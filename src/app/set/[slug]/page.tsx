@@ -21,11 +21,7 @@ export default function SetPage() {
 
   useEffect(() => {
     async function loadCards() {
-      const { data } = await supabase
-        .from('cards')
-        .select('card_slug, card_name, set_name, raw_usd, psa10_usd, image_url')
-        .eq('set_name', setName)
-        .order('raw_usd', { ascending: false, nullsFirst: false })
+const { data } = await supabase.rpc('get_set_cards', { set_text: setName })
       if (data) setCards(data)
       setLoading(false)
     }
