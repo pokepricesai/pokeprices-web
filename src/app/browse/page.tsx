@@ -72,7 +72,7 @@ export default function BrowsePage() {
               }}
             >
               <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{s.set_name}</div>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{s.card_count} cards</div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{s.card_count} cards & sealed products</div>
             </Link>
           ))}
         </div>
