@@ -48,7 +48,7 @@ export default function CardPage() {
     { label: 'CGC 9.5', value: card.cgc95_usd },
   ]
 
-  const trends = trend ? [
+const trends: {label: string; val: number | null}[] = trend ? [
     { label: '7d', val: trend.raw_pct_7d },
     { label: '30d', val: trend.raw_pct_30d },
     { label: '90d', val: trend.raw_pct_90d },
@@ -56,8 +56,8 @@ export default function CardPage() {
     { label: '1y', val: trend.raw_pct_365d },
     { label: '2y', val: trend.raw_pct_2y },
     { label: '5y', val: trend.raw_pct_5y },
-  ] : []
-
+  ] : [];
+  
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '40px 24px' }}>
       <Link href={`/set/${encodeURIComponent(card.set_name)}`} style={{
