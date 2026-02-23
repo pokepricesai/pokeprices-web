@@ -1,6 +1,8 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
-import { CHAT_ENDPOINT, supabase } from '@/lib/supabase'
+import { CHAT_ENDPOINT } from '@/lib/supabase'
+
+const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
 const quickQuestions = [
   'How much is a Base Set Charizard?',
@@ -40,7 +42,7 @@ export default function InlineChat() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabase.supabaseKey || ''}`,
+          'Authorization': `Bearer ${ANON_KEY}`,
         },
         body: JSON.stringify({
           message: msg,
