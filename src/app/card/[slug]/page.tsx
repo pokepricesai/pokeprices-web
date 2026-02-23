@@ -140,7 +140,7 @@ export default function CardPage() {
           fontFamily: "'DM Serif Display', serif", fontSize: 22,
           margin: '0 0 16px', color: 'var(--text)',
         }}>Ask about this card</h2>
-        <InlineChat />
+        <InlineChat cardContext={card.card_name + ' from ' + card.set_name} />
       </div>
     </div>
   );
