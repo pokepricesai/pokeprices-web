@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { supabase, formatPrice } from '@/lib/supabase'
+import InlineChat from '@/components/InlineChat'
 
 interface Card {
   card_slug: string
@@ -10,23 +11,33 @@ interface Card {
   set_name: string
   raw_usd: number | null
   psa10_usd: number | null
+  psa9_usd: number | null
   image_url: string | null
 }
+
+type SortField = 'raw' | 'psa10' | 'psa9' | 'name'
 
 export default function SetPage() {
   const params = useParams()
   const setName = decodeURIComponent(params.slug as string)
   const [cards, setCards] = useState<Card[]>([])
   const [loading, setLoading] = useState(true)
+  const [sortBy, setSortBy] = useState<SortField>('raw')
 
   useEffect(() => {
     async function loadCards() {
-const { data } = await supabase.rpc('get_set_cards', { set_text: setName })
+      const { data } = await supabase.rpc('get_set_cards', { set_text: setName })
       if (data) setCards(data)
       setLoading(false)
     }
     loadCards()
   }, [setName])
+
+  const sorted = [...cards].sort((a, b) => {
+    if (sortBy === 'name') return (a.card_name || '').localeCompare(b.card_name || '')
+    const field = sortBy === 'raw' ? 'raw_usd' : sortBy === 'psa10' ? 'psa10_usd' : 'psa9_usd'
+    return (b[field] || 0) - (a[field] || 0)
+  })
 
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '40px 24px' }}>
@@ -37,15 +48,44 @@ const { data } = await supabase.rpc('get_set_cards', { set_text: setName })
         fontFamily: "'DM Serif Display', serif", fontSize: 32,
         margin: '8px 0', color: 'var(--text)',
       }}>{setName}</h1>
-      <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 28px' }}>
-        {cards.length} cards · Sorted by value (highest first)
+      <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 20px' }}>
+        {cards.length} cards & sealed products
       </p>
+
+      {/* Chat */}
+      <div style={{ marginBottom: 28 }}>
+        <InlineChat />
+      </div>
+
+      {/* Sort controls */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ fontSize: 13, color: 'var(--text-muted)', marginRight: 4 }}>Sort by:</span>
+        {([
+          { key: 'raw', label: 'Raw Price' },
+          { key: 'psa10', label: 'PSA 10' },
+          { key: 'psa9', label: 'PSA 9' },
+          { key: 'name', label: 'Name' },
+        ] as { key: SortField; label: string }[]).map((opt) => (
+          <button
+            key={opt.key}
+            onClick={() => setSortBy(opt.key)}
+            style={{
+              background: sortBy === opt.key ? 'var(--primary)' : 'var(--card)',
+              color: sortBy === opt.key ? '#fff' : 'var(--text)',
+              border: `1px solid ${sortBy === opt.key ? 'var(--primary)' : 'var(--border)'}`,
+              borderRadius: 8, padding: '6px 14px', fontSize: 13,
+              fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
+              transition: 'all 0.15s',
+            }}
+          >{opt.label}</button>
+        ))}
+      </div>
 
       {loading ? (
         <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>Loading cards...</p>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
-          {cards.map((c) => (
+          {sorted.map((c) => (
             <Link
               key={c.card_slug}
               href={`/card/${c.card_slug}`}
@@ -82,6 +122,11 @@ const { data } = await supabase.rpc('get_set_cards', { set_text: setName })
               <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
                 Raw: {formatPrice(c.raw_usd)}
               </div>
+              {c.psa9_usd && (
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  PSA 9: {formatPrice(c.psa9_usd)}
+                </div>
+              )}
               {c.psa10_usd && (
                 <div style={{ fontSize: 12, color: 'var(--accent)' }}>
                   PSA 10: {formatPrice(c.psa10_usd)}
