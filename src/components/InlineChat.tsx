@@ -26,7 +26,7 @@ export default function InlineChat() {
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }, [messages])
 
   const sendMessage = async (text?: string) => {
