@@ -1,12 +1,11 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { supabase, formatPrice } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 
 interface SetInfo {
   set_name: string
   card_count: number
-  avg_price: number | null
 }
 
 export default function BrowsePage() {
@@ -16,19 +15,8 @@ export default function BrowsePage() {
 
   useEffect(() => {
     async function loadSets() {
-      const { data } = await supabase
-        .from('cards')
-        .select('set_name')
-      if (data) {
-        const counts: Record<string, number> = {}
-        data.forEach((row: any) => {
-          counts[row.set_name] = (counts[row.set_name] || 0) + 1
-        })
-        const setList = Object.entries(counts)
-          .map(([name, count]) => ({ set_name: name, card_count: count, avg_price: null }))
-          .sort((a, b) => a.set_name.localeCompare(b.set_name))
-        setSets(setList)
-      }
+      const { data } = await supabase.rpc('get_set_list')
+      if (data) setSets(data)
       setLoading(false)
     }
     loadSets()
@@ -45,7 +33,7 @@ export default function BrowsePage() {
         margin: '0 0 8px', color: 'var(--text)',
       }}>Cards & Sets</h1>
       <p style={{ color: 'var(--text-muted)', fontSize: 15, margin: '0 0 28px' }}>
-        Browse all 156 sets in our database. Click any set to see its cards.
+        Browse all {sets.length} sets in our database. Click any set to see its cards.
       </p>
 
       <input
