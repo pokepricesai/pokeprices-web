@@ -96,10 +96,9 @@ export default function SetPage() {
           }}>Set Price History</h3>
           <PriceChart
             data={priceHistory}
-            lines={[
-              { key: 'median_usd', color: 'var(--primary)', label: 'Avg Card' },
-              { key: 'value_usd', color: 'var(--accent)', label: 'Total Set Value' },
-            ]}
+lines={[
+  { key: 'value_usd', color: 'var(--accent)', label: 'Total Set Value' },
+]}
             height={220}
           />
         </div>
