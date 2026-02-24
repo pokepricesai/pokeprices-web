@@ -51,7 +51,12 @@ export default function SetPage() {
 
       // Load price history
       const { data: histData } = await supabase.rpc('get_set_price_history', { set_text: setName })
-      if (histData) setPriceHistory(histData)
+if (histData) {
+  setPriceHistory(histData.map((d: any) => ({
+    ...d,
+    value_usd: d.value_usd ? d.value_usd * 100 : null,
+  })))
+}
 
       setLoading(false)
     }
