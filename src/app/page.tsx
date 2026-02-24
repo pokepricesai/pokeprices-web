@@ -121,7 +121,7 @@ export default function Home() {
         <div style={{ maxWidth: 720, margin: '0 auto', textAlign: 'center', position: 'relative', zIndex: 1 }}>
           {/* Logo */}
           <img src="/logo.png" alt="PokePrices" style={{
-            height: 70, margin: '0 auto 16px', display: 'block',
+  height: 120, margin: '0 auto 16px', display: 'block',
             filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.2))',
             animation: 'float 4s ease-in-out infinite',
           }} />
