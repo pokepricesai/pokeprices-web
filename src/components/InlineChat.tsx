@@ -45,8 +45,10 @@ export default function InlineChat({ cardContext }: { cardContext?: string }) {
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+  if (messages.length > 0) {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-  }, [messages])
+  }
+}, [messages])
 
   const clearChat = useCallback(() => {
     setMessages([]); setSessionId('web-' + Math.random().toString(36).slice(2, 10)); setInput('')
