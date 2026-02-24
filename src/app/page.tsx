@@ -11,7 +11,7 @@ const upcomingReleases = [
 
 const features = [
   { icon: '📊', title: 'Real Market Data', desc: 'Daily prices from actual sold listings. Not guesses, not estimates — real completed sales across major marketplaces.' },
-  { icon: '🇬🇧', title: 'True Landed Cost', desc: 'We show what you actually pay. VAT, shipping, customs, handling fees — the full picture for UK and EU buyers.' },
+  { icon: '💷', title: 'True Landed Cost', desc: 'We show what you actually pay. VAT, shipping, customs, handling fees — the full picture for UK and EU buyers.' },
   { icon: '📈', title: 'Trend Analysis', desc: 'See how any card has moved over 30 days, 6 months, or 5 years. Spot market movement before the crowd.' },
   { icon: '💎', title: 'Grading Intelligence', desc: 'PSA and CGC pop counts, grade premium ratios, and honest grading advice with real UK middleman costs.' },
 ]
