@@ -37,15 +37,14 @@ export default function Navbar() {
         {menuOpen ? '✕' : '☰'}
       </button>
 
-      <div style={{ width: 40 }} className="mobile-spacer" />
+      
 
       {/* Logo centered */}
       <Link href="/" style={{
-        position: 'absolute', left: '50%', transform: 'translateX(-50%)',
-        textDecoration: 'none',
-      }}>
-        <img src="/logo.png" alt="PokePrices" style={{ height: 42 }} />
-      </Link>
+  textDecoration: 'none',
+}}>
+  <img src="/logo.png" alt="PokePrices" style={{ height: 38 }} />
+</Link>
 
       {/* Desktop links */}
       <div style={{ display: 'flex', gap: 24, alignItems: 'center', marginLeft: 'auto' }} className="desktop-nav">
