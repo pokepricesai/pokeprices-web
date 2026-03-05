@@ -11,27 +11,69 @@ export default function CardPage() {
   const slug = params.slug as string
   const [card, setCard] = useState<any>(null)
   const [trend, setTrend] = useState<any>(null)
+  const [metrics, setMetrics] = useState<any>(null)
   const [priceHistory, setPriceHistory] = useState<any[]>([])
   const [insight, setInsight] = useState<string | null>(null)
+  const [psaPop, setPsaPop] = useState<any[]>([])
+  const [ebayDeals, setEbayDeals] = useState<any[]>([])
+  const [ebayListings, setEbayListings] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     async function loadCard() {
-      // Load card detail
       const { data: cardData } = await supabase.rpc('get_card_detail', { slug })
-      if (cardData) setCard(cardData)
+      if (!cardData) { setLoading(false); return }
+      setCard(cardData)
 
-      // Load trends
-      const { data: trendData } = await supabase.rpc('get_card_trends_detail', { slug })
-      if (trendData) setTrend(trendData)
+      const [trendRes, metricsRes, histRes, insightRes] = await Promise.all([
+        supabase.rpc('get_card_trends_detail', { slug }),
+        supabase.rpc('get_card_metrics', { search_text: cardData.card_name }),
+        supabase.rpc('get_card_price_history', { slug }),
+        supabase.rpc('get_card_insight', { slug }),
+      ])
 
-      // Load price history for chart
-      const { data: histData } = await supabase.rpc('get_card_price_history', { slug })
-      if (histData) setPriceHistory(histData)
+      if (trendRes.data) setTrend(trendRes.data)
+      if (metricsRes.data) {
+        const m = Array.isArray(metricsRes.data) ? metricsRes.data[0] : metricsRes.data
+        setMetrics(m)
+      }
+      if (histRes.data) setPriceHistory(histRes.data)
+      if (insightRes.data) setInsight(insightRes.data)
 
-      // Load insight
-      const { data: insightData } = await supabase.rpc('get_card_insight', { slug })
-      if (insightData) setInsight(insightData)
+      // PSA population — search by card name in psa_population
+      const baseName = cardData.card_name.split('[')[0].split('#')[0].trim()
+      const { data: popData } = await supabase
+        .from('psa_population')
+        .select('card_name, variant, set_name, card_number, psa_1, psa_2, psa_3, psa_4, psa_5, psa_6, psa_7, psa_8, psa_9, psa_10, total_graded, gem_rate')
+        .ilike('card_name', `%${baseName}%`)
+        .ilike('set_name', `%${cardData.set_name.replace(/^Pokemon /, '')}%`)
+        .gt('total_graded', 0)
+        .order('total_graded', { ascending: false })
+        .limit(5)
+
+      if (popData && popData.length > 0) setPsaPop(popData)
+
+      // eBay deals for this card
+      const { data: dealsData } = await supabase
+        .from('daily_deals')
+        .select('*')
+        .eq('card_slug', slug)
+        .order('discount_pct', { ascending: false })
+        .limit(5)
+
+      if (dealsData && dealsData.length > 0) {
+        setEbayDeals(dealsData)
+      } else {
+        // Fall back to regular listings if no deals
+        const { data: listingsData } = await supabase
+          .from('ebay_listings')
+          .select('*')
+          .eq('card_slug', slug)
+          .in('match_confidence', ['high', 'medium'])
+          .order('total_cost_cents', { ascending: true })
+          .limit(5)
+        if (listingsData) setEbayListings(listingsData)
+      }
 
       setLoading(false)
     }
@@ -53,7 +95,7 @@ export default function CardPage() {
 
   if (!card) return (
     <div style={{ maxWidth: 800, margin: '0 auto', padding: '60px 24px', textAlign: 'center' }}>
-      <h1 style={{ fontFamily: "'DM Serif Display', serif", fontSize: 28, marginBottom: 12 }}>Card not found</h1>
+      <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, marginBottom: 12 }}>Card not found</h1>
       <p style={{ color: 'var(--text-muted)' }}>This card doesn&apos;t exist in our database.</p>
       <Link href="/browse" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>Browse sets →</Link>
     </div>
@@ -69,8 +111,8 @@ export default function CardPage() {
   ]
 
   const hasAnyTrend = trend && (
-    trend.raw_pct_7d !== null || trend.raw_pct_30d !== null || trend.raw_pct_90d !== null ||
-    trend.raw_pct_180d !== null || trend.raw_pct_365d !== null
+    trend.raw_pct_7d !== null || trend.raw_pct_30d !== null ||
+    trend.raw_pct_90d !== null || trend.raw_pct_180d !== null || trend.raw_pct_365d !== null
   )
 
   const trends = hasAnyTrend ? [
@@ -83,20 +125,67 @@ export default function CardPage() {
     { label: '5y', val: trend.raw_pct_5y },
   ] : []
 
+  // Buying signals
+  const signals: { label: string; value: string; type: 'good' | 'warn' | 'neutral' }[] = []
+
+  if (metrics) {
+    const raw = metrics.results?.[0] || metrics
+    if (raw.drawdown_pct !== null && raw.drawdown_pct !== undefined) {
+      const dd = parseFloat(raw.drawdown_pct)
+      if (dd < -30) signals.push({ label: 'Price vs ATH', value: `${dd.toFixed(1)}% below peak`, type: 'good' })
+      else if (dd < -10) signals.push({ label: 'Price vs ATH', value: `${dd.toFixed(1)}% below peak`, type: 'neutral' })
+      else signals.push({ label: 'Price vs ATH', value: `Near all-time high (${dd.toFixed(1)}%)`, type: 'warn' })
+    }
+    if (raw.slope_30d !== null && raw.slope_30d !== undefined) {
+      const slope = parseFloat(raw.slope_30d)
+      if (slope > 50) signals.push({ label: 'Trend', value: 'Rising strongly (30d)', type: 'good' })
+      else if (slope > 0) signals.push({ label: 'Trend', value: 'Trending up (30d)', type: 'good' })
+      else if (slope < -50) signals.push({ label: 'Trend', value: 'Falling sharply (30d)', type: 'warn' })
+      else signals.push({ label: 'Trend', value: 'Flat / sideways (30d)', type: 'neutral' })
+    }
+  }
+
+  // PSA gem rate signal
+  const mainPop = psaPop[0]
+  if (mainPop && card.psa10_usd && card.raw_usd) {
+    const gemRate = parseFloat(mainPop.gem_rate)
+    const multiple = card.psa10_usd / card.raw_usd
+    if (gemRate < 5 && multiple > 3) signals.push({ label: 'PSA 10 rarity', value: `${gemRate.toFixed(1)}% gem rate — premium justified`, type: 'good' })
+    else if (gemRate > 40 && multiple < 2) signals.push({ label: 'PSA 10 value', value: `${gemRate.toFixed(1)}% gem rate — 10s are plentiful`, type: 'warn' })
+    else signals.push({ label: 'PSA 10 gem rate', value: `${gemRate.toFixed(1)}%`, type: 'neutral' })
+  }
+
+  // Grade value sweet spot
+  if (card.psa9_usd && card.psa10_usd && card.raw_usd) {
+    const ratio9 = card.psa9_usd / card.raw_usd
+    const ratio10 = card.psa10_usd / card.raw_usd
+    const jumpTo10 = card.psa10_usd / card.psa9_usd
+    if (jumpTo10 > 3) signals.push({ label: 'Best grade value', value: `PSA 9 (${ratio9.toFixed(1)}x raw) — PSA 10 costs ${jumpTo10.toFixed(1)}x more`, type: 'neutral' })
+    else if (jumpTo10 < 1.5) signals.push({ label: 'Best grade value', value: `PSA 10 (only ${jumpTo10.toFixed(1)}x PSA 9 price)`, type: 'good' })
+  }
+
+  const hasDeals = ebayDeals.length > 0
+  const hasListings = ebayListings.length > 0
+
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '36px 24px' }}>
       <Link href={`/set/${encodeURIComponent(card.set_name)}`} style={{
         color: 'var(--text-muted)', fontSize: 13, textDecoration: 'none',
-        marginBottom: 8, display: 'inline-block',
+        marginBottom: 8, display: 'inline-block', fontFamily: "'Figtree', sans-serif",
       }}>← {card.set_name}</Link>
 
-      <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap', marginTop: 8 }}>
+      {/* Chat at top */}
+      <div style={{ margin: '12px 0 28px' }}>
+        <InlineChat cardContext={`${card.card_name} from ${card.set_name}`} />
+      </div>
+
+      <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap' }}>
         {/* Image */}
         <div style={{ flex: '0 0 auto' }}>
           {card.image_url ? (
             <img src={card.image_url} alt={card.card_name} style={{
               width: 220, borderRadius: 10,
-              boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
             }} />
           ) : (
             <div style={{
@@ -107,34 +196,75 @@ export default function CardPage() {
           )}
         </div>
 
-        {/* Info */}
+        {/* Info column */}
         <div style={{ flex: 1, minWidth: 280 }}>
           <h1 style={{
-            fontFamily: "'DM Serif Display', serif", fontSize: 28,
-            margin: '0 0 4px', color: 'var(--text)',
+            fontFamily: "'Playfair Display', serif", fontSize: 26,
+            margin: '0 0 4px', color: 'var(--text)', letterSpacing: '-0.3px',
           }}>{card.card_name}</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 8px' }}>{card.set_name}</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 12px', fontFamily: "'Figtree', sans-serif" }}>
+            {card.set_name}
+          </p>
 
+          {/* Insight badge */}
           {insight && (
-            <div className="insight-badge" style={{ marginBottom: 16 }}>{insight}</div>
+            <div style={{
+              background: 'var(--card)',
+              border: '1px solid var(--border)',
+              borderLeft: '3px solid var(--primary)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 14,
+              fontSize: 13,
+              lineHeight: 1.55,
+              color: 'var(--text)',
+              fontFamily: "'Figtree', sans-serif",
+            }}>{insight}</div>
+          )}
+
+          {/* Buying signals */}
+          {signals.length > 0 && (
+            <div style={{
+              background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)',
+              padding: '14px 16px', marginBottom: 14,
+            }}>
+              <div style={{
+                fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+                letterSpacing: 1.5, color: 'var(--text-muted)', marginBottom: 10,
+                fontFamily: "'Figtree', sans-serif",
+              }}>Buying Signals</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                {signals.map((s, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>{s.label}</span>
+                    <span style={{
+                      fontSize: 12, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
+                      color: s.type === 'good' ? 'var(--green)' : s.type === 'warn' ? '#e07b39' : 'var(--text)',
+                      background: s.type === 'good' ? 'rgba(39,174,96,0.08)' : s.type === 'warn' ? 'rgba(224,123,57,0.08)' : 'var(--bg-light)',
+                      padding: '2px 8px', borderRadius: 20,
+                    }}>{s.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
 
           {/* Prices */}
           <div style={{
             background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)',
-            padding: 18, marginBottom: 16,
+            padding: '14px 16px', marginBottom: 14,
           }}>
-            <h3 style={{
-              fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
-              margin: '0 0 12px', color: 'var(--text-muted)',
-              textTransform: 'uppercase', letterSpacing: 1,
-            }}>Current Prices</h3>
+            <div style={{
+              fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+              letterSpacing: 1.5, color: 'var(--text-muted)', marginBottom: 12,
+              fontFamily: "'Figtree', sans-serif",
+            }}>Current Prices</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
               {grades.map((g) => (
                 <div key={g.label}>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>{g.label}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, fontFamily: "'Figtree', sans-serif" }}>{g.label}</div>
                   <div style={{
-                    fontSize: 17, fontWeight: 700,
+                    fontSize: 16, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
                     color: g.value ? 'var(--text)' : 'var(--border)',
                   }}>
                     {formatPrice(g.value)}
@@ -148,20 +278,20 @@ export default function CardPage() {
           {trends.length > 0 && (
             <div style={{
               background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)',
-              padding: 18,
+              padding: '14px 16px',
             }}>
-              <h3 style={{
-                fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
-                margin: '0 0 12px', color: 'var(--text-muted)',
-                textTransform: 'uppercase', letterSpacing: 1,
-              }}>Raw Price Trend</h3>
+              <div style={{
+                fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+                letterSpacing: 1.5, color: 'var(--text-muted)', marginBottom: 10,
+                fontFamily: "'Figtree', sans-serif",
+              }}>Raw Price Trend</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
                 {trends.map((t) => {
                   const f = formatPct(t.val)
                   return (
                     <div key={t.label}>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>{t.label}</div>
-                      <div style={{ fontSize: 15, fontWeight: 600, color: f.color }}>{f.text}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, fontFamily: "'Figtree', sans-serif" }}>{t.label}</div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: f.color, fontFamily: "'Figtree', sans-serif" }}>{f.text}</div>
                     </div>
                   )
                 })}
@@ -171,29 +301,147 @@ export default function CardPage() {
         </div>
       </div>
 
+      {/* PSA Population */}
+      {psaPop.length > 0 && (
+        <div style={{
+          background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)',
+          padding: '18px 20px', marginTop: 24,
+        }}>
+          <div style={{
+            fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+            letterSpacing: 1.5, color: 'var(--text-muted)', marginBottom: 14,
+            fontFamily: "'Figtree', sans-serif",
+          }}>PSA Population</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, fontFamily: "'Figtree', sans-serif" }}>
+              <thead>
+                <tr>
+                  {['Variant', 'PSA 7', 'PSA 8', 'PSA 9', 'PSA 10', 'Total', 'Gem Rate'].map(h => (
+                    <th key={h} style={{
+                      textAlign: h === 'Variant' ? 'left' : 'right',
+                      padding: '4px 10px 8px',
+                      fontSize: 11, color: 'var(--text-muted)',
+                      fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1,
+                      borderBottom: '1px solid var(--border-light)',
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {psaPop.map((p, i) => (
+                  <tr key={i} style={{ borderBottom: i < psaPop.length - 1 ? '1px solid var(--border-light)' : 'none' }}>
+                    <td style={{ padding: '8px 10px', color: 'var(--text)', fontWeight: 600 }}>
+                      {p.variant && p.variant !== 'Standard' ? p.variant : 'Standard'}
+                    </td>
+                    {[p.psa_7, p.psa_8, p.psa_9, p.psa_10].map((v, j) => (
+                      <td key={j} style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--text)' }}>
+                        {v?.toLocaleString() ?? '—'}
+                      </td>
+                    ))}
+                    <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--text)', fontWeight: 600 }}>
+                      {p.total_graded?.toLocaleString() ?? '—'}
+                    </td>
+                    <td style={{
+                      padding: '8px 10px', textAlign: 'right', fontWeight: 700,
+                      color: parseFloat(p.gem_rate) >= 20 ? 'var(--green)' : parseFloat(p.gem_rate) >= 5 ? 'var(--accent-hover)' : 'var(--text)',
+                    }}>
+                      {p.gem_rate ? `${parseFloat(p.gem_rate).toFixed(1)}%` : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* eBay Deals / Listings */}
+      {(hasDeals || hasListings) && (
+        <div style={{
+          background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)',
+          padding: '18px 20px', marginTop: 24,
+        }}>
+          <div style={{
+            fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+            letterSpacing: 1.5, marginBottom: 14, fontFamily: "'Figtree', sans-serif",
+            color: hasDeals ? 'var(--green)' : 'var(--text-muted)',
+          }}>{hasDeals ? 'Live Deals' : 'Live Listings'}</div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {(hasDeals ? ebayDeals : ebayListings).map((item: any, i: number) => {
+              const price = hasDeals
+                ? (item.listing_price_cents / 100).toFixed(2)
+                : (item.total_cost_cents / 100).toFixed(2)
+              const currency = item.currency === 'GBP' ? '£' : '$'
+              const url = item.item_web_url
+              const condition = item.condition || 'Ungraded'
+              const seller = item.seller_username
+              const feedback = item.seller_feedback_score
+              const discount = hasDeals ? item.discount_pct : null
+              const fairValue = hasDeals && item.fair_value_cents
+                ? (item.fair_value_cents / 100).toFixed(2)
+                : null
+
+              return (
+                <div key={i} style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '10px 12px', background: 'var(--bg-light)',
+                  borderRadius: 10, gap: 12, flexWrap: 'wrap',
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+                      <span style={{ fontSize: 14, fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>
+                        {currency}{price}
+                      </span>
+                      {discount && (
+                        <span style={{
+                          fontSize: 11, fontWeight: 700, color: 'var(--green)',
+                          background: 'rgba(39,174,96,0.1)', padding: '1px 7px', borderRadius: 20,
+                          fontFamily: "'Figtree', sans-serif",
+                        }}>{discount.toFixed(0)}% off</span>
+                      )}
+                      {fairValue && (
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+                          vs {currency}{fairValue} fair value
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+                      {condition} · {seller} ({feedback?.toLocaleString()} feedback)
+                    </div>
+                  </div>
+                  {url && (
+                    <a href={url} target="_blank" rel="noopener noreferrer" style={{
+                      background: 'var(--primary)', color: '#fff',
+                      padding: '6px 14px', borderRadius: 8,
+                      fontSize: 12, fontWeight: 700, textDecoration: 'none',
+                      fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap',
+                    }}>View on eBay</a>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '10px 0 0', fontFamily: "'Figtree', sans-serif" }}>
+            Prices scraped daily. Always verify listing before buying.
+          </p>
+        </div>
+      )}
+
       {/* Price History Chart */}
       {priceHistory.length > 1 && (
         <div style={{
           background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)',
           padding: '20px', marginTop: 24,
         }}>
-          <h3 style={{
-            fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
-            margin: '0 0 14px', color: 'var(--text-muted)',
-            textTransform: 'uppercase', letterSpacing: 1,
-          }}>Price History</h3>
+          <div style={{
+            fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+            letterSpacing: 1.5, color: 'var(--text-muted)', marginBottom: 14,
+            fontFamily: "'Figtree', sans-serif",
+          }}>Price History</div>
           <PriceChart data={priceHistory} height={280} />
         </div>
       )}
-
-      {/* Chat */}
-      <div style={{ marginTop: 36 }}>
-        <h2 style={{
-          fontFamily: "'DM Serif Display', serif", fontSize: 20,
-          margin: '0 0 14px', color: 'var(--text)',
-        }}>Ask about this card</h2>
-        <InlineChat cardContext={`${card.card_name} from ${card.set_name}`} />
-      </div>
     </div>
   )
 }
