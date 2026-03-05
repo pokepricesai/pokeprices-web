@@ -6,6 +6,13 @@ import { supabase, formatPrice, formatPct } from '@/lib/supabase'
 import InlineChat from '@/components/InlineChat'
 import PriceChart from '@/components/PriceChart'
 
+// Extract variant from card name e.g. "Charizard [1st Edition] #4" → "1st Edition"
+// Returns null if no brackets (Standard/unlimited)
+function extractVariant(cardName: string): string | null {
+  const match = cardName.match(/\[([^\]]+)\]/)
+  return match ? match[1] : null
+}
+
 export default function CardPage() {
   const params = useParams()
   const slug = params.slug as string
@@ -14,7 +21,7 @@ export default function CardPage() {
   const [metrics, setMetrics] = useState<any>(null)
   const [priceHistory, setPriceHistory] = useState<any[]>([])
   const [insight, setInsight] = useState<string | null>(null)
-  const [psaPop, setPsaPop] = useState<any[]>([])
+  const [psaPop, setPsaPop] = useState<any | null>(null)
   const [ebayDeals, setEbayDeals] = useState<any[]>([])
   const [ebayListings, setEbayListings] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -40,18 +47,31 @@ export default function CardPage() {
       if (histRes.data) setPriceHistory(histRes.data)
       if (insightRes.data) setInsight(insightRes.data)
 
-      // PSA population — search by card name in psa_population
+      // PSA population — exact variant match
       const baseName = cardData.card_name.split('[')[0].split('#')[0].trim()
-      const { data: popData } = await supabase
-        .from('psa_population')
-        .select('card_name, variant, set_name, card_number, psa_1, psa_2, psa_3, psa_4, psa_5, psa_6, psa_7, psa_8, psa_9, psa_10, total_graded, gem_rate')
-        .ilike('card_name', `%${baseName}%`)
-        .ilike('set_name', `%${cardData.set_name.replace(/^Pokemon /, '')}%`)
-        .gt('total_graded', 0)
-        .order('total_graded', { ascending: false })
-        .limit(5)
+      const variant = extractVariant(cardData.card_name)
+      const setNameClean = cardData.set_name.replace(/^Pokemon /, '')
 
-      if (popData && popData.length > 0) setPsaPop(popData)
+      let popQuery = supabase
+        .from('psa_population')
+        .select('card_name, variant, set_name, card_number, psa_7, psa_8, psa_9, psa_10, total_graded, gem_rate')
+        .ilike('card_name', `%${baseName}%`)
+        .ilike('set_name', `%${setNameClean}%`)
+        .gt('total_graded', 0)
+
+      if (variant) {
+        // Has a variant like "1st Edition" — match exactly
+        popQuery = popQuery.ilike('variant', `%${variant}%`)
+      } else {
+        // No variant = Standard/unlimited — exclude known variant rows
+        popQuery = popQuery.or('variant.is.null,variant.eq.,variant.ilike.Standard%')
+      }
+
+      const { data: popData } = await popQuery
+        .order('total_graded', { ascending: false })
+        .limit(1)
+
+      if (popData && popData.length > 0) setPsaPop(popData[0])
 
       // eBay deals for this card
       const { data: dealsData } = await supabase
@@ -64,7 +84,6 @@ export default function CardPage() {
       if (dealsData && dealsData.length > 0) {
         setEbayDeals(dealsData)
       } else {
-        // Fall back to regular listings if no deals
         const { data: listingsData } = await supabase
           .from('ebay_listings')
           .select('*')
@@ -145,27 +164,26 @@ export default function CardPage() {
     }
   }
 
-  // PSA gem rate signal
-  const mainPop = psaPop[0]
-  if (mainPop && card.psa10_usd && card.raw_usd) {
-    const gemRate = parseFloat(mainPop.gem_rate)
+  if (psaPop && card.psa10_usd && card.raw_usd) {
+    const gemRate = parseFloat(psaPop.gem_rate)
     const multiple = card.psa10_usd / card.raw_usd
     if (gemRate < 5 && multiple > 3) signals.push({ label: 'PSA 10 rarity', value: `${gemRate.toFixed(1)}% gem rate — premium justified`, type: 'good' })
     else if (gemRate > 40 && multiple < 2) signals.push({ label: 'PSA 10 value', value: `${gemRate.toFixed(1)}% gem rate — 10s are plentiful`, type: 'warn' })
     else signals.push({ label: 'PSA 10 gem rate', value: `${gemRate.toFixed(1)}%`, type: 'neutral' })
   }
 
-  // Grade value sweet spot
-  if (card.psa9_usd && card.psa10_usd && card.raw_usd) {
-    const ratio9 = card.psa9_usd / card.raw_usd
-    const ratio10 = card.psa10_usd / card.raw_usd
+  if (card.psa9_usd && card.psa10_usd) {
     const jumpTo10 = card.psa10_usd / card.psa9_usd
-    if (jumpTo10 > 3) signals.push({ label: 'Best grade value', value: `PSA 9 (${ratio9.toFixed(1)}x raw) — PSA 10 costs ${jumpTo10.toFixed(1)}x more`, type: 'neutral' })
+    if (jumpTo10 > 3) signals.push({ label: 'Best grade value', value: `PSA 9 — PSA 10 costs ${jumpTo10.toFixed(1)}x more`, type: 'neutral' })
     else if (jumpTo10 < 1.5) signals.push({ label: 'Best grade value', value: `PSA 10 (only ${jumpTo10.toFixed(1)}x PSA 9 price)`, type: 'good' })
   }
 
   const hasDeals = ebayDeals.length > 0
   const hasListings = ebayListings.length > 0
+
+  // Pre-filled chat message
+  const cardNumber = card.card_number ? ` #${card.card_number}` : ''
+  const prefillMessage = `I'm looking at ${card.card_name}${cardNumber} from ${card.set_name}`
 
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '36px 24px' }}>
@@ -174,9 +192,12 @@ export default function CardPage() {
         marginBottom: 8, display: 'inline-block', fontFamily: "'Figtree', sans-serif",
       }}>← {card.set_name}</Link>
 
-      {/* Chat at top */}
+      {/* Chat at top with pre-filled message */}
       <div style={{ margin: '12px 0 28px' }}>
-        <InlineChat cardContext={`${card.card_name} from ${card.set_name}`} />
+        <InlineChat
+          cardContext={`${card.card_name} from ${card.set_name}`}
+          prefillMessage={prefillMessage}
+        />
       </div>
 
       <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap' }}>
@@ -206,18 +227,12 @@ export default function CardPage() {
             {card.set_name}
           </p>
 
-          {/* Insight badge */}
           {insight && (
             <div style={{
-              background: 'var(--card)',
-              border: '1px solid var(--border)',
-              borderLeft: '3px solid var(--primary)',
-              borderRadius: 10,
-              padding: '10px 14px',
-              marginBottom: 14,
-              fontSize: 13,
-              lineHeight: 1.55,
-              color: 'var(--text)',
+              background: 'var(--card)', border: '1px solid var(--border)',
+              borderLeft: '3px solid var(--primary)', borderRadius: 10,
+              padding: '10px 14px', marginBottom: 14,
+              fontSize: 13, lineHeight: 1.55, color: 'var(--text)',
               fontFamily: "'Figtree', sans-serif",
             }}>{insight}</div>
           )}
@@ -301,8 +316,8 @@ export default function CardPage() {
         </div>
       </div>
 
-      {/* PSA Population */}
-      {psaPop.length > 0 && (
+      {/* PSA Population — single row for this exact variant */}
+      {psaPop && (
         <div style={{
           background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)',
           padding: '18px 20px', marginTop: 24,
@@ -311,47 +326,45 @@ export default function CardPage() {
             fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
             letterSpacing: 1.5, color: 'var(--text-muted)', marginBottom: 14,
             fontFamily: "'Figtree', sans-serif",
-          }}>PSA Population</div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, fontFamily: "'Figtree', sans-serif" }}>
-              <thead>
-                <tr>
-                  {['Variant', 'PSA 7', 'PSA 8', 'PSA 9', 'PSA 10', 'Total', 'Gem Rate'].map(h => (
-                    <th key={h} style={{
-                      textAlign: h === 'Variant' ? 'left' : 'right',
-                      padding: '4px 10px 8px',
-                      fontSize: 11, color: 'var(--text-muted)',
-                      fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1,
-                      borderBottom: '1px solid var(--border-light)',
-                    }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {psaPop.map((p, i) => (
-                  <tr key={i} style={{ borderBottom: i < psaPop.length - 1 ? '1px solid var(--border-light)' : 'none' }}>
-                    <td style={{ padding: '8px 10px', color: 'var(--text)', fontWeight: 600 }}>
-                      {p.variant && p.variant !== 'Standard' ? p.variant : 'Standard'}
-                    </td>
-                    {[p.psa_7, p.psa_8, p.psa_9, p.psa_10].map((v, j) => (
-                      <td key={j} style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--text)' }}>
-                        {v?.toLocaleString() ?? '—'}
-                      </td>
-                    ))}
-                    <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--text)', fontWeight: 600 }}>
-                      {p.total_graded?.toLocaleString() ?? '—'}
-                    </td>
-                    <td style={{
-                      padding: '8px 10px', textAlign: 'right', fontWeight: 700,
-                      color: parseFloat(p.gem_rate) >= 20 ? 'var(--green)' : parseFloat(p.gem_rate) >= 5 ? 'var(--accent-hover)' : 'var(--text)',
-                    }}>
-                      {p.gem_rate ? `${parseFloat(p.gem_rate).toFixed(1)}%` : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          }}>PSA Population{psaPop.variant && psaPop.variant !== 'Standard' ? ` — ${psaPop.variant}` : ''}</div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(5, 1fr)',
+            gap: 12,
+          }}>
+            {[
+              { label: 'PSA 7', value: psaPop.psa_7 },
+              { label: 'PSA 8', value: psaPop.psa_8 },
+              { label: 'PSA 9', value: psaPop.psa_9 },
+              { label: 'PSA 10', value: psaPop.psa_10 },
+              { label: 'Total Graded', value: psaPop.total_graded },
+            ].map((stat) => (
+              <div key={stat.label} style={{
+                background: 'var(--bg-light)', borderRadius: 10, padding: '12px 14px',
+              }}>
+                <div style={{
+                  fontSize: stat.label === 'Total Graded' ? 18 : 20,
+                  fontWeight: 700, color: 'var(--text)',
+                  fontFamily: "'Figtree', sans-serif", lineHeight: 1,
+                }}>{stat.value?.toLocaleString() ?? '—'}</div>
+                <div style={{
+                  fontSize: 11, color: 'var(--text-muted)', marginTop: 4,
+                  fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase', letterSpacing: 1, fontWeight: 600,
+                }}>{stat.label}</div>
+              </div>
+            ))}
           </div>
+          {psaPop.gem_rate && (
+            <div style={{ marginTop: 12, fontSize: 13, fontFamily: "'Figtree', sans-serif", color: 'var(--text-muted)' }}>
+              Gem rate:{' '}
+              <strong style={{
+                color: parseFloat(psaPop.gem_rate) >= 20 ? 'var(--green)' : parseFloat(psaPop.gem_rate) >= 5 ? 'var(--accent-hover)' : 'var(--text)',
+              }}>
+                {parseFloat(psaPop.gem_rate).toFixed(1)}%
+              </strong>
+              {' '}of all graded copies received PSA 10.
+            </div>
+          )}
         </div>
       )}
 
