@@ -48,8 +48,8 @@ function ChatLink({ href, children }: { href?: string; children?: React.ReactNod
   )
 }
 
-export default function InlineChat({ cardContext }: { cardContext?: string }) {
-  const [input, setInput] = useState('')
+export default function InlineChat({ cardContext, prefillMessage }: { cardContext?: string; prefillMessage?: string }) {
+  const [input, setInput] = useState(prefillMessage || '')
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
   const [sessionId, setSessionId] = useState(() => 'web-' + Math.random().toString(36).slice(2, 10))
