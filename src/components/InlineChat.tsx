@@ -1,6 +1,7 @@
 'use client'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import Link from 'next/link'
+import ReactMarkdown from 'react-markdown'
 import { CHAT_ENDPOINT } from '@/lib/supabase'
 
 const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -23,18 +24,28 @@ const cardQuickQuestions = [
 
 interface Message { role: 'user' | 'assistant'; content: string }
 
-function parseMessageLinks(content: string) {
-  const linkRegex = /\[([^\]]+)\]\(\/(?:card|set)\/([^)]+)\)/g
-  const parts: (string | { text: string; href: string })[] = []
-  let lastIndex = 0
-  let match
-  while ((match = linkRegex.exec(content)) !== null) {
-    if (match.index > lastIndex) parts.push(content.slice(lastIndex, match.index))
-    parts.push({ text: match[1], href: `/${match[0].includes('/card/') ? 'card' : 'set'}/${match[2]}` })
-    lastIndex = match.index + match[0].length
+// Custom link renderer: internal /card/ and /set/ links use Next.js Link,
+// everything else (eBay, etc.) opens in a new tab
+function ChatLink({ href, children }: { href?: string; children?: React.ReactNode }) {
+  if (!href) return <>{children}</>
+  const isInternal = href.startsWith('/card/') || href.startsWith('/set/')
+  if (isInternal) {
+    return (
+      <Link href={href} style={{ color: 'var(--primary)', textDecoration: 'underline', fontWeight: 700 }}>
+        {children}
+      </Link>
+    )
   }
-  if (lastIndex < content.length) parts.push(content.slice(lastIndex))
-  return parts
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{ color: 'var(--primary)', textDecoration: 'underline', fontWeight: 700 }}
+    >
+      {children}
+    </a>
+  )
 }
 
 export default function InlineChat({ cardContext }: { cardContext?: string }) {
@@ -45,10 +56,10 @@ export default function InlineChat({ cardContext }: { cardContext?: string }) {
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-  if (messages.length > 0) {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-  }
-}, [messages])
+    if (messages.length > 0) {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  }, [messages])
 
   const clearChat = useCallback(() => {
     setMessages([]); setSessionId('web-' + Math.random().toString(36).slice(2, 10)); setInput('')
@@ -127,11 +138,31 @@ export default function InlineChat({ cardContext }: { cardContext?: string }) {
               maxWidth: '85%', fontSize: 14, lineHeight: 1.6,
             }}>
               {msg.role === 'assistant' ? (
-                parseMessageLinks(msg.content).map((part, j) =>
-                  typeof part === 'string' ? <span key={j} style={{ whiteSpace: 'pre-wrap' }}>{part}</span>
-                    : <Link key={j} href={part.href}>{part.text}</Link>
-                )
-              ) : <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>}
+                <ReactMarkdown
+                  components={{
+                    a: ({ href, children }) => <ChatLink href={href}>{children}</ChatLink>,
+                    // Keep paragraphs tight — no extra margin
+                    p: ({ children }) => <p style={{ margin: '0 0 8px 0' }}>{children}</p>,
+                    // Style bold text to use the theme colour
+                    strong: ({ children }) => <strong style={{ color: 'var(--text)', fontWeight: 800 }}>{children}</strong>,
+                    // Inline code (card names etc.)
+                    code: ({ children }) => (
+                      <code style={{
+                        background: 'rgba(0,0,0,0.08)', borderRadius: 4,
+                        padding: '1px 5px', fontSize: 13, fontFamily: 'monospace',
+                      }}>{children}</code>
+                    ),
+                    // Lists (e.g. multiple card results)
+                    ul: ({ children }) => <ul style={{ margin: '4px 0', paddingLeft: 20 }}>{children}</ul>,
+                    ol: ({ children }) => <ol style={{ margin: '4px 0', paddingLeft: 20 }}>{children}</ol>,
+                    li: ({ children }) => <li style={{ marginBottom: 2 }}>{children}</li>,
+                  }}
+                >
+                  {msg.content}
+                </ReactMarkdown>
+              ) : (
+                <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>
+              )}
             </div>
           </div>
         ))}
