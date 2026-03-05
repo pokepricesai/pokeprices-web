@@ -41,7 +41,6 @@ export default function SetPage() {
       setLoading(true)
       setError(false)
 
-      // Load cards
       const { data, error: err } = await supabase.rpc('get_set_cards_sortable', {
         set_text: setName,
         sort_col: sort,
@@ -52,11 +51,9 @@ export default function SetPage() {
         setCards(data)
       }
 
-      // Load insight
       const { data: insightData } = await supabase.rpc('get_set_insight', { set_text: setName })
       if (insightData) setInsight(insightData)
 
-      // Load price history
       const { data: histData } = await supabase.rpc('get_set_price_history', { set_text: setName })
       if (histData) {
         setPriceHistory(histData.map((d: any) => ({
@@ -65,7 +62,6 @@ export default function SetPage() {
         })))
       }
 
-      // Load PSA population stats
       const { data: popData } = await supabase
         .from('psa_set_totals')
         .select('*')
@@ -87,6 +83,9 @@ export default function SetPage() {
     loadData()
   }, [setName, sort])
 
+  const hasInsight = !!insight
+  const hasPop = !!(popStats && popStats.total_graded > 0)
+
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 24px' }}>
       <Link href="/browse" style={{
@@ -104,99 +103,94 @@ export default function SetPage() {
         letterSpacing: '-0.5px',
       }}>{setName}</h1>
 
-      {/* Chat — top of page */}
-      <div style={{ marginBottom: 32 }}>
+      {/* Chat */}
+      <div style={{ marginBottom: 24 }}>
         <InlineChat cardContext={setName} />
       </div>
 
-      {/* Set Insights */}
-      {insight && (
+      {/* Set Insights + PSA Population side by side */}
+      {(hasInsight || hasPop) && (
         <div style={{
-          background: 'var(--card)',
-          border: '1px solid var(--border)',
-          borderLeft: '3px solid var(--primary)',
-          borderRadius: 12,
-          padding: '16px 20px',
+          display: 'grid',
+          gridTemplateColumns: hasInsight && hasPop ? '1fr auto' : '1fr',
+          gap: 12,
           marginBottom: 20,
+          alignItems: 'stretch',
         }}>
-          <div style={{
-            fontSize: 11,
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            letterSpacing: 1.5,
-            color: 'var(--primary)',
-            marginBottom: 8,
-            fontFamily: "'Figtree', sans-serif",
-          }}>Set Insights</div>
-          <p style={{
-            fontSize: 14,
-            lineHeight: 1.65,
-            color: 'var(--text)',
-            margin: 0,
-            fontFamily: "'Figtree', sans-serif",
-          }}>{insight}</p>
-        </div>
-      )}
-
-      {/* PSA Population Stats */}
-      {popStats && popStats.total_graded > 0 && (
-        <div style={{
-          background: 'var(--card)',
-          border: '1px solid var(--border)',
-          borderRadius: 12,
-          padding: '16px 20px',
-          marginBottom: 20,
-        }}>
-          <div style={{
-            fontSize: 11,
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            letterSpacing: 1.5,
-            color: 'var(--text-muted)',
-            marginBottom: 14,
-            fontFamily: "'Figtree', sans-serif",
-          }}>PSA Population</div>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: 12,
-          }}>
-            <div style={statBox}>
-              <div style={statValue}>{popStats.total_graded.toLocaleString()}</div>
-              <div style={statLabel}>Total Graded</div>
-            </div>
-            <div style={statBox}>
-              <div style={statValue}>{popStats.total_psa10.toLocaleString()}</div>
-              <div style={statLabel}>PSA 10s</div>
-            </div>
-            <div style={statBox}>
+          {hasInsight && (
+            <div style={{
+              background: 'var(--card)',
+              border: '1px solid var(--border)',
+              borderLeft: '3px solid var(--primary)',
+              borderRadius: 12,
+              padding: '14px 18px',
+            }}>
               <div style={{
-                ...statValue,
-                color: popStats.gem_rate >= 20 ? 'var(--green)' : popStats.gem_rate >= 5 ? 'var(--accent-hover)' : 'var(--text)',
-              }}>{popStats.gem_rate.toFixed(1)}%</div>
-              <div style={statLabel}>Gem Rate</div>
+                fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+                letterSpacing: 1.5, color: 'var(--primary)', marginBottom: 7,
+                fontFamily: "'Figtree', sans-serif",
+              }}>Set Insights</div>
+              <p style={{
+                fontSize: 13, lineHeight: 1.6, color: 'var(--text)',
+                margin: 0, fontFamily: "'Figtree', sans-serif",
+              }}>{insight}</p>
             </div>
-          </div>
+          )}
+
+          {hasPop && popStats && (
+            <div style={{
+              background: 'var(--card)',
+              border: '1px solid var(--border)',
+              borderRadius: 12,
+              padding: '14px 18px',
+              minWidth: 190,
+            }}>
+              <div style={{
+                fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+                letterSpacing: 1.5, color: 'var(--text-muted)', marginBottom: 12,
+                fontFamily: "'Figtree', sans-serif",
+              }}>PSA Population</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <div style={statValue}>{popStats.total_graded.toLocaleString()}</div>
+                  <div style={statLabel}>Total Graded</div>
+                </div>
+                <div>
+                  <div style={statValue}>{popStats.total_psa10.toLocaleString()}</div>
+                  <div style={statLabel}>PSA 10s</div>
+                </div>
+                <div>
+                  <div style={{
+                    ...statValue,
+                    color: popStats.gem_rate >= 20
+                      ? 'var(--green)'
+                      : popStats.gem_rate >= 5
+                      ? 'var(--accent-hover)'
+                      : 'var(--text)',
+                  }}>{popStats.gem_rate.toFixed(1)}%</div>
+                  <div style={statLabel}>Gem Rate</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       <p style={{
         color: 'var(--text-muted)', fontSize: 13,
-        margin: '0 0 20px',
-        fontFamily: "'Figtree', sans-serif",
+        margin: '0 0 20px', fontFamily: "'Figtree', sans-serif",
       }}>
         {cards.length} cards
       </p>
 
-      {/* Set Price Chart — total value only */}
+      {/* Set Price Chart */}
       {priceHistory.length > 1 && (
         <div style={{
           background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)',
           padding: '20px', marginBottom: 20,
         }}>
           <h3 style={{
-            fontSize: 11, fontWeight: 700,
-            fontFamily: "'Figtree', sans-serif",
+            fontSize: 11, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
             margin: '0 0 14px', color: 'var(--text-muted)',
             textTransform: 'uppercase', letterSpacing: 1.5,
           }}>Set Price History</h3>
@@ -293,18 +287,8 @@ export default function SetPage() {
   )
 }
 
-// Stat box styles
-const statBox: React.CSSProperties = {
-  background: 'var(--bg-light)',
-  borderRadius: 10,
-  padding: '12px 14px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 4,
-}
-
 const statValue: React.CSSProperties = {
-  fontSize: 22,
+  fontSize: 20,
   fontWeight: 700,
   color: 'var(--text)',
   fontFamily: "'Figtree', sans-serif",
@@ -318,4 +302,5 @@ const statLabel: React.CSSProperties = {
   textTransform: 'uppercase',
   letterSpacing: 1,
   fontWeight: 600,
+  marginTop: 2,
 }
