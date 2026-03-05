@@ -17,6 +17,12 @@ interface Card {
   image_url: string | null
 }
 
+interface PopStats {
+  total_graded: number
+  gem_rate: number
+  total_psa10: number
+}
+
 type SortOption = 'raw_desc' | 'raw_asc' | 'psa10_desc' | 'name_asc' | 'number_asc'
 
 export default function SetPage() {
@@ -27,6 +33,7 @@ export default function SetPage() {
   const [sort, setSort] = useState<SortOption>('raw_desc')
   const [insight, setInsight] = useState<string | null>(null)
   const [priceHistory, setPriceHistory] = useState<any[]>([])
+  const [popStats, setPopStats] = useState<PopStats | null>(null)
   const [error, setError] = useState(false)
 
   useEffect(() => {
@@ -51,12 +58,29 @@ export default function SetPage() {
 
       // Load price history
       const { data: histData } = await supabase.rpc('get_set_price_history', { set_text: setName })
-if (histData) {
-  setPriceHistory(histData.map((d: any) => ({
-    ...d,
-    value_usd: d.value_usd ? d.value_usd * 100 : null,
-  })))
-}
+      if (histData) {
+        setPriceHistory(histData.map((d: any) => ({
+          ...d,
+          value_usd: d.value_usd ? d.value_usd * 100 : null,
+        })))
+      }
+
+      // Load PSA population stats
+      const { data: popData } = await supabase
+        .from('psa_set_totals')
+        .select('*')
+        .or(`set_name.eq.Pokemon ${setName},set_name.ilike.%${setName}%`)
+        .order('snapshot_date', { ascending: false })
+        .limit(1)
+
+      if (popData && popData.length > 0) {
+        const pop = popData[0]
+        setPopStats({
+          total_graded: pop.total_graded || 0,
+          gem_rate: pop.gem_rate || 0,
+          total_psa10: pop.total_psa_10 || 0,
+        })
+      }
 
       setLoading(false)
     }
@@ -68,36 +92,117 @@ if (histData) {
       <Link href="/browse" style={{
         color: 'var(--text-muted)', fontSize: 13, textDecoration: 'none',
         marginBottom: 8, display: 'inline-block',
+        fontFamily: "'Figtree', sans-serif",
       }}>← Back to sets</Link>
 
       <h1 style={{
-        fontFamily: "'DM Serif Display', serif", fontSize: 30,
-        margin: '8px 0 4px', color: 'var(--text)',
+        fontFamily: "'Playfair Display', serif",
+        fontSize: 34,
+        fontWeight: 700,
+        margin: '8px 0 16px',
+        color: 'var(--text)',
+        letterSpacing: '-0.5px',
       }}>{setName}</h1>
 
+      {/* Chat — top of page */}
+      <div style={{ marginBottom: 32 }}>
+        <InlineChat cardContext={setName} />
+      </div>
+
+      {/* Set Insights */}
       {insight && (
-        <div className="insight-badge" style={{ marginBottom: 12 }}>{insight}</div>
+        <div style={{
+          background: 'var(--card)',
+          border: '1px solid var(--border)',
+          borderLeft: '3px solid var(--primary)',
+          borderRadius: 12,
+          padding: '16px 20px',
+          marginBottom: 20,
+        }}>
+          <div style={{
+            fontSize: 11,
+            fontWeight: 700,
+            textTransform: 'uppercase',
+            letterSpacing: 1.5,
+            color: 'var(--primary)',
+            marginBottom: 8,
+            fontFamily: "'Figtree', sans-serif",
+          }}>Set Insights</div>
+          <p style={{
+            fontSize: 14,
+            lineHeight: 1.65,
+            color: 'var(--text)',
+            margin: 0,
+            fontFamily: "'Figtree', sans-serif",
+          }}>{insight}</p>
+        </div>
       )}
 
-      <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 20px' }}>
+      {/* PSA Population Stats */}
+      {popStats && popStats.total_graded > 0 && (
+        <div style={{
+          background: 'var(--card)',
+          border: '1px solid var(--border)',
+          borderRadius: 12,
+          padding: '16px 20px',
+          marginBottom: 20,
+        }}>
+          <div style={{
+            fontSize: 11,
+            fontWeight: 700,
+            textTransform: 'uppercase',
+            letterSpacing: 1.5,
+            color: 'var(--text-muted)',
+            marginBottom: 14,
+            fontFamily: "'Figtree', sans-serif",
+          }}>PSA Population</div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: 12,
+          }}>
+            <div style={statBox}>
+              <div style={statValue}>{popStats.total_graded.toLocaleString()}</div>
+              <div style={statLabel}>Total Graded</div>
+            </div>
+            <div style={statBox}>
+              <div style={statValue}>{popStats.total_psa10.toLocaleString()}</div>
+              <div style={statLabel}>PSA 10s</div>
+            </div>
+            <div style={statBox}>
+              <div style={{
+                ...statValue,
+                color: popStats.gem_rate >= 20 ? 'var(--green)' : popStats.gem_rate >= 5 ? 'var(--accent-hover)' : 'var(--text)',
+              }}>{popStats.gem_rate.toFixed(1)}%</div>
+              <div style={statLabel}>Gem Rate</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <p style={{
+        color: 'var(--text-muted)', fontSize: 13,
+        margin: '0 0 20px',
+        fontFamily: "'Figtree', sans-serif",
+      }}>
         {cards.length} cards
       </p>
 
-      {/* Set Price Chart */}
+      {/* Set Price Chart — total value only */}
       {priceHistory.length > 1 && (
         <div style={{
           background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)',
           padding: '20px', marginBottom: 20,
         }}>
           <h3 style={{
-            fontSize: 14, fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
+            fontSize: 11, fontWeight: 700,
+            fontFamily: "'Figtree', sans-serif",
             margin: '0 0 14px', color: 'var(--text-muted)',
-            textTransform: 'uppercase', letterSpacing: 1,
+            textTransform: 'uppercase', letterSpacing: 1.5,
           }}>Set Price History</h3>
           <PriceChart
             data={priceHistory}
             lines={[
-              { key: 'median_usd', color: 'var(--primary)', label: 'Avg Card' },
               { key: 'value_usd', color: 'var(--accent)', label: 'Total Set Value' },
             ]}
             height={220}
@@ -118,6 +223,7 @@ if (histData) {
             key={val}
             className={`sort-btn ${sort === val ? 'active' : ''}`}
             onClick={() => setSort(val)}
+            style={{ fontFamily: "'Figtree', sans-serif" }}
           >{label}</button>
         ))}
       </div>
@@ -133,7 +239,7 @@ if (histData) {
           background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)',
           padding: '40px 24px', textAlign: 'center',
         }}>
-          <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: 14, fontFamily: "'Figtree', sans-serif" }}>
             Could not load cards for this set. Try refreshing the page.
           </p>
         </div>
@@ -165,16 +271,17 @@ if (histData) {
               <div style={{
                 fontWeight: 600, fontSize: 13, textAlign: 'center',
                 marginBottom: 3, lineHeight: 1.3,
+                fontFamily: "'Figtree', sans-serif",
                 display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
                 overflow: 'hidden',
               }}>
                 {c.card_name}
               </div>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
                 Raw: {formatPrice(c.raw_usd)}
               </div>
               {c.psa10_usd && c.psa10_usd > 0 && (
-                <div style={{ fontSize: 12, color: 'var(--accent-hover)', fontWeight: 500 }}>
+                <div style={{ fontSize: 12, color: 'var(--accent-hover)', fontWeight: 500, fontFamily: "'Figtree', sans-serif" }}>
                   PSA 10: {formatPrice(c.psa10_usd)}
                 </div>
               )}
@@ -182,15 +289,33 @@ if (histData) {
           ))}
         </div>
       )}
-
-      {/* Chat */}
-      <div style={{ marginTop: 40 }}>
-        <h2 style={{
-          fontFamily: "'DM Serif Display', serif", fontSize: 20,
-          margin: '0 0 14px', color: 'var(--text)',
-        }}>Ask about this set</h2>
-        <InlineChat cardContext={setName} />
-      </div>
     </div>
   )
+}
+
+// Stat box styles
+const statBox: React.CSSProperties = {
+  background: 'var(--bg-light)',
+  borderRadius: 10,
+  padding: '12px 14px',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+}
+
+const statValue: React.CSSProperties = {
+  fontSize: 22,
+  fontWeight: 700,
+  color: 'var(--text)',
+  fontFamily: "'Figtree', sans-serif",
+  lineHeight: 1,
+}
+
+const statLabel: React.CSSProperties = {
+  fontSize: 11,
+  color: 'var(--text-muted)',
+  fontFamily: "'Figtree', sans-serif",
+  textTransform: 'uppercase',
+  letterSpacing: 1,
+  fontWeight: 600,
 }
