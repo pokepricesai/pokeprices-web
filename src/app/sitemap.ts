@@ -38,7 +38,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       .order('set_name')
     
     if (sets) {
-      const uniqueSets = [...new Set(sets.map((s: any) => s.set_name))]
+      const uniqueSets = Array.from(new Set(sets.map((s: any) => s.set_name)))
       setPages = uniqueSets.map((setName: string) => ({
         url: `https://pokeprices.io/set/${encodeURIComponent(setName)}`,
         lastModified: new Date(),
