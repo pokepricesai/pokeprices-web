@@ -68,7 +68,12 @@ export default function SearchBar({ placeholder = 'Search cards or sets…' }: {
       }))
 
       // Deduplicate sets
-      const uniqueSets = [...new Map((sets || []).map((s: any) => [s.set_name, s])).values()]
+      const seen = new Set<string>()
+const uniqueSets = (sets || []).filter((s: any) => {
+  if (seen.has(s.set_name)) return false
+  seen.add(s.set_name)
+  return true
+})
       const setResults: SearchResult[] = uniqueSets.slice(0, 3).map((s: any) => ({
         type: 'set' as const,
         label: s.set_name,
