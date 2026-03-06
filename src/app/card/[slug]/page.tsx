@@ -1,6 +1,3 @@
-// app/card/[slug]/page.tsx
-// Server component wrapper — handles metadata only, renders client component
-
 import type { Metadata } from 'next'
 import { createClient } from '@supabase/supabase-js'
 import CardPageClient from './CardPageClient'
