@@ -25,6 +25,30 @@ interface PopStats {
 
 type SortOption = 'raw_desc' | 'raw_asc' | 'psa10_desc' | 'name_asc' | 'number_asc'
 
+import type { Metadata } from 'next'
+
+export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
+  const setName = decodeURIComponent(params.slug)
+  
+  const title = `${setName} Card Prices`
+  const description = `All ${setName} Pokemon card prices with PSA population data, price history and grading insights. Updated daily. Free, no login required.`
+
+  return {
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      url: `https://pokeprices.io/set/${params.slug}`,
+    },
+    twitter: {
+      card: 'summary',
+      title,
+      description,
+    },
+  }
+}
+
 export default function SetPage() {
   const params = useParams()
   const setName = decodeURIComponent(params.slug as string)
