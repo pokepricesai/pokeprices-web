@@ -11,6 +11,50 @@ function extractVariant(cardName: string): string | null {
   return match ? match[1] : null
 }
 
+function buildEbayUrl(cardName: string, setName: string, region: 'UK' | 'US', mode: 'sold' | 'forsale') {
+  const baseName = cardName.split('[')[0].split('#')[0].trim()
+  const setShort = setName.replace(/^Pokemon /, '').split(' ').slice(0, 2).join(' ')
+  const q = encodeURIComponent(`${baseName} ${setShort} pokemon card`)
+  if (region === 'UK') {
+    const base = 'https://www.ebay.co.uk/sch/i.html'
+    return mode === 'sold'
+      ? `${base}?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sacat=2536`
+      : `${base}?_nkw=${q}&LH_BIN=1&_sacat=2536`
+  } else {
+    const base = 'https://www.ebay.com/sch/i.html'
+    return mode === 'sold'
+      ? `${base}?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sacat=2536`
+      : `${base}?_nkw=${q}&LH_BIN=1&_sacat=2536`
+  }
+}
+
+function EbayButton({ href, label, flag, variant = 'secondary' }: {
+  href: string; label: string; flag: string; variant?: 'primary' | 'secondary'
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: '8px 14px', borderRadius: 10, textDecoration: 'none',
+        fontSize: 12, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
+        border: '1px solid var(--border)',
+        background: variant === 'primary' ? 'var(--primary)' : 'var(--bg-light)',
+        color: variant === 'primary' ? '#fff' : 'var(--text)',
+        whiteSpace: 'nowrap',
+        transition: 'opacity 0.15s',
+      }}
+      onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.opacity = '0.8' }}
+      onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.opacity = '1' }}
+    >
+      <span style={{ fontSize: 13 }}>{flag}</span>
+      {label}
+    </a>
+  )
+}
+
 export default function CardPageClient({
   setName,
   cardUrlSlug,
@@ -30,7 +74,6 @@ export default function CardPageClient({
 
   useEffect(() => {
     async function loadCard() {
-      // Fetch card by set name + card_url_slug
       const { data: cardData } = await supabase.rpc('get_card_detail_by_url_slug', {
         p_set_name: setName,
         p_card_url_slug: cardUrlSlug,
@@ -38,7 +81,6 @@ export default function CardPageClient({
       if (!cardData) { setLoading(false); return }
       setCard(cardData)
 
-      // Use the numeric card_slug for all subsequent lookups (unchanged)
       const slug = cardData.card_slug
 
       const [trendRes, metricsRes, histRes, insightRes] = await Promise.all([
@@ -56,7 +98,6 @@ export default function CardPageClient({
       if (histRes.data) setPriceHistory(histRes.data)
       if (insightRes.data) setInsight(insightRes.data)
 
-      // PSA population — exact variant match
       const baseName = cardData.card_name.split('[')[0].split('#')[0].trim()
       const variant = extractVariant(cardData.card_name)
       const setNameClean = cardData.set_name.replace(/^Pokemon /, '')
@@ -80,7 +121,7 @@ export default function CardPageClient({
 
       if (popData && popData.length > 0) setPsaPop(popData[0])
 
-      // eBay deals
+      // eBay deals — only show if they exist
       const { data: dealsData } = await supabase
         .from('daily_deals')
         .select('*')
@@ -151,7 +192,6 @@ export default function CardPageClient({
     { label: '5y', val: trend.raw_pct_5y },
   ] : []
 
-  // Buying signals
   const signals: { label: string; value: string; type: 'good' | 'warn' | 'neutral' }[] = []
 
   if (metrics) {
@@ -189,6 +229,11 @@ export default function CardPageClient({
   const hasListings = ebayListings.length > 0
   const cardNumber = card.card_number ? ` #${card.card_number}` : ''
   const prefillMessage = `I'm looking at ${card.card_name}${cardNumber} from ${card.set_name}`
+
+  const ebayUkForSale = buildEbayUrl(card.card_name, card.set_name, 'UK', 'forsale')
+  const ebayUkSold    = buildEbayUrl(card.card_name, card.set_name, 'UK', 'sold')
+  const ebayUsForSale = buildEbayUrl(card.card_name, card.set_name, 'US', 'forsale')
+  const ebayUsSold    = buildEbayUrl(card.card_name, card.set_name, 'US', 'sold')
 
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '36px 24px' }}>
@@ -323,6 +368,50 @@ export default function CardPageClient({
         </div>
       </div>
 
+      {/* eBay Search Buttons */}
+      <div style={{
+        background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)',
+        padding: '16px 20px', marginTop: 24,
+      }}>
+        <div style={{
+          fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+          letterSpacing: 1.5, color: 'var(--text-muted)', marginBottom: 14,
+          fontFamily: "'Figtree', sans-serif",
+        }}>Search eBay</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
+          {/* UK */}
+          <div>
+            <div style={{
+              fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+              letterSpacing: 1, color: 'var(--text-muted)', marginBottom: 7,
+              fontFamily: "'Figtree', sans-serif",
+            }}>🇬🇧 eBay UK</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <EbayButton href={ebayUkForSale} label="For Sale" flag="🛒" variant="primary" />
+              <EbayButton href={ebayUkSold} label="Sold Listings" flag="✅" />
+            </div>
+          </div>
+
+          <div style={{ width: 1, background: 'var(--border)', alignSelf: 'stretch', margin: '0 4px' }} />
+
+          {/* US */}
+          <div>
+            <div style={{
+              fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+              letterSpacing: 1, color: 'var(--text-muted)', marginBottom: 7,
+              fontFamily: "'Figtree', sans-serif",
+            }}>🇺🇸 eBay US</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <EbayButton href={ebayUsForSale} label="For Sale" flag="🛒" variant="primary" />
+              <EbayButton href={ebayUsSold} label="Sold Listings" flag="✅" />
+            </div>
+          </div>
+        </div>
+        <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '12px 0 0', fontFamily: "'Figtree', sans-serif" }}>
+          Opens eBay pre-searched for this card. Always verify the listing matches before buying.
+        </p>
+      </div>
+
       {/* PSA Population */}
       {psaPop && (
         <div style={{
@@ -371,7 +460,7 @@ export default function CardPageClient({
         </div>
       )}
 
-      {/* eBay Deals / Listings */}
+      {/* eBay Deals / Listings — only shown if data exists */}
       {(hasDeals || hasListings) && (
         <div style={{
           background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)',
@@ -381,7 +470,7 @@ export default function CardPageClient({
             fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
             letterSpacing: 1.5, marginBottom: 14, fontFamily: "'Figtree', sans-serif",
             color: hasDeals ? 'var(--green)' : 'var(--text-muted)',
-          }}>{hasDeals ? 'Live Deals' : 'Live Listings'}</div>
+          }}>{hasDeals ? '🔥 Live Deals' : 'Live Listings'}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {(hasDeals ? ebayDeals : ebayListings).map((item: any, i: number) => {
               const price = hasDeals
