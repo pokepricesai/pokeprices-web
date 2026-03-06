@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { supabase, formatPrice, formatPct } from '@/lib/supabase'
 import InlineChat from '@/components/InlineChat'
+import SearchBar from '@/components/SearchBar'
 
 const upcomingReleases = [
   { name: 'Perfect Order', date: 'Mar 27, 2026', confirmed: true, type: 'Main Set' },
@@ -85,7 +86,7 @@ export default function HomeClient() {
 
   useEffect(() => {
     async function loadTrending() {
-const { data } = await supabase
+      const { data } = await supabase
         .from('card_trends')
         .select('card_slug, card_name, set_name, current_raw, current_psa10, raw_pct_30d')
         .not('raw_pct_30d', 'is', null)
@@ -149,9 +150,27 @@ const { data } = await supabase
           }}>
             Know what your cards<br />are <span style={{ color: 'var(--accent)' }}>really</span> worth
           </h1>
-          <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 15, margin: '0 0 28px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif" }}>
+          <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 15, margin: '0 0 20px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif" }}>
             Real market data for 40,000+ Pokemon cards. Ask anything — prices, trends, grading advice.
           </p>
+
+          {/* Search bar */}
+          <div style={{ marginBottom: 16 }}>
+            <SearchBar placeholder="Search cards or sets… e.g. Charizard, Evolving Skies" />
+          </div>
+
+          {/* Divider */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 12, margin: '0 auto 16px',
+            maxWidth: 560,
+          }}>
+            <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.15)' }} />
+            <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, fontFamily: "'Figtree', sans-serif", fontWeight: 600, letterSpacing: 0.5 }}>
+              or ask the chatbot
+            </span>
+            <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.15)' }} />
+          </div>
+
           <InlineChat />
           <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, marginTop: 12, fontFamily: "'Figtree', sans-serif" }}>
             Updated daily from actual sold listings
