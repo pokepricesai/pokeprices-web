@@ -34,6 +34,7 @@ interface TrendCard {
   current_psa10: number
   raw_pct_30d: number
   image_url?: string
+  card_url_slug?: string
 }
 
 function Sparkles() {
@@ -84,7 +85,7 @@ export default function HomeClient() {
 
   useEffect(() => {
     async function loadTrending() {
-      const { data } = await supabase
+const { data } = await supabase
         .from('card_trends')
         .select('card_slug, card_name, set_name, current_raw, current_psa10, raw_pct_30d')
         .not('raw_pct_30d', 'is', null)
@@ -96,11 +97,22 @@ export default function HomeClient() {
         const slugs = data.map((d: any) => d.card_slug)
         const { data: cardData } = await supabase
           .from('cards')
-          .select('card_slug, image_url')
+          .select('card_slug, image_url, card_url_slug, set_name')
           .in('card_slug', slugs)
         const imageMap: Record<string, string> = {}
-        if (cardData) cardData.forEach((c: any) => { if (c.image_url) imageMap[c.card_slug] = c.image_url })
-        setTrending(data.map((d: any) => ({ ...d, image_url: imageMap[d.card_slug] })))
+        const slugMap: Record<string, string> = {}
+        const setMap: Record<string, string> = {}
+        if (cardData) cardData.forEach((c: any) => {
+          if (c.image_url) imageMap[c.card_slug] = c.image_url
+          if (c.card_url_slug) slugMap[c.card_slug] = c.card_url_slug
+          if (c.set_name) setMap[c.card_slug] = c.set_name
+        })
+        setTrending(data.map((d: any) => ({
+          ...d,
+          image_url: imageMap[d.card_slug],
+          card_url_slug: slugMap[d.card_slug],
+          set_name: setMap[d.card_slug] || d.set_name,
+        })))
       }
     }
     loadTrending()
@@ -161,7 +173,7 @@ export default function HomeClient() {
               return (
                 <Link
                   key={card.card_slug}
-                  href={`/card/${card.card_slug}`}
+                  href={`/set/${encodeURIComponent(card.set_name)}/card/${card.card_url_slug}`}
                   className={`card-hover animate-fade-in-up delay-${i + 1}`}
                   style={{
                     background: 'var(--card)', borderRadius: 14,
