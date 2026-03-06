@@ -74,14 +74,14 @@ const uniqueSets = (sets || []).filter((s: any) => {
   seen.add(s.set_name)
   return true
 })
-      const setResults: SearchResult[] = uniqueSets.slice(0, 3).map((s: any) => ({
+      const setItems: SearchResult[] = uniqueSets.slice(0, 3).map((s: any) => ({
         type: 'set' as const,
         label: s.set_name,
         sublabel: 'Set',
         href: `/set/${encodeURIComponent(s.set_name)}`,
       }))
 
-      setResults([...setResults, ...cardResults])
+      setResults([...setItems, ...cardResults])
       setOpen(true)
       setHighlighted(-1)
       setLoading(false)
