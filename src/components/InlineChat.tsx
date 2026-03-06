@@ -207,7 +207,7 @@ export default function InlineChat({ cardContext, prefillMessage }: { cardContex
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-          placeholder="Search any Pokemon card or set..."
+          placeholder="Any ask questions here..."
           style={{
             flex: 1, border: 'none', outline: 'none', fontSize: 14,
             color: 'var(--text)', background: 'transparent', fontFamily: 'inherit',
