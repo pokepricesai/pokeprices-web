@@ -35,7 +35,7 @@ export const metadata: Metadata = {
     description: 'Real Pokemon card prices for 40,000+ cards. Daily updates, PSA population data, grading advice. Free.',
     images: ['/og-image.png'],
   },
-  robots: {
+robots: {
     index: true,
     follow: true,
     googleBot: {
@@ -45,6 +45,11 @@ export const metadata: Metadata = {
       'max-image-preview': 'large',
       'max-snippet': -1,
     },
+  },
+  icons: {
+    icon: '/favicon.ico',
+    shortcut: '/favicon-32x32.png',
+    apple: '/apple-touch-icon.png',
   },
 }
 
