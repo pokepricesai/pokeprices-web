@@ -13,9 +13,6 @@ function extractVariant(cardName: string): string | null {
   return match ? match[1] : null
 }
 
-// Add this generateMetadata function to your app/card/[slug]/page.tsx
-// Place it ABOVE the default export, outside the component
-
 import type { Metadata } from 'next'
 import { createClient } from '@supabase/supabase-js'
 
