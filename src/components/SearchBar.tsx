@@ -43,12 +43,25 @@ export default function SearchBar({ placeholder = 'Search cards or sets…' }: {
       const q = debouncedQuery.trim()
 
       // Cards search
-      const { data: cards } = await supabase
-        .from('cards')
-        .select('card_slug, card_name, set_name, image_url, card_url_slug')
-        .ilike('card_name', `%${q}%`)
-        .not('card_url_slug', 'is', null)
-        .limit(6)
+      const words = q.split(' ')
+const likelySetWords = words.slice(1).join(' ')
+const firstWord = words[0]
+
+// Try card name + set name split search first
+let cardQuery = supabase
+  .from('cards')
+  .select('card_slug, card_name, set_name, image_url, card_url_slug')
+  .not('card_url_slug', 'is', null)
+
+if (words.length > 1 && likelySetWords.length > 2) {
+  cardQuery = cardQuery
+    .ilike('card_name', `%${firstWord}%`)
+    .ilike('set_name', `%${likelySetWords}%`)
+} else {
+  cardQuery = cardQuery.ilike('card_name', `%${q}%`)
+}
+
+const { data: cards } = await cardQuery.limit(6)
 
       // Sets search
       const { data: sets } = await supabase
