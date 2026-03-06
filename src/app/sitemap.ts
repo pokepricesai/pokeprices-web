@@ -7,40 +7,20 @@ const supabase = createClient(
 )
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  // Static pages
   const staticPages: MetadataRoute.Sitemap = [
-    {
-      url: 'https://pokeprices.io',
-      lastModified: new Date(),
-      changeFrequency: 'daily',
-      priority: 1,
-    },
-    {
-      url: 'https://pokeprices.io/browse',
-      lastModified: new Date(),
-      changeFrequency: 'weekly',
-      priority: 0.8,
-    },
-    {
-      url: 'https://pokeprices.io/contact',
-      lastModified: new Date(),
-      changeFrequency: 'monthly',
-      priority: 0.3,
-    },
+    { url: 'https://pokeprices.io', lastModified: new Date(), changeFrequency: 'daily', priority: 1 },
+    { url: 'https://pokeprices.io/browse', lastModified: new Date(), changeFrequency: 'weekly', priority: 0.8 },
+    { url: 'https://pokeprices.io/insights', lastModified: new Date(), changeFrequency: 'daily', priority: 0.7 },
+    { url: 'https://pokeprices.io/contact', lastModified: new Date(), changeFrequency: 'monthly', priority: 0.3 },
   ]
 
-  // Set pages
+  // Set pages — use RPC to get distinct set names
   let setPages: MetadataRoute.Sitemap = []
   try {
-    const { data: sets } = await supabase
-      .from('cards')
-      .select('set_name')
-      .order('set_name')
-    
+    const { data: sets } = await supabase.rpc('get_distinct_set_names')
     if (sets) {
-      const uniqueSets = Array.from(new Set(sets.map((s: any) => s.set_name)))
-      setPages = uniqueSets.map((setName: string) => ({
-        url: `https://pokeprices.io/set/${encodeURIComponent(setName)}`,
+      setPages = sets.map((s: any) => ({
+        url: `https://pokeprices.io/set/${encodeURIComponent(s.set_name)}`,
         lastModified: new Date(),
         changeFrequency: 'weekly' as const,
         priority: 0.7,
@@ -50,27 +30,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     console.error('Sitemap: failed to load sets', e)
   }
 
-  // Card pages — top 5000 by value (avoid 40k URL sitemap hitting rate limits)
+  // Card pages — fetch in batches to get all 5000
   let cardPages: MetadataRoute.Sitemap = []
   try {
-    const { data: cards } = await supabase
-      .from('card_trends')
-      .select('card_slug')
-      .not('current_raw', 'is', null)
-      .order('current_raw', { ascending: false })
-      .limit(5000)
-
+    const { data: cards } = await supabase.rpc('get_sitemap_cards', { max_cards: 5000 })
     if (cards) {
       cardPages = cards.map((c: any) => ({
         url: `https://pokeprices.io/card/${c.card_slug}`,
-        lastModified: new Date(),
-        changeFrequency: 'daily' as const,
-        priority: 0.6,
-      }))
-    }
-  } catch (e) {
-    console.error('Sitemap: failed to load cards', e)
-  }
-
-  return [...staticPages, ...setPages, ...cardPages]
-}
