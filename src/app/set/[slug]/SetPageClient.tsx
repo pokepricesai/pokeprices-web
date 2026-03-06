@@ -15,6 +15,7 @@ interface Card {
   psa9_usd: number | null
   psa10_usd: number | null
   image_url: string | null
+  card_url_slug: string | null
 }
 
 interface PopStats {
@@ -234,7 +235,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
           {cards.map((c) => (
             <Link
               key={c.card_slug}
-              href={`/card/${c.card_slug}`}
+              href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`}
               className="card-hover holo-shimmer"
               style={{
                 background: 'var(--card)', borderRadius: 12,
