@@ -33,7 +33,7 @@ export default function BrowsePageClient() {
     .filter((s) => s.set_name.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => {
       switch (sort) {
-        case 'release_desc': return (b.set_release_date || '').localeCompare(a.set_release_date || '')
+        case 'release_desc': return new Date(b.set_release_date || '1900-01-01').getTime() - new Date(a.set_release_date || '1900-01-01').getTime()
         case 'az': return a.set_name.localeCompare(b.set_name)
         case 'za': return b.set_name.localeCompare(a.set_name)
         case 'price_desc': return (b.avg_raw_usd || 0) - (a.avg_raw_usd || 0)
