@@ -187,7 +187,7 @@ export default function SetPage() {
       {priceHistory.length > 1 && (
         <div style={{
           background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)',
-          padding: '20px', marginBottom: 20,
+          padding: '20px 20px 32px', marginBottom: 20,
         }}>
           <h3 style={{
             fontSize: 11, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
