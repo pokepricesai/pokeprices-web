@@ -1,6 +1,3 @@
-// app/card/[slug]/CardPageClient.tsx
-// All client-side logic lives here
-
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
