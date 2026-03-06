@@ -286,15 +286,18 @@ const uniqueSets = (sets || []).filter((s: any) => {
         </div>
       )}
 
-      <style>{`
-        @keyframes fadeInDown {
-          from { opacity: 0; transform: translateY(-6px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
+<style>{`
+  @keyframes fadeInDown {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  input::placeholder {
+    color: rgba(255, 255, 255, 0.6);
+  }
+`}</style>
     </div>
   )
 }
