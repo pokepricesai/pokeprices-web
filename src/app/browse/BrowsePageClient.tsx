@@ -9,15 +9,16 @@ interface SetInfo {
   card_count: number
   avg_raw_usd: number | null
   set_image_url: string | null
+  set_release_date: string | null
 }
 
-type SortOption = 'az' | 'za' | 'price_desc' | 'price_asc' | 'cards_desc'
+type SortOption = 'release_desc' | 'az' | 'za' | 'price_desc' | 'price_asc' | 'cards_desc'
 
 export default function BrowsePageClient() {
   const [search, setSearch] = useState('')
   const [sets, setSets] = useState<SetInfo[]>([])
   const [loading, setLoading] = useState(true)
-  const [sort, setSort] = useState<SortOption>('az')
+  const [sort, setSort] = useState<SortOption>('release_desc')
 
   useEffect(() => {
     async function loadSets() {
@@ -32,6 +33,7 @@ export default function BrowsePageClient() {
     .filter((s) => s.set_name.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => {
       switch (sort) {
+        case 'release_desc': return (b.set_release_date || '').localeCompare(a.set_release_date || '')
         case 'az': return a.set_name.localeCompare(b.set_name)
         case 'za': return b.set_name.localeCompare(a.set_name)
         case 'price_desc': return (b.avg_raw_usd || 0) - (a.avg_raw_usd || 0)
@@ -66,6 +68,7 @@ export default function BrowsePageClient() {
         />
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {([
+            ['release_desc', 'Newest First'],
             ['az', 'A-Z'],
             ['za', 'Z-A'],
             ['price_desc', 'Highest Avg'],
@@ -121,6 +124,11 @@ export default function BrowsePageClient() {
                 }}>{s.set_name}</div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2, fontFamily: "'Figtree', sans-serif" }}>
                   {s.card_count} cards
+                  {s.set_release_date && (
+                    <span style={{ marginLeft: 8 }}>
+                      · {new Date(s.set_release_date).getFullYear()}
+                    </span>
+                  )}
                 </div>
                 {s.avg_raw_usd !== null && s.avg_raw_usd > 0 && (
                   <div style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 600, fontFamily: "'Figtree', sans-serif" }}>
