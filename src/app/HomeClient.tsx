@@ -156,7 +156,7 @@ export default function HomeClient() {
 
           {/* Search bar */}
           <div style={{ marginBottom: 16 }}>
-            <SearchBar placeholder="Search cards or sets… e.g. Charizard, Evolving Skies" />
+            <SearchBar placeholder="Search cards or sets…" />
           </div>
 
           {/* Divider */}
