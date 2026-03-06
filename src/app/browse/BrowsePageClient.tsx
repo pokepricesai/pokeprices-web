@@ -126,7 +126,7 @@ export default function BrowsePageClient() {
                   {s.card_count} cards
                   {s.set_release_date && (
                     <span style={{ marginLeft: 8 }}>
-                      · {new Date(s.set_release_date).getFullYear()}
+                      · {new Date(s.set_release_date).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}
                     </span>
                   )}
                 </div>
