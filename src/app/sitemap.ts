@@ -14,6 +14,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: 'https://pokeprices.io/contact', lastModified: new Date(), changeFrequency: 'monthly', priority: 0.3 },
   ]
 
+  
   let setPages: MetadataRoute.Sitemap = []
   try {
     const { data: sets } = await supabase.rpc('get_distinct_set_names')
