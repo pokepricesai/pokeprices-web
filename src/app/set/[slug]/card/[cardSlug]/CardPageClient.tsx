@@ -11,10 +11,11 @@ function extractVariant(cardName: string): string | null {
   return match ? match[1] : null
 }
 
-function buildEbayUrl(cardName: string, setName: string, region: 'UK' | 'US', mode: 'sold' | 'forsale') {
+function buildEbayUrl(cardName: string, setName: string, cardNumber: string | null, region: 'UK' | 'US', mode: 'sold' | 'forsale') {
   const baseName = cardName.split('[')[0].split('#')[0].trim()
   const setShort = setName.replace(/^Pokemon /, '').split(' ').slice(0, 2).join(' ')
-  const q = encodeURIComponent(`${baseName} ${setShort} pokemon card`)
+  const numberPart = cardNumber ? ` ${cardNumber}` : ''
+  const q = encodeURIComponent(`${baseName}${numberPart} ${setShort} pokemon card`)
   if (region === 'UK') {
     const base = 'https://www.ebay.co.uk/sch/i.html'
     return mode === 'sold'
@@ -230,10 +231,10 @@ export default function CardPageClient({
   const cardNumber = card.card_number ? ` #${card.card_number}` : ''
   const prefillMessage = `I'm looking at ${card.card_name}${cardNumber} from ${card.set_name}`
 
-  const ebayUkForSale = buildEbayUrl(card.card_name, card.set_name, 'UK', 'forsale')
-  const ebayUkSold    = buildEbayUrl(card.card_name, card.set_name, 'UK', 'sold')
-  const ebayUsForSale = buildEbayUrl(card.card_name, card.set_name, 'US', 'forsale')
-  const ebayUsSold    = buildEbayUrl(card.card_name, card.set_name, 'US', 'sold')
+  const ebayUkForSale = buildEbayUrl(card.card_name, card.set_name, card.card_number, 'UK', 'forsale')
+const ebayUkSold    = buildEbayUrl(card.card_name, card.set_name, card.card_number, 'UK', 'sold')
+const ebayUsForSale = buildEbayUrl(card.card_name, card.set_name, card.card_number, 'US', 'forsale')
+const ebayUsSold    = buildEbayUrl(card.card_name, card.set_name, card.card_number, 'US', 'sold')
 
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '36px 24px' }}>
