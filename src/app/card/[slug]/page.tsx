@@ -445,7 +445,7 @@ export default function CardPage() {
       {priceHistory.length > 1 && (
         <div style={{
           background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)',
-          padding: '20px', marginTop: 24,
+          padding: '20px 20px 32px', marginTop: 24,
         }}>
           <div style={{
             fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
