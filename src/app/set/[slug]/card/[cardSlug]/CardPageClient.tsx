@@ -260,6 +260,19 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
     ? card.psa10_usd - card.raw_usd - gradingCostCents
     : null
 
+  // Expected value = weighted average outcome across grades minus cost
+  // Uses gem rate for PSA 10 probability, ~60% of remainder hit PSA 9
+  const expectedValueCents: number | null = card.raw_usd && card.psa10_usd && gemRate != null
+    ? (() => {
+        const p10 = gemRate / 100
+        const p9 = (1 - p10) * 0.6
+        const p9val = card.psa9_usd ?? Math.round(card.psa10_usd * 0.25)
+        const expectedReturn = (p10 * card.psa10_usd) + (p9 * p9val) + ((1 - p10 - p9) * card.raw_usd * 0.8)
+        return Math.round(expectedReturn - card.raw_usd - gradingCostCents)
+      })()
+    : null
+  const isLotteryCard = psa10Multiple != null && psa10Multiple > 15
+
   // ATH / drawdown
   const drawdown = raw.drawdown_pct != null ? parseFloat(raw.drawdown_pct) : null
   const athUsd = drawdown != null && card.raw_usd
@@ -463,9 +476,9 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
             )}
             {raw.volatility_30d != null && (
               <StatTile
-                label="Volatility"
-                value={`${parseFloat(raw.volatility_30d).toFixed(1)}%`}
-                sub="30d price swing"
+                label="Price Stability"
+                value={parseFloat(raw.volatility_30d) < 5 ? 'Steady' : parseFloat(raw.volatility_30d) < 15 ? 'Moderate' : 'Volatile'}
+                sub={`${parseFloat(raw.volatility_30d).toFixed(1)}% day-to-day swing`}
               />
             )}
             {psa10Multiple != null && (
