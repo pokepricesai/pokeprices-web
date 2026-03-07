@@ -65,6 +65,8 @@ interface HeatmapCard {
   pct_change: number
   price_usd: number
   color_band: string
+  trend_quality: string
+  is_recovery: boolean
 }
 
 interface HiddenGem {
@@ -138,12 +140,12 @@ function heatColor(band: string) {
 
 function categoryMeta(cat: string) {
   switch (cat) {
-    case 'top_riser_7d':  return { label: '🚀 Top Riser',    color: '#22c55e' }
-    case 'top_faller_7d': return { label: '📉 Top Faller',   color: '#ef4444' }
-    case 'most_volatile': return { label: '⚡ Most Volatile', color: '#f59e0b' }
-    case 'new_ath':       return { label: '🏆 New High',      color: '#a78bfa' }
-    case 'best_deal':     return { label: '🔥 Best Deal',     color: '#3b82f6' }
-    default:              return { label: cat,                color: '#94a3b8' }
+    case 'top_riser':     return { label: '🚀 Top Riser',      color: '#22c55e' }
+    case 'top_faller':    return { label: '📉 Top Faller',     color: '#ef4444' }
+    case 'most_volatile': return { label: '⚡ Most Volatile',  color: '#f59e0b' }
+    case 'new_ath':       return { label: '🏆 New High',       color: '#a78bfa' }
+    case 'most_traded':   return { label: '🔥 Most Traded',     color: '#3b82f6' }
+    default:              return { label: cat,                  color: '#94a3b8' }
   }
 }
 
@@ -480,13 +482,18 @@ export default function HomeClient() {
                       onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.opacity = '0.75'}
                       onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.opacity = '1'}
                     >
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', lineHeight: 1.3, marginBottom: 4, fontFamily: "'Figtree', sans-serif",
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', lineHeight: 1.3, marginBottom: 3, fontFamily: "'Figtree', sans-serif",
                         display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                         {card.card_name}
                       </div>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6, fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 5, fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {card.set_name}
                       </div>
+                      {card.is_recovery && (
+                        <div style={{ fontSize: 9, fontWeight: 700, color: '#f59e0b', letterSpacing: 0.3, marginBottom: 4, fontFamily: "'Figtree', sans-serif" }}>
+                          ↩ RECOVERY
+                        </div>
+                      )}
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>
                           ${card.price_usd >= 100 ? Math.round(card.price_usd) : card.price_usd.toFixed(2)}
