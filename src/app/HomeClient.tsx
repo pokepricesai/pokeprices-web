@@ -241,6 +241,11 @@ export default function HomeClient() {
         supabase.rpc('get_weekly_market_report'),
         supabase.rpc('get_hidden_gems', { lim: 6 }),
       ])
+
+      console.log('[PP] market_index rows:', indexRes.data?.length, '| error:', indexRes.error?.message)
+      console.log('[PP] weekly_report rows:', reportRes.data?.length, '| error:', reportRes.error?.message, '| data:', reportRes.data)
+      console.log('[PP] hidden_gems rows:', gemsRes.data?.length, '| error:', gemsRes.error?.message)
+
       if (indexRes.data && indexRes.data.length > 0) {
         setMarketIndex(indexRes.data)
         const latest = indexRes.data[indexRes.data.length - 1]
@@ -250,8 +255,8 @@ export default function HomeClient() {
           : prev ? ((latest.total_raw_usd - prev.total_raw_usd) / prev.total_raw_usd * 100) : null
         setTotalMarket({ value: latest.total_raw_usd, pct30d })
       }
-      if (reportRes.data) setWeeklyReport(reportRes.data)
-      if (gemsRes.data) setHiddenGems(gemsRes.data)
+      if (reportRes.data && reportRes.data.length > 0) setWeeklyReport(reportRes.data)
+      if (gemsRes.data && gemsRes.data.length > 0) setHiddenGems(gemsRes.data)
     }
     loadAnalytics()
   }, [])
@@ -259,10 +264,11 @@ export default function HomeClient() {
   // Heatmap — reload when period changes
   useEffect(() => {
     async function loadHeatmap() {
-      const { data } = await supabase.rpc('get_heatmap_cards', {
+      const res = await supabase.rpc('get_heatmap_cards', {
         period: heatPeriod, grade_filter: 'all', price_max: 0, lim: 60,
       })
-      if (data) setHeatmap(data)
+      console.log('[PP] heatmap rows:', res.data?.length, '| error:', res.error?.message, '| sample:', res.data?.[0])
+      if (res.data && res.data.length > 0) setHeatmap(res.data)
     }
     loadHeatmap()
   }, [heatPeriod])
