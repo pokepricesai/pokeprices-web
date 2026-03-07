@@ -25,8 +25,6 @@ const cardQuickQuestions = [
 
 interface Message { role: 'user' | 'assistant'; content: string }
 
-// Custom link renderer: internal /card/ and /set/ links use Next.js Link,
-// everything else (eBay, etc.) opens in a new tab
 function ChatLink({ href, children }: { href?: string; children?: React.ReactNode }) {
   if (!href) return <>{children}</>
   const isInternal = href.startsWith('/card/') || href.startsWith('/set/')
@@ -38,18 +36,17 @@ function ChatLink({ href, children }: { href?: string; children?: React.ReactNod
     )
   }
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      style={{ color: 'var(--primary)', textDecoration: 'underline', fontWeight: 700 }}
-    >
+    <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', textDecoration: 'underline', fontWeight: 700 }}>
       {children}
     </a>
   )
 }
 
-export default function InlineChat({ cardContext, prefillMessage }: { cardContext?: string; prefillMessage?: string }) {
+export default function InlineChat({ cardContext, prefillMessage, suggestedPrompts }: {
+  cardContext?: string
+  prefillMessage?: string
+  suggestedPrompts?: string[]
+}) {
   const [input, setInput] = useState(prefillMessage || '')
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
@@ -57,9 +54,7 @@ export default function InlineChat({ cardContext, prefillMessage }: { cardContex
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (messages.length > 0) {
-      chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-    }
+    if (messages.length > 0) chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }, [messages])
 
   const clearChat = useCallback(() => {
@@ -89,7 +84,8 @@ export default function InlineChat({ cardContext, prefillMessage }: { cardContex
     setLoading(false)
   }
 
-  const suggestions = cardContext ? cardQuickQuestions : quickQuestions
+  // suggestedPrompts prop overrides defaults — lets each page pass context-specific questions
+  const suggestions = suggestedPrompts ?? (cardContext ? cardQuickQuestions : quickQuestions)
 
   return (
     <div style={{
@@ -105,10 +101,7 @@ export default function InlineChat({ cardContext, prefillMessage }: { cardContex
         background: 'var(--bg-light)',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{
-            width: 8, height: 8, borderRadius: '50%', background: 'var(--green)',
-            boxShadow: '0 0 6px rgba(39,174,96,0.4)',
-          }} />
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)', boxShadow: '0 0 6px rgba(39,174,96,0.4)' }} />
           <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 700 }}>
             {cardContext ? `Ask about ${cardContext}` : 'Ask me anything about Pokemon cards'}
           </span>
@@ -125,40 +118,24 @@ export default function InlineChat({ cardContext, prefillMessage }: { cardContex
       {/* Messages */}
       <div style={{ padding: 16, minHeight: messages.length > 0 ? 100 : 0, maxHeight: 420, overflowY: 'auto' }}>
         {messages.map((msg, i) => (
-          <div key={i} className="animate-fade-in" style={{
-            marginBottom: 12, display: 'flex',
-            justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-          }}>
+          <div key={i} className="animate-fade-in" style={{ marginBottom: 12, display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
             <div className={msg.role === 'assistant' ? 'chat-message' : ''} style={{
-              background: msg.role === 'user'
-                ? 'linear-gradient(135deg, #2563a8, #3b82d6)'
-                : 'var(--bg-light)',
+              background: msg.role === 'user' ? 'linear-gradient(135deg, #2563a8, #3b82d6)' : 'var(--bg-light)',
               color: msg.role === 'user' ? '#fff' : 'var(--text)',
               padding: '10px 15px',
               borderRadius: msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
               maxWidth: '85%', fontSize: 14, lineHeight: 1.6,
             }}>
               {msg.role === 'assistant' ? (
-                <ReactMarkdown
-                  components={{
-                    a: ({ href, children }) => <ChatLink href={href}>{children}</ChatLink>,
-                    // Keep paragraphs tight — no extra margin
-                    p: ({ children }) => <p style={{ margin: '0 0 8px 0' }}>{children}</p>,
-                    // Style bold text to use the theme colour
-                    strong: ({ children }) => <strong style={{ color: 'var(--text)', fontWeight: 800 }}>{children}</strong>,
-                    // Inline code (card names etc.)
-                    code: ({ children }) => (
-                      <code style={{
-                        background: 'rgba(0,0,0,0.08)', borderRadius: 4,
-                        padding: '1px 5px', fontSize: 13, fontFamily: 'monospace',
-                      }}>{children}</code>
-                    ),
-                    // Lists (e.g. multiple card results)
-                    ul: ({ children }) => <ul style={{ margin: '4px 0', paddingLeft: 20 }}>{children}</ul>,
-                    ol: ({ children }) => <ol style={{ margin: '4px 0', paddingLeft: 20 }}>{children}</ol>,
-                    li: ({ children }) => <li style={{ marginBottom: 2 }}>{children}</li>,
-                  }}
-                >
+                <ReactMarkdown components={{
+                  a: ({ href, children }) => <ChatLink href={href}>{children}</ChatLink>,
+                  p: ({ children }) => <p style={{ margin: '0 0 8px 0' }}>{children}</p>,
+                  strong: ({ children }) => <strong style={{ color: 'var(--text)', fontWeight: 800 }}>{children}</strong>,
+                  code: ({ children }) => <code style={{ background: 'rgba(0,0,0,0.08)', borderRadius: 4, padding: '1px 5px', fontSize: 13, fontFamily: 'monospace' }}>{children}</code>,
+                  ul: ({ children }) => <ul style={{ margin: '4px 0', paddingLeft: 20 }}>{children}</ul>,
+                  ol: ({ children }) => <ol style={{ margin: '4px 0', paddingLeft: 20 }}>{children}</ol>,
+                  li: ({ children }) => <li style={{ marginBottom: 2 }}>{children}</li>,
+                }}>
                   {msg.content}
                 </ReactMarkdown>
               ) : (
@@ -170,11 +147,7 @@ export default function InlineChat({ cardContext, prefillMessage }: { cardContex
         {loading && (
           <div style={{ display: 'flex', gap: 5, padding: '8px 0' }}>
             {[0, 1, 2].map((d) => (
-              <div key={d} style={{
-                width: 10, height: 10, borderRadius: '50%',
-                background: 'var(--primary-light)', opacity: 0.5,
-                animation: `bounce 1.2s ease-in-out ${d * 0.15}s infinite`,
-              }} />
+              <div key={d} style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--primary-light)', opacity: 0.5, animation: `bounce 1.2s ease-in-out ${d * 0.15}s infinite` }} />
             ))}
           </div>
         )}
@@ -199,20 +172,13 @@ export default function InlineChat({ cardContext, prefillMessage }: { cardContex
       )}
 
       {/* Input */}
-      <div style={{
-        padding: '10px 14px', borderTop: '1px solid var(--border-light)',
-        display: 'flex', gap: 10, background: 'var(--bg-light)',
-      }}>
+      <div style={{ padding: '10px 14px', borderTop: '1px solid var(--border-light)', display: 'flex', gap: 10, background: 'var(--bg-light)' }}>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
           placeholder="Any ask questions here..."
-          style={{
-            flex: 1, border: 'none', outline: 'none', fontSize: 14,
-            color: 'var(--text)', background: 'transparent', fontFamily: 'inherit',
-            fontWeight: 600,
-          }}
+          style={{ flex: 1, border: 'none', outline: 'none', fontSize: 14, color: 'var(--text)', background: 'transparent', fontFamily: 'inherit', fontWeight: 600 }}
         />
         <button onClick={() => sendMessage()} disabled={loading} style={{
           background: 'var(--accent)', border: 'none', borderRadius: 12,
