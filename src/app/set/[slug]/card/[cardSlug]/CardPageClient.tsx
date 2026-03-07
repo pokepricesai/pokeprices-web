@@ -12,10 +12,11 @@ function extractVariant(cardName: string): string | null {
 }
 
 function buildEbayUrl(cardName: string, setName: string, cardNumber: string | null, region: 'UK' | 'US', mode: 'sold' | 'forsale') {
-  const baseName = cardName.split('[')[0].split('#')[0].trim()
-  const setShort = setName.replace(/^Pokemon /, '').split(' ').slice(0, 2).join(' ')
-  const numberPart = cardNumber ? ` ${cardNumber}` : ''
-  const q = encodeURIComponent(`${baseName}${numberPart} ${setShort} pokemon card`)
+  // Use the FULL card name — brackets and card number are the most identifying parts
+  // e.g. "Pikachu [Rain City Showcase] #62 Promo pokemon card"
+  // Previously this was stripping brackets and truncating the set name, causing wrong results
+  const numberSuffix = cardNumber && !cardName.includes(`#${cardNumber}`) ? ` #${cardNumber}` : ''
+  const q = encodeURIComponent(`${cardName}${numberSuffix} ${setName} pokemon card`)
   if (region === 'UK') {
     const base = 'https://www.ebay.co.uk/sch/i.html'
     return mode === 'sold'
