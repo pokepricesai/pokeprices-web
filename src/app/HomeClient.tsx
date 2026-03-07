@@ -181,13 +181,28 @@ export default function HomeClient() {
         .select('card_slug, card_name, set_name, current_raw, current_psa10, raw_pct_30d')
         .not('raw_pct_30d', 'is', null)
         .not('current_raw', 'is', null)
-        .gt('current_raw', 5000)
+        .gt('current_raw', 1000)          // min $10
+        .lte('raw_pct_30d', 200)          // cap extreme moves
+        .gt('raw_pct_30d', 0)
+        .not('card_name', 'ilike', '%Booster Box%')
+        .not('card_name', 'ilike', '%Elite Trainer%')
+        .not('card_name', 'ilike', '%Booster Pack%')
+        .not('card_name', 'ilike', '%Display Box%')
+        .not('card_name', 'ilike', '%Collection Box%')
         .order('raw_pct_30d', { ascending: false })
-        .limit(6)
+        .limit(12)  // fetch more so we can filter further client-side
       if (data) {
         const slugs = data.map((d: any) => d.card_slug)
         const { data: cardData } = await supabase
           .from('cards').select('card_slug, image_url, card_url_slug, set_name').in('card_slug', slugs)
+        // Also fetch volume to filter low-sales cards
+        const { data: volData } = await supabase
+          .from('card_volume')
+          .select('card_slug, sales_30d, days_since_last_sale')
+          .in('card_slug', slugs)
+          .eq('grade', 'Ungraded')
+        const volMap: Record<string, any> = {}
+        if (volData) volData.forEach((v: any) => { volMap[v.card_slug] = v })
         const imageMap: Record<string, string> = {}
         const slugMap: Record<string, string> = {}
         const setMap: Record<string, string> = {}
@@ -196,11 +211,20 @@ export default function HomeClient() {
           if (c.card_url_slug) slugMap[c.card_slug] = c.card_url_slug
           if (c.set_name) setMap[c.card_slug] = c.set_name
         })
-        setTrending(data.map((d: any) => ({
-          ...d, image_url: imageMap[d.card_slug],
-          card_url_slug: slugMap[d.card_slug],
-          set_name: setMap[d.card_slug] || d.set_name,
-        })))
+        const filtered = data
+          .filter((d: any) => {
+            const vol = volMap[d.card_slug]
+            if (!vol) return false
+            return (vol.sales_30d >= 3 || (vol.sales_30d >= 1 && vol.days_since_last_sale <= 14))
+          })
+          .slice(0, 6)
+          .map((d: any) => ({
+            ...d,
+            image_url: imageMap[d.card_slug],
+            card_url_slug: slugMap[d.card_slug],
+            set_name: setMap[d.card_slug] || d.set_name,
+          }))
+        setTrending(filtered)
       }
     }
     loadTrending()
