@@ -18,6 +18,14 @@ interface Card {
   card_url_slug: string | null
 }
 
+interface TrendCard {
+  card_name: string
+  card_url_slug: string | null
+  raw_usd: number
+  raw_pct_30d: number | null
+  image_url: string | null
+}
+
 interface PopStats {
   total_graded: number
   gem_rate: number
@@ -30,11 +38,64 @@ const statValue: React.CSSProperties = {
   fontSize: 20, fontWeight: 700, color: 'var(--text)',
   fontFamily: "'Figtree', sans-serif", lineHeight: 1,
 }
-
 const statLabel: React.CSSProperties = {
   fontSize: 11, color: 'var(--text-muted)',
   fontFamily: "'Figtree', sans-serif",
   textTransform: 'uppercase', letterSpacing: 1, fontWeight: 600, marginTop: 2,
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      fontSize: 10, fontWeight: 800, textTransform: 'uppercase',
+      letterSpacing: 1.8, color: 'var(--text-muted)', marginBottom: 12,
+      fontFamily: "'Figtree', sans-serif",
+    }}>{children}</div>
+  )
+}
+
+function Panel({ children, style = {} }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return (
+    <div style={{
+      background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)',
+      padding: '18px 20px', ...style,
+    }}>{children}</div>
+  )
+}
+
+function MoverRow({ card, setName, positive }: { card: TrendCard; setName: string; positive: boolean }) {
+  const href = card.card_url_slug
+    ? `/set/${encodeURIComponent(setName)}/card/${card.card_url_slug}`
+    : '#'
+
+  return (
+    <Link href={href} style={{ textDecoration: 'none' }}>
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 6px', borderRadius: 8, transition: 'background 0.15s' }}
+        onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-light)' }}
+        onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
+      >
+        {card.image_url ? (
+          <img src={card.image_url} alt={card.card_name} style={{ width: 26, height: 36, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
+        ) : (
+          <div style={{ width: 26, height: 36, background: 'var(--bg)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, flexShrink: 0, color: 'var(--border)' }}>🃏</div>
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {card.card_name}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+            ${card.raw_usd.toFixed(2)}
+          </div>
+        </div>
+        {card.raw_pct_30d != null && (
+          <span style={{ fontSize: 12, fontWeight: 800, flexShrink: 0, color: positive ? 'var(--green)' : '#ef4444', fontFamily: "'Figtree', sans-serif" }}>
+            {card.raw_pct_30d > 0 ? '+' : ''}{card.raw_pct_30d.toFixed(1)}%
+          </span>
+        )}
+      </div>
+    </Link>
+  )
 }
 
 export default function SetPageClient({ slug }: { slug: string }) {
@@ -45,6 +106,8 @@ export default function SetPageClient({ slug }: { slug: string }) {
   const [insight, setInsight] = useState<string | null>(null)
   const [priceHistory, setPriceHistory] = useState<any[]>([])
   const [popStats, setPopStats] = useState<PopStats | null>(null)
+  const [topMovers, setTopMovers] = useState<TrendCard[]>([])
+  const [topFallers, setTopFallers] = useState<TrendCard[]>([])
   const [error, setError] = useState(false)
 
   useEffect(() => {
@@ -52,27 +115,25 @@ export default function SetPageClient({ slug }: { slug: string }) {
       setLoading(true)
       setError(false)
 
+      // Cards
       const { data, error: err } = await supabase.rpc('get_set_cards_sortable', {
         set_text: setName,
         sort_col: sort,
       })
-      if (err || !data) {
-        setError(true)
-      } else {
-        setCards(data)
-      }
+      if (err || !data) setError(true)
+      else setCards(data)
 
+      // Insight
       const { data: insightData } = await supabase.rpc('get_set_insight', { set_text: setName })
       if (insightData) setInsight(insightData)
 
+      // Price history
       const { data: histData } = await supabase.rpc('get_set_price_history', { set_text: setName })
       if (histData) {
-        setPriceHistory(histData.map((d: any) => ({
-          ...d,
-          value_usd: d.value_usd ? d.value_usd * 100 : null,
-        })))
+        setPriceHistory(histData.map((d: any) => ({ ...d, value_usd: d.value_usd ? d.value_usd * 100 : null })))
       }
 
+      // PSA population
       const { data: popData } = await supabase
         .from('psa_set_totals')
         .select('*')
@@ -82,11 +143,39 @@ export default function SetPageClient({ slug }: { slug: string }) {
 
       if (popData && popData.length > 0) {
         const pop = popData[0]
-        setPopStats({
-          total_graded: pop.total_graded || 0,
-          gem_rate: pop.gem_rate || 0,
-          total_psa10: pop.total_psa_10 || 0,
-        })
+        setPopStats({ total_graded: pop.total_graded || 0, gem_rate: pop.gem_rate || 0, total_psa10: pop.total_psa_10 || 0 })
+      }
+
+      // Top movers/fallers from card_trends
+      const { data: trendData } = await supabase
+        .from('card_trends')
+        .select('card_name, card_slug, current_raw, raw_pct_30d')
+        .eq('set_name', setName)
+        .not('raw_pct_30d', 'is', null)
+        .gt('current_raw', 500)
+        .order('raw_pct_30d', { ascending: false })
+        .limit(30)
+
+      if (trendData && trendData.length > 0) {
+        const slugs = trendData.map((t: any) => t.card_slug)
+        const { data: imgData } = await supabase
+          .from('cards')
+          .select('card_slug, image_url, card_url_slug')
+          .in('card_slug', slugs)
+
+        const imgMap: Record<string, { image_url: string | null; card_url_slug: string | null }> = {}
+        ;(imgData || []).forEach((c: any) => { imgMap[c.card_slug] = c })
+
+        const enriched: TrendCard[] = trendData.map((t: any) => ({
+          card_name: t.card_name,
+          card_url_slug: imgMap[t.card_slug]?.card_url_slug ?? null,
+          raw_usd: t.current_raw / 100,
+          raw_pct_30d: t.raw_pct_30d,
+          image_url: imgMap[t.card_slug]?.image_url ?? null,
+        }))
+
+        setTopMovers(enriched.filter(t => (t.raw_pct_30d ?? 0) > 0).slice(0, 5))
+        setTopFallers([...enriched].filter(t => (t.raw_pct_30d ?? 0) < 0).sort((a, b) => (a.raw_pct_30d ?? 0) - (b.raw_pct_30d ?? 0)).slice(0, 5))
       }
 
       setLoading(false)
@@ -94,8 +183,15 @@ export default function SetPageClient({ slug }: { slug: string }) {
     loadData()
   }, [setName, sort])
 
+  // Derived stats
+  const cardsWithPrice = cards.filter(c => c.raw_usd && c.raw_usd > 0)
+  const totalSetValue = cardsWithPrice.reduce((sum, c) => sum + (c.raw_usd || 0), 0)
+  const avgCardValue = cardsWithPrice.length > 0 ? totalSetValue / cardsWithPrice.length : 0
+  const cardsWithPsa10 = cards.filter(c => c.psa10_usd && c.psa10_usd > 0)
+
   const hasInsight = !!insight
   const hasPop = !!(popStats && popStats.total_graded > 0)
+  const hasMovers = topMovers.length > 0 || topFallers.length > 0
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 24px' }}>
@@ -110,85 +206,107 @@ export default function SetPageClient({ slug }: { slug: string }) {
         margin: '8px 0 16px', color: 'var(--text)', letterSpacing: '-0.5px',
       }}>{setName}</h1>
 
-      {/* Chat */}
-      <div style={{ marginBottom: 24 }}>
-        <InlineChat cardContext={setName} />
+      {/* ── Chat — set-level prompts ── */}
+      <div style={{ marginBottom: 20 }}>
+        <InlineChat
+          cardContext={setName}
+          suggestedPrompts={[
+            `What are the most valuable cards in ${setName}?`,
+            `Is ${setName} worth investing in right now?`,
+            `Which ${setName} cards are trending up?`,
+            `What's the grading outlook for ${setName}?`,
+          ]}
+        />
       </div>
 
-      {/* Set Insights + PSA Population side by side */}
-      {(hasInsight || hasPop) && (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: hasInsight && hasPop ? '1fr auto' : '1fr',
-          gap: 12, marginBottom: 20, alignItems: 'stretch',
-        }}>
-          {hasInsight && (
-            <div style={{
-              background: 'var(--card)', border: '1px solid var(--border)',
-              borderLeft: '3px solid var(--primary)', borderRadius: 12, padding: '14px 18px',
-            }}>
-              <div style={{
-                fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-                letterSpacing: 1.5, color: 'var(--primary)', marginBottom: 7,
-                fontFamily: "'Figtree', sans-serif",
-              }}>Set Insights</div>
-              <p style={{
-                fontSize: 13, lineHeight: 1.6, color: 'var(--text)',
-                margin: 0, fontFamily: "'Figtree', sans-serif",
-              }}>{insight}</p>
-            </div>
-          )}
-
-          {hasPop && popStats && (
-            <div style={{
-              background: 'var(--card)', border: '1px solid var(--border)',
-              borderRadius: 12, padding: '14px 18px', minWidth: 190,
-            }}>
-              <div style={{
-                fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-                letterSpacing: 1.5, color: 'var(--text-muted)', marginBottom: 12,
-                fontFamily: "'Figtree', sans-serif",
-              }}>PSA Population</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div>
-                  <div style={statValue}>{popStats.total_graded.toLocaleString()}</div>
-                  <div style={statLabel}>Total Graded</div>
-                </div>
-                <div>
-                  <div style={statValue}>{popStats.total_psa10.toLocaleString()}</div>
-                  <div style={statLabel}>PSA 10s</div>
-                </div>
-                <div>
-                  <div style={{
-                    ...statValue,
-                    color: popStats.gem_rate >= 20 ? 'var(--green)' : popStats.gem_rate >= 5 ? 'var(--accent-hover)' : 'var(--text)',
-                  }}>{popStats.gem_rate.toFixed(1)}%</div>
-                  <div style={statLabel}>Gem Rate</div>
-                </div>
+      {/* ── Set overview stats bar ── */}
+      {!loading && cardsWithPrice.length > 0 && (
+        <Panel style={{ marginBottom: 14 }}>
+          <SectionLabel>Set Overview</SectionLabel>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 10 }}>
+            {[
+              { val: cards.length.toString(), label: 'Total Cards' },
+              { val: `$${(totalSetValue / 100).toFixed(0)}`, label: 'Complete Set Value' },
+              { val: `$${(avgCardValue / 100).toFixed(2)}`, label: 'Avg Card (Raw)' },
+              { val: cardsWithPsa10.length.toString(), label: 'Cards w/ PSA 10 Data' },
+              ...(hasPop && popStats ? [
+                { val: popStats.total_graded.toLocaleString(), label: 'Total PSA Graded' },
+                { val: `${popStats.gem_rate.toFixed(1)}%`, label: 'Set Gem Rate', color: popStats.gem_rate < 5 ? 'var(--green)' : undefined },
+              ] : []),
+            ].map(({ val, label, color }) => (
+              <div key={label} style={{ background: 'var(--bg-light)', borderRadius: 10, padding: '10px 12px' }}>
+                <div style={{ ...statValue, color: color ?? 'var(--text)' }}>{val}</div>
+                <div style={statLabel}>{label}</div>
               </div>
-            </div>
+            ))}
+          </div>
+        </Panel>
+      )}
+
+      {/* ── Set insight ── */}
+      {hasInsight && (
+        <div style={{
+          background: 'var(--card)', border: '1px solid var(--border)',
+          borderLeft: '3px solid var(--primary)', borderRadius: 12, padding: '14px 18px',
+          marginBottom: 14,
+        }}>
+          <div style={{
+            fontSize: 10, fontWeight: 800, textTransform: 'uppercase',
+            letterSpacing: 1.8, color: 'var(--primary)', marginBottom: 7,
+            fontFamily: "'Figtree', sans-serif",
+          }}>Set Insight</div>
+          <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text)', margin: 0, fontFamily: "'Figtree', sans-serif" }}>
+            {insight}
+          </p>
+        </div>
+      )}
+
+      {/* ── Top movers / fallers ── */}
+      {hasMovers && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+          {topMovers.length > 0 && (
+            <Panel>
+              <SectionLabel>📈 Top Risers (30d)</SectionLabel>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {topMovers.map((card, i) => <MoverRow key={i} card={card} setName={setName} positive />)}
+              </div>
+            </Panel>
+          )}
+          {topFallers.length > 0 && (
+            <Panel>
+              <SectionLabel>📉 Top Fallers (30d)</SectionLabel>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {topFallers.map((card, i) => <MoverRow key={i} card={card} setName={setName} positive={false} />)}
+              </div>
+            </Panel>
           )}
         </div>
       )}
 
-      <p style={{
-        color: 'var(--text-muted)', fontSize: 13,
-        margin: '0 0 20px', fontFamily: "'Figtree', sans-serif",
-      }}>
-        {cards.length} cards
-      </p>
+      {/* ── PSA Population (standalone if no insight) ── */}
+      {hasPop && popStats && !hasInsight && (
+        <Panel style={{ marginBottom: 14 }}>
+          <SectionLabel>PSA Population</SectionLabel>
+          <div style={{ display: 'flex', gap: 24 }}>
+            <div><div style={statValue}>{popStats.total_graded.toLocaleString()}</div><div style={statLabel}>Total Graded</div></div>
+            <div><div style={statValue}>{popStats.total_psa10.toLocaleString()}</div><div style={statLabel}>PSA 10s</div></div>
+            <div>
+              <div style={{ ...statValue, color: popStats.gem_rate < 5 ? 'var(--green)' : 'var(--text)' }}>
+                {popStats.gem_rate.toFixed(1)}%
+              </div>
+              <div style={statLabel}>Gem Rate</div>
+            </div>
+          </div>
+        </Panel>
+      )}
 
-      {/* Set Price Chart */}
+      {/* ── Set Price Chart ── */}
       {priceHistory.length > 1 && (
         <div style={{
           background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)',
-          padding: '20px 20px 32px', marginBottom: 20,
+          padding: '20px 20px 32px', marginBottom: 16,
         }}>
-          <h3 style={{
-            fontSize: 11, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
-            margin: '0 0 14px', color: 'var(--text-muted)',
-            textTransform: 'uppercase', letterSpacing: 1.5,
-          }}>Set Price History</h3>
+          <SectionLabel>Set Price History</SectionLabel>
           <PriceChart
             data={priceHistory}
             lines={[{ key: 'value_usd', color: 'var(--accent)', label: 'Total Set Value' }]}
@@ -197,24 +315,25 @@ export default function SetPageClient({ slug }: { slug: string }) {
         </div>
       )}
 
-      {/* Sort controls */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
-        {([
-          ['raw_desc', 'Highest Raw'],
-          ['raw_asc', 'Lowest Raw'],
-          ['psa10_desc', 'Highest PSA 10'],
-          ['name_asc', 'Name A-Z'],
-          ['number_asc', 'Card #'],
-        ] as [SortOption, string][]).map(([val, label]) => (
-          <button
-            key={val}
-            className={`sort-btn ${sort === val ? 'active' : ''}`}
-            onClick={() => setSort(val)}
-            style={{ fontFamily: "'Figtree', sans-serif" }}
-          >{label}</button>
-        ))}
+      {/* ── Sort + card count ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+        <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0, fontFamily: "'Figtree', sans-serif" }}>
+          {cards.length} cards
+        </p>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {([
+            ['raw_desc', 'Highest Raw'],
+            ['raw_asc', 'Lowest Raw'],
+            ['psa10_desc', 'Highest PSA 10'],
+            ['name_asc', 'Name A-Z'],
+            ['number_asc', 'Card #'],
+          ] as [SortOption, string][]).map(([val, label]) => (
+            <button key={val} className={`sort-btn ${sort === val ? 'active' : ''}`} onClick={() => setSort(val)} style={{ fontFamily: "'Figtree', sans-serif" }}>{label}</button>
+          ))}
+        </div>
       </div>
 
+      {/* ── Card grid ── */}
       {loading ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
           {Array.from({ length: 12 }).map((_, i) => (
@@ -222,10 +341,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
           ))}
         </div>
       ) : error ? (
-        <div style={{
-          background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)',
-          padding: '40px 24px', textAlign: 'center',
-        }}>
+        <div style={{ background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)', padding: '40px 24px', textAlign: 'center' }}>
           <p style={{ color: 'var(--text-muted)', fontSize: 14, fontFamily: "'Figtree', sans-serif" }}>
             Could not load cards for this set. Try refreshing the page.
           </p>
@@ -238,29 +354,17 @@ export default function SetPageClient({ slug }: { slug: string }) {
               href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`}
               className="card-hover holo-shimmer"
               style={{
-                background: 'var(--card)', borderRadius: 12,
-                border: '1px solid var(--border)', padding: 14,
-                textDecoration: 'none', color: 'var(--text)',
+                background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)',
+                padding: 14, textDecoration: 'none', color: 'var(--text)',
                 display: 'flex', flexDirection: 'column', alignItems: 'center',
               }}
             >
               {c.image_url ? (
-                <img src={c.image_url} alt={c.card_name} style={{
-                  width: 110, height: 154, objectFit: 'contain', marginBottom: 8, borderRadius: 6,
-                }} loading="lazy" />
+                <img src={c.image_url} alt={c.card_name} style={{ width: 110, height: 154, objectFit: 'contain', marginBottom: 8, borderRadius: 6 }} loading="lazy" />
               ) : (
-                <div style={{
-                  width: 110, height: 154, background: 'var(--bg)', borderRadius: 6,
-                  marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 28, color: 'var(--border)',
-                }}>🃏</div>
+                <div style={{ width: 110, height: 154, background: 'var(--bg)', borderRadius: 6, marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, color: 'var(--border)' }}>🃏</div>
               )}
-              <div style={{
-                fontWeight: 600, fontSize: 13, textAlign: 'center',
-                marginBottom: 3, lineHeight: 1.3, fontFamily: "'Figtree', sans-serif",
-                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-                overflow: 'hidden',
-              }}>
+              <div style={{ fontWeight: 600, fontSize: 13, textAlign: 'center', marginBottom: 3, lineHeight: 1.3, fontFamily: "'Figtree', sans-serif", display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                 {c.card_name}
               </div>
               <div style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
