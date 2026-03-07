@@ -150,7 +150,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
 
       const [trendRes, metricsRes, histRes, insightRes] = await Promise.all([
         supabase.rpc('get_card_trends_detail', { slug }),
-        supabase.rpc('get_card_metrics', { search_text: cardData.card_name }),
+        supabase.rpc('get_card_metrics', { card_slug: cardData.card_slug }),
         supabase.rpc('get_card_price_history', { slug }),
         supabase.rpc('get_card_insight', { slug }),
       ])
@@ -262,7 +262,10 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
 
 
   // ATH / drawdown
-  const drawdown = raw.drawdown_pct != null ? parseFloat(raw.drawdown_pct) : null
+  // Only trust drawdown if we have real long-term data to anchor it to
+  // Without 365d+ history the ATH calc is unreliable
+  const hasLongTermData = trend && (trend.raw_365d_ago != null || trend.raw_pct_365d != null)
+  const drawdown = raw.drawdown_pct != null && hasLongTermData ? parseFloat(raw.drawdown_pct) : null
   const athUsd = drawdown != null && card.raw_usd
     ? Math.round((card.raw_usd / 100) / (1 + drawdown / 100))
     : null
