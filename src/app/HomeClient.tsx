@@ -53,10 +53,12 @@ interface WeeklyReportRow {
   metric_value: number
   metric_label: string
   card_slug: string
+  card_url_slug: string
 }
 
 interface HeatmapCard {
   card_slug: string
+  card_url_slug: string
   card_name: string
   set_name: string
   current_price: number
@@ -67,11 +69,14 @@ interface HeatmapCard {
 
 interface HiddenGem {
   card_slug: string
+  card_url_slug: string
   card_name: string
   set_name: string
   current_price: number
   pct_30d: number
   psa10_pop: number
+  sales_30d: number
+  live_listings: number
   gem_score: number
 }
 
@@ -343,7 +348,7 @@ export default function HomeClient() {
               const { label, color } = categoryMeta(row.category)
               const priceUsd = row.current_price / 100
               return (
-                <Link key={row.category} href={`/set/${encodeURIComponent(row.set_name)}/card/${row.card_slug}`} style={{ textDecoration: 'none' }}>
+                <Link key={row.category} href={`/set/${encodeURIComponent(row.set_name)}/card/${row.card_url_slug || row.card_slug}`} style={{ textDecoration: 'none' }}>
                   <div style={{
                     background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14,
                     padding: '14px 16px', height: '100%', boxSizing: 'border-box',
@@ -440,7 +445,7 @@ export default function HomeClient() {
               {heatmap.slice(0, 48).map(card => {
                 const { bg, border, text } = heatColor(card.color_band)
                 return (
-                  <Link key={card.card_slug} href={`/set/${encodeURIComponent(card.set_name)}/card/${card.card_slug}`} style={{ textDecoration: 'none' }}>
+                  <Link key={card.card_slug} href={`/set/${encodeURIComponent(card.set_name)}/card/${card.card_url_slug || card.card_slug}`} style={{ textDecoration: 'none' }}>
                     <div style={{ background: bg, border: `1px solid ${border}`, borderRadius: 10, padding: '10px 10px 8px', cursor: 'pointer', transition: 'opacity 0.12s' }}
                       onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.opacity = '0.75'}
                       onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.opacity = '1'}
@@ -505,7 +510,7 @@ export default function HomeClient() {
               {hiddenGems.map(gem => {
                 const priceUsd = gem.current_price / 100
                 return (
-                  <Link key={gem.card_slug} href={`/set/${encodeURIComponent(gem.set_name)}/card/${gem.card_slug}`} style={{ textDecoration: 'none' }}>
+                  <Link key={gem.card_slug} href={`/set/${encodeURIComponent(gem.set_name)}/card/${gem.card_url_slug || gem.card_slug}`} style={{ textDecoration: 'none' }}>
                     <div style={{
                       background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)',
                       padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12,
