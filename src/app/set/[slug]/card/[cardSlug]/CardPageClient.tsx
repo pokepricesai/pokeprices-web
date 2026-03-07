@@ -260,18 +260,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
     ? card.psa10_usd - card.raw_usd - gradingCostCents
     : null
 
-  // Expected value = weighted average outcome across grades minus cost
-  // Uses gem rate for PSA 10 probability, ~60% of remainder hit PSA 9
-  const expectedValueCents: number | null = card.raw_usd && card.psa10_usd && gemRate != null
-    ? (() => {
-        const p10 = gemRate / 100
-        const p9 = (1 - p10) * 0.6
-        const p9val = card.psa9_usd ?? Math.round(card.psa10_usd * 0.25)
-        const expectedReturn = (p10 * card.psa10_usd) + (p9 * p9val) + ((1 - p10 - p9) * card.raw_usd * 0.8)
-        return Math.round(expectedReturn - card.raw_usd - gradingCostCents)
-      })()
-    : null
-  const isLotteryCard = psa10Multiple != null && psa10Multiple > 15
 
   // ATH / drawdown
   const drawdown = raw.drawdown_pct != null ? parseFloat(raw.drawdown_pct) : null
@@ -289,6 +277,19 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
 
   // PSA pop
   const gemRate = psaPop?.gem_rate ? parseFloat(psaPop.gem_rate) : null
+
+  // Expected value = weighted average outcome across grades minus cost
+  // Uses gem rate for PSA 10 probability, ~60% of remainder hit PSA 9
+  const expectedValueCents: number | null = card.raw_usd && card.psa10_usd && gemRate != null
+    ? (() => {
+        const p10 = gemRate / 100
+        const p9 = (1 - p10) * 0.6
+        const p9val = card.psa9_usd ?? Math.round(card.psa10_usd * 0.25)
+        const expectedReturn = (p10 * card.psa10_usd) + (p9 * p9val) + ((1 - p10 - p9) * card.raw_usd * 0.8)
+        return Math.round(expectedReturn - card.raw_usd - gradingCostCents)
+      })()
+    : null
+  const isLotteryCard = psa10Multiple != null && psa10Multiple > 15
   const totalGraded = psaPop?.total_graded ?? null
   const psa10Count = psaPop?.psa_10 ?? null
 
@@ -522,17 +523,39 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
             Based on PSA Standard tier (~$25 USD). Assumes a perfect PSA 10 result — actual outcome depends on card condition.
           </p>
 
+          {/* Lottery card warning */}
+          {isLotteryCard && (
+            <div style={{
+              marginBottom: 16, padding: '10px 14px',
+              background: 'rgba(224,123,57,0.08)', border: '1px solid rgba(224,123,57,0.25)',
+              borderRadius: 10, fontSize: 13, fontFamily: "'Figtree', sans-serif",
+              color: 'var(--text)', lineHeight: 1.6,
+            }}>
+              ⚠️ <strong>High-variance grade.</strong> PSA 10 is {psa10Multiple?.toFixed(0)}x the raw price
+              {gemRate != null ? ` but only ${gemRate.toFixed(1)}% of copies gem` : ''}.
+              The profit if PSA 10 figure below is the best-case outcome — expected value accounts for the realistic probability.
+            </div>
+          )}
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10, marginBottom: 18 }}>
             <StatTile label="Buy Raw" value={`$${(card.raw_usd / 100).toFixed(0)}`} />
             <StatTile label="Grading Fee" value="~$25" sub="PSA Standard" />
             <StatTile label="PSA 10 Value" value={`$${(card.psa10_usd / 100).toFixed(0)}`} />
             <StatTile
-              label="Profit if PSA 10"
+              label="Best Case (PSA 10)"
               value={gradingProfitCents != null
                 ? `${gradingProfitCents > 0 ? '+' : ''}$${(gradingProfitCents / 100).toFixed(0)}`
                 : '—'}
-              highlight={gradingProfitCents != null && gradingProfitCents > 0}
+              sub="if you pull a 10"
             />
+            {expectedValueCents != null && (
+              <StatTile
+                label="Expected Value"
+                value={`${expectedValueCents > 0 ? '+' : ''}$${(expectedValueCents / 100).toFixed(0)}`}
+                sub={gemRate != null ? `at ${gemRate.toFixed(1)}% gem rate` : 'probability-weighted'}
+                highlight={expectedValueCents > 0}
+              />
+            )}
           </div>
 
           {gradeMultiples.length > 0 && (
