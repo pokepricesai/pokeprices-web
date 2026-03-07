@@ -140,8 +140,8 @@ function heatColor(band: string) {
 
 function categoryMeta(cat: string) {
   switch (cat) {
-    case 'top_riser':     return { label: '🚀 Top Riser',      color: '#22c55e' }
-    case 'top_faller':    return { label: '📉 Top Faller',     color: '#ef4444' }
+    case 'top_riser':     return { label: '🚀 Top Riser (30d)',  color: '#22c55e' }
+    case 'top_faller':    return { label: '📉 Top Faller (30d)', color: '#ef4444' }
     case 'most_volatile': return { label: '⚡ Most Volatile',  color: '#f59e0b' }
     case 'new_ath':       return { label: '🏆 New High',       color: '#a78bfa' }
     case 'most_traded':   return { label: '🔥 Most Traded',     color: '#3b82f6' }
@@ -244,9 +244,6 @@ export default function HomeClient() {
         supabase.rpc('get_hidden_gems', { lim: 6 }),
       ])
 
-      console.log('[PP] market_index rows:', indexRes.data?.length, '| error:', indexRes.error?.message)
-      console.log('[PP] weekly_report rows:', reportRes.data?.length, '| error:', reportRes.error?.message, '| data:', reportRes.data)
-      console.log('[PP] hidden_gems rows:', gemsRes.data?.length, '| error:', gemsRes.error?.message)
 
       if (indexRes.data && indexRes.data.length > 0) {
         setMarketIndex(indexRes.data)
@@ -269,7 +266,6 @@ export default function HomeClient() {
       const res = await supabase.rpc('get_heatmap_cards', {
         period: heatPeriod, grade_filter: 'all', price_max: 0, lim: 60,
       })
-      console.log('[PP] heatmap rows:', res.data?.length, '| error:', res.error?.message, '| sample:', res.data?.[0])
       if (res.data && res.data.length > 0) setHeatmap(res.data)
     }
     loadHeatmap()
