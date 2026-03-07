@@ -27,17 +27,6 @@ const faqs = [
   { q: 'What grading companies do you track?', a: 'We track PSA and CGC prices and population data. Our grading advice covers PSA, CGC, BGS, SGC, and ACE.' },
 ]
 
-interface TrendCard {
-  card_slug: string
-  card_name: string
-  set_name: string
-  current_raw: number
-  current_psa10: number
-  raw_pct_30d: number
-  image_url?: string
-  card_url_slug?: string
-}
-
 interface MarketIndexRow {
   date: string
   total_raw_usd: number
@@ -152,7 +141,6 @@ function categoryMeta(cat: string) {
 export default function HomeClient() {
   const nextRelease = new Date('2026-03-27T00:00:00')
   const [countdown, setCountdown] = useState({ days: 0, hours: 0, mins: 0 })
-  const [trending, setTrending] = useState<TrendCard[]>([])
   const [marketIndex, setMarketIndex] = useState<MarketIndexRow[]>([])
   const [totalMarket, setTotalMarket] = useState<{ value: number, pct30d: number | null } | null>(null)
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReportRow[]>([])
@@ -175,76 +163,16 @@ export default function HomeClient() {
     return () => clearInterval(id)
   }, [])
 
-  // Trending cards
-  useEffect(() => {
-    async function loadTrending() {
-      const { data } = await supabase
-        .from('card_trends')
-        .select('card_slug, card_name, set_name, current_raw, current_psa10, raw_pct_30d')
-        .not('raw_pct_30d', 'is', null)
-        .not('current_raw', 'is', null)
-        .gt('current_raw', 1000)          // min $10
-        .lte('raw_pct_30d', 200)          // cap extreme moves
-        .gt('raw_pct_30d', 0)
-        .not('card_name', 'ilike', '%Booster Box%')
-        .not('card_name', 'ilike', '%Elite Trainer%')
-        .not('card_name', 'ilike', '%Booster Pack%')
-        .not('card_name', 'ilike', '%Display Box%')
-        .not('card_name', 'ilike', '%Collection Box%')
-        .order('raw_pct_30d', { ascending: false })
-        .limit(12)  // fetch more so we can filter further client-side
-      if (data) {
-        const slugs = data.map((d: any) => d.card_slug)
-        const { data: cardData } = await supabase
-          .from('cards').select('card_slug, image_url, card_url_slug, set_name').in('card_slug', slugs)
-        // Also fetch volume to filter low-sales cards
-        const { data: volData } = await supabase
-          .from('card_volume')
-          .select('card_slug, sales_30d, days_since_last_sale')
-          .in('card_slug', slugs)
-          .eq('grade', 'Ungraded')
-        const volMap: Record<string, any> = {}
-        if (volData) volData.forEach((v: any) => { volMap[v.card_slug] = v })
-        const imageMap: Record<string, string> = {}
-        const slugMap: Record<string, string> = {}
-        const setMap: Record<string, string> = {}
-        if (cardData) cardData.forEach((c: any) => {
-          if (c.image_url) imageMap[c.card_slug] = c.image_url
-          if (c.card_url_slug) slugMap[c.card_slug] = c.card_url_slug
-          if (c.set_name) setMap[c.card_slug] = c.set_name
-        })
-        const filtered = data
-          .filter((d: any) => {
-            const vol = volMap[d.card_slug]
-            if (!vol) return false
-            return (vol.sales_30d >= 3 || (vol.sales_30d >= 1 && vol.days_since_last_sale <= 14))
-          })
-          .slice(0, 6)
-          .map((d: any) => ({
-            ...d,
-            image_url: imageMap[d.card_slug],
-            card_url_slug: slugMap[d.card_slug],
-            set_name: setMap[d.card_slug] || d.set_name,
-          }))
-        setTrending(filtered)
-      }
-    }
-    loadTrending()
-  }, [])
-
-  // Analytics: market index + weekly report + hidden gems (all parallel)
+  // Analytics: market index + hidden gems (fast, load together)
   useEffect(() => {
     async function loadAnalytics() {
-      const [indexRes, reportRes, gemsRes] = await Promise.all([
+      const [indexRes, gemsRes] = await Promise.all([
         supabase.from('market_index')
           .select('date, total_raw_usd, median_raw_usd, raw_pct_30d')
           .order('date', { ascending: true })
           .limit(80),
-        supabase.rpc('get_weekly_market_report'),
         supabase.rpc('get_hidden_gems', { lim: 6 }),
       ])
-
-
       if (indexRes.data && indexRes.data.length > 0) {
         setMarketIndex(indexRes.data)
         const latest = indexRes.data[indexRes.data.length - 1]
@@ -254,10 +182,25 @@ export default function HomeClient() {
           : prev ? ((latest.total_raw_usd - prev.total_raw_usd) / prev.total_raw_usd * 100) : null
         setTotalMarket({ value: latest.total_raw_usd, pct30d })
       }
-      if (reportRes.data && reportRes.data.length > 0) setWeeklyReport(reportRes.data)
       if (gemsRes.data && gemsRes.data.length > 0) setHiddenGems(gemsRes.data)
     }
     loadAnalytics()
+  }, [])
+
+  // Weekly report — separate with retry (heavier query, occasionally slow)
+  useEffect(() => {
+    let cancelled = false
+    async function load(attempt = 1) {
+      const { data } = await supabase.rpc('get_weekly_market_report')
+      if (cancelled) return
+      if (data && data.length > 0) {
+        setWeeklyReport(data)
+      } else if (attempt < 3) {
+        setTimeout(() => load(attempt + 1), 1500 * attempt)
+      }
+    }
+    load()
+    return () => { cancelled = true }
   }, [])
 
   // Heatmap — reload when period changes
@@ -404,41 +347,6 @@ export default function HomeClient() {
                       </span>
                     </div>
                   </div>
-                </Link>
-              )
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* ── TRENDING RIGHT NOW ────────────────────────────────── */}
-      {trending.length > 0 && (
-        <section style={{ padding: '36px 24px', maxWidth: 960, margin: '0 auto' }}>
-          <h2 style={{ fontSize: 24, textAlign: 'center', margin: '0 0 6px', fontFamily: "'Playfair Display', serif" }}>
-            Trending Right Now
-          </h2>
-          <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: 14, margin: '0 0 24px', fontFamily: "'Figtree', sans-serif" }}>
-            Top movers in the last 30 days
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
-            {trending.map((card, i) => {
-              const pct = formatPct(card.raw_pct_30d)
-              return (
-                <Link key={card.card_slug}
-                  href={`/set/${encodeURIComponent(card.set_name)}/card/${card.card_url_slug}`}
-                  className={`card-hover animate-fade-in-up delay-${i + 1}`}
-                  style={{ background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)', padding: 14, textDecoration: 'none', color: 'var(--text)', textAlign: 'center' }}
-                >
-                  {card.image_url ? (
-                    <img src={card.image_url} alt={card.card_name} style={{ width: 90, height: 126, objectFit: 'contain', marginBottom: 8, borderRadius: 6 }} loading="lazy" />
-                  ) : (
-                    <div style={{ width: 90, height: 126, background: 'var(--bg)', borderRadius: 6, margin: '0 auto 8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, color: 'var(--border)' }}>🃏</div>
-                  )}
-                  <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 2, lineHeight: 1.3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', fontFamily: "'Figtree', sans-serif" }}>
-                    {card.card_name}
-                  </div>
-                  <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 1, fontFamily: "'Figtree', sans-serif" }}>{formatPrice(card.current_raw)}</div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: pct.color, fontFamily: "'Figtree', sans-serif" }}>{pct.text}</div>
                 </Link>
               )
             })}
