@@ -243,9 +243,12 @@ export default function SetPageClient({ slug }: { slug: string }) {
         const cardEnriched = allEnriched.filter(t => !t.is_sealed)
         const sealedEnriched = allEnriched.filter(t => t.is_sealed)
 
-        setTopMovers(cardEnriched.filter(t => (t.raw_pct_30d ?? 0) > 0).slice(0, 5))
-        setTopFallers(cardEnriched.filter(t => (t.raw_pct_30d ?? 0) < 0).sort((a, b) => (a.raw_pct_30d ?? 0) - (b.raw_pct_30d ?? 0)).slice(0, 5))
-        setTopSealedMovers(sealedEnriched.filter(t => (t.raw_pct_30d ?? 0) > 0).slice(0, 5))
+        // Quality gate: never show moves > 300% in panels — almost always stale anchors
+        const isReliable = (t: any) => Math.abs(t.raw_pct_30d ?? 0) <= 300
+
+        setTopMovers(cardEnriched.filter(t => (t.raw_pct_30d ?? 0) > 0 && isReliable(t)).slice(0, 5))
+        setTopFallers(cardEnriched.filter(t => (t.raw_pct_30d ?? 0) < 0 && isReliable(t)).sort((a, b) => (a.raw_pct_30d ?? 0) - (b.raw_pct_30d ?? 0)).slice(0, 5))
+        setTopSealedMovers(sealedEnriched.filter(t => (t.raw_pct_30d ?? 0) > 0 && isReliable(t)).slice(0, 5))
       }
 
       setLoading(false)
