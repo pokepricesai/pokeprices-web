@@ -9,6 +9,7 @@ interface SetInfo {
   card_count: number
   avg_raw_usd: number | null
   set_image_url: string | null
+  set_release_date: string | null
 }
 
 interface TrendingSet {
