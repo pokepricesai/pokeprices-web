@@ -297,9 +297,24 @@ export default function BrowsePageClient() {
         fontFamily: "'Playfair Display', serif", fontSize: 30,
         margin: '0 0 6px', color: 'var(--text)',
       }}>Pokemon Card Sets</h1>
-      <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 24px', fontFamily: "'Figtree', sans-serif" }}>
+      <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 16px', fontFamily: "'Figtree', sans-serif" }}>
         Browse all {sets.length} sets in our database. Click any set to see prices, trends and grading data.
       </p>
+
+      <a
+        href="#set-list"
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          background: 'var(--card)', border: '1px solid var(--border)',
+          borderRadius: 20, padding: '6px 16px', textDecoration: 'none',
+          color: 'var(--text)', fontSize: 12, fontFamily: "'Figtree', sans-serif",
+          fontWeight: 600, marginBottom: 28, transition: 'border-color 0.15s',
+        }}
+        onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--primary)' }}
+        onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)' }}
+      >
+        🃏 Jump to Set List
+      </a>
 
       {/* Trending Sets Panel */}
       {!loading && trendingSets && (trendingSets.rising.length > 0 || trendingSets.falling.length > 0) && (
@@ -310,7 +325,7 @@ export default function BrowsePageClient() {
       {!loading && <SetInsightsBar sets={sets} />}
 
       {/* Search + Sort */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div id="set-list" style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
