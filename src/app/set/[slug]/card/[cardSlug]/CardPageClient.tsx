@@ -29,6 +29,103 @@ function buildEbayUrl(cardName: string, setName: string, cardNumber: string | nu
   }
 }
 
+// ─── Data quality policy ─────────────────────────────────────────────────────
+// A % swing is only trustworthy if it's based on recent, liquid trading.
+// We apply three tiers:
+//   SUPPRESS  (|pct| > 300%)  — almost certainly a stale-anchor artefact; show nothing
+//   WARN      (|pct| > 100%)  — plausible but unusual; show amber ⚠ with caveat
+//   CLEAN     everything else — show normally
+
+type PctQuality = 'clean' | 'warn' | 'suppress'
+
+function pctQuality(pct: number | null): PctQuality {
+  if (pct == null) return 'clean'
+  const abs = Math.abs(pct)
+  if (abs > 300) return 'suppress'
+  if (abs > 100) return 'warn'
+  return 'clean'
+}
+
+// Returns what to render for a trend % cell
+function TrendCell({ val, label }: { val: number | null; label: string }) {
+  const quality = pctQuality(val)
+  if (val == null || quality === 'suppress') {
+    return (
+      <div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, fontFamily: "'Figtree', sans-serif" }}>{label}</div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--border)', fontFamily: "'Figtree', sans-serif" }}>—</div>
+      </div>
+    )
+  }
+  if (quality === 'warn') {
+    return (
+      <div title="Large move — low recent volume may make this figure unreliable. Check sold listings before drawing conclusions.">
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, fontFamily: "'Figtree', sans-serif" }}>{label}</div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: '#e07b39', fontFamily: "'Figtree', sans-serif" }}>
+          ⚠ {val > 0 ? '+' : ''}{val.toFixed(1)}%
+        </div>
+      </div>
+    )
+  }
+  const f = formatPct(val)
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, fontFamily: "'Figtree', sans-serif" }}>{label}</div>
+      <div style={{ fontSize: 15, fontWeight: 700, color: f.color, fontFamily: "'Figtree', sans-serif" }}>{f.text}</div>
+    </div>
+  )
+}
+
+// Hero banner — only show if the move is clean or warn (with caveat), never for suppress
+function HeroBanner({ trend }: { trend: any }) {
+  if (!trend) return null
+
+  // Find the most prominent trend period that has a value
+  const periods = [
+    { label: '30d', val: trend.raw_pct_30d },
+    { label: '7d', val: trend.raw_pct_7d },
+    { label: '90d', val: trend.raw_pct_90d },
+  ]
+  const main = periods.find(p => p.val != null)
+  if (!main || main.val == null) return null
+
+  const quality = pctQuality(main.val)
+  if (quality === 'suppress') return null
+
+  const isUp = main.val > 0
+  const absPct = Math.abs(main.val)
+
+  if (quality === 'warn') {
+    return (
+      <div style={{
+        background: 'rgba(224,123,57,0.08)', border: '1px solid rgba(224,123,57,0.25)',
+        borderLeft: '3px solid #e07b39', borderRadius: 10,
+        padding: '10px 14px', marginBottom: 16,
+        fontSize: 13, lineHeight: 1.6, color: 'var(--text)',
+        fontFamily: "'Figtree', sans-serif",
+      }}>
+        ⚠️ <strong>{isUp ? 'Up' : 'Down'} {absPct.toFixed(0)}% in {main.label}</strong> — unusually large move.
+        This may reflect a stale price anchor rather than real market activity.
+        Check recent sold listings before drawing conclusions.
+      </div>
+    )
+  }
+
+  // Clean — show normally
+  return (
+    <div style={{
+      background: isUp ? 'rgba(39,174,96,0.06)' : 'rgba(239,68,68,0.06)',
+      border: `1px solid ${isUp ? 'rgba(39,174,96,0.2)' : 'rgba(239,68,68,0.2)'}`,
+      borderLeft: `3px solid ${isUp ? 'var(--green)' : '#ef4444'}`,
+      borderRadius: 10, padding: '10px 14px', marginBottom: 16,
+      fontSize: 13, lineHeight: 1.6, color: 'var(--text)',
+      fontFamily: "'Figtree', sans-serif",
+    }}>
+      <strong>{isUp ? 'Up' : 'Down'} {absPct.toFixed(1)}% in {main.label}</strong>
+    </div>
+  )
+}
+
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 function SectionLabel({ children, style = {} }: { children: React.ReactNode; style?: React.CSSProperties }) {
@@ -240,7 +337,9 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
     trend.raw_pct_7d !== null || trend.raw_pct_30d !== null ||
     trend.raw_pct_90d !== null || trend.raw_pct_180d !== null || trend.raw_pct_365d !== null
   )
-  const trends = hasAnyTrend ? [
+
+  // Apply quality filter: suppress any period where the % is unreliably large
+  const trendPeriods = hasAnyTrend ? [
     { label: '7d', val: trend.raw_pct_7d },
     { label: '30d', val: trend.raw_pct_30d },
     { label: '90d', val: trend.raw_pct_90d },
@@ -254,23 +353,17 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   const psa10Multiple = card.psa10_usd && card.raw_usd ? card.psa10_usd / card.raw_usd : null
   const psa9Multiple = card.psa9_usd && card.raw_usd ? card.psa9_usd / card.raw_usd : null
 
-  // Grading profit calc (PSA Standard ~$25)
   const gradingCostCents = 2500
   const gradingProfitCents = card.raw_usd && card.psa10_usd
     ? card.psa10_usd - card.raw_usd - gradingCostCents
     : null
 
-
-  // ATH / drawdown
-  // Only trust drawdown if we have real long-term data to anchor it to
-  // Without 365d+ history the ATH calc is unreliable
   const hasLongTermData = trend && (trend.raw_365d_ago != null || trend.raw_pct_365d != null)
   const drawdown = raw.drawdown_pct != null && hasLongTermData ? parseFloat(raw.drawdown_pct) : null
   const athUsd = drawdown != null && card.raw_usd
     ? Math.round((card.raw_usd / 100) / (1 + drawdown / 100))
     : null
 
-  // Liquidity
   const salesMonthly = raw.sales_30d ?? raw.volume_30d ?? null
   const liquidityScore = salesMonthly != null ? Math.min(100, Math.round((salesMonthly / 20) * 100)) : null
   const liquidityLabel = liquidityScore == null ? null
@@ -278,11 +371,8 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
     : liquidityScore >= 35 ? 'Medium — may take a few weeks'
     : 'Low — patient seller needed'
 
-  // PSA pop
   const gemRate = psaPop?.gem_rate ? parseFloat(psaPop.gem_rate) : null
 
-  // Expected value = weighted average outcome across grades minus cost
-  // Uses gem rate for PSA 10 probability, ~60% of remainder hit PSA 9
   const expectedValueCents: number | null = card.raw_usd && card.psa10_usd && gemRate != null
     ? (() => {
         const p10 = gemRate / 100
@@ -296,13 +386,12 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   const totalGraded = psaPop?.total_graded ?? null
   const psa10Count = psaPop?.psa_10 ?? null
 
-  // Grade multiples for chart
   const gradeMultiples = [
     { label: 'PSA 9', value: card.psa9_usd, multiple: psa9Multiple },
     { label: 'PSA 10', value: card.psa10_usd, multiple: psa10Multiple },
   ].filter(g => g.value && g.multiple)
 
-  // Collector verdict signals
+  // Collector verdict signals — only add momentum if the % is trustworthy
   const signals: { label: string; value: string; type: 'good' | 'warn' | 'neutral' }[] = []
 
   if (drawdown != null) {
@@ -310,13 +399,17 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
     else if (drawdown < -15) signals.push({ label: 'vs All-Time High', value: `${drawdown.toFixed(0)}% below peak`, type: 'neutral' })
     else signals.push({ label: 'vs All-Time High', value: `Near peak (${drawdown.toFixed(0)}%)`, type: 'warn' })
   }
-  if (raw.slope_30d != null) {
+
+  // Only add 30d momentum signal if the number is trustworthy
+  const pct30dQuality = pctQuality(trend?.raw_pct_30d)
+  if (raw.slope_30d != null && pct30dQuality !== 'suppress') {
     const slope = parseFloat(raw.slope_30d)
     if (slope > 50) signals.push({ label: '30d Momentum', value: 'Rising strongly', type: 'good' })
     else if (slope > 0) signals.push({ label: '30d Momentum', value: 'Trending up', type: 'good' })
     else if (slope < -50) signals.push({ label: '30d Momentum', value: 'Falling sharply', type: 'warn' })
     else signals.push({ label: '30d Momentum', value: 'Flat / sideways', type: 'neutral' })
   }
+
   if (gemRate != null && card.psa10_usd && card.raw_usd) {
     if (gemRate < 5 && psa10Multiple && psa10Multiple > 3)
       signals.push({ label: 'PSA 10 Rarity', value: `${gemRate.toFixed(1)}% gem rate — scarce`, type: 'good' })
@@ -385,6 +478,9 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
             {card.set_name}{card.card_number ? ` · #${card.card_number}` : ''}
           </p>
 
+          {/* Hero banner — quality-gated */}
+          <HeroBanner trend={trend} />
+
           {insight && (
             <div style={{
               background: 'var(--card)', border: '1px solid var(--border)',
@@ -414,24 +510,38 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
             </div>
           </div>
 
-          {/* Trend */}
-          {trends.length > 0 && (
+          {/* Trend — each cell quality-gated individually */}
+          {trendPeriods.length > 0 && (
             <div style={{
               background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)',
               padding: '14px 16px',
             }}>
               <SectionLabel>Raw Price Trend</SectionLabel>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                {trends.map((t) => {
-                  const f = formatPct(t.val)
-                  return (
-                    <div key={t.label}>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, fontFamily: "'Figtree', sans-serif" }}>{t.label}</div>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: f.color, fontFamily: "'Figtree', sans-serif" }}>{f.text}</div>
-                    </div>
-                  )
-                })}
+                {trendPeriods.map((t) => (
+                  <TrendCell key={t.label} val={t.val} label={t.label} />
+                ))}
               </div>
+              {/* Low-volume caveat if any period was suppressed */}
+              {trendPeriods.some(t => pctQuality(t.val) === 'suppress') && (
+                <p style={{
+                  fontSize: 11, color: 'var(--text-muted)', margin: '10px 0 0',
+                  fontFamily: "'Figtree', sans-serif", lineHeight: 1.5,
+                }}>
+                  — Some periods are hidden because the price movement was too large to be reliable.
+                  This usually means the card traded infrequently and the comparison price is outdated.
+                  Check recent eBay sold listings for the real picture.
+                </p>
+              )}
+              {/* Warn caveat */}
+              {trendPeriods.some(t => pctQuality(t.val) === 'warn') && !trendPeriods.some(t => pctQuality(t.val) === 'suppress') && (
+                <p style={{
+                  fontSize: 11, color: '#e07b39', margin: '10px 0 0',
+                  fontFamily: "'Figtree', sans-serif", lineHeight: 1.5,
+                }}>
+                  ⚠ Large moves shown in amber — verify against recent sold listings before drawing conclusions.
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -469,7 +579,8 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
             {salesMonthly != null && (
               <StatTile label="Sales / 30d" value={salesMonthly.toString()} sub="eBay sold" />
             )}
-            {raw.slope_30d != null && (
+            {/* Only show slope if 30d % is trustworthy */}
+            {raw.slope_30d != null && pctQuality(trend?.raw_pct_30d) !== 'suppress' && (
               <StatTile
                 label="30d Slope"
                 value={parseFloat(raw.slope_30d) >= 0
@@ -526,7 +637,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
             Based on PSA Standard tier (~$25 USD). Assumes a perfect PSA 10 result — actual outcome depends on card condition.
           </p>
 
-          {/* Lottery card warning */}
           {isLotteryCard && (
             <div style={{
               marginBottom: 16, padding: '10px 14px',
@@ -636,7 +746,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
             ))}
           </div>
 
-          {/* Grade distribution bar */}
           {psaPop.total_graded > 0 && (
             <div style={{ marginBottom: 14 }}>
               <div style={{ display: 'flex', height: 8, borderRadius: 99, overflow: 'hidden', gap: 1, marginBottom: 8 }}>
