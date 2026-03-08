@@ -391,13 +391,15 @@ export default function HomeClient() {
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                           <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>
-                            ${card.price_usd >= 100 ? Math.round(card.price_usd) : card.price_usd.toFixed(2)}
+                            {card.price_usd != null ? `$${card.price_usd >= 100 ? Math.round(card.price_usd) : Number(card.price_usd).toFixed(2)}` : '—'}
                           </span>
                           <span style={{ fontSize: 8, fontWeight: 800, color: 'var(--text-muted)', opacity: 0.7, fontFamily: "'Figtree', sans-serif", letterSpacing: 0.3 }}>RAW</span>
                         </div>
-                        <span style={{ fontSize: 12, fontWeight: 800, color: text, fontFamily: "'Figtree', sans-serif" }}>
-                          {card.pct_change > 0 ? '+' : ''}{card.pct_change.toFixed(1)}%
-                        </span>
+                        {card.pct_change != null && (
+                          <span style={{ fontSize: 12, fontWeight: 800, color: text, fontFamily: "'Figtree', sans-serif" }}>
+                            {card.pct_change > 0 ? '+' : ''}{Number(card.pct_change).toFixed(1)}%
+                          </span>
+                        )}
                       </div>
                     </div>
                   </Link>
