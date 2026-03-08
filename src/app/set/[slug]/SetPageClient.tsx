@@ -138,46 +138,31 @@ function CardGrid({ cards, setName }: { cards: Card[]; setName: string }) {
 }
 
 function SealedSection({ sealedCards, setName }: { sealedCards: Card[]; setName: string }) {
-  const [open, setOpen] = useState(false)
-
   if (sealedCards.length === 0) return null
 
   return (
-    <div style={{ marginTop: 32 }}>
+    <div id="sealed" style={{ marginTop: 32 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
         <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-        <button
-          onClick={() => setOpen(o => !o)}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            background: 'var(--card)', border: '1px solid var(--border)',
-            borderRadius: 20, padding: '6px 16px', cursor: 'pointer',
-            color: 'var(--text-muted)', fontSize: 12, fontFamily: "'Figtree', sans-serif",
-            fontWeight: 600, letterSpacing: 0.5, transition: 'all 0.15s',
-          }}
-          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--primary)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text)' }}
-          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)' }}
-        >
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          color: 'var(--text-muted)', fontSize: 12, fontFamily: "'Figtree', sans-serif",
+          fontWeight: 700, letterSpacing: 0.5,
+        }}>
           <span>📦</span>
           <span>Sealed Product ({sealedCards.length})</span>
-          <span style={{ fontSize: 10, marginLeft: 2 }}>{open ? '▲' : '▼'}</span>
-        </button>
+        </div>
         <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
       </div>
-
-      {open && (
-        <>
-          <p style={{
-            fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif",
-            marginBottom: 14, lineHeight: 1.6,
-            background: 'var(--bg-light)', borderRadius: 8, padding: '10px 14px',
-          }}>
-            Sealed product prices track market value of unopened product — not individual cards.
-            Prices shown are raw sealed value from PriceCharting.
-          </p>
-          <CardGrid cards={sealedCards} setName={setName} />
-        </>
-      )}
+      <p style={{
+        fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif",
+        marginBottom: 14, lineHeight: 1.6,
+        background: 'var(--bg-light)', borderRadius: 8, padding: '10px 14px',
+      }}>
+        Sealed product prices track market value of unopened product — not individual cards.
+        Prices shown are sealed market value from PriceCharting.
+      </p>
+      <CardGrid cards={sealedCards} setName={setName} />
     </div>
   )
 }
@@ -192,6 +177,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
   const [popStats, setPopStats] = useState<PopStats | null>(null)
   const [topMovers, setTopMovers] = useState<TrendCard[]>([])
   const [topFallers, setTopFallers] = useState<TrendCard[]>([])
+  const [topSealedMovers, setTopSealedMovers] = useState<TrendCard[]>([])
   const [error, setError] = useState(false)
 
   useEffect(() => {
@@ -226,7 +212,6 @@ export default function SetPageClient({ slug }: { slug: string }) {
         setPopStats({ total_graded: pop.total_graded || 0, gem_rate: pop.gem_rate || 0, total_psa10: pop.total_psa_10 || 0 })
       }
 
-      // Top movers/fallers — fetch more to account for sealed filtering
       const { data: trendData } = await supabase
         .from('card_trends')
         .select('card_name, card_slug, current_raw, raw_pct_30d')
@@ -234,7 +219,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
         .not('raw_pct_30d', 'is', null)
         .gt('current_raw', 500)
         .order('raw_pct_30d', { ascending: false })
-        .limit(50)
+        .limit(80)
 
       if (trendData && trendData.length > 0) {
         const slugs = trendData.map((t: any) => t.card_slug)
@@ -246,19 +231,21 @@ export default function SetPageClient({ slug }: { slug: string }) {
         const imgMap: Record<string, { image_url: string | null; card_url_slug: string | null; is_sealed: boolean }> = {}
         ;(imgData || []).forEach((c: any) => { imgMap[c.card_slug] = c })
 
-        // Filter out sealed product from movers/fallers
-        const enriched: TrendCard[] = trendData
-          .filter((t: any) => !imgMap[t.card_slug]?.is_sealed)
-          .map((t: any) => ({
-            card_name: t.card_name,
-            card_url_slug: imgMap[t.card_slug]?.card_url_slug ?? null,
-            raw_usd: t.current_raw / 100,
-            raw_pct_30d: t.raw_pct_30d,
-            image_url: imgMap[t.card_slug]?.image_url ?? null,
-          }))
+        const allEnriched = trendData.map((t: any) => ({
+          card_name: t.card_name,
+          card_url_slug: imgMap[t.card_slug]?.card_url_slug ?? null,
+          raw_usd: t.current_raw / 100,
+          raw_pct_30d: t.raw_pct_30d,
+          image_url: imgMap[t.card_slug]?.image_url ?? null,
+          is_sealed: imgMap[t.card_slug]?.is_sealed ?? false,
+        }))
 
-        setTopMovers(enriched.filter(t => (t.raw_pct_30d ?? 0) > 0).slice(0, 5))
-        setTopFallers([...enriched].filter(t => (t.raw_pct_30d ?? 0) < 0).sort((a, b) => (a.raw_pct_30d ?? 0) - (b.raw_pct_30d ?? 0)).slice(0, 5))
+        const cardEnriched = allEnriched.filter(t => !t.is_sealed)
+        const sealedEnriched = allEnriched.filter(t => t.is_sealed)
+
+        setTopMovers(cardEnriched.filter(t => (t.raw_pct_30d ?? 0) > 0).slice(0, 5))
+        setTopFallers(cardEnriched.filter(t => (t.raw_pct_30d ?? 0) < 0).sort((a, b) => (a.raw_pct_30d ?? 0) - (b.raw_pct_30d ?? 0)).slice(0, 5))
+        setTopSealedMovers(sealedEnriched.filter(t => (t.raw_pct_30d ?? 0) > 0).slice(0, 5))
       }
 
       setLoading(false)
@@ -266,11 +253,9 @@ export default function SetPageClient({ slug }: { slug: string }) {
     loadData()
   }, [setName, sort])
 
-  // Split cards and sealed product
   const regularCards = cards.filter(c => !c.is_sealed)
   const sealedCards = cards.filter(c => c.is_sealed)
 
-  // Stats from regular cards only
   const cardsWithPrice = regularCards.filter(c => c.raw_usd && c.raw_usd > 0)
   const totalSetValue = cardsWithPrice.reduce((sum, c) => sum + (c.raw_usd || 0), 0)
   const avgCardValue = cardsWithPrice.length > 0 ? totalSetValue / cardsWithPrice.length : 0
@@ -278,7 +263,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
 
   const hasInsight = !!insight
   const hasPop = !!(popStats && popStats.total_graded > 0)
-  const hasMovers = topMovers.length > 0 || topFallers.length > 0
+  const hasMovers = topMovers.length > 0 || topFallers.length > 0 || topSealedMovers.length > 0
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 24px' }}>
@@ -290,9 +275,44 @@ export default function SetPageClient({ slug }: { slug: string }) {
       <h1 style={{
         fontFamily: "'Playfair Display', serif",
         fontSize: 34, fontWeight: 700,
-        margin: '8px 0 16px', color: 'var(--text)', letterSpacing: '-0.5px',
+        margin: '8px 0 12px', color: 'var(--text)', letterSpacing: '-0.5px',
       }}>{setName}</h1>
 
+      {/* ── Section jump links ── */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        <a
+          href="#cards"
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            background: 'var(--card)', border: '1px solid var(--border)',
+            borderRadius: 20, padding: '5px 14px', textDecoration: 'none',
+            color: 'var(--text)', fontSize: 12, fontFamily: "'Figtree', sans-serif",
+            fontWeight: 600, transition: 'border-color 0.15s',
+          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--primary)' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)' }}
+        >
+          🃏 Cards {!loading && regularCards.length > 0 && <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>({regularCards.length})</span>}
+        </a>
+        {!loading && sealedCards.length > 0 && (
+          <a
+            href="#sealed"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              background: 'var(--card)', border: '1px solid var(--border)',
+              borderRadius: 20, padding: '5px 14px', textDecoration: 'none',
+              color: 'var(--text)', fontSize: 12, fontFamily: "'Figtree', sans-serif",
+              fontWeight: 600, transition: 'border-color 0.15s',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--primary)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)' }}
+          >
+            📦 Sealed Product <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>({sealedCards.length})</span>
+          </a>
+        )}
+      </div>
+
+      {/* ── Chat ── */}
       <div style={{ marginBottom: 20 }}>
         <InlineChat
           cardContext={setName}
@@ -305,6 +325,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
         />
       </div>
 
+      {/* ── Set overview stats ── */}
       {!loading && cardsWithPrice.length > 0 && (
         <Panel style={{ marginBottom: 14 }}>
           <SectionLabel>Set Overview</SectionLabel>
@@ -314,9 +335,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
               { val: `$${(totalSetValue / 100).toFixed(0)}`, label: 'Complete Set Value' },
               { val: `$${(avgCardValue / 100).toFixed(2)}`, label: 'Avg Card (Raw)' },
               { val: cardsWithPsa10.length.toString(), label: 'Cards w/ PSA 10 Data' },
-              ...(sealedCards.length > 0 ? [
-                { val: sealedCards.length.toString(), label: 'Sealed Products' },
-              ] : []),
+              ...(sealedCards.length > 0 ? [{ val: sealedCards.length.toString(), label: 'Sealed Products' }] : []),
               ...(hasPop && popStats ? [
                 { val: popStats.total_graded.toLocaleString(), label: 'Total PSA Graded' },
                 { val: `${popStats.gem_rate.toFixed(1)}%`, label: 'Set Gem Rate', color: popStats.gem_rate < 5 ? 'var(--green)' : undefined },
@@ -331,28 +350,24 @@ export default function SetPageClient({ slug }: { slug: string }) {
         </Panel>
       )}
 
+      {/* ── Set insight ── */}
       {hasInsight && (
         <div style={{
           background: 'var(--card)', border: '1px solid var(--border)',
           borderLeft: '3px solid var(--primary)', borderRadius: 12, padding: '14px 18px',
           marginBottom: 14,
         }}>
-          <div style={{
-            fontSize: 10, fontWeight: 800, textTransform: 'uppercase',
-            letterSpacing: 1.8, color: 'var(--primary)', marginBottom: 7,
-            fontFamily: "'Figtree', sans-serif",
-          }}>Set Insight</div>
-          <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text)', margin: 0, fontFamily: "'Figtree', sans-serif" }}>
-            {insight}
-          </p>
+          <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.8, color: 'var(--primary)', marginBottom: 7, fontFamily: "'Figtree', sans-serif" }}>Set Insight</div>
+          <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text)', margin: 0, fontFamily: "'Figtree', sans-serif" }}>{insight}</p>
         </div>
       )}
 
+      {/* ── Movers grid: Cards rising | Cards falling | Sealed rising ── */}
       {hasMovers && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12, marginBottom: 14 }}>
           {topMovers.length > 0 && (
             <Panel>
-              <SectionLabel>📈 Top Risers (30d)</SectionLabel>
+              <SectionLabel>📈 Top Risers — Cards (30d)</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {topMovers.map((card, i) => <MoverRow key={i} card={card} setName={setName} positive />)}
               </div>
@@ -360,15 +375,24 @@ export default function SetPageClient({ slug }: { slug: string }) {
           )}
           {topFallers.length > 0 && (
             <Panel>
-              <SectionLabel>📉 Top Fallers (30d)</SectionLabel>
+              <SectionLabel>📉 Top Fallers — Cards (30d)</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {topFallers.map((card, i) => <MoverRow key={i} card={card} setName={setName} positive={false} />)}
+              </div>
+            </Panel>
+          )}
+          {topSealedMovers.length > 0 && (
+            <Panel>
+              <SectionLabel>📦 Top Risers — Sealed (30d)</SectionLabel>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {topSealedMovers.map((card, i) => <MoverRow key={i} card={card} setName={setName} positive />)}
               </div>
             </Panel>
           )}
         </div>
       )}
 
+      {/* ── PSA Population ── */}
       {hasPop && popStats && !hasInsight && (
         <Panel style={{ marginBottom: 14 }}>
           <SectionLabel>PSA Population</SectionLabel>
@@ -376,20 +400,16 @@ export default function SetPageClient({ slug }: { slug: string }) {
             <div><div style={statValue}>{popStats.total_graded.toLocaleString()}</div><div style={statLabel}>Total Graded</div></div>
             <div><div style={statValue}>{popStats.total_psa10.toLocaleString()}</div><div style={statLabel}>PSA 10s</div></div>
             <div>
-              <div style={{ ...statValue, color: popStats.gem_rate < 5 ? 'var(--green)' : 'var(--text)' }}>
-                {popStats.gem_rate.toFixed(1)}%
-              </div>
+              <div style={{ ...statValue, color: popStats.gem_rate < 5 ? 'var(--green)' : 'var(--text)' }}>{popStats.gem_rate.toFixed(1)}%</div>
               <div style={statLabel}>Gem Rate</div>
             </div>
           </div>
         </Panel>
       )}
 
+      {/* ── Set Price Chart ── */}
       {priceHistory.length > 1 && (
-        <div style={{
-          background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)',
-          padding: '20px 20px 32px', marginBottom: 16,
-        }}>
+        <div style={{ background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)', padding: '20px 20px 32px', marginBottom: 16 }}>
           <SectionLabel>Set Price History</SectionLabel>
           <PriceChart
             data={priceHistory}
@@ -399,12 +419,13 @@ export default function SetPageClient({ slug }: { slug: string }) {
         </div>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+      {/* ── Sort + card count ── */}
+      <div id="cards" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
         <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0, fontFamily: "'Figtree', sans-serif" }}>
           {regularCards.length} cards
           {sealedCards.length > 0 && (
-            <span style={{ marginLeft: 6, color: 'var(--text-muted)', opacity: 0.6 }}>
-              + {sealedCards.length} sealed ↓
+            <span style={{ marginLeft: 6, opacity: 0.6 }}>
+              · <a href="#sealed" style={{ color: 'var(--text-muted)', textDecoration: 'none' }}>{sealedCards.length} sealed ↓</a>
             </span>
           )}
         </p>
@@ -421,6 +442,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
         </div>
       </div>
 
+      {/* ── Card grid ── */}
       {loading ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
           {Array.from({ length: 12 }).map((_, i) => (
