@@ -30,25 +30,34 @@ function buildEbayUrl(cardName: string, setName: string, cardNumber: string | nu
 }
 
 // ─── Data quality policy ─────────────────────────────────────────────────────
-// A % swing is only trustworthy if it's based on recent, liquid trading.
-// We apply three tiers:
-//   SUPPRESS  (|pct| > 300%)  — almost certainly a stale-anchor artefact; show nothing
-//   WARN      (|pct| > 100%)  — plausible but unusual; show amber ⚠ with caveat
-//   CLEAN     everything else — show normally
+// Thresholds are calibrated per time period — a 200% move in 2 years is normal;
+// a 200% move in 7 days almost certainly means a stale anchor price.
+// 2y and 5y are never flagged — multi-year compounding is expected and legitimate.
 
 type PctQuality = 'clean' | 'warn' | 'suppress'
 
-function pctQuality(pct: number | null): PctQuality {
+const PERIOD_THRESHOLDS: Record<string, { warn: number; suppress: number }> = {
+  '7d':   { warn: 50,  suppress: 200 },
+  '30d':  { warn: 100, suppress: 300 },
+  '90d':  { warn: 200, suppress: 500 },
+  '180d': { warn: 300, suppress: 700 },
+  '1y':   { warn: 400, suppress: 900 },
+  '2y':   { warn: Infinity, suppress: Infinity }, // never flag
+  '5y':   { warn: Infinity, suppress: Infinity }, // never flag
+}
+
+function pctQuality(pct: number | null, period = '30d'): PctQuality {
   if (pct == null) return 'clean'
   const abs = Math.abs(pct)
-  if (abs > 300) return 'suppress'
-  if (abs > 100) return 'warn'
+  const thresholds = PERIOD_THRESHOLDS[period] ?? PERIOD_THRESHOLDS['30d']
+  if (abs > thresholds.suppress) return 'suppress'
+  if (abs > thresholds.warn) return 'warn'
   return 'clean'
 }
 
 // Returns what to render for a trend % cell
 function TrendCell({ val, label }: { val: number | null; label: string }) {
-  const quality = pctQuality(val)
+  const quality = pctQuality(val, label)
   if (val == null || quality === 'suppress') {
     return (
       <div>
@@ -59,7 +68,7 @@ function TrendCell({ val, label }: { val: number | null; label: string }) {
   }
   if (quality === 'warn') {
     return (
-      <div title="Large move — low recent volume may make this figure unreliable. Check sold listings before drawing conclusions.">
+      <div title="Unusually large move for this timeframe — may reflect a stale price anchor rather than real market activity. Check sold listings.">
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, fontFamily: "'Figtree', sans-serif" }}>{label}</div>
         <div style={{ fontSize: 15, fontWeight: 700, color: '#e07b39', fontFamily: "'Figtree', sans-serif" }}>
           ⚠ {val > 0 ? '+' : ''}{val.toFixed(1)}%
@@ -77,10 +86,10 @@ function TrendCell({ val, label }: { val: number | null; label: string }) {
 }
 
 // Hero banner — only show if the move is clean or warn (with caveat), never for suppress
-function HeroBanner({ trend }: { trend: any }) {
-  if (!trend) return null
+// Also suppressed entirely when insight text is present (avoids duplicate messaging)
+function HeroBanner({ trend, hasInsight }: { trend: any; hasInsight: boolean }) {
+  if (!trend || hasInsight) return null
 
-  // Find the most prominent trend period that has a value
   const periods = [
     { label: '30d', val: trend.raw_pct_30d },
     { label: '7d', val: trend.raw_pct_7d },
@@ -89,7 +98,7 @@ function HeroBanner({ trend }: { trend: any }) {
   const main = periods.find(p => p.val != null)
   if (!main || main.val == null) return null
 
-  const quality = pctQuality(main.val)
+  const quality = pctQuality(main.val, main.label)
   if (quality === 'suppress') return null
 
   const isUp = main.val > 0
@@ -111,7 +120,6 @@ function HeroBanner({ trend }: { trend: any }) {
     )
   }
 
-  // Clean — show normally
   return (
     <div style={{
       background: isUp ? 'rgba(39,174,96,0.06)' : 'rgba(239,68,68,0.06)',
@@ -401,7 +409,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   }
 
   // Only add 30d momentum signal if the number is trustworthy
-  const pct30dQuality = pctQuality(trend?.raw_pct_30d)
+  const pct30dQuality = pctQuality(trend?.raw_pct_30d, '30d')
   if (raw.slope_30d != null && pct30dQuality !== 'suppress') {
     const slope = parseFloat(raw.slope_30d)
     if (slope > 50) signals.push({ label: '30d Momentum', value: 'Rising strongly', type: 'good' })
@@ -478,8 +486,8 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
             {card.set_name}{card.card_number ? ` · #${card.card_number}` : ''}
           </p>
 
-          {/* Hero banner — quality-gated */}
-          <HeroBanner trend={trend} />
+          {/* Hero banner — quality-gated, hidden when insight covers the same info */}
+          <HeroBanner trend={trend} hasInsight={!!insight} />
 
           {insight && (
             <div style={{
@@ -523,7 +531,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
                 ))}
               </div>
               {/* Low-volume caveat if any period was suppressed */}
-              {trendPeriods.some(t => pctQuality(t.val) === 'suppress') && (
+              {trendPeriods.some(t => pctQuality(t.val, t.label) === 'suppress') && (
                 <p style={{
                   fontSize: 11, color: 'var(--text-muted)', margin: '10px 0 0',
                   fontFamily: "'Figtree', sans-serif", lineHeight: 1.5,
@@ -534,7 +542,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
                 </p>
               )}
               {/* Warn caveat */}
-              {trendPeriods.some(t => pctQuality(t.val) === 'warn') && !trendPeriods.some(t => pctQuality(t.val) === 'suppress') && (
+              {trendPeriods.some(t => pctQuality(t.val, t.label) === 'warn') && !trendPeriods.some(t => pctQuality(t.val, t.label) === 'suppress') && (
                 <p style={{
                   fontSize: 11, color: '#e07b39', margin: '10px 0 0',
                   fontFamily: "'Figtree', sans-serif", lineHeight: 1.5,
@@ -598,7 +606,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
         })
 
         // Momentum (only if trustworthy)
-        const pct30dQualityLocal = pctQuality(trend?.raw_pct_30d)
+        const pct30dQualityLocal = pctQuality(trend?.raw_pct_30d, '30d')
         if (trend?.raw_pct_30d != null && pct30dQualityLocal === 'clean') tiles.push({
           label: '30d Price Move',
           value: `${trend.raw_pct_30d > 0 ? '+' : ''}${trend.raw_pct_30d.toFixed(1)}%`,
