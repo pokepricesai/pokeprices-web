@@ -360,9 +360,9 @@ export default function HomeClient() {
       {/* ── MARKET HEATMAP ────────────────────────────────────── */}
       <section style={{ padding: '8px 24px 40px', maxWidth: 960, margin: '0 auto' }}>
         <div style={{ marginBottom: 16 }}>
-          <h2 style={{ fontSize: 24, margin: '0 0 4px', fontFamily: "'Playfair Display', serif" }}>Top 30 Most Valuable Cards</h2>
+          <h2 style={{ fontSize: 24, margin: '0 0 4px', fontFamily: "'Playfair Display', serif" }}>Market Heatmap</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0, fontFamily: "'Figtree', sans-serif" }}>
-            Highest raw prices across every set — colour shows 30d price movement
+            The 30 most valuable actively-traded cards right now — colour shows 30-day price movement
           </p>
         </div>
         {heatmap.length > 0 ? (
