@@ -240,6 +240,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   const [psaPop, setPsaPop] = useState<any | null>(null)
   const [ebayDeals, setEbayDeals] = useState<any[]>([])
   const [ebayListings, setEbayListings] = useState<any[]>([])
+  const [highConfidenceListingCount, setHighConfidenceListingCount] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -301,6 +302,14 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
           .order('total_cost_cents', { ascending: true }).limit(5)
         if (listingsData) setEbayListings(listingsData)
       }
+
+      // High-confidence listing count for Collector Intel
+      const { count } = await supabase
+        .from('ebay_listings')
+        .select('*', { count: 'exact', head: true })
+        .eq('card_slug', slug)
+        .eq('match_confidence', 'high')
+      if (count != null) setHighConfidenceListingCount(count)
 
       setLoading(false)
     }
@@ -600,9 +609,16 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
 
         // Sales volume
         if (salesMonthly != null) tiles.push({
-          label: 'Sales / 30d',
-          value: salesMonthly.toString(),
+          label: 'Avg Sales / Month',
+          value: `~${salesMonthly}`,
           sub: salesMonthly >= 10 ? 'Liquid market' : salesMonthly >= 3 ? 'Moderate volume' : 'Thin market',
+        })
+
+        // Available listings (high confidence only)
+        if (highConfidenceListingCount != null && highConfidenceListingCount > 0) tiles.push({
+          label: 'Live Listings',
+          value: highConfidenceListingCount.toString(),
+          sub: 'High-confidence matches',
         })
 
         // Momentum (only if trustworthy)
