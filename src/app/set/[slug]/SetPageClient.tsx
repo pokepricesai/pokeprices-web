@@ -16,6 +16,7 @@ interface Card {
   psa10_usd: number | null
   image_url: string | null
   card_url_slug: string | null
+  is_sealed: boolean
 }
 
 interface TrendCard {
@@ -98,6 +99,89 @@ function MoverRow({ card, setName, positive }: { card: TrendCard; setName: strin
   )
 }
 
+function CardGrid({ cards, setName }: { cards: Card[]; setName: string }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
+      {cards.map((c) => (
+        <Link
+          key={c.card_slug}
+          href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`}
+          className="card-hover holo-shimmer"
+          style={{
+            background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)',
+            padding: 14, textDecoration: 'none', color: 'var(--text)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+          }}
+        >
+          {c.image_url ? (
+            <img src={c.image_url} alt={c.card_name} style={{ width: 110, height: 154, objectFit: 'contain', marginBottom: 8, borderRadius: 6 }} loading="lazy" />
+          ) : (
+            <div style={{ width: 110, height: 154, background: 'var(--bg)', borderRadius: 6, marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, color: 'var(--border)' }}>
+              {c.is_sealed ? '📦' : '🃏'}
+            </div>
+          )}
+          <div style={{ fontWeight: 600, fontSize: 13, textAlign: 'center', marginBottom: 3, lineHeight: 1.3, fontFamily: "'Figtree', sans-serif", display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+            {c.card_name}
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+            {c.is_sealed ? 'Sealed' : 'Raw'}: {formatPrice(c.raw_usd)}
+          </div>
+          {!c.is_sealed && c.psa10_usd && c.psa10_usd > 0 && (
+            <div style={{ fontSize: 12, color: 'var(--accent-hover)', fontWeight: 500, fontFamily: "'Figtree', sans-serif" }}>
+              PSA 10: {formatPrice(c.psa10_usd)}
+            </div>
+          )}
+        </Link>
+      ))}
+    </div>
+  )
+}
+
+function SealedSection({ sealedCards, setName }: { sealedCards: Card[]; setName: string }) {
+  const [open, setOpen] = useState(false)
+
+  if (sealedCards.length === 0) return null
+
+  return (
+    <div style={{ marginTop: 32 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+        <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+        <button
+          onClick={() => setOpen(o => !o)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            background: 'var(--card)', border: '1px solid var(--border)',
+            borderRadius: 20, padding: '6px 16px', cursor: 'pointer',
+            color: 'var(--text-muted)', fontSize: 12, fontFamily: "'Figtree', sans-serif",
+            fontWeight: 600, letterSpacing: 0.5, transition: 'all 0.15s',
+          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--primary)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text)' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)' }}
+        >
+          <span>📦</span>
+          <span>Sealed Product ({sealedCards.length})</span>
+          <span style={{ fontSize: 10, marginLeft: 2 }}>{open ? '▲' : '▼'}</span>
+        </button>
+        <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+      </div>
+
+      {open && (
+        <>
+          <p style={{
+            fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif",
+            marginBottom: 14, lineHeight: 1.6,
+            background: 'var(--bg-light)', borderRadius: 8, padding: '10px 14px',
+          }}>
+            Sealed product prices track market value of unopened product — not individual cards.
+            Prices shown are raw sealed value from PriceCharting.
+          </p>
+          <CardGrid cards={sealedCards} setName={setName} />
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function SetPageClient({ slug }: { slug: string }) {
   const setName = decodeURIComponent(slug)
   const [cards, setCards] = useState<Card[]>([])
@@ -115,7 +199,6 @@ export default function SetPageClient({ slug }: { slug: string }) {
       setLoading(true)
       setError(false)
 
-      // Cards
       const { data, error: err } = await supabase.rpc('get_set_cards_sortable', {
         set_text: setName,
         sort_col: sort,
@@ -123,17 +206,14 @@ export default function SetPageClient({ slug }: { slug: string }) {
       if (err || !data) setError(true)
       else setCards(data)
 
-      // Insight
       const { data: insightData } = await supabase.rpc('get_set_insight', { set_text: setName })
       if (insightData) setInsight(insightData)
 
-      // Price history
       const { data: histData } = await supabase.rpc('get_set_price_history', { set_text: setName })
       if (histData) {
         setPriceHistory(histData.map((d: any) => ({ ...d, value_usd: d.value_usd ? d.value_usd * 100 : null })))
       }
 
-      // PSA population
       const { data: popData } = await supabase
         .from('psa_set_totals')
         .select('*')
@@ -146,7 +226,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
         setPopStats({ total_graded: pop.total_graded || 0, gem_rate: pop.gem_rate || 0, total_psa10: pop.total_psa_10 || 0 })
       }
 
-      // Top movers/fallers from card_trends
+      // Top movers/fallers — fetch more to account for sealed filtering
       const { data: trendData } = await supabase
         .from('card_trends')
         .select('card_name, card_slug, current_raw, raw_pct_30d')
@@ -154,25 +234,28 @@ export default function SetPageClient({ slug }: { slug: string }) {
         .not('raw_pct_30d', 'is', null)
         .gt('current_raw', 500)
         .order('raw_pct_30d', { ascending: false })
-        .limit(30)
+        .limit(50)
 
       if (trendData && trendData.length > 0) {
         const slugs = trendData.map((t: any) => t.card_slug)
         const { data: imgData } = await supabase
           .from('cards')
-          .select('card_slug, image_url, card_url_slug')
+          .select('card_slug, image_url, card_url_slug, is_sealed')
           .in('card_slug', slugs)
 
-        const imgMap: Record<string, { image_url: string | null; card_url_slug: string | null }> = {}
+        const imgMap: Record<string, { image_url: string | null; card_url_slug: string | null; is_sealed: boolean }> = {}
         ;(imgData || []).forEach((c: any) => { imgMap[c.card_slug] = c })
 
-        const enriched: TrendCard[] = trendData.map((t: any) => ({
-          card_name: t.card_name,
-          card_url_slug: imgMap[t.card_slug]?.card_url_slug ?? null,
-          raw_usd: t.current_raw / 100,
-          raw_pct_30d: t.raw_pct_30d,
-          image_url: imgMap[t.card_slug]?.image_url ?? null,
-        }))
+        // Filter out sealed product from movers/fallers
+        const enriched: TrendCard[] = trendData
+          .filter((t: any) => !imgMap[t.card_slug]?.is_sealed)
+          .map((t: any) => ({
+            card_name: t.card_name,
+            card_url_slug: imgMap[t.card_slug]?.card_url_slug ?? null,
+            raw_usd: t.current_raw / 100,
+            raw_pct_30d: t.raw_pct_30d,
+            image_url: imgMap[t.card_slug]?.image_url ?? null,
+          }))
 
         setTopMovers(enriched.filter(t => (t.raw_pct_30d ?? 0) > 0).slice(0, 5))
         setTopFallers([...enriched].filter(t => (t.raw_pct_30d ?? 0) < 0).sort((a, b) => (a.raw_pct_30d ?? 0) - (b.raw_pct_30d ?? 0)).slice(0, 5))
@@ -183,11 +266,15 @@ export default function SetPageClient({ slug }: { slug: string }) {
     loadData()
   }, [setName, sort])
 
-  // Derived stats
-  const cardsWithPrice = cards.filter(c => c.raw_usd && c.raw_usd > 0)
+  // Split cards and sealed product
+  const regularCards = cards.filter(c => !c.is_sealed)
+  const sealedCards = cards.filter(c => c.is_sealed)
+
+  // Stats from regular cards only
+  const cardsWithPrice = regularCards.filter(c => c.raw_usd && c.raw_usd > 0)
   const totalSetValue = cardsWithPrice.reduce((sum, c) => sum + (c.raw_usd || 0), 0)
   const avgCardValue = cardsWithPrice.length > 0 ? totalSetValue / cardsWithPrice.length : 0
-  const cardsWithPsa10 = cards.filter(c => c.psa10_usd && c.psa10_usd > 0)
+  const cardsWithPsa10 = regularCards.filter(c => c.psa10_usd && c.psa10_usd > 0)
 
   const hasInsight = !!insight
   const hasPop = !!(popStats && popStats.total_graded > 0)
@@ -206,7 +293,6 @@ export default function SetPageClient({ slug }: { slug: string }) {
         margin: '8px 0 16px', color: 'var(--text)', letterSpacing: '-0.5px',
       }}>{setName}</h1>
 
-      {/* ── Chat — set-level prompts ── */}
       <div style={{ marginBottom: 20 }}>
         <InlineChat
           cardContext={setName}
@@ -219,16 +305,18 @@ export default function SetPageClient({ slug }: { slug: string }) {
         />
       </div>
 
-      {/* ── Set overview stats bar ── */}
       {!loading && cardsWithPrice.length > 0 && (
         <Panel style={{ marginBottom: 14 }}>
           <SectionLabel>Set Overview</SectionLabel>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 10 }}>
             {[
-              { val: cards.length.toString(), label: 'Total Cards' },
+              { val: regularCards.length.toString(), label: 'Total Cards' },
               { val: `$${(totalSetValue / 100).toFixed(0)}`, label: 'Complete Set Value' },
               { val: `$${(avgCardValue / 100).toFixed(2)}`, label: 'Avg Card (Raw)' },
               { val: cardsWithPsa10.length.toString(), label: 'Cards w/ PSA 10 Data' },
+              ...(sealedCards.length > 0 ? [
+                { val: sealedCards.length.toString(), label: 'Sealed Products' },
+              ] : []),
               ...(hasPop && popStats ? [
                 { val: popStats.total_graded.toLocaleString(), label: 'Total PSA Graded' },
                 { val: `${popStats.gem_rate.toFixed(1)}%`, label: 'Set Gem Rate', color: popStats.gem_rate < 5 ? 'var(--green)' : undefined },
@@ -243,7 +331,6 @@ export default function SetPageClient({ slug }: { slug: string }) {
         </Panel>
       )}
 
-      {/* ── Set insight ── */}
       {hasInsight && (
         <div style={{
           background: 'var(--card)', border: '1px solid var(--border)',
@@ -261,7 +348,6 @@ export default function SetPageClient({ slug }: { slug: string }) {
         </div>
       )}
 
-      {/* ── Top movers / fallers ── */}
       {hasMovers && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
           {topMovers.length > 0 && (
@@ -283,7 +369,6 @@ export default function SetPageClient({ slug }: { slug: string }) {
         </div>
       )}
 
-      {/* ── PSA Population (standalone if no insight) ── */}
       {hasPop && popStats && !hasInsight && (
         <Panel style={{ marginBottom: 14 }}>
           <SectionLabel>PSA Population</SectionLabel>
@@ -300,7 +385,6 @@ export default function SetPageClient({ slug }: { slug: string }) {
         </Panel>
       )}
 
-      {/* ── Set Price Chart ── */}
       {priceHistory.length > 1 && (
         <div style={{
           background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)',
@@ -315,10 +399,14 @@ export default function SetPageClient({ slug }: { slug: string }) {
         </div>
       )}
 
-      {/* ── Sort + card count ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
         <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0, fontFamily: "'Figtree', sans-serif" }}>
-          {cards.length} cards
+          {regularCards.length} cards
+          {sealedCards.length > 0 && (
+            <span style={{ marginLeft: 6, color: 'var(--text-muted)', opacity: 0.6 }}>
+              + {sealedCards.length} sealed ↓
+            </span>
+          )}
         </p>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {([
@@ -333,7 +421,6 @@ export default function SetPageClient({ slug }: { slug: string }) {
         </div>
       </div>
 
-      {/* ── Card grid ── */}
       {loading ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
           {Array.from({ length: 12 }).map((_, i) => (
@@ -347,37 +434,10 @@ export default function SetPageClient({ slug }: { slug: string }) {
           </p>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
-          {cards.map((c) => (
-            <Link
-              key={c.card_slug}
-              href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`}
-              className="card-hover holo-shimmer"
-              style={{
-                background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)',
-                padding: 14, textDecoration: 'none', color: 'var(--text)',
-                display: 'flex', flexDirection: 'column', alignItems: 'center',
-              }}
-            >
-              {c.image_url ? (
-                <img src={c.image_url} alt={c.card_name} style={{ width: 110, height: 154, objectFit: 'contain', marginBottom: 8, borderRadius: 6 }} loading="lazy" />
-              ) : (
-                <div style={{ width: 110, height: 154, background: 'var(--bg)', borderRadius: 6, marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, color: 'var(--border)' }}>🃏</div>
-              )}
-              <div style={{ fontWeight: 600, fontSize: 13, textAlign: 'center', marginBottom: 3, lineHeight: 1.3, fontFamily: "'Figtree', sans-serif", display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                {c.card_name}
-              </div>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-                Raw: {formatPrice(c.raw_usd)}
-              </div>
-              {c.psa10_usd && c.psa10_usd > 0 && (
-                <div style={{ fontSize: 12, color: 'var(--accent-hover)', fontWeight: 500, fontFamily: "'Figtree', sans-serif" }}>
-                  PSA 10: {formatPrice(c.psa10_usd)}
-                </div>
-              )}
-            </Link>
-          ))}
-        </div>
+        <>
+          <CardGrid cards={regularCards} setName={setName} />
+          <SealedSection sealedCards={sealedCards} setName={setName} />
+        </>
       )}
     </div>
   )
