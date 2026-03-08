@@ -11,8 +11,148 @@ interface SetInfo {
   set_image_url: string | null
 }
 
-type SortOption = 'az' | 'za' | 'price_desc' | 'price_asc' | 'cards_desc'
+interface TrendingSet {
+  set_name: string
+  card_count: number
+  avg_raw_usd: number
+  total_raw_usd: number
+  avg_pct_30d: number
+  avg_pct_90d: number
+  total_pct_30d: number
+  total_pct_90d: number
+}
 
+interface TrendingSet {
+  set_name: string
+  card_count: number
+  avg_raw_usd: number
+  total_raw_usd: number
+  avg_pct_30d: number
+  avg_pct_90d: number
+  total_pct_30d: number
+  total_pct_90d: number
+}
+
+type SortOption = 'release_desc' | 'release_asc' | 'az' | 'za' | 'price_desc' | 'price_asc' | 'cards_desc'
+
+
+
+// ── Trending Sets Panel ───────────────────────────────────────
+function TrendingRow({ set, isRising }: { set: TrendingSet, isRising: boolean }) {
+  const color30 = isRising ? '#22c55e' : '#ef4444'
+  const color90 = (set.avg_pct_90d ?? 0) >= 0 ? '#22c55e' : '#ef4444'
+  const totalUsd = set.total_raw_usd >= 1000
+    ? `$${(set.total_raw_usd / 1000).toFixed(1)}k`
+    : `$${set.total_raw_usd.toFixed(0)}`
+
+  return (
+    <Link href={`/set/${encodeURIComponent(set.set_name)}`} style={{ textDecoration: 'none' }}>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 64px 64px 72px',
+        gap: 8,
+        alignItems: 'center',
+        padding: '9px 12px',
+        borderRadius: 10,
+        background: 'var(--card)',
+        border: '1px solid var(--border)',
+        cursor: 'pointer',
+        transition: 'transform 0.12s',
+      }}
+        onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.transform = 'translateX(3px)'}
+        onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.transform = ''}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div style={{
+            fontSize: 13, fontWeight: 700, color: 'var(--text)',
+            fontFamily: "'Figtree', sans-serif",
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>{set.set_name}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+            {set.card_count} cards · {totalUsd} total
+          </div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: color30, fontFamily: "'Figtree', sans-serif" }}>
+            {set.avg_pct_30d > 0 ? '+' : ''}{set.avg_pct_30d?.toFixed(1)}%
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>avg 30d</div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: color90, fontFamily: "'Figtree', sans-serif" }}>
+            {(set.avg_pct_90d ?? 0) > 0 ? '+' : ''}{set.avg_pct_90d?.toFixed(1)}%
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>avg 90d</div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: isRising ? '#22c55e' : '#ef4444', fontFamily: "'Figtree', sans-serif" }}>
+            {(set.total_pct_30d ?? 0) > 0 ? '+' : ''}{set.total_pct_30d?.toFixed(1)}%
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>set value</div>
+        </div>
+      </div>
+    </Link>
+  )
+}
+
+function TrendingSetsPanel({ data }: { data: { rising: TrendingSet[], falling: TrendingSet[] } }) {
+  return (
+    <div style={{
+      background: 'var(--card)',
+      border: '1px solid var(--border)',
+      borderRadius: 16,
+      padding: '20px 24px',
+      marginBottom: 28,
+    }}>
+      <div style={{ marginBottom: 16 }}>
+        <h2 style={{
+          fontSize: 18, fontWeight: 800, margin: '0 0 4px',
+          fontFamily: "'Playfair Display', serif", color: 'var(--text)',
+        }}>Set Momentum</h2>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0, fontFamily: "'Figtree', sans-serif" }}>
+          Which sets are gaining or losing value — averaged across all cards in the set
+        </p>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+        {/* Rising */}
+        <div>
+          <div style={{
+            fontSize: 11, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase',
+            color: '#22c55e', marginBottom: 10, fontFamily: "'Figtree', sans-serif",
+          }}>📈 Gaining</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {data.rising.map(s => <TrendingRow key={s.set_name} set={s} isRising={true} />)}
+            {data.rising.length === 0 && (
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>No data yet</p>
+            )}
+          </div>
+        </div>
+
+        {/* Falling */}
+        <div>
+          <div style={{
+            fontSize: 11, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase',
+            color: '#ef4444', marginBottom: 10, fontFamily: "'Figtree', sans-serif",
+          }}>📉 Cooling</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {data.falling.map(s => <TrendingRow key={s.set_name} set={s} isRising={false} />)}
+            {data.falling.length === 0 && (
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>No data yet</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <p style={{
+        fontSize: 11, color: 'var(--text-muted)', margin: '14px 0 0',
+        fontFamily: "'Figtree', sans-serif", borderTop: '1px solid var(--border)', paddingTop: 12,
+      }}>
+        Avg % = mean price change across all cards in set with 30d+ history · Set value % = total raw value change
+      </p>
+    </div>
+  )
+}
 
 // ── Set Insights Bar ─────────────────────────────────────────
 function SetInsightsBar({ sets }: { sets: SetInfo[] }) {
@@ -113,12 +253,23 @@ export default function BrowsePageClient() {
   const [search, setSearch] = useState('')
   const [sets, setSets] = useState<SetInfo[]>([])
   const [loading, setLoading] = useState(true)
-  const [sort, setSort] = useState<SortOption>('az')
+  const [sort, setSort] = useState<SortOption>('release_desc')
+  const [trendingSets, setTrendingSets] = useState<{ rising: TrendingSet[], falling: TrendingSet[] } | null>(null)
 
   useEffect(() => {
     async function loadSets() {
-      const { data, error } = await supabase.rpc('get_set_list_v2')
-      if (data && !error) setSets(data)
+      const [setsRes, trendRes] = await Promise.all([
+        supabase.rpc('get_set_list_v2'),
+        supabase.rpc('get_trending_sets', { lim: 8 }),
+      ])
+      if (setsRes.data && !setsRes.error) setSets(setsRes.data)
+      if (trendRes.data) {
+        const d = trendRes.data
+        setTrendingSets({
+          rising: d.rising ?? [],
+          falling: d.falling ?? [],
+        })
+      }
       setLoading(false)
     }
     loadSets()
@@ -128,6 +279,8 @@ export default function BrowsePageClient() {
     .filter((s) => s.set_name.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => {
       switch (sort) {
+        case 'release_desc': return new Date(b.set_release_date || '1900-01-01').getTime() - new Date(a.set_release_date || '1900-01-01').getTime()
+        case 'release_asc': return new Date(a.set_release_date || '1900-01-01').getTime() - new Date(b.set_release_date || '1900-01-01').getTime()
         case 'az': return a.set_name.localeCompare(b.set_name)
         case 'za': return b.set_name.localeCompare(a.set_name)
         case 'price_desc': return (b.avg_raw_usd || 0) - (a.avg_raw_usd || 0)
@@ -147,6 +300,11 @@ export default function BrowsePageClient() {
         Browse all {sets.length} sets in our database. Click any set to see prices, trends and grading data.
       </p>
 
+      {/* Trending Sets Panel */}
+      {!loading && trendingSets && (trendingSets.rising.length > 0 || trendingSets.falling.length > 0) && (
+        <TrendingSetsPanel data={trendingSets} />
+      )}
+
       {/* Set Insights Bar */}
       {!loading && <SetInsightsBar sets={sets} />}
 
@@ -165,6 +323,8 @@ export default function BrowsePageClient() {
         />
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {([
+            ['release_desc', 'Newest First'],
+            ['release_asc', 'Oldest First'],
             ['az', 'A-Z'],
             ['za', 'Z-A'],
             ['price_desc', 'Highest Avg'],
