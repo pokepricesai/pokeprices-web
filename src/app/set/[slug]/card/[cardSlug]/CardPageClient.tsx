@@ -547,84 +547,125 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
         </div>
       </div>
 
-      {/* ── Collector Verdict ───────────────────────────────────────── */}
-      {signals.length > 0 && (
-        <Panel>
-          <SectionLabel>Collector Verdict</SectionLabel>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {signals.map((s, i) => <SignalRow key={i} {...s} />)}
-          </div>
-          <p style={{
-            fontSize: 11, color: 'var(--text-muted)', margin: '14px 0 0',
-            fontFamily: "'Figtree', sans-serif", lineHeight: 1.5,
-          }}>
-            Signals are calculated from price history, PSA population, and market trends. Not financial advice.
-          </p>
-        </Panel>
-      )}
+      {/* ── Collector Intel (merged verdict + market stats) ──────────── */}
+      {(() => {
+        // Build all tiles — only include those with real data
+        const tiles: { label: string; value: string; sub?: string; highlight?: boolean; color?: string }[] = []
 
-      {/* ── Market Stats ────────────────────────────────────────────── */}
-      {(drawdown != null || salesMonthly != null || raw.slope_30d != null || raw.volatility_30d != null || psa10Multiple != null) && (
-        <Panel>
-          <SectionLabel>Market Stats</SectionLabel>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 10, marginBottom: 16 }}>
-            {drawdown != null && (
-              <StatTile
-                label="vs All-Time High"
-                value={`${drawdown.toFixed(0)}%`}
-                sub={athUsd ? `ATH ~$${athUsd}` : undefined}
-                highlight={drawdown < -30}
-              />
-            )}
-            {salesMonthly != null && (
-              <StatTile label="Sales / 30d" value={salesMonthly.toString()} sub="eBay sold" />
-            )}
-            {/* Only show slope if 30d % is trustworthy */}
-            {raw.slope_30d != null && pctQuality(trend?.raw_pct_30d) !== 'suppress' && (
-              <StatTile
-                label="30d Slope"
-                value={parseFloat(raw.slope_30d) >= 0
-                  ? `↑ ${Math.abs(parseFloat(raw.slope_30d)).toFixed(0)}`
-                  : `↓ ${Math.abs(parseFloat(raw.slope_30d)).toFixed(0)}`}
-                sub="price momentum"
-              />
-            )}
-            {raw.volatility_30d != null && (
-              <StatTile
-                label="Price Stability"
-                value={parseFloat(raw.volatility_30d) < 5 ? 'Steady' : parseFloat(raw.volatility_30d) < 15 ? 'Moderate' : 'Volatile'}
-                sub={`${parseFloat(raw.volatility_30d).toFixed(1)}% day-to-day swing`}
-              />
-            )}
-            {psa10Multiple != null && (
-              <StatTile
-                label="Raw → PSA 10"
-                value={`${psa10Multiple.toFixed(1)}x`}
-                sub="grade multiplier"
-                highlight={psa10Multiple < 2}
-              />
-            )}
-          </div>
+        // PSA 10 multiplier
+        if (psa10Multiple != null) tiles.push({
+          label: 'Raw → PSA 10',
+          value: `${psa10Multiple.toFixed(1)}x`,
+          sub: psa10Multiple < 2 ? 'Great grade value' : psa10Multiple > 10 ? 'High-risk grade' : 'Grade multiplier',
+          highlight: psa10Multiple < 2,
+        })
 
-          {liquidityScore != null && (
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <span style={{
-                  fontSize: 10, fontWeight: 800, color: 'var(--text-muted)',
-                  fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase', letterSpacing: 1.5,
-                }}>Liquidity</span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>
-                  {liquidityLabel}
-                </span>
-              </div>
-              <MeterBar
-                value={liquidityScore}
-                color={liquidityScore >= 70 ? 'var(--green)' : liquidityScore >= 35 ? '#f59e0b' : '#ef4444'}
-              />
+        // PSA 9 multiplier
+        if (psa9Multiple != null) tiles.push({
+          label: 'Raw → PSA 9',
+          value: `${psa9Multiple.toFixed(1)}x`,
+          sub: 'Grade multiplier',
+        })
+
+        // Gem rate
+        if (gemRate != null) tiles.push({
+          label: 'Gem Rate (PSA 10)',
+          value: `${gemRate.toFixed(1)}%`,
+          sub: gemRate < 5 ? 'Hard to gem — scarce' : gemRate > 40 ? 'Common gem — high supply' : 'Average difficulty',
+          highlight: gemRate < 5,
+        })
+
+        // PSA population
+        if (psaPop?.total_graded) tiles.push({
+          label: 'Total PSA Graded',
+          value: psaPop.total_graded.toLocaleString(),
+          sub: psaPop.psa_10 ? `${psaPop.psa_10.toLocaleString()} PSA 10s` : undefined,
+        })
+
+        // vs ATH
+        if (drawdown != null) tiles.push({
+          label: 'vs All-Time High',
+          value: `${drawdown.toFixed(0)}%`,
+          sub: athUsd ? `ATH ~$${athUsd}` : 'from peak',
+          highlight: drawdown < -30,
+        })
+
+        // Sales volume
+        if (salesMonthly != null) tiles.push({
+          label: 'Sales / 30d',
+          value: salesMonthly.toString(),
+          sub: salesMonthly >= 10 ? 'Liquid market' : salesMonthly >= 3 ? 'Moderate volume' : 'Thin market',
+        })
+
+        // Momentum (only if trustworthy)
+        const pct30dQualityLocal = pctQuality(trend?.raw_pct_30d)
+        if (trend?.raw_pct_30d != null && pct30dQualityLocal === 'clean') tiles.push({
+          label: '30d Price Move',
+          value: `${trend.raw_pct_30d > 0 ? '+' : ''}${trend.raw_pct_30d.toFixed(1)}%`,
+          sub: trend.raw_pct_30d > 0 ? 'Rising' : 'Falling',
+          color: trend.raw_pct_30d > 0 ? 'var(--green)' : '#ef4444',
+        })
+
+        // Price stability
+        if (raw.volatility_30d != null) {
+          const v = parseFloat(raw.volatility_30d)
+          tiles.push({
+            label: 'Price Stability',
+            value: v < 5 ? 'Steady' : v < 15 ? 'Moderate' : 'Volatile',
+            sub: `${v.toFixed(1)}% daily swing`,
+          })
+        }
+
+        // Liquidity
+        if (liquidityScore != null) tiles.push({
+          label: 'Liquidity',
+          value: liquidityScore >= 70 ? 'High' : liquidityScore >= 35 ? 'Medium' : 'Low',
+          sub: liquidityScore >= 70 ? 'Sells quickly' : liquidityScore >= 35 ? 'May take weeks' : 'Patient seller needed',
+          color: liquidityScore >= 70 ? 'var(--green)' : liquidityScore < 35 ? '#ef4444' : undefined,
+        })
+
+        // Expected grading value
+        if (expectedValueCents != null) tiles.push({
+          label: 'Expected Grade Value',
+          value: `${expectedValueCents > 0 ? '+' : ''}$${(expectedValueCents / 100).toFixed(0)}`,
+          sub: gemRate != null ? `at ${gemRate.toFixed(1)}% gem rate` : 'probability-weighted',
+          highlight: expectedValueCents > 0,
+        })
+
+        if (tiles.length === 0) return null
+
+        return (
+          <Panel>
+            <SectionLabel>Collector Intel</SectionLabel>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10, marginBottom: liquidityScore != null ? 16 : 0 }}>
+              {tiles.map((t, i) => (
+                <div key={i} style={{
+                  background: t.highlight ? 'rgba(26,95,173,0.06)' : 'var(--bg-light)',
+                  border: `1px solid ${t.highlight ? 'rgba(26,95,173,0.2)' : 'transparent'}`,
+                  borderRadius: 10, padding: '12px 14px',
+                }}>
+                  <div style={{
+                    fontSize: 18, fontWeight: 800, lineHeight: 1, marginBottom: 4,
+                    fontFamily: "'Figtree', sans-serif",
+                    color: t.color ?? 'var(--text)',
+                  }}>{t.value}</div>
+                  <div style={{
+                    fontSize: 10, fontWeight: 700, color: 'var(--text-muted)',
+                    fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase', letterSpacing: 1,
+                  }}>{t.label}</div>
+                  {t.sub && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3, fontFamily: "'Figtree', sans-serif" }}>{t.sub}</div>}
+                </div>
+              ))}
             </div>
-          )}
-        </Panel>
-      )}
+            <p style={{
+              fontSize: 11, color: 'var(--text-muted)', margin: '14px 0 0',
+              fontFamily: "'Figtree', sans-serif", lineHeight: 1.5,
+            }}>
+              Calculated from price history, PSA population data, and market trends. Not financial advice.
+            </p>
+          </Panel>
+        )
+      })()}
 
       {/* ── Grading Calculator ──────────────────────────────────────── */}
       {card.raw_usd && card.psa10_usd && (
