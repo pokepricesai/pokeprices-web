@@ -9,16 +9,111 @@ interface SetInfo {
   card_count: number
   avg_raw_usd: number | null
   set_image_url: string | null
-  set_release_date: string | null
 }
 
-type SortOption = 'release_desc' | 'az' | 'za' | 'price_desc' | 'price_asc' | 'cards_desc'
+type SortOption = 'az' | 'za' | 'price_desc' | 'price_asc' | 'cards_desc'
+
+
+// ── Set Insights Bar ─────────────────────────────────────────
+function SetInsightsBar({ sets }: { sets: SetInfo[] }) {
+  if (!sets.length) return null
+
+  const withPrice = sets.filter(s => s.avg_raw_usd && s.avg_raw_usd > 0)
+
+  // Total set value = avg_raw_usd (in cents) * card_count
+  const byTotalValue = [...withPrice].sort((a, b) =>
+    (b.avg_raw_usd! * b.card_count) - (a.avg_raw_usd! * a.card_count)
+  )
+  const byAvgPrice = [...withPrice].sort((a, b) => b.avg_raw_usd! - a.avg_raw_usd!)
+  const byCardCount = [...sets].sort((a, b) => b.card_count - a.card_count)
+
+  const topValue = byTotalValue[0]
+  const topAvg = byAvgPrice[0]
+  const biggest = byCardCount[0]
+
+  const totalMarket = withPrice.reduce((sum, s) => sum + (s.avg_raw_usd! * s.card_count), 0)
+
+  const stats = [
+    {
+      icon: '👑',
+      label: 'Most Valuable Set',
+      value: topValue?.set_name ?? '—',
+      sub: topValue ? `$${((topValue.avg_raw_usd! * topValue.card_count) / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })} total raw value` : '',
+      href: topValue ? `/set/${encodeURIComponent(topValue.set_name)}` : null,
+    },
+    {
+      icon: '💰',
+      label: 'Highest Avg Card Price',
+      value: topAvg?.set_name ?? '—',
+      sub: topAvg ? `$${(topAvg.avg_raw_usd! / 100).toFixed(2)} avg per card` : '',
+      href: topAvg ? `/set/${encodeURIComponent(topAvg.set_name)}` : null,
+    },
+    {
+      icon: '📦',
+      label: 'Largest Set',
+      value: biggest?.set_name ?? '—',
+      sub: biggest ? `${biggest.card_count.toLocaleString()} cards` : '',
+      href: biggest ? `/set/${encodeURIComponent(biggest.set_name)}` : null,
+    },
+    {
+      icon: '📊',
+      label: 'Total Tracked Value',
+      value: `$${(totalMarket / 100 / 1000000).toFixed(1)}M`,
+      sub: `across ${withPrice.length} sets`,
+      href: null,
+    },
+  ]
+
+  return (
+    <div style={{
+      background: 'linear-gradient(135deg, rgba(26,95,173,0.06), rgba(59,130,246,0.04))',
+      border: '1px solid rgba(26,95,173,0.15)',
+      borderRadius: 16, padding: '20px 24px', marginBottom: 28,
+    }}>
+      <p style={{
+        fontSize: 11, fontWeight: 800, letterSpacing: 2, textTransform: 'uppercase',
+        color: 'var(--text-muted)', margin: '0 0 14px', fontFamily: "'Figtree', sans-serif",
+      }}>Set Insights</p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
+        {stats.map(stat => {
+          const inner = (
+            <div key={stat.label} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                <span style={{ fontSize: 16 }}>{stat.icon}</span>
+                <span style={{
+                  fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
+                  textTransform: 'uppercase', letterSpacing: 0.5,
+                  fontFamily: "'Figtree', sans-serif",
+                }}>{stat.label}</span>
+              </div>
+              <div style={{
+                fontSize: 14, fontWeight: 800, color: stat.href ? 'var(--primary)' : 'var(--text)',
+                fontFamily: "'Figtree', sans-serif", lineHeight: 1.3,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>{stat.value}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+                {stat.sub}
+              </div>
+            </div>
+          )
+          return stat.href ? (
+            <Link key={stat.label} href={stat.href} style={{ textDecoration: 'none' }}>
+              {inner}
+            </Link>
+          ) : (
+            <div key={stat.label}>{inner}</div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 export default function BrowsePageClient() {
   const [search, setSearch] = useState('')
   const [sets, setSets] = useState<SetInfo[]>([])
   const [loading, setLoading] = useState(true)
-  const [sort, setSort] = useState<SortOption>('release_desc')
+  const [sort, setSort] = useState<SortOption>('az')
 
   useEffect(() => {
     async function loadSets() {
@@ -33,7 +128,6 @@ export default function BrowsePageClient() {
     .filter((s) => s.set_name.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => {
       switch (sort) {
-        case 'release_desc': return new Date(b.set_release_date || '1900-01-01').getTime() - new Date(a.set_release_date || '1900-01-01').getTime()
         case 'az': return a.set_name.localeCompare(b.set_name)
         case 'za': return b.set_name.localeCompare(a.set_name)
         case 'price_desc': return (b.avg_raw_usd || 0) - (a.avg_raw_usd || 0)
@@ -53,6 +147,9 @@ export default function BrowsePageClient() {
         Browse all {sets.length} sets in our database. Click any set to see prices, trends and grading data.
       </p>
 
+      {/* Set Insights Bar */}
+      {!loading && <SetInsightsBar sets={sets} />}
+
       {/* Search + Sort */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
         <input
@@ -68,7 +165,6 @@ export default function BrowsePageClient() {
         />
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {([
-            ['release_desc', 'Newest First'],
             ['az', 'A-Z'],
             ['za', 'Z-A'],
             ['price_desc', 'Highest Avg'],
@@ -124,11 +220,6 @@ export default function BrowsePageClient() {
                 }}>{s.set_name}</div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2, fontFamily: "'Figtree', sans-serif" }}>
                   {s.card_count} cards
-                  {s.set_release_date && (
-                    <span style={{ marginLeft: 8 }}>
-                      · {new Date(s.set_release_date).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}
-                    </span>
-                  )}
                 </div>
                 {s.avg_raw_usd !== null && s.avg_raw_usd > 0 && (
                   <div style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 600, fontFamily: "'Figtree', sans-serif" }}>
