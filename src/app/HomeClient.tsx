@@ -145,7 +145,6 @@ export default function HomeClient() {
   const [totalMarket, setTotalMarket] = useState<{ value: number, pct30d: number | null } | null>(null)
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReportRow[]>([])
   const [heatmap, setHeatmap] = useState<HeatmapCard[]>([])
-  const [heatPeriod, setHeatPeriod] = useState<'7d' | '30d' | '90d'>('30d')
   const [hiddenGems, setHiddenGems] = useState<HiddenGem[]>([])
 
   // Countdown timer
@@ -203,16 +202,15 @@ export default function HomeClient() {
     return () => { cancelled = true }
   }, [])
 
-  // Heatmap — reload when period changes
+  // Heatmap — top 30 cards by raw price, coloured by 30d change
   useEffect(() => {
     async function loadHeatmap() {
-      const res = await supabase.rpc('get_heatmap_cards', {
-        period: heatPeriod, grade_filter: 'all', price_max: 0, lim: 60,
-      })
-      if (res.data && res.data.length > 0) setHeatmap(res.data)
+      const res = await supabase.rpc('get_heatmap_top_cards', { lim: 30 })
+      const rows = res.data?.results ?? res.data
+      if (rows && rows.length > 0) setHeatmap(rows)
     }
     loadHeatmap()
-  }, [heatPeriod])
+  }, [])
 
   const sparklineData = marketIndex.slice(-30).map(r => r.total_raw_usd / 100)
   const marketUp = (totalMarket?.pct30d ?? 0) >= 0
@@ -294,7 +292,7 @@ export default function HomeClient() {
                 )}
               </div>
               <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: '4px 0 0', fontFamily: "'Figtree', sans-serif" }}>
-                Total tracked raw card value · {marketIndex.length > 0 ? `${marketIndex.length} data points from ${marketIndex[0].date.slice(0, 7)}` : ''}
+                Ungraded (raw) card values · {marketIndex.length > 0 ? `${marketIndex.length} data points from ${marketIndex[0].date.slice(0, 7)}` : ''}
               </p>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
@@ -339,9 +337,14 @@ export default function HomeClient() {
                       {row.set_name}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto' }}>
-                      <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>
-                        ${priceUsd >= 100 ? priceUsd.toFixed(0) : priceUsd.toFixed(2)}
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>
+                          ${priceUsd >= 100 ? priceUsd.toFixed(0) : priceUsd.toFixed(2)}
+                        </span>
+                        <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', background: 'var(--bg-light)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px', letterSpacing: 0.5, fontFamily: "'Figtree', sans-serif" }}>
+                          RAW
+                        </span>
+                      </div>
                       <span style={{ fontSize: 11, color, fontWeight: 700, fontFamily: "'Figtree', sans-serif", textAlign: 'right', maxWidth: 90 }}>
                         {row.metric_label}
                       </span>
@@ -356,24 +359,11 @@ export default function HomeClient() {
 
       {/* ── MARKET HEATMAP ────────────────────────────────────── */}
       <section style={{ padding: '8px 24px 40px', maxWidth: 960, margin: '0 auto' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
-          <div>
-            <h2 style={{ fontSize: 24, margin: '0 0 4px', fontFamily: "'Playfair Display', serif" }}>Market Heatmap</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0, fontFamily: "'Figtree', sans-serif" }}>
-              Price movement across the market — green rising, red falling
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {(['7d', '30d', '90d'] as const).map(p => (
-              <button key={p} onClick={() => setHeatPeriod(p)} style={{
-                padding: '6px 14px', borderRadius: 20, fontSize: 12, fontWeight: 700,
-                border: '1px solid var(--border)', cursor: 'pointer', fontFamily: "'Figtree', sans-serif",
-                background: heatPeriod === p ? '#1a5fad' : 'var(--card)',
-                color: heatPeriod === p ? '#fff' : 'var(--text-muted)',
-                transition: 'all 0.15s',
-              }}>{p}</button>
-            ))}
-          </div>
+        <div style={{ marginBottom: 16 }}>
+          <h2 style={{ fontSize: 24, margin: '0 0 4px', fontFamily: "'Playfair Display', serif" }}>Top 30 Most Valuable Cards</h2>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0, fontFamily: "'Figtree', sans-serif" }}>
+            Highest raw prices across every set — colour shows 30d price movement
+          </p>
         </div>
         {heatmap.length > 0 ? (
           <>
@@ -399,9 +389,12 @@ export default function HomeClient() {
                         </div>
                       )}
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>
-                          ${card.price_usd >= 100 ? Math.round(card.price_usd) : card.price_usd.toFixed(2)}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>
+                            ${card.price_usd >= 100 ? Math.round(card.price_usd) : card.price_usd.toFixed(2)}
+                          </span>
+                          <span style={{ fontSize: 8, fontWeight: 800, color: 'var(--text-muted)', opacity: 0.7, fontFamily: "'Figtree', sans-serif", letterSpacing: 0.3 }}>RAW</span>
+                        </div>
                         <span style={{ fontSize: 12, fontWeight: 800, color: text, fontFamily: "'Figtree', sans-serif" }}>
                           {card.pct_change > 0 ? '+' : ''}{card.pct_change.toFixed(1)}%
                         </span>
