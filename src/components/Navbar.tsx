@@ -1,16 +1,14 @@
 'use client'
 import Link from 'next/link'
 import { useState } from 'react'
-
 export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false)
-
   const navLinks = [
     { label: 'Insights', href: '/insights' },
+    { label: 'Pokémon', href: '/pokemon' },
     { label: 'Cards & Sets', href: '/browse' },
     { label: 'Contact', href: '/contact' },
   ]
-
   return (
     <nav style={{
       background: 'linear-gradient(135deg, #1a5fad, #2874c8)',
@@ -36,16 +34,13 @@ export default function Navbar() {
       >
         {menuOpen ? '✕' : '☰'}
       </button>
-
       
-
       {/* Logo centered */}
       <Link href="/" style={{
   textDecoration: 'none',
 }}>
   <img src="/logo.png" alt="PokePrices" style={{ height: 38 }} />
 </Link>
-
       {/* Desktop links */}
       <div style={{ display: 'flex', gap: 24, alignItems: 'center', marginLeft: 'auto' }} className="desktop-nav">
         {navLinks.map((item) => (
@@ -56,7 +51,6 @@ export default function Navbar() {
           }}>{item.label}</Link>
         ))}
       </div>
-
       {menuOpen && (
         <div style={{
           position: 'absolute', top: 60, left: 0, right: 0,
@@ -77,7 +71,6 @@ export default function Navbar() {
           ))}
         </div>
       )}
-
       <style jsx>{`
         @media (min-width: 768px) {
           .mobile-menu-btn { display: none !important; }
