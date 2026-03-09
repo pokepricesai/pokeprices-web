@@ -92,31 +92,49 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
       setPokeData(poke)
       setSpeciesData(species)
 
-      // Fetch cards from Supabase — match by name containing the pokemon name
+      // Fetch cards from Supabase — exclude sealed, no limit, paginate
       const displayName = slug.split('-').map((w: string) => w[0].toUpperCase() + w.slice(1)).join(' ')
-      // Try exact match first, then broader
-      const { data: cardData } = await supabase
-        .from('cards')
-        .select('card_name, set_name, card_url_slug, image_url, card_number, is_sealed')
-        .ilike('card_name', `%${displayName}%`)
-        .order('set_name')
-        .limit(500)
 
-      if (cardData && cardData.length > 0) {
-        // Get prices for these cards
-        const slugs = cardData.map((c: any) => c.card_url_slug).filter(Boolean)
-        const { data: priceData } = await supabase
-          .from('card_trends')
-          .select('card_name, set_name, current_raw, current_psa10')
-          .in('card_name', cardData.map((c: any) => c.card_name))
+      // Paginate to get all matching cards (no 1000-row limit)
+      let allCardData: any[] = []
+      let page = 0
+      let done = false
+      while (!done) {
+        const { data, error } = await supabase
+          .from('cards')
+          .select('card_name, set_name, card_url_slug, image_url, card_number, is_sealed')
+          .ilike('card_name', `%${displayName}%`)
+          .eq('is_sealed', false)
+          .order('set_name')
+          .range(page * 1000, page * 1000 + 999)
+        if (error || !data || data.length === 0) { done = true; break }
+        allCardData = [...allCardData, ...data]
+        if (data.length < 1000) done = true
+        page++
+      }
+
+      if (allCardData.length > 0) {
+        // Get unique card names to fetch prices
+        const uniqueNames = [...new Set(allCardData.map((c: any) => c.card_name))]
+
+        // Paginate prices too if needed
+        let allPrices: any[] = []
+        for (let i = 0; i < uniqueNames.length; i += 100) {
+          const batch = uniqueNames.slice(i, i + 100)
+          const { data: priceData } = await supabase
+            .from('card_trends')
+            .select('card_name, set_name, current_raw, current_psa10')
+            .in('card_name', batch)
+          if (priceData) allPrices = [...allPrices, ...priceData]
+        }
 
         const priceMap: Record<string, any> = {}
-        priceData?.forEach((p: any) => {
+        allPrices.forEach((p: any) => {
           const key = `${p.card_name}|||${p.set_name}`
           priceMap[key] = p
         })
 
-        const enriched: Card[] = cardData.map((c: any) => {
+        const enriched: Card[] = allCardData.map((c: any) => {
           const key = `${c.card_name}|||${c.set_name}`
           const price = priceMap[key]
           return {
@@ -322,7 +340,7 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
-            {sortedCards.filter(c => !c.is_sealed).map((card, i) => (
+            {sortedCards.map((card, i) => (
               <Link key={i} href={`/set/${encodeURIComponent(card.set_name)}/card/${card.card_url_slug}`} style={{ textDecoration: 'none' }}>
                 <div style={{
                   background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12,
