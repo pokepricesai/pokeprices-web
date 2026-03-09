@@ -387,11 +387,15 @@ export default function SetPageClient({ slug }: { slug: string }) {
           {sealedCards.length > 0 && <span style={{ marginLeft: 6, opacity: 0.6 }}>· <a href="#sealed" style={{ color: 'var(--text-muted)', textDecoration: 'none' }}>{sealedCards.length} sealed ↓</a></span>}
         </p>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {(['raw_desc', 'Highest Raw'] as const) && (
-            ([['raw_desc', 'Highest Raw'], ['raw_asc', 'Lowest Raw'], ['psa10_desc', 'Highest PSA 10'], ['name_asc', 'Name A-Z'], ['number_asc', 'Card #']] as [SortOption, string][]).map(([val, label]) => (
-              <button key={val} className={`sort-btn ${sort === val ? 'active' : ''}`} onClick={() => setSort(val)} style={{ fontFamily: "'Figtree', sans-serif" }}>{label}</button>
-            ))
-          )}
+          {(([
+            ['raw_desc',   'Highest Raw'],
+            ['raw_asc',    'Lowest Raw'],
+            ['psa10_desc', 'Highest PSA 10'],
+            ['name_asc',   'Name A-Z'],
+            ['number_asc', 'Card #'],
+          ] as [SortOption, string][]).map(([val, label]) => (
+            <button key={val} className={`sort-btn ${sort === val ? 'active' : ''}`} onClick={() => setSort(val)} style={{ fontFamily: "'Figtree', sans-serif" }}>{label}</button>
+          )))}
         </div>
       </div>
 
