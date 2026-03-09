@@ -220,19 +220,17 @@ export default function BrowsePageClient() {
           style={{ flex: 1, minWidth: 200, padding: '10px 16px', fontSize: 14, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--card)', color: 'var(--text)', fontFamily: "'Figtree', sans-serif", outline: 'none' }}
         />
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {(['release_desc', 'Newest First'], ['release_asc', 'Oldest First'], ['az', 'A-Z'], ['za', 'Z-A'], ['price_desc', 'Highest Avg'], ['price_asc', 'Lowest Avg'], ['cards_desc', 'Most Cards']) && (
-            ([
-              ['release_desc', 'Newest First'],
-              ['release_asc', 'Oldest First'],
-              ['az', 'A-Z'],
-              ['za', 'Z-A'],
-              ['price_desc', 'Highest Avg'],
-              ['price_asc', 'Lowest Avg'],
-              ['cards_desc', 'Most Cards'],
-            ] as [SortOption, string][]).map(([val, label]) => (
-              <button key={val} className={`sort-btn ${sort === val ? 'active' : ''}`} onClick={() => setSort(val)} style={{ fontFamily: "'Figtree', sans-serif" }}>{label}</button>
-            ))
-          )}
+          {(([
+            ['release_desc', 'Newest First'],
+            ['release_asc', 'Oldest First'],
+            ['az', 'A-Z'],
+            ['za', 'Z-A'],
+            ['price_desc', 'Highest Avg'],
+            ['price_asc', 'Lowest Avg'],
+            ['cards_desc', 'Most Cards'],
+          ] as [SortOption, string][]).map(([val, label]) => (
+            <button key={val} className={`sort-btn ${sort === val ? 'active' : ''}`} onClick={() => setSort(val)} style={{ fontFamily: "'Figtree', sans-serif" }}>{label}</button>
+          )))}
         </div>
       </div>
 
