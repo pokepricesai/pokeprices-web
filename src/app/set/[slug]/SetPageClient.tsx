@@ -146,32 +146,25 @@ function SetHeader({ setName }: { setName: string }) {
         ← Back to sets
       </Link>
 
-      {/* Era / Logo / Symbol row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 12, flexWrap: 'wrap' }}>
-        {/* Era badge */}
-        {eraUrl && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--bg-light)', borderRadius: 20, padding: '4px 10px 4px 4px', border: '1px solid var(--border)' }}>
-            <img src={eraUrl} alt={eraDisplay ?? ''} style={{ height: 22, width: 'auto', objectFit: 'contain' }} loading="lazy" />
-            {eraDisplay && (
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap' }}>
-                {eraDisplay}
-              </span>
-            )}
-          </div>
-        )}
+      {/* Era row — no box, just image + label */}
+      {eraUrl && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <img src={eraUrl} alt={eraDisplay ?? ''} style={{ height: 22, width: 'auto', objectFit: 'contain' }} loading="lazy" />
+          {eraDisplay && (
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap' }}>
+              {eraDisplay}
+            </span>
+          )}
+        </div>
+      )}
 
-        {/* Symbol badge */}
-        {symbolUrl && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, background: 'var(--bg-light)', borderRadius: '50%', border: '1px solid var(--border)' }}>
-            <img src={symbolUrl} alt="" style={{ width: 20, height: 20, objectFit: 'contain' }} loading="lazy" />
-          </div>
-        )}
-      </div>
-
-      {/* Set logo + name */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+      {/* Set logo + symbol + name */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
         {logoUrl && (
           <img src={logoUrl} alt={setName} style={{ height: 56, width: 'auto', objectFit: 'contain', maxWidth: 240 }} loading="eager" />
+        )}
+        {symbolUrl && (
+          <img src={symbolUrl} alt="" style={{ width: 28, height: 28, objectFit: 'contain' }} loading="lazy" />
         )}
         <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: logoUrl ? 26 : 34, fontWeight: 700, margin: 0, color: 'var(--text)', letterSpacing: '-0.5px', lineHeight: 1.2 }}>
           {setName}
