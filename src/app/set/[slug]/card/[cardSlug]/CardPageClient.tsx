@@ -5,6 +5,7 @@ import { supabase, formatPrice, formatPct } from '@/lib/supabase'
 import InlineChat from '@/components/InlineChat'
 import PriceChart from '@/components/PriceChart'
 import CardStructuredData from '@/components/CardStructuredData'
+import { getSetAssets } from '@/lib/setAssets'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -30,20 +31,16 @@ function buildEbayUrl(cardName: string, setName: string, cardNumber: string | nu
 }
 
 // ─── Data quality policy ─────────────────────────────────────────────────────
-// Thresholds are calibrated per time period — a 200% move in 2 years is normal;
-// a 200% move in 7 days almost certainly means a stale anchor price.
-// 2y and 5y are never flagged — multi-year compounding is expected and legitimate.
-
 type PctQuality = 'clean' | 'warn' | 'suppress'
 
 const PERIOD_THRESHOLDS: Record<string, { warn: number; suppress: number }> = {
-  '7d':   { warn: 50,  suppress: 200 },
-  '30d':  { warn: 100, suppress: 300 },
-  '90d':  { warn: 200, suppress: 500 },
-  '180d': { warn: 300, suppress: 700 },
-  '1y':   { warn: 400, suppress: 900 },
-  '2y':   { warn: Infinity, suppress: Infinity }, // never flag
-  '5y':   { warn: Infinity, suppress: Infinity }, // never flag
+  '7d':   { warn: 50,       suppress: 200 },
+  '30d':  { warn: 100,      suppress: 300 },
+  '90d':  { warn: 200,      suppress: 500 },
+  '180d': { warn: 300,      suppress: 700 },
+  '1y':   { warn: 400,      suppress: 900 },
+  '2y':   { warn: Infinity, suppress: Infinity },
+  '5y':   { warn: Infinity, suppress: Infinity },
 }
 
 function pctQuality(pct: number | null, period = '30d'): PctQuality {
@@ -55,7 +52,6 @@ function pctQuality(pct: number | null, period = '30d'): PctQuality {
   return 'clean'
 }
 
-// Returns what to render for a trend % cell
 function TrendCell({ val, label }: { val: number | null; label: string }) {
   const quality = pctQuality(val, label)
   if (val == null || quality === 'suppress') {
@@ -85,15 +81,13 @@ function TrendCell({ val, label }: { val: number | null; label: string }) {
   )
 }
 
-// Hero banner — only show if the move is clean or warn (with caveat), never for suppress
-// Also suppressed entirely when insight text is present (avoids duplicate messaging)
 function HeroBanner({ trend, hasInsight }: { trend: any; hasInsight: boolean }) {
   if (!trend || hasInsight) return null
 
   const periods = [
     { label: '30d', val: trend.raw_pct_30d },
-    { label: '7d', val: trend.raw_pct_7d },
-    { label: '90d', val: trend.raw_pct_90d },
+    { label: '7d',  val: trend.raw_pct_7d  },
+    { label: '90d', val: trend.raw_pct_90d  },
   ]
   const main = periods.find(p => p.val != null)
   if (!main || main.val == null) return null
@@ -212,9 +206,9 @@ function StatTile({ label, value, sub, highlight = false }: {
 
 function SignalRow({ label, value, type }: { label: string; value: string; type: 'good' | 'warn' | 'neutral' }) {
   const colors = {
-    good: { text: 'var(--green)', bg: 'rgba(39,174,96,0.08)' },
-    warn: { text: '#e07b39', bg: 'rgba(224,123,57,0.08)' },
-    neutral: { text: 'var(--text)', bg: 'var(--bg-light)' },
+    good:    { text: 'var(--green)',  bg: 'rgba(39,174,96,0.08)'  },
+    warn:    { text: '#e07b39',       bg: 'rgba(224,123,57,0.08)' },
+    neutral: { text: 'var(--text)',   bg: 'var(--bg-light)'       },
   }
   const c = colors[type]
   return (
@@ -303,7 +297,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
         if (listingsData) setEbayListings(listingsData)
       }
 
-      // High-confidence listing count for Collector Intel
       const { count } = await supabase
         .from('ebay_listings')
         .select('*', { count: 'exact', head: true })
@@ -342,12 +335,12 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   const raw = metrics?.results?.[0] || metrics || {}
 
   const grades = [
-    { label: 'Raw', value: card.raw_usd },
-    { label: 'PSA 7', value: card.psa7_usd },
-    { label: 'PSA 8', value: card.psa8_usd },
-    { label: 'PSA 9', value: card.psa9_usd },
+    { label: 'Raw',    value: card.raw_usd   },
+    { label: 'PSA 7',  value: card.psa7_usd  },
+    { label: 'PSA 8',  value: card.psa8_usd  },
+    { label: 'PSA 9',  value: card.psa9_usd  },
     { label: 'PSA 10', value: card.psa10_usd },
-    { label: 'CGC 9.5', value: card.cgc95_usd },
+    { label: 'CGC 9.5',value: card.cgc95_usd },
   ]
 
   const hasAnyTrend = trend && (
@@ -355,20 +348,18 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
     trend.raw_pct_90d !== null || trend.raw_pct_180d !== null || trend.raw_pct_365d !== null
   )
 
-  // Apply quality filter: suppress any period where the % is unreliably large
   const trendPeriods = hasAnyTrend ? [
-    { label: '7d', val: trend.raw_pct_7d },
-    { label: '30d', val: trend.raw_pct_30d },
-    { label: '90d', val: trend.raw_pct_90d },
+    { label: '7d',   val: trend.raw_pct_7d   },
+    { label: '30d',  val: trend.raw_pct_30d  },
+    { label: '90d',  val: trend.raw_pct_90d  },
     { label: '180d', val: trend.raw_pct_180d },
-    { label: '1y', val: trend.raw_pct_365d },
-    { label: '2y', val: trend.raw_pct_2y },
-    { label: '5y', val: trend.raw_pct_5y },
+    { label: '1y',   val: trend.raw_pct_365d },
+    { label: '2y',   val: trend.raw_pct_2y   },
+    { label: '5y',   val: trend.raw_pct_5y   },
   ] : []
 
-  // Grade multiples
   const psa10Multiple = card.psa10_usd && card.raw_usd ? card.psa10_usd / card.raw_usd : null
-  const psa9Multiple = card.psa9_usd && card.raw_usd ? card.psa9_usd / card.raw_usd : null
+  const psa9Multiple  = card.psa9_usd  && card.raw_usd ? card.psa9_usd  / card.raw_usd : null
 
   const gradingCostCents = 2500
   const gradingProfitCents = card.raw_usd && card.psa10_usd
@@ -393,62 +384,59 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   const expectedValueCents: number | null = card.raw_usd && card.psa10_usd && gemRate != null
     ? (() => {
         const p10 = gemRate / 100
-        const p9 = (1 - p10) * 0.6
+        const p9  = (1 - p10) * 0.6
         const p9val = card.psa9_usd ?? Math.round(card.psa10_usd * 0.25)
         const expectedReturn = (p10 * card.psa10_usd) + (p9 * p9val) + ((1 - p10 - p9) * card.raw_usd * 0.8)
         return Math.round(expectedReturn - card.raw_usd - gradingCostCents)
       })()
     : null
-  const isLotteryCard = psa10Multiple != null && psa10Multiple > 15
-  const totalGraded = psaPop?.total_graded ?? null
-  const psa10Count = psaPop?.psa_10 ?? null
+
+  const isLotteryCard  = psa10Multiple != null && psa10Multiple > 15
+  const totalGraded    = psaPop?.total_graded ?? null
+  const psa10Count     = psaPop?.psa_10 ?? null
 
   const gradeMultiples = [
-    { label: 'PSA 9', value: card.psa9_usd, multiple: psa9Multiple },
+    { label: 'PSA 9',  value: card.psa9_usd,  multiple: psa9Multiple  },
     { label: 'PSA 10', value: card.psa10_usd, multiple: psa10Multiple },
   ].filter(g => g.value && g.multiple)
 
-  // Collector verdict signals — only add momentum if the % is trustworthy
   const signals: { label: string; value: string; type: 'good' | 'warn' | 'neutral' }[] = []
 
   if (drawdown != null) {
-    if (drawdown < -40) signals.push({ label: 'vs All-Time High', value: `${drawdown.toFixed(0)}% below peak`, type: 'good' })
-    else if (drawdown < -15) signals.push({ label: 'vs All-Time High', value: `${drawdown.toFixed(0)}% below peak`, type: 'neutral' })
-    else signals.push({ label: 'vs All-Time High', value: `Near peak (${drawdown.toFixed(0)}%)`, type: 'warn' })
+    if (drawdown < -40)      signals.push({ label: 'vs All-Time High', value: `${drawdown.toFixed(0)}% below peak`,  type: 'good'    })
+    else if (drawdown < -15) signals.push({ label: 'vs All-Time High', value: `${drawdown.toFixed(0)}% below peak`,  type: 'neutral' })
+    else                     signals.push({ label: 'vs All-Time High', value: `Near peak (${drawdown.toFixed(0)}%)`, type: 'warn'    })
   }
 
-  // Only add 30d momentum signal if the number is trustworthy
   const pct30dQuality = pctQuality(trend?.raw_pct_30d, '30d')
   if (raw.slope_30d != null && pct30dQuality !== 'suppress') {
     const slope = parseFloat(raw.slope_30d)
-    if (slope > 50) signals.push({ label: '30d Momentum', value: 'Rising strongly', type: 'good' })
-    else if (slope > 0) signals.push({ label: '30d Momentum', value: 'Trending up', type: 'good' })
-    else if (slope < -50) signals.push({ label: '30d Momentum', value: 'Falling sharply', type: 'warn' })
-    else signals.push({ label: '30d Momentum', value: 'Flat / sideways', type: 'neutral' })
+    if      (slope > 50)  signals.push({ label: '30d Momentum', value: 'Rising strongly', type: 'good'    })
+    else if (slope > 0)   signals.push({ label: '30d Momentum', value: 'Trending up',     type: 'good'    })
+    else if (slope < -50) signals.push({ label: '30d Momentum', value: 'Falling sharply', type: 'warn'    })
+    else                  signals.push({ label: '30d Momentum', value: 'Flat / sideways', type: 'neutral' })
   }
 
   if (gemRate != null && card.psa10_usd && card.raw_usd) {
-    if (gemRate < 5 && psa10Multiple && psa10Multiple > 3)
-      signals.push({ label: 'PSA 10 Rarity', value: `${gemRate.toFixed(1)}% gem rate — scarce`, type: 'good' })
+    if      (gemRate < 5 && psa10Multiple && psa10Multiple > 3)
+      signals.push({ label: 'PSA 10 Rarity',  value: `${gemRate.toFixed(1)}% gem rate — scarce`,    type: 'good'    })
     else if (gemRate > 40)
-      signals.push({ label: 'PSA 10 Supply', value: `${gemRate.toFixed(1)}% gem rate — plentiful`, type: 'warn' })
+      signals.push({ label: 'PSA 10 Supply',  value: `${gemRate.toFixed(1)}% gem rate — plentiful`, type: 'warn'    })
     else
-      signals.push({ label: 'PSA 10 Gem Rate', value: `${gemRate.toFixed(1)}%`, type: 'neutral' })
+      signals.push({ label: 'PSA 10 Gem Rate',value: `${gemRate.toFixed(1)}%`,                       type: 'neutral' })
   }
   if (psa10Multiple != null) {
-    if (psa10Multiple > 4)
-      signals.push({ label: 'Best Grade Value', value: `PSA 9 — PSA 10 is ${psa10Multiple.toFixed(1)}x raw`, type: 'neutral' })
-    else if (psa10Multiple < 1.8)
-      signals.push({ label: 'Best Grade Value', value: `PSA 10 great value (${psa10Multiple.toFixed(1)}x raw)`, type: 'good' })
+    if      (psa10Multiple > 4)   signals.push({ label: 'Best Grade Value', value: `PSA 9 — PSA 10 is ${psa10Multiple.toFixed(1)}x raw`,    type: 'neutral' })
+    else if (psa10Multiple < 1.8) signals.push({ label: 'Best Grade Value', value: `PSA 10 great value (${psa10Multiple.toFixed(1)}x raw)`, type: 'good'    })
   }
   if (liquidityLabel) {
     const lType = liquidityScore! >= 70 ? 'good' : liquidityScore! >= 35 ? 'neutral' : 'warn'
     signals.push({ label: 'Liquidity', value: liquidityLabel, type: lType })
   }
 
-  const hasDeals = ebayDeals.length > 0
+  const hasDeals    = ebayDeals.length > 0
   const hasListings = ebayListings.length > 0
-  const cardNumber = card.card_number ? ` #${card.card_number}` : ''
+  const cardNumber  = card.card_number ? ` #${card.card_number}` : ''
   const prefillMessage = `I'm looking at ${card.card_name}${cardNumber} from ${card.set_name}`
 
   const ebayUkForSale = buildEbayUrl(card.card_name, card.set_name, card.card_number, 'UK', 'forsale')
@@ -456,17 +444,42 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   const ebayUsForSale = buildEbayUrl(card.card_name, card.set_name, card.card_number, 'US', 'forsale')
   const ebayUsSold    = buildEbayUrl(card.card_name, card.set_name, card.card_number, 'US', 'sold')
 
+  // ── Set assets ─────────────────────────────────────────────────────────────
+  const { logoUrl, symbolUrl } = getSetAssets(card.set_name)
+
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 24px' }}>
       <CardStructuredData card={card} />
 
-      <Link href={`/set/${encodeURIComponent(card.set_name)}`} style={{
-        color: 'var(--text-muted)', fontSize: 13, textDecoration: 'none',
-        marginBottom: 8, display: 'inline-block', fontFamily: "'Figtree', sans-serif",
-      }}>← {card.set_name}</Link>
+      {/* ── Breadcrumb: set logo + symbol + name ── */}
+      <div style={{ marginBottom: 16 }}>
+        <Link
+          href={`/set/${encodeURIComponent(card.set_name)}`}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            textDecoration: 'none', color: 'var(--text-muted)',
+            fontSize: 13, fontFamily: "'Figtree', sans-serif",
+            padding: '5px 12px 5px 8px',
+            background: 'var(--card)', border: '1px solid var(--border)',
+            borderRadius: 20, transition: 'border-color 0.15s',
+          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--primary)' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)' }}
+        >
+          {logoUrl ? (
+            <img src={logoUrl} alt={card.set_name} style={{ height: 20, width: 'auto', objectFit: 'contain', maxWidth: 90 }} loading="lazy" />
+          ) : (
+            <span style={{ fontSize: 13 }}>←</span>
+          )}
+          {symbolUrl && (
+            <img src={symbolUrl} alt="" style={{ width: 16, height: 16, objectFit: 'contain' }} loading="lazy" />
+          )}
+          <span>{card.set_name}</span>
+        </Link>
+      </div>
 
-      <div style={{ margin: '12px 0 28px' }}>
+      <div style={{ margin: '0 0 28px' }}>
         <InlineChat cardContext={`${card.card_name} from ${card.set_name}`} prefillMessage={prefillMessage} />
       </div>
 
@@ -495,7 +508,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
             {card.set_name}{card.card_number ? ` · #${card.card_number}` : ''}
           </p>
 
-          {/* Hero banner — quality-gated, hidden when insight covers the same info */}
           <HeroBanner trend={trend} hasInsight={!!insight} />
 
           {insight && (
@@ -515,7 +527,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
           }}>
             <SectionLabel>Current Prices (USD)</SectionLabel>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-              {grades.map((g) => (
+              {grades.map(g => (
                 <div key={g.label}>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, fontFamily: "'Figtree', sans-serif" }}>{g.label}</div>
                   <div style={{
@@ -527,7 +539,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
             </div>
           </div>
 
-          {/* Trend — each cell quality-gated individually */}
+          {/* Trend */}
           {trendPeriods.length > 0 && (
             <div style={{
               background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)',
@@ -535,27 +547,17 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
             }}>
               <SectionLabel>Raw Price Trend</SectionLabel>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                {trendPeriods.map((t) => (
-                  <TrendCell key={t.label} val={t.val} label={t.label} />
-                ))}
+                {trendPeriods.map(t => <TrendCell key={t.label} val={t.val} label={t.label} />)}
               </div>
-              {/* Low-volume caveat if any period was suppressed */}
               {trendPeriods.some(t => pctQuality(t.val, t.label) === 'suppress') && (
-                <p style={{
-                  fontSize: 11, color: 'var(--text-muted)', margin: '10px 0 0',
-                  fontFamily: "'Figtree', sans-serif", lineHeight: 1.5,
-                }}>
+                <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '10px 0 0', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
                   — Some periods are hidden because the price movement was too large to be reliable.
                   This usually means the card traded infrequently and the comparison price is outdated.
                   Check recent eBay sold listings for the real picture.
                 </p>
               )}
-              {/* Warn caveat */}
               {trendPeriods.some(t => pctQuality(t.val, t.label) === 'warn') && !trendPeriods.some(t => pctQuality(t.val, t.label) === 'suppress') && (
-                <p style={{
-                  fontSize: 11, color: '#e07b39', margin: '10px 0 0',
-                  fontFamily: "'Figtree', sans-serif", lineHeight: 1.5,
-                }}>
+                <p style={{ fontSize: 11, color: '#e07b39', margin: '10px 0 0', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
                   ⚠ Large moves shown in amber — verify against recent sold listings before drawing conclusions.
                 </p>
               )}
@@ -564,64 +566,39 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
         </div>
       </div>
 
-      {/* ── Collector Intel (merged verdict + market stats) ──────────── */}
+      {/* ── Collector Intel ──────────────────────────────────────────── */}
       {(() => {
-        // Build all tiles — only include those with real data
         const tiles: { label: string; value: string; sub?: string; highlight?: boolean; color?: string }[] = []
 
-        // PSA 10 multiplier
         if (psa10Multiple != null) tiles.push({
-          label: 'Raw → PSA 10',
-          value: `${psa10Multiple.toFixed(1)}x`,
+          label: 'Raw → PSA 10', value: `${psa10Multiple.toFixed(1)}x`,
           sub: psa10Multiple < 2 ? 'Great grade value' : psa10Multiple > 10 ? 'High-risk grade' : 'Grade multiplier',
           highlight: psa10Multiple < 2,
         })
-
-        // PSA 9 multiplier
         if (psa9Multiple != null) tiles.push({
-          label: 'Raw → PSA 9',
-          value: `${psa9Multiple.toFixed(1)}x`,
-          sub: 'Grade multiplier',
+          label: 'Raw → PSA 9', value: `${psa9Multiple.toFixed(1)}x`, sub: 'Grade multiplier',
         })
-
-        // Gem rate
         if (gemRate != null) tiles.push({
-          label: 'Gem Rate (PSA 10)',
-          value: `${gemRate.toFixed(1)}%`,
+          label: 'Gem Rate (PSA 10)', value: `${gemRate.toFixed(1)}%`,
           sub: gemRate < 5 ? 'Hard to gem — scarce' : gemRate > 40 ? 'Common gem — high supply' : 'Average difficulty',
           highlight: gemRate < 5,
         })
-
-        // PSA population
         if (psaPop?.total_graded) tiles.push({
-          label: 'Total PSA Graded',
-          value: psaPop.total_graded.toLocaleString(),
+          label: 'Total PSA Graded', value: psaPop.total_graded.toLocaleString(),
           sub: psaPop.psa_10 ? `${psaPop.psa_10.toLocaleString()} PSA 10s` : undefined,
         })
-
-        // vs ATH
         if (drawdown != null) tiles.push({
-          label: 'vs All-Time High',
-          value: `${drawdown.toFixed(0)}%`,
+          label: 'vs All-Time High', value: `${drawdown.toFixed(0)}%`,
           sub: athUsd ? `ATH ~$${athUsd}` : 'from peak',
           highlight: drawdown < -30,
         })
-
-        // Sales volume
         if (salesMonthly != null) tiles.push({
-          label: 'Avg Sales / Month',
-          value: `~${salesMonthly}`,
+          label: 'Avg Sales / Month', value: `~${salesMonthly}`,
           sub: salesMonthly >= 10 ? 'Liquid market' : salesMonthly >= 3 ? 'Moderate volume' : 'Thin market',
         })
-
-        // Available listings (high confidence only)
         if (highConfidenceListingCount != null && highConfidenceListingCount > 0) tiles.push({
-          label: 'Live Listings',
-          value: highConfidenceListingCount.toString(),
-          sub: 'High-confidence matches',
+          label: 'Live Listings', value: highConfidenceListingCount.toString(), sub: 'High-confidence matches',
         })
-
-        // Momentum (only if trustworthy)
         const pct30dQualityLocal = pctQuality(trend?.raw_pct_30d, '30d')
         if (trend?.raw_pct_30d != null && pct30dQualityLocal === 'clean') tiles.push({
           label: '30d Price Move',
@@ -629,8 +606,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
           sub: trend.raw_pct_30d > 0 ? 'Rising' : 'Falling',
           color: trend.raw_pct_30d > 0 ? 'var(--green)' : '#ef4444',
         })
-
-        // Price stability
         if (raw.volatility_30d != null) {
           const v = parseFloat(raw.volatility_30d)
           tiles.push({
@@ -639,16 +614,12 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
             sub: `${v.toFixed(1)}% daily swing`,
           })
         }
-
-        // Liquidity
         if (liquidityScore != null) tiles.push({
           label: 'Liquidity',
           value: liquidityScore >= 70 ? 'High' : liquidityScore >= 35 ? 'Medium' : 'Low',
           sub: liquidityScore >= 70 ? 'Sells quickly' : liquidityScore >= 35 ? 'May take weeks' : 'Patient seller needed',
           color: liquidityScore >= 70 ? 'var(--green)' : liquidityScore < 35 ? '#ef4444' : undefined,
         })
-
-        // Expected grading value
         if (expectedValueCents != null) tiles.push({
           label: 'Expected Grade Value',
           value: `${expectedValueCents > 0 ? '+' : ''}$${(expectedValueCents / 100).toFixed(0)}`,
@@ -668,23 +639,13 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
                   border: `1px solid ${t.highlight ? 'rgba(26,95,173,0.2)' : 'transparent'}`,
                   borderRadius: 10, padding: '12px 14px',
                 }}>
-                  <div style={{
-                    fontSize: 18, fontWeight: 800, lineHeight: 1, marginBottom: 4,
-                    fontFamily: "'Figtree', sans-serif",
-                    color: t.color ?? 'var(--text)',
-                  }}>{t.value}</div>
-                  <div style={{
-                    fontSize: 10, fontWeight: 700, color: 'var(--text-muted)',
-                    fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase', letterSpacing: 1,
-                  }}>{t.label}</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, lineHeight: 1, marginBottom: 4, fontFamily: "'Figtree', sans-serif", color: t.color ?? 'var(--text)' }}>{t.value}</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase', letterSpacing: 1 }}>{t.label}</div>
                   {t.sub && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3, fontFamily: "'Figtree', sans-serif" }}>{t.sub}</div>}
                 </div>
               ))}
             </div>
-            <p style={{
-              fontSize: 11, color: 'var(--text-muted)', margin: '14px 0 0',
-              fontFamily: "'Figtree', sans-serif", lineHeight: 1.5,
-            }}>
+            <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '14px 0 0', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
               Calculated from price history, PSA population data, and market trends. Not financial advice.
             </p>
           </Panel>
@@ -695,20 +656,12 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
       {card.raw_usd && card.psa10_usd && (
         <Panel>
           <SectionLabel>Grading Calculator</SectionLabel>
-          <p style={{
-            fontSize: 13, color: 'var(--text-muted)', margin: '0 0 16px',
-            fontFamily: "'Figtree', sans-serif", lineHeight: 1.5,
-          }}>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 16px', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
             Based on PSA Standard tier (~$25 USD). Assumes a perfect PSA 10 result — actual outcome depends on card condition.
           </p>
 
           {isLotteryCard && (
-            <div style={{
-              marginBottom: 16, padding: '10px 14px',
-              background: 'rgba(224,123,57,0.08)', border: '1px solid rgba(224,123,57,0.25)',
-              borderRadius: 10, fontSize: 13, fontFamily: "'Figtree', sans-serif",
-              color: 'var(--text)', lineHeight: 1.6,
-            }}>
+            <div style={{ marginBottom: 16, padding: '10px 14px', background: 'rgba(224,123,57,0.08)', border: '1px solid rgba(224,123,57,0.25)', borderRadius: 10, fontSize: 13, fontFamily: "'Figtree', sans-serif", color: 'var(--text)', lineHeight: 1.6 }}>
               ⚠️ <strong>High-variance grade.</strong> PSA 10 is {psa10Multiple?.toFixed(0)}x the raw price
               {gemRate != null ? ` but only ${gemRate.toFixed(1)}% of copies gem` : ''}.
               The profit if PSA 10 figure below is the best-case outcome — expected value accounts for the realistic probability.
@@ -716,14 +669,12 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
           )}
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10, marginBottom: 18 }}>
-            <StatTile label="Buy Raw" value={`$${(card.raw_usd / 100).toFixed(0)}`} />
-            <StatTile label="Grading Fee" value="~$25" sub="PSA Standard" />
-            <StatTile label="PSA 10 Value" value={`$${(card.psa10_usd / 100).toFixed(0)}`} />
+            <StatTile label="Buy Raw"       value={`$${(card.raw_usd / 100).toFixed(0)}`} />
+            <StatTile label="Grading Fee"   value="~$25" sub="PSA Standard" />
+            <StatTile label="PSA 10 Value"  value={`$${(card.psa10_usd / 100).toFixed(0)}`} />
             <StatTile
               label="Best Case (PSA 10)"
-              value={gradingProfitCents != null
-                ? `${gradingProfitCents > 0 ? '+' : ''}$${(gradingProfitCents / 100).toFixed(0)}`
-                : '—'}
+              value={gradingProfitCents != null ? `${gradingProfitCents > 0 ? '+' : ''}$${(gradingProfitCents / 100).toFixed(0)}` : '—'}
               sub="if you pull a 10"
             />
             {expectedValueCents != null && (
@@ -745,9 +696,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
                       <span style={{ fontSize: 13, fontFamily: "'Figtree', sans-serif", color: 'var(--text)', fontWeight: 600 }}>
                         {g.label}
-                        <span style={{ fontWeight: 400, color: 'var(--text-muted)', marginLeft: 6 }}>
-                          ${(g.value / 100).toFixed(0)}
-                        </span>
+                        <span style={{ fontWeight: 400, color: 'var(--text-muted)', marginLeft: 6 }}>${(g.value / 100).toFixed(0)}</span>
                       </span>
                       <span style={{ fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif", color: 'var(--text-muted)' }}>
                         {g.multiple?.toFixed(1)}x raw
@@ -764,13 +713,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
           )}
 
           {gemRate != null && totalGraded != null && (
-            <div style={{
-              marginTop: 16, padding: '12px 14px',
-              background: gemRate < 10 ? 'rgba(39,174,96,0.06)' : 'var(--bg-light)',
-              border: `1px solid ${gemRate < 10 ? 'rgba(39,174,96,0.2)' : 'var(--border)'}`,
-              borderRadius: 10, fontSize: 13, fontFamily: "'Figtree', sans-serif",
-              color: 'var(--text)', lineHeight: 1.6,
-            }}>
+            <div style={{ marginTop: 16, padding: '12px 14px', background: gemRate < 10 ? 'rgba(39,174,96,0.06)' : 'var(--bg-light)', border: `1px solid ${gemRate < 10 ? 'rgba(39,174,96,0.2)' : 'var(--border)'}`, borderRadius: 10, fontSize: 13, fontFamily: "'Figtree', sans-serif", color: 'var(--text)', lineHeight: 1.6 }}>
               <strong>{gemRate.toFixed(1)}% gem rate</strong> — {psa10Count?.toLocaleString()} PSA 10s out of {totalGraded?.toLocaleString()} graded.
               {' '}{gemRate < 10
                 ? 'Hard card to grade — scarcity keeps the PSA 10 premium justified.'
@@ -791,22 +734,19 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 16 }}>
             {[
-              { label: 'PSA 7', value: psaPop.psa_7 },
-              { label: 'PSA 8', value: psaPop.psa_8 },
-              { label: 'PSA 9', value: psaPop.psa_9 },
+              { label: 'PSA 7',  value: psaPop.psa_7  },
+              { label: 'PSA 8',  value: psaPop.psa_8  },
+              { label: 'PSA 9',  value: psaPop.psa_9  },
               { label: 'PSA 10', value: psaPop.psa_10 },
-              { label: 'Total', value: psaPop.total_graded },
-            ].map((stat) => (
+              { label: 'Total',  value: psaPop.total_graded },
+            ].map(stat => (
               <div key={stat.label} style={{ background: 'var(--bg-light)', borderRadius: 10, padding: '12px 14px' }}>
-                <div style={{
-                  fontSize: 18, fontWeight: 700, color: 'var(--text)',
-                  fontFamily: "'Figtree', sans-serif", lineHeight: 1,
-                }}>{stat.value?.toLocaleString() ?? '—'}</div>
-                <div style={{
-                  fontSize: 10, color: 'var(--text-muted)', marginTop: 4,
-                  fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase',
-                  letterSpacing: 1, fontWeight: 700,
-                }}>{stat.label}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1 }}>
+                  {stat.value?.toLocaleString() ?? '—'}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>
+                  {stat.label}
+                </div>
               </div>
             ))}
           </div>
@@ -815,25 +755,21 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
             <div style={{ marginBottom: 14 }}>
               <div style={{ display: 'flex', height: 8, borderRadius: 99, overflow: 'hidden', gap: 1, marginBottom: 8 }}>
                 {[
-                  { count: psaPop.psa_7, color: '#94a3b8' },
-                  { count: psaPop.psa_8, color: '#60a5fa' },
-                  { count: psaPop.psa_9, color: '#34d399' },
+                  { count: psaPop.psa_7,  color: '#94a3b8' },
+                  { count: psaPop.psa_8,  color: '#60a5fa' },
+                  { count: psaPop.psa_9,  color: '#34d399' },
                   { count: psaPop.psa_10, color: '#22c55e' },
                 ].map((seg, i) => {
                   const pct = (seg.count / psaPop.total_graded) * 100
                   if (pct < 1) return null
-                  return (
-                    <div key={i} style={{
-                      flex: `0 0 ${pct}%`, background: seg.color, height: '100%',
-                    }} />
-                  )
+                  return <div key={i} style={{ flex: `0 0 ${pct}%`, background: seg.color, height: '100%' }} />
                 })}
               </div>
               <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
                 {[
-                  { label: 'PSA 7', color: '#94a3b8', count: psaPop.psa_7 },
-                  { label: 'PSA 8', color: '#60a5fa', count: psaPop.psa_8 },
-                  { label: 'PSA 9', color: '#34d399', count: psaPop.psa_9 },
+                  { label: 'PSA 7',  color: '#94a3b8', count: psaPop.psa_7  },
+                  { label: 'PSA 8',  color: '#60a5fa', count: psaPop.psa_8  },
+                  { label: 'PSA 9',  color: '#34d399', count: psaPop.psa_9  },
                   { label: 'PSA 10', color: '#22c55e', count: psaPop.psa_10 },
                 ].map((item, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -850,9 +786,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
           {gemRate != null && (
             <div style={{ fontSize: 13, fontFamily: "'Figtree', sans-serif", color: 'var(--text-muted)' }}>
               Gem rate:{' '}
-              <strong style={{
-                color: gemRate < 5 ? 'var(--green)' : gemRate >= 20 ? 'var(--text)' : '#f59e0b',
-              }}>
+              <strong style={{ color: gemRate < 5 ? 'var(--green)' : gemRate >= 20 ? 'var(--text)' : '#f59e0b' }}>
                 {gemRate.toFixed(1)}%
               </strong>
               {' '}of all graded copies received PSA 10.
@@ -866,24 +800,18 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
         <SectionLabel>Search eBay</SectionLabel>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
           <div>
-            <div style={{
-              fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1,
-              color: 'var(--text-muted)', marginBottom: 7, fontFamily: "'Figtree', sans-serif",
-            }}>🇬🇧 eBay UK</div>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-muted)', marginBottom: 7, fontFamily: "'Figtree', sans-serif" }}>🇬🇧 eBay UK</div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <EbayButton href={ebayUkForSale} label="For Sale" flag="🛒" variant="primary" />
-              <EbayButton href={ebayUkSold} label="Sold Listings" flag="✅" />
+              <EbayButton href={ebayUkForSale} label="For Sale"       flag="🛒" variant="primary" />
+              <EbayButton href={ebayUkSold}    label="Sold Listings"  flag="✅" />
             </div>
           </div>
           <div style={{ width: 1, background: 'var(--border)', alignSelf: 'stretch', margin: '0 4px' }} />
           <div>
-            <div style={{
-              fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1,
-              color: 'var(--text-muted)', marginBottom: 7, fontFamily: "'Figtree', sans-serif",
-            }}>🇺🇸 eBay US</div>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-muted)', marginBottom: 7, fontFamily: "'Figtree', sans-serif" }}>🇺🇸 eBay US</div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <EbayButton href={ebayUsForSale} label="For Sale" flag="🛒" variant="primary" />
-              <EbayButton href={ebayUsSold} label="Sold Listings" flag="✅" />
+              <EbayButton href={ebayUsForSale} label="For Sale"       flag="🛒" variant="primary" />
+              <EbayButton href={ebayUsSold}    label="Sold Listings"  flag="✅" />
             </div>
           </div>
         </div>
@@ -900,35 +828,22 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
           </SectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {(hasDeals ? ebayDeals : ebayListings).map((item: any, i: number) => {
-              const price = hasDeals
-                ? (item.listing_price_cents / 100).toFixed(2)
-                : (item.total_cost_cents / 100).toFixed(2)
+              const price    = hasDeals ? (item.listing_price_cents / 100).toFixed(2) : (item.total_cost_cents / 100).toFixed(2)
               const currency = item.currency === 'GBP' ? '£' : '$'
               const discount = hasDeals ? item.discount_pct : null
-              const fairValue = hasDeals && item.fair_value_cents
-                ? (item.fair_value_cents / 100).toFixed(2) : null
+              const fairValue = hasDeals && item.fair_value_cents ? (item.fair_value_cents / 100).toFixed(2) : null
               return (
-                <div key={i} style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  padding: '10px 12px', background: 'var(--bg-light)',
-                  borderRadius: 10, gap: 12, flexWrap: 'wrap',
-                }}>
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'var(--bg-light)', borderRadius: 10, gap: 12, flexWrap: 'wrap' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-                      <span style={{ fontSize: 14, fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>
-                        {currency}{price}
-                      </span>
+                      <span style={{ fontSize: 14, fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>{currency}{price}</span>
                       {discount && (
-                        <span style={{
-                          fontSize: 11, fontWeight: 700, color: 'var(--green)',
-                          background: 'rgba(39,174,96,0.1)', padding: '1px 7px', borderRadius: 20,
-                          fontFamily: "'Figtree', sans-serif",
-                        }}>{discount.toFixed(0)}% off</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--green)', background: 'rgba(39,174,96,0.1)', padding: '1px 7px', borderRadius: 20, fontFamily: "'Figtree', sans-serif" }}>
+                          {discount.toFixed(0)}% off
+                        </span>
                       )}
                       {fairValue && (
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-                          vs {currency}{fairValue} fair value
-                        </span>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>vs {currency}{fairValue} fair value</span>
                       )}
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
@@ -936,11 +851,9 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
                     </div>
                   </div>
                   {item.item_web_url && (
-                    <a href={item.item_web_url} target="_blank" rel="noopener noreferrer" style={{
-                      background: 'var(--primary)', color: '#fff', padding: '6px 14px',
-                      borderRadius: 8, fontSize: 12, fontWeight: 700, textDecoration: 'none',
-                      fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap',
-                    }}>View on eBay</a>
+                    <a href={item.item_web_url} target="_blank" rel="noopener noreferrer" style={{ background: 'var(--primary)', color: '#fff', padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700, textDecoration: 'none', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap' }}>
+                      View on eBay
+                    </a>
                   )}
                 </div>
               )
