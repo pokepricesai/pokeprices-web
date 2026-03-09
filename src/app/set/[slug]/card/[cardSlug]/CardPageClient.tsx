@@ -452,8 +452,9 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 24px' }}>
       <CardStructuredData card={card} />
 
-      {/* ── Breadcrumb: set logo + symbol + name ── */}
-      <div style={{ marginBottom: 16 }}>
+      {/* ── Breadcrumb: "← Back to" + set pill ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+        <span style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>← Back to</span>
         <Link
           href={`/set/${encodeURIComponent(card.set_name)}`}
           style={{
@@ -467,10 +468,8 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
           onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--primary)' }}
           onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)' }}
         >
-          {logoUrl ? (
+          {logoUrl && (
             <img src={logoUrl} alt={card.set_name} style={{ height: 20, width: 'auto', objectFit: 'contain', maxWidth: 90 }} loading="lazy" />
-          ) : (
-            <span style={{ fontSize: 13 }}>←</span>
           )}
           {symbolUrl && (
             <img src={symbolUrl} alt="" style={{ width: 16, height: 16, objectFit: 'contain' }} loading="lazy" />
