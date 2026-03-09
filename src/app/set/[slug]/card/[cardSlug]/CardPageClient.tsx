@@ -454,7 +454,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
 
       {/* ── Breadcrumb: "← Back to" + set pill ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-        <span style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>← Back to</span>
+        <Link href={`/set/${encodeURIComponent(card.set_name)}`} style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textDecoration: 'none' }}>← Back to</Link>
         <Link
           href={`/set/${encodeURIComponent(card.set_name)}`}
           style={{
