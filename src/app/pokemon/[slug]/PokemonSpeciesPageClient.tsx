@@ -115,7 +115,7 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
 
       if (allCardData.length > 0) {
         // Get unique card names to fetch prices
-        const uniqueNames = [...new Set(allCardData.map((c: any) => c.card_name))]
+        const uniqueNames = Array.from(new Set(allCardData.map((c: any) => c.card_name)))
 
         // Paginate prices too if needed
         let allPrices: any[] = []
