@@ -57,41 +57,71 @@ export default function PokemonPageClient() {
 
   useEffect(() => {
     async function load() {
-      // Get all card names + prices from DB to work out which pokemon have cards
-      const { data: cardData } = await supabase
-        .from('card_trends')
-        .select('card_name, set_name, current_raw')
-        .not('current_raw', 'is', null)
-
-      // Fetch all 1025 pokemon from PokeAPI
-      const res = await fetch('https://pokeapi.co/api/v2/pokemon?limit=1025&offset=0')
-      const json = await res.json()
+      // Fetch PokeAPI list + paginate ALL card_trends rows (bypassing 1000-row limit)
+      // Exclude sealed products from counts
+      const [pokeRes] = await Promise.all([
+        fetch('https://pokeapi.co/api/v2/pokemon?limit=1025&offset=0'),
+      ])
+      const json = await pokeRes.json()
       const speciesList: { name: string; url: string }[] = json.results
 
-      // Build a card count map by matching pokemon names
-      const cardMap: Record<string, { count: number; maxPrice: number | null }> = {}
-      if (cardData) {
-        cardData.forEach((card: any) => {
-          const name = card.card_name?.toLowerCase() ?? ''
-          speciesList.forEach(s => {
-            const pName = s.name.toLowerCase()
-            // Match if card name contains the pokemon name as a word
-            const regex = new RegExp(`\\b${pName.replace(/-/g, '[- ]')}\\b`, 'i')
-            if (regex.test(name)) {
-              if (!cardMap[s.name]) cardMap[s.name] = { count: 0, maxPrice: null }
-              cardMap[s.name].count++
-              const price = card.current_raw ? Number(card.current_raw) : null
-              if (price && (!cardMap[s.name].maxPrice || price > cardMap[s.name].maxPrice!)) {
-                cardMap[s.name].maxPrice = price
-              }
-            }
-          })
-        })
+      // Paginate card_trends to get every row, not just first 1000
+      let allCards: { card_name: string; current_raw: number | null }[] = []
+      let page = 0
+      let done = false
+      while (!done) {
+        const { data, error } = await supabase
+          .from('card_trends')
+          .select('card_name, current_raw')
+          .not('current_raw', 'is', null)
+          .range(page * 1000, page * 1000 + 999)
+        if (error || !data || data.length === 0) { done = true; break }
+        allCards = [...allCards, ...data]
+        if (data.length < 1000) done = true
+        page++
       }
 
-      // Fetch types for first 151 + sample — use sprite URL to extract ID
-      // We'll load types lazily per pokemon, but pre-fetch in batches for the grid
-      // For now build entries without types, load types on scroll/filter
+      // Get sealed product names so we can exclude them
+      const sealedNames = new Set<string>()
+      let sPage = 0
+      let sDone = false
+      while (!sDone) {
+        const { data } = await supabase
+          .from('cards')
+          .select('card_name')
+          .eq('is_sealed', true)
+          .range(sPage * 1000, sPage * 1000 + 999)
+        if (!data || data.length === 0) { sDone = true; break }
+        data.forEach((c: any) => sealedNames.add(c.card_name?.toLowerCase()))
+        if (data.length < 1000) sDone = true
+        sPage++
+      }
+
+      // Filter out sealed products
+      const cardData = allCards.filter(c => !sealedNames.has(c.card_name?.toLowerCase()))
+
+      // Build card count + max price map per pokemon species
+      // Use negative lookahead/lookbehind to avoid partial matches
+      // e.g. "pikachu" matches "Pikachu ex" but NOT "Pikachu GX & Eevee GX"
+      const cardMap: Record<string, { count: number; maxPrice: number | null }> = {}
+      cardData.forEach((card: any) => {
+        const cardNameLower = card.card_name?.toLowerCase() ?? ''
+        speciesList.forEach(s => {
+          const pName = s.name.toLowerCase()
+          const escapedName = pName.replace(/-/g, '[- ]').replace(/\./g, '\\.')
+          // Word boundary: not preceded or followed by a letter
+          const regex = new RegExp(`(?<![a-z])${escapedName}(?![a-z])`, 'i')
+          if (regex.test(cardNameLower)) {
+            if (!cardMap[s.name]) cardMap[s.name] = { count: 0, maxPrice: null }
+            cardMap[s.name].count++
+            const price = card.current_raw ? Number(card.current_raw) : null
+            if (price && (!cardMap[s.name].maxPrice || price > cardMap[s.name].maxPrice!)) {
+              cardMap[s.name].maxPrice = price
+            }
+          }
+        })
+      })
+
       const entries: PokemonEntry[] = speciesList.map((s, i) => ({
         id: i + 1,
         name: s.name,
@@ -100,8 +130,6 @@ export default function PokemonPageClient() {
         maxPrice: cardMap[s.name]?.maxPrice ?? null,
       }))
 
-      // Compute page stats
-      const withCards = entries.filter(e => e.cardCount > 0)
       const mostCards = [...entries].sort((a, b) => b.cardCount - a.cardCount)[0] ?? null
       const mostExpensive = [...entries].sort((a, b) => (b.maxPrice ?? 0) - (a.maxPrice ?? 0))[0] ?? null
 
@@ -109,7 +137,7 @@ export default function PokemonPageClient() {
       setFiltered(entries)
       setStats({
         totalPokemon: entries.length,
-        totalCards: cardData?.length ?? 0,
+        totalCards: cardData.length,
         mostCards,
         mostExpensive,
       })
