@@ -188,10 +188,10 @@ export default function VendorDetailClient({ vendor }: { vendor: any }) {
         <SectionLabel>Contact & Links</SectionLabel>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
           {vendor.website && (
-            <a href={vendor.website} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--primary)', color: '#fff', padding: '8px 16px', borderRadius: 10, textDecoration: 'none', fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>
-              🌐 Website
-            </a>
-          )}
+  <a href={vendor.website.startsWith('http') ? vendor.website : `https://${vendor.website}`} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--primary)', color: '#fff', padding: '8px 16px', borderRadius: 10, textDecoration: 'none', fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>
+    🌐 Website
+  </a>
+)}
           {vendor.ebay_store_url && (
             <a href={vendor.ebay_store_url} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--bg-light)', color: 'var(--text)', border: '1px solid var(--border)', padding: '8px 16px', borderRadius: 10, textDecoration: 'none', fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>
               🛒 eBay Store
