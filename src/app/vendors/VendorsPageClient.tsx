@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 
@@ -15,19 +15,29 @@ const VENDOR_TYPE_LABELS: Record<string, string> = {
 
 const SPECIALISM_LABELS: Record<string, string> = {
   singles:     'Singles',
-  sealed:      'Sealed',
-  graded:      'Graded',
+  sealed:      'Sealed Product',
+  graded:      'Graded Cards',
   vintage:     'Vintage',
   bulk:        'Bulk',
   accessories: 'Accessories',
 }
 
+const FILTER_TYPES = [
+  { value: 'all',             label: 'All' },
+  { value: 'physical_shop',   label: '🏪 Shops' },
+  { value: 'retailer',        label: '📦 Retailers' },
+  { value: 'grading_service', label: '🏆 Grading' },
+]
+
 interface Vendor {
   id: string
   name: string
+  slug: string
   vendor_type: string
+  address: string | null
   city: string | null
   county: string | null
+  postcode: string | null
   country: string
   website: string | null
   ebay_store_url: string | null
@@ -39,54 +49,114 @@ interface Vendor {
   ships_internationally: boolean
   description: string | null
   verified: boolean
+  multiple_locations: boolean
+  store_finder_url: string | null
+  grading_services: string[] | null
+  distance_miles: number | null
+}
+
+async function geocodeLocation(query: string): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1&countrycodes=gb`,
+      { headers: { 'Accept-Language': 'en' } }
+    )
+    const data = await res.json()
+    if (data && data.length > 0) {
+      return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }
+    }
+  } catch {}
+  return null
 }
 
 function VendorCard({ vendor }: { vendor: Vendor }) {
-  const isPhysical = vendor.vendor_type === 'physical_shop'
-  const location = [vendor.city, vendor.county, vendor.country].filter(Boolean).join(', ')
-  const mainUrl = vendor.website || vendor.ebay_store_url || null
+  const location = [vendor.city, vendor.county].filter(Boolean).join(', ')
+  const isChain = vendor.multiple_locations
 
   return (
-    <div style={{
-      background: 'var(--card)', border: '1px solid var(--border)',
-      borderRadius: 14, padding: '18px 20px',
-      display: 'flex', flexDirection: 'column', gap: 10,
-      transition: 'border-color 0.15s',
-    }}
-      onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--primary)' }}
-      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border)' }}
-    >
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-            <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 17, fontWeight: 700, color: 'var(--text)', margin: 0 }}>
-              {vendor.name}
-            </h3>
-            {vendor.verified && (
-              <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--primary)', background: 'rgba(26,95,173,0.08)', padding: '2px 7px', borderRadius: 20, fontFamily: "'Figtree', sans-serif", letterSpacing: 0.5 }}>
-                ✓ VERIFIED
-              </span>
-            )}
+    <Link href={`/vendors/${vendor.slug}`} style={{ textDecoration: 'none' }}>
+      <div
+        style={{
+          background: 'var(--card)', border: '1px solid var(--border)',
+          borderRadius: 14, padding: '18px 20px',
+          display: 'flex', flexDirection: 'column', gap: 10,
+          transition: 'border-color 0.15s, transform 0.15s',
+          cursor: 'pointer',
+        }}
+        onMouseEnter={e => {
+          const el = e.currentTarget as HTMLDivElement
+          el.style.borderColor = 'var(--primary)'
+          el.style.transform = 'translateY(-2px)'
+        }}
+        onMouseLeave={e => {
+          const el = e.currentTarget as HTMLDivElement
+          el.style.borderColor = 'var(--border)'
+          el.style.transform = 'translateY(0)'
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3, flexWrap: 'wrap' }}>
+              <h3 style={{
+                fontFamily: "'Playfair Display', serif", fontSize: 17,
+                fontWeight: 700, color: 'var(--text)', margin: 0,
+              }}>
+                {vendor.name}
+              </h3>
+              {vendor.verified && (
+                <span style={{
+                  fontSize: 10, fontWeight: 800, color: 'var(--primary)',
+                  background: 'rgba(26,95,173,0.08)', padding: '2px 7px',
+                  borderRadius: 20, fontFamily: "'Figtree', sans-serif", letterSpacing: 0.5,
+                }}>
+                  ✓ VERIFIED
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <span>{VENDOR_TYPE_LABELS[vendor.vendor_type] ?? vendor.vendor_type}</span>
+              {isChain
+                ? <span>📍 Multiple locations</span>
+                : location && <span>📍 {location}</span>}
+            </div>
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-            {VENDOR_TYPE_LABELS[vendor.vendor_type] ?? vendor.vendor_type}
-            {location && <span style={{ marginLeft: 8 }}>· 📍 {location}</span>}
-          </div>
+
+          {/* Distance badge */}
+          {vendor.distance_miles != null && (
+            <div style={{
+              background: vendor.distance_miles < 10 ? 'rgba(39,174,96,0.08)' : 'var(--bg-light)',
+              border: `1px solid ${vendor.distance_miles < 10 ? 'rgba(39,174,96,0.2)' : 'var(--border)'}`,
+              borderRadius: 10, padding: '6px 12px', textAlign: 'center', flexShrink: 0,
+            }}>
+              <div style={{
+                fontSize: 16, fontWeight: 800, color: vendor.distance_miles < 10 ? 'var(--green)' : 'var(--text)',
+                fontFamily: "'Figtree', sans-serif", lineHeight: 1,
+              }}>
+                {vendor.distance_miles}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", fontWeight: 700 }}>
+                miles
+              </div>
+            </div>
+          )}
         </div>
-      </div>
 
-      {/* Description */}
-      {vendor.description && (
-        <p style={{ fontSize: 13, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.6, margin: 0 }}>
-          {vendor.description}
-        </p>
-      )}
+        {/* Description */}
+        {vendor.description && (
+          <p style={{
+            fontSize: 13, color: 'var(--text)', fontFamily: "'Figtree', sans-serif",
+            lineHeight: 1.6, margin: 0,
+            display: '-webkit-box', WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical' as any, overflow: 'hidden',
+          }}>
+            {vendor.description}
+          </p>
+        )}
 
-      {/* Specialisms */}
-      {vendor.specialisms && vendor.specialisms.length > 0 && (
+        {/* Tags */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {vendor.specialisms.map(s => (
+          {vendor.specialisms?.map(s => (
             <span key={s} style={{
               fontSize: 11, fontWeight: 600, fontFamily: "'Figtree', sans-serif",
               background: 'var(--bg-light)', border: '1px solid var(--border)',
@@ -95,118 +165,123 @@ function VendorCard({ vendor }: { vendor: Vendor }) {
               {SPECIALISM_LABELS[s] ?? s}
             </span>
           ))}
+          {vendor.grading_services && vendor.grading_services.length > 0 && (
+            <span style={{
+              fontSize: 11, fontWeight: 600, fontFamily: "'Figtree', sans-serif",
+              background: 'rgba(26,95,173,0.06)', border: '1px solid rgba(26,95,173,0.15)',
+              borderRadius: 20, padding: '2px 10px', color: 'var(--primary)',
+            }}>
+              {vendor.grading_services.join(' · ')}
+            </span>
+          )}
           {vendor.buys_cards && (
-            <span style={{ fontSize: 11, fontWeight: 600, fontFamily: "'Figtree', sans-serif", background: 'rgba(39,174,96,0.08)', border: '1px solid rgba(39,174,96,0.2)', borderRadius: 20, padding: '2px 10px', color: 'var(--green)' }}>
+            <span style={{
+              fontSize: 11, fontWeight: 600, fontFamily: "'Figtree', sans-serif",
+              background: 'rgba(39,174,96,0.08)', border: '1px solid rgba(39,174,96,0.2)',
+              borderRadius: 20, padding: '2px 10px', color: 'var(--green)',
+            }}>
               💰 Buys Cards
             </span>
           )}
           {vendor.runs_tournaments && (
-            <span style={{ fontSize: 11, fontWeight: 600, fontFamily: "'Figtree', sans-serif", background: 'rgba(26,95,173,0.08)', border: '1px solid rgba(26,95,173,0.2)', borderRadius: 20, padding: '2px 10px', color: 'var(--primary)' }}>
+            <span style={{
+              fontSize: 11, fontWeight: 600, fontFamily: "'Figtree', sans-serif",
+              background: 'rgba(26,95,173,0.08)', border: '1px solid rgba(26,95,173,0.2)',
+              borderRadius: 20, padding: '2px 10px', color: 'var(--primary)',
+            }}>
               🏆 Tournaments
             </span>
           )}
-          {vendor.ships_internationally && (
-            <span style={{ fontSize: 11, fontWeight: 600, fontFamily: "'Figtree', sans-serif", background: 'var(--bg-light)', border: '1px solid var(--border)', borderRadius: 20, padding: '2px 10px', color: 'var(--text-muted)' }}>
-              ✈️ Ships Worldwide
-            </span>
-          )}
         </div>
-      )}
 
-      {/* Links */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
-        {vendor.website && (
-          <a href={vendor.website} target="_blank" rel="noopener noreferrer" style={{
-            fontSize: 12, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
-            color: 'var(--primary)', textDecoration: 'none',
-            background: 'rgba(26,95,173,0.06)', border: '1px solid rgba(26,95,173,0.15)',
-            borderRadius: 8, padding: '5px 12px',
-          }}>
-            🌐 Website
-          </a>
-        )}
-        {vendor.ebay_store_url && (
-          <a href={vendor.ebay_store_url} target="_blank" rel="noopener noreferrer" style={{
-            fontSize: 12, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
-            color: 'var(--text)', textDecoration: 'none',
-            background: 'var(--bg-light)', border: '1px solid var(--border)',
-            borderRadius: 8, padding: '5px 12px',
-          }}>
-            🛒 eBay Store
-          </a>
-        )}
-        {vendor.instagram && (
-          <a href={`https://instagram.com/${vendor.instagram.replace('@', '')}`} target="_blank" rel="noopener noreferrer" style={{
-            fontSize: 12, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
-            color: 'var(--text)', textDecoration: 'none',
-            background: 'var(--bg-light)', border: '1px solid var(--border)',
-            borderRadius: 8, padding: '5px 12px',
-          }}>
-            📸 Instagram
-          </a>
-        )}
-        {vendor.phone && (
-          <a href={`tel:${vendor.phone}`} style={{
-            fontSize: 12, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
-            color: 'var(--text)', textDecoration: 'none',
-            background: 'var(--bg-light)', border: '1px solid var(--border)',
-            borderRadius: 8, padding: '5px 12px',
-          }}>
-            📞 {vendor.phone}
-          </a>
+        {/* Store finder for chains */}
+        {isChain && vendor.store_finder_url && (
+          <div style={{ fontSize: 12, color: 'var(--primary)', fontFamily: "'Figtree', sans-serif", fontWeight: 600 }}>
+            Find nearest location →
+          </div>
         )}
       </div>
-    </div>
+    </Link>
   )
 }
 
 export default function VendorsPageClient() {
   const [vendors, setVendors] = useState<Vendor[]>([])
-  const [filtered, setFiltered] = useState<Vendor[]>([])
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [typeFilter, setTypeFilter] = useState<string>('all')
-  const [buyingFilter, setBuyingFilter] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [typeFilter, setTypeFilter] = useState('all')
+  const [locationQuery, setLocationQuery] = useState('')
+  const [geocoding, setGeocoding] = useState(false)
+  const [geocodeError, setGeocodeError] = useState(false)
+  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null)
+  const [hasSearched, setHasSearched] = useState(false)
+  const [chainVendors, setChainVendors] = useState<Vendor[]>([])
+  const debounceRef = useRef<NodeJS.Timeout>()
 
+  // Load all vendors on mount (no proximity, just list)
   useEffect(() => {
-    async function load() {
-      const { data } = await supabase
+    loadVendors(null, typeFilter)
+  }, [])
+
+  // Re-fetch when type filter changes
+  useEffect(() => {
+    loadVendors(userCoords, typeFilter)
+  }, [typeFilter])
+
+  async function loadVendors(coords: { lat: number; lng: number } | null, type: string) {
+    setLoading(true)
+    if (coords) {
+      const { data } = await supabase.rpc('get_vendors_by_proximity', {
+        user_lat: coords.lat,
+        user_lng: coords.lng,
+        vendor_type_filter: type,
+      })
+      const all = data ?? []
+      setVendors(all.filter((v: Vendor) => !v.multiple_locations))
+      setChainVendors(all.filter((v: Vendor) => v.multiple_locations))
+    } else {
+      const query = supabase
         .from('vendors')
         .select('*')
         .eq('active', true)
+        .not('vendor_type', 'in', '(online_shop,ebay_store,marketplace,private_seller)')
         .order('verified', { ascending: false })
         .order('name', { ascending: true })
-      setVendors(data ?? [])
-      setFiltered(data ?? [])
-      setLoading(false)
-    }
-    load()
-  }, [])
 
-  useEffect(() => {
-    let result = [...vendors]
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      result = result.filter(v =>
-        v.name.toLowerCase().includes(q) ||
-        v.city?.toLowerCase().includes(q) ||
-        v.county?.toLowerCase().includes(q) ||
-        v.description?.toLowerCase().includes(q)
-      )
-    }
-    if (typeFilter !== 'all') {
-      result = result.filter(v => v.vendor_type === typeFilter)
-    }
-    if (buyingFilter) {
-      result = result.filter(v => v.buys_cards)
-    }
-    setFiltered(result)
-  }, [search, typeFilter, buyingFilter, vendors])
+      if (type !== 'all') query.eq('vendor_type', type)
 
-  const typeCounts = vendors.reduce((acc, v) => {
-    acc[v.vendor_type] = (acc[v.vendor_type] ?? 0) + 1
-    return acc
-  }, {} as Record<string, number>)
+      const { data } = await query
+      const all = data ?? []
+      setVendors(all.filter((v: Vendor) => !v.multiple_locations))
+      setChainVendors(all.filter((v: Vendor) => v.multiple_locations))
+    }
+    setLoading(false)
+  }
+
+  async function handleLocationSearch() {
+    if (!locationQuery.trim()) return
+    setGeocoding(true)
+    setGeocodeError(false)
+    const coords = await geocodeLocation(locationQuery)
+    if (!coords) {
+      setGeocodeError(true)
+      setGeocoding(false)
+      return
+    }
+    setUserCoords(coords)
+    setHasSearched(true)
+    setGeocoding(false)
+    loadVendors(coords, typeFilter)
+  }
+
+  function handleClearLocation() {
+    setUserCoords(null)
+    setLocationQuery('')
+    setHasSearched(false)
+    setGeocodeError(false)
+    loadVendors(null, typeFilter)
+  }
+
+  const totalCount = vendors.length + chainVendors.length
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 24px' }}>
@@ -217,7 +292,7 @@ export default function VendorsPageClient() {
           Vendor Directory
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: 14, fontFamily: "'Figtree', sans-serif", margin: '0 0 16px' }}>
-          Pokémon card shops, online stores, eBay sellers and grading services.
+          Find Pokémon card shops, retailers and grading services near you.
         </p>
         <Link href="/vendors/submit" style={{
           display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -229,49 +304,82 @@ export default function VendorsPageClient() {
         </Link>
       </div>
 
-      {/* Search + filters */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search by name, city, or type..."
-          style={{
-            flex: 1, minWidth: 220, padding: '10px 16px', fontSize: 14,
-            border: '1px solid var(--border)', borderRadius: 10,
-            background: 'var(--card)', color: 'var(--text)',
-            fontFamily: "'Figtree', sans-serif", outline: 'none',
-          }}
-        />
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      {/* Location search */}
+      <div style={{
+        background: 'var(--card)', border: '1px solid var(--border)',
+        borderRadius: 14, padding: '18px 20px', marginBottom: 16,
+      }}>
+        <div style={{
+          fontSize: 10, fontWeight: 800, textTransform: 'uppercase' as const,
+          letterSpacing: 1.8, color: 'var(--text-muted)', marginBottom: 10,
+          fontFamily: "'Figtree', sans-serif",
+        }}>
+          📍 Find Nearest Vendors
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <input
+            value={locationQuery}
+            onChange={e => setLocationQuery(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleLocationSearch()}
+            placeholder="Enter your postcode or town (e.g. M1 1AA or Manchester)"
+            style={{
+              flex: 1, minWidth: 240, padding: '10px 16px', fontSize: 14,
+              border: `1px solid ${geocodeError ? '#ef4444' : 'var(--border)'}`,
+              borderRadius: 10, background: 'var(--bg-light)', color: 'var(--text)',
+              fontFamily: "'Figtree', sans-serif", outline: 'none',
+            }}
+          />
           <button
-            onClick={() => setTypeFilter('all')}
-            className={`sort-btn ${typeFilter === 'all' ? 'active' : ''}`}
+            onClick={handleLocationSearch}
+            disabled={geocoding || !locationQuery.trim()}
+            style={{
+              padding: '10px 20px', borderRadius: 10, border: 'none',
+              background: 'var(--primary)', color: '#fff',
+              fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
+              cursor: geocoding ? 'wait' : 'pointer', whiteSpace: 'nowrap' as const,
+              opacity: !locationQuery.trim() ? 0.5 : 1,
+            }}
+          >
+            {geocoding ? 'Finding...' : 'Find Nearest'}
+          </button>
+          {hasSearched && (
+            <button
+              onClick={handleClearLocation}
+              style={{
+                padding: '10px 16px', borderRadius: 10,
+                border: '1px solid var(--border)', background: 'var(--bg-light)',
+                color: 'var(--text-muted)', fontSize: 13, fontWeight: 600,
+                fontFamily: "'Figtree', sans-serif", cursor: 'pointer',
+              }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        {geocodeError && (
+          <p style={{ fontSize: 12, color: '#ef4444', fontFamily: "'Figtree', sans-serif", margin: '8px 0 0' }}>
+            Could not find that location. Try a postcode or town name.
+          </p>
+        )}
+        {hasSearched && !geocodeError && (
+          <p style={{ fontSize: 12, color: 'var(--green)', fontFamily: "'Figtree', sans-serif", margin: '8px 0 0', fontWeight: 600 }}>
+            ✓ Showing nearest vendors to {locationQuery}
+          </p>
+        )}
+      </div>
+
+      {/* Type filters */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
+        {FILTER_TYPES.map(t => (
+          <button
+            key={t.value}
+            onClick={() => setTypeFilter(t.value)}
+            className={`sort-btn ${typeFilter === t.value ? 'active' : ''}`}
             style={{ fontFamily: "'Figtree', sans-serif" }}
           >
-            All ({vendors.length})
+            {t.label}
           </button>
-          {Object.entries(VENDOR_TYPE_LABELS).map(([key, label]) => {
-            const count = typeCounts[key] ?? 0
-            if (count === 0) return null
-            return (
-              <button
-                key={key}
-                onClick={() => setTypeFilter(key)}
-                className={`sort-btn ${typeFilter === key ? 'active' : ''}`}
-                style={{ fontFamily: "'Figtree', sans-serif" }}
-              >
-                {label} ({count})
-              </button>
-            )
-          })}
-        </div>
-        <button
-          onClick={() => setBuyingFilter(b => !b)}
-          className={`sort-btn ${buyingFilter ? 'active' : ''}`}
-          style={{ fontFamily: "'Figtree', sans-serif" }}
-        >
-          💰 Buying Cards
-        </button>
+        ))}
       </div>
 
       {/* Results */}
@@ -281,15 +389,13 @@ export default function VendorsPageClient() {
             <div key={i} className="skeleton" style={{ height: 140, borderRadius: 14 }} />
           ))}
         </div>
-      ) : filtered.length === 0 ? (
+      ) : totalCount === 0 ? (
         <div style={{
           background: 'var(--card)', border: '1px solid var(--border)',
           borderRadius: 14, padding: '48px 24px', textAlign: 'center',
         }}>
           <p style={{ color: 'var(--text-muted)', fontSize: 14, fontFamily: "'Figtree', sans-serif", marginBottom: 16 }}>
-            {vendors.length === 0
-              ? 'No vendors listed yet — be the first!'
-              : 'No vendors match your search.'}
+            No vendors listed yet — be the first!
           </p>
           <Link href="/vendors/submit" style={{
             background: 'var(--primary)', color: '#fff',
@@ -300,12 +406,34 @@ export default function VendorsPageClient() {
           </Link>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 4px' }}>
-            {filtered.length} vendor{filtered.length !== 1 ? 's' : ''}
+        <>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 12px' }}>
+            {vendors.length} vendor{vendors.length !== 1 ? 's' : ''}
+            {hasSearched ? ' sorted by distance' : ''}
+            {chainVendors.length > 0 ? ` · ${chainVendors.length} chain retailer${chainVendors.length !== 1 ? 's' : ''}` : ''}
           </p>
-          {filtered.map(v => <VendorCard key={v.id} vendor={v} />)}
-        </div>
+
+          {/* Local/single vendors */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {vendors.map(v => <VendorCard key={v.id} vendor={v} />)}
+          </div>
+
+          {/* Chain retailers */}
+          {chainVendors.length > 0 && (
+            <div style={{ marginTop: 32 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", letterSpacing: 0.5 }}>
+                  📦 CHAIN RETAILERS & NATIONWIDE STORES
+                </div>
+                <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {chainVendors.map(v => <VendorCard key={v.id} vendor={v} />)}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
