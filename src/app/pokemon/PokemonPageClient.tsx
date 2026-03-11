@@ -8,7 +8,6 @@ const PAGE_SIZE = 100
 interface PokemonEntry {
   id: number
   name: string
-  types: string[]
   cardCount: number
   maxPrice: number | null
 }
@@ -29,80 +28,37 @@ export default function PokemonPageClient() {
 
   useEffect(() => {
     async function load() {
-      const [pokeRes, countRes] = await Promise.all([
-        fetch('https://pokeapi.co/api/v2/pokemon?limit=1025&offset=0'),
-        // Count all non-sealed cards from cards table — correct total
-        supabase.from('cards').select('id', { count: 'exact', head: true }).eq('is_sealed', false),
+      const [speciesRes, countRes] = await Promise.all([
+        supabase
+          .from('pokemon_species_stats')
+          .select('species_name, species_id, card_count, max_raw_usd')
+          .order('species_id', { ascending: true }),
+        supabase
+          .from('cards')
+          .select('id', { count: 'exact', head: true })
+          .eq('is_sealed', false),
       ])
 
-      const json = await pokeRes.json()
-      const speciesList: { name: string; url: string }[] = json.results
       const totalCards = countRes.count ?? 0
+      const rows = speciesRes.data ?? []
 
-      // Fetch all non-sealed card names for count mapping (paginated)
-      let allCardNames: { card_name: string }[] = []
-      let cPage = 0, cDone = false
-      while (!cDone) {
-        const { data, error } = await supabase
-          .from('cards').select('card_name').eq('is_sealed', false)
-          .range(cPage * 1000, cPage * 1000 + 999)
-        if (error || !data || data.length === 0) { cDone = true; break }
-        allCardNames = [...allCardNames, ...data]
-        if (data.length < 1000) cDone = true
-        cPage++
-      }
+      // Fill in any species not yet in stats table (species_id 1-1025 with 0 cards)
+      // by also fetching the full species list
+      const { data: allSpecies } = await supabase
+        .from('pokemon_species')
+        .select('id, name')
+        .order('id', { ascending: true })
 
-      // Fetch priced cards from card_trends for max price mapping (paginated)
-      let allPricedCards: { card_name: string; current_raw: number | null }[] = []
-      let pPage = 0, pDone = false
-      while (!pDone) {
-        const { data, error } = await supabase
-          .from('card_trends').select('card_name, current_raw')
-          .not('current_raw', 'is', null)
-          .range(pPage * 1000, pPage * 1000 + 999)
-        if (error || !data || data.length === 0) { pDone = true; break }
-        allPricedCards = [...allPricedCards, ...data]
-        if (data.length < 1000) pDone = true
-        pPage++
-      }
-
-      // Build count map from all cards
-      const countMap: Record<string, number> = {}
-      allCardNames.forEach((card: any) => {
-        const cardNameLower = card.card_name?.toLowerCase() ?? ''
-        speciesList.forEach(s => {
-          const pName = s.name.toLowerCase()
-          const escapedName = pName.replace(/-/g, '[- ]').replace(/\./g, '\\.')
-          const regex = new RegExp(`(?<![a-z])${escapedName}(?![a-z])`, 'i')
-          if (regex.test(cardNameLower)) {
-            countMap[s.name] = (countMap[s.name] ?? 0) + 1
-          }
-        })
+      const statsMap: Record<string, { card_count: number; max_raw_usd: number | null }> = {}
+      rows.forEach((r: any) => {
+        statsMap[r.species_name] = { card_count: r.card_count, max_raw_usd: r.max_raw_usd }
       })
 
-      // Build price map from priced cards
-      const priceMap: Record<string, number> = {}
-      allPricedCards.forEach((card: any) => {
-        const cardNameLower = card.card_name?.toLowerCase() ?? ''
-        speciesList.forEach(s => {
-          const pName = s.name.toLowerCase()
-          const escapedName = pName.replace(/-/g, '[- ]').replace(/\./g, '\\.')
-          const regex = new RegExp(`(?<![a-z])${escapedName}(?![a-z])`, 'i')
-          if (regex.test(cardNameLower)) {
-            const price = card.current_raw ? Number(card.current_raw) : null
-            if (price && (!priceMap[s.name] || price > priceMap[s.name])) {
-              priceMap[s.name] = price
-            }
-          }
-        })
-      })
-
-      const entries: PokemonEntry[] = speciesList.map((s, i) => ({
-        id: i + 1,
+      const entries: PokemonEntry[] = (allSpecies ?? []).map((s: any) => ({
+        id: s.id,
         name: s.name,
-        types: [],
-        cardCount: countMap[s.name] ?? 0,
-        maxPrice: priceMap[s.name] ?? null,
+        cardCount: statsMap[s.name]?.card_count ?? 0,
+        maxPrice: statsMap[s.name]?.max_raw_usd ?? null,
       }))
 
       const mostCards = [...entries].sort((a, b) => b.cardCount - a.cardCount)[0] ?? null
@@ -116,7 +72,6 @@ export default function PokemonPageClient() {
     load()
   }, [])
 
-  // Filter + sort — resets visible count on any change
   useEffect(() => {
     let result = [...pokemon]
     if (search.trim()) {
@@ -200,19 +155,16 @@ export default function PokemonPageClient() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
             {visiblePokemon.map(p => (
               <Link key={p.id} href={`/pokemon/${p.name}`} style={{ textDecoration: 'none' }}>
-                <div style={{
-                  background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12,
-                  padding: '14px 12px', transition: 'border-color 0.15s, transform 0.15s', cursor: 'pointer',
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center',
-                }}
+                <div
+                  style={{
+                    background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12,
+                    padding: '14px 12px', transition: 'border-color 0.15s, transform 0.15s', cursor: 'pointer',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center',
+                  }}
                   onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--primary)'; el.style.transform = 'translateY(-2px)' }}
                   onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--border)'; el.style.transform = 'translateY(0)' }}
                 >
-                  {/* Fixed container so all cards are same height regardless of image size */}
-                  <div style={{
-                    width: 80, height: 80, marginBottom: 8,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}>
+                  <div style={{ width: 80, height: 80, marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <img
                       src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.id}.png`}
                       alt={capitalize(p.name)}
@@ -238,7 +190,6 @@ export default function PokemonPageClient() {
             ))}
           </div>
 
-          {/* Load more button */}
           {hasMore && (
             <div style={{ textAlign: 'center', marginTop: 32 }}>
               <button
