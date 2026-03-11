@@ -55,10 +55,16 @@ interface Vendor {
   distance_miles: number | null
 }
 
+interface Suggestion {
+  display_name: string
+  lat: string
+  lon: string
+}
+
 async function geocodeLocation(query: string): Promise<{ lat: number; lng: number } | null> {
   try {
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1&countrycodes=gb`,
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`,
       { headers: { 'Accept-Language': 'en' } }
     )
     const data = await res.json()
@@ -80,8 +86,7 @@ function VendorCard({ vendor }: { vendor: Vendor }) {
           background: 'var(--card)', border: '1px solid var(--border)',
           borderRadius: 14, padding: '18px 20px',
           display: 'flex', flexDirection: 'column', gap: 10,
-          transition: 'border-color 0.15s, transform 0.15s',
-          cursor: 'pointer',
+          transition: 'border-color 0.15s, transform 0.15s', cursor: 'pointer',
         }}
         onMouseEnter={e => {
           const el = e.currentTarget as HTMLDivElement
@@ -114,28 +119,42 @@ function VendorCard({ vendor }: { vendor: Vendor }) {
                 </span>
               )}
             </div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{
+              fontSize: 12, color: 'var(--text-muted)',
+              fontFamily: "'Figtree', sans-serif",
+              display: 'flex', gap: 10, flexWrap: 'wrap',
+            }}>
               <span>{VENDOR_TYPE_LABELS[vendor.vendor_type] ?? vendor.vendor_type}</span>
               {isChain
                 ? <span>📍 Multiple locations</span>
                 : location && <span>📍 {location}</span>}
+              {vendor.country && !isChain && (
+                <span style={{ opacity: 0.6 }}>{vendor.country}</span>
+              )}
             </div>
           </div>
 
           {/* Distance badge */}
           {vendor.distance_miles != null && (
             <div style={{
-              background: vendor.distance_miles < 10 ? 'rgba(39,174,96,0.08)' : 'var(--bg-light)',
-              border: `1px solid ${vendor.distance_miles < 10 ? 'rgba(39,174,96,0.2)' : 'var(--border)'}`,
-              borderRadius: 10, padding: '6px 12px', textAlign: 'center', flexShrink: 0,
+              background: vendor.distance_miles < 10
+                ? 'rgba(39,174,96,0.08)' : 'var(--bg-light)',
+              border: `1px solid ${vendor.distance_miles < 10
+                ? 'rgba(39,174,96,0.2)' : 'var(--border)'}`,
+              borderRadius: 10, padding: '6px 12px',
+              textAlign: 'center', flexShrink: 0,
             }}>
               <div style={{
-                fontSize: 16, fontWeight: 800, color: vendor.distance_miles < 10 ? 'var(--green)' : 'var(--text)',
+                fontSize: 16, fontWeight: 800,
+                color: vendor.distance_miles < 10 ? 'var(--green)' : 'var(--text)',
                 fontFamily: "'Figtree', sans-serif", lineHeight: 1,
               }}>
                 {vendor.distance_miles}
               </div>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", fontWeight: 700 }}>
+              <div style={{
+                fontSize: 10, color: 'var(--text-muted)',
+                fontFamily: "'Figtree', sans-serif", fontWeight: 700,
+              }}>
                 miles
               </div>
             </div>
@@ -194,9 +213,11 @@ function VendorCard({ vendor }: { vendor: Vendor }) {
           )}
         </div>
 
-        {/* Store finder for chains */}
         {isChain && vendor.store_finder_url && (
-          <div style={{ fontSize: 12, color: 'var(--primary)', fontFamily: "'Figtree', sans-serif", fontWeight: 600 }}>
+          <div style={{
+            fontSize: 12, color: 'var(--primary)',
+            fontFamily: "'Figtree', sans-serif", fontWeight: 600,
+          }}>
             Find nearest location →
           </div>
         )}
@@ -207,27 +228,30 @@ function VendorCard({ vendor }: { vendor: Vendor }) {
 
 export default function VendorsPageClient() {
   const [vendors, setVendors] = useState<Vendor[]>([])
-  const [loading, setLoading] = useState(false)
+  const [chainVendors, setChainVendors] = useState<Vendor[]>([])
+  const [loading, setLoading] = useState(true)
   const [typeFilter, setTypeFilter] = useState('all')
   const [locationQuery, setLocationQuery] = useState('')
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
   const [geocoding, setGeocoding] = useState(false)
   const [geocodeError, setGeocodeError] = useState(false)
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null)
   const [hasSearched, setHasSearched] = useState(false)
-  const [chainVendors, setChainVendors] = useState<Vendor[]>([])
   const debounceRef = useRef<NodeJS.Timeout>()
 
-  // Load all vendors on mount (no proximity, just list)
   useEffect(() => {
-    loadVendors(null, typeFilter)
+    loadVendors(null, 'all')
   }, [])
 
-  // Re-fetch when type filter changes
   useEffect(() => {
     loadVendors(userCoords, typeFilter)
   }, [typeFilter])
 
-  async function loadVendors(coords: { lat: number; lng: number } | null, type: string) {
+  async function loadVendors(
+    coords: { lat: number; lng: number } | null,
+    type: string
+  ) {
     setLoading(true)
     if (coords) {
       const { data } = await supabase.rpc('get_vendors_by_proximity', {
@@ -235,29 +259,61 @@ export default function VendorsPageClient() {
         user_lng: coords.lng,
         vendor_type_filter: type,
       })
-      const all = data ?? []
-      setVendors(all.filter((v: Vendor) => !v.multiple_locations))
-      setChainVendors(all.filter((v: Vendor) => v.multiple_locations))
+      const all = (data ?? []) as Vendor[]
+      setVendors(all.filter(v => !v.multiple_locations))
+      setChainVendors(all.filter(v => v.multiple_locations))
     } else {
-      const query = supabase
+      let query = supabase
         .from('vendors')
         .select('*')
         .eq('active', true)
         .not('vendor_type', 'in', '(online_shop,ebay_store,marketplace,private_seller)')
         .order('verified', { ascending: false })
         .order('name', { ascending: true })
-
-      if (type !== 'all') query.eq('vendor_type', type)
-
+      if (type !== 'all') query = query.eq('vendor_type', type)
       const { data } = await query
-      const all = data ?? []
-      setVendors(all.filter((v: Vendor) => !v.multiple_locations))
-      setChainVendors(all.filter((v: Vendor) => v.multiple_locations))
+      const all = (data ?? []) as Vendor[]
+      setVendors(all.filter(v => !v.multiple_locations))
+      setChainVendors(all.filter(v => v.multiple_locations))
     }
     setLoading(false)
   }
 
-  async function handleLocationSearch() {
+  function handleLocationInput(val: string) {
+    setLocationQuery(val)
+    setGeocodeError(false)
+    if (val.length < 2) {
+      setSuggestions([])
+      setShowSuggestions(false)
+      return
+    }
+    clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(val)}&limit=6&addressdetails=1`,
+          { headers: { 'Accept-Language': 'en' } }
+        )
+        const data = await res.json()
+        setSuggestions(data ?? [])
+        setShowSuggestions(true)
+      } catch {}
+    }, 300)
+  }
+
+  function selectSuggestion(s: Suggestion) {
+    const coords = { lat: parseFloat(s.lat), lng: parseFloat(s.lon) }
+    const parts = s.display_name.split(',')
+    const shortName = parts.slice(0, 2).join(',').trim()
+    setLocationQuery(shortName)
+    setUserCoords(coords)
+    setHasSearched(true)
+    setSuggestions([])
+    setShowSuggestions(false)
+    loadVendors(coords, typeFilter)
+  }
+
+  async function handleManualSearch() {
     if (!locationQuery.trim()) return
     setGeocoding(true)
     setGeocodeError(false)
@@ -278,6 +334,8 @@ export default function VendorsPageClient() {
     setLocationQuery('')
     setHasSearched(false)
     setGeocodeError(false)
+    setSuggestions([])
+    setShowSuggestions(false)
     loadVendors(null, typeFilter)
   }
 
@@ -288,10 +346,16 @@ export default function VendorsPageClient() {
 
       {/* Header */}
       <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 32, margin: '0 0 8px', color: 'var(--text)' }}>
+        <h1 style={{
+          fontFamily: "'Playfair Display', serif", fontSize: 32,
+          margin: '0 0 8px', color: 'var(--text)',
+        }}>
           Vendor Directory
         </h1>
-        <p style={{ color: 'var(--text-muted)', fontSize: 14, fontFamily: "'Figtree', sans-serif", margin: '0 0 16px' }}>
+        <p style={{
+          color: 'var(--text-muted)', fontSize: 14,
+          fontFamily: "'Figtree', sans-serif", margin: '0 0 16px',
+        }}>
           Find Pokémon card shops, retailers and grading services near you.
         </p>
         <Link href="/vendors/submit" style={{
@@ -317,31 +381,91 @@ export default function VendorsPageClient() {
           📍 Find Nearest Vendors
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <input
-            value={locationQuery}
-            onChange={e => setLocationQuery(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleLocationSearch()}
-            placeholder="Enter your postcode or town (e.g. M1 1AA or Manchester)"
-            style={{
-              flex: 1, minWidth: 240, padding: '10px 16px', fontSize: 14,
-              border: `1px solid ${geocodeError ? '#ef4444' : 'var(--border)'}`,
-              borderRadius: 10, background: 'var(--bg-light)', color: 'var(--text)',
-              fontFamily: "'Figtree', sans-serif", outline: 'none',
-            }}
-          />
+
+          {/* Input + dropdown wrapper */}
+          <div style={{ flex: 1, minWidth: 240, position: 'relative' as const }}>
+            <input
+              value={locationQuery}
+              onChange={e => handleLocationInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  setShowSuggestions(false)
+                  handleManualSearch()
+                }
+                if (e.key === 'Escape') setShowSuggestions(false)
+              }}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+              placeholder="Enter postcode, town or city (UK or US)..."
+              style={{
+                width: '100%', padding: '10px 16px', fontSize: 14,
+                border: `1px solid ${geocodeError ? '#ef4444' : 'var(--border)'}`,
+                borderRadius: 10, background: 'var(--bg-light)', color: 'var(--text)',
+                fontFamily: "'Figtree', sans-serif", outline: 'none',
+                boxSizing: 'border-box' as const,
+              }}
+            />
+
+            {/* Autocomplete dropdown */}
+            {showSuggestions && suggestions.length > 0 && (
+              <div style={{
+                position: 'absolute' as const, top: '100%', left: 0, right: 0,
+                zIndex: 100, background: 'var(--card)',
+                border: '1px solid var(--border)', borderRadius: 10,
+                marginTop: 4, overflow: 'hidden',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+              }}>
+                {suggestions.map((s, i) => {
+                  const parts = s.display_name.split(',')
+                  const title = parts[0].trim()
+                  const subtitle = parts.slice(1, 3).join(',').trim()
+                  return (
+                    <div
+                      key={i}
+                      onMouseDown={() => selectSuggestion(s)}
+                      style={{
+                        padding: '10px 16px', fontSize: 13, cursor: 'pointer',
+                        fontFamily: "'Figtree', sans-serif", color: 'var(--text)',
+                        borderBottom: i < suggestions.length - 1
+                          ? '1px solid var(--border)' : 'none',
+                        transition: 'background 0.1s',
+                      }}
+                      onMouseEnter={e => {
+                        (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-light)'
+                      }}
+                      onMouseLeave={e => {
+                        (e.currentTarget as HTMLDivElement).style.background = 'transparent'
+                      }}
+                    >
+                      <div style={{ fontWeight: 600 }}>{title}</div>
+                      {subtitle && (
+                        <div style={{
+                          fontSize: 11, color: 'var(--text-muted)', marginTop: 2,
+                        }}>
+                          {subtitle}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
           <button
-            onClick={handleLocationSearch}
+            onClick={() => { setShowSuggestions(false); handleManualSearch() }}
             disabled={geocoding || !locationQuery.trim()}
             style={{
               padding: '10px 20px', borderRadius: 10, border: 'none',
               background: 'var(--primary)', color: '#fff',
               fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
-              cursor: geocoding ? 'wait' : 'pointer', whiteSpace: 'nowrap' as const,
+              cursor: geocoding ? 'wait' : 'pointer',
+              whiteSpace: 'nowrap' as const,
               opacity: !locationQuery.trim() ? 0.5 : 1,
             }}
           >
             {geocoding ? 'Finding...' : 'Find Nearest'}
           </button>
+
           {hasSearched && (
             <button
               onClick={handleClearLocation}
@@ -356,13 +480,20 @@ export default function VendorsPageClient() {
             </button>
           )}
         </div>
+
         {geocodeError && (
-          <p style={{ fontSize: 12, color: '#ef4444', fontFamily: "'Figtree', sans-serif", margin: '8px 0 0' }}>
-            Could not find that location. Try a postcode or town name.
+          <p style={{
+            fontSize: 12, color: '#ef4444',
+            fontFamily: "'Figtree', sans-serif", margin: '8px 0 0',
+          }}>
+            Could not find that location. Try a postcode or city name.
           </p>
         )}
         {hasSearched && !geocodeError && (
-          <p style={{ fontSize: 12, color: 'var(--green)', fontFamily: "'Figtree', sans-serif", margin: '8px 0 0', fontWeight: 600 }}>
+          <p style={{
+            fontSize: 12, color: 'var(--green)',
+            fontFamily: "'Figtree', sans-serif", margin: '8px 0 0', fontWeight: 600,
+          }}>
             ✓ Showing nearest vendors to {locationQuery}
           </p>
         )}
@@ -394,7 +525,10 @@ export default function VendorsPageClient() {
           background: 'var(--card)', border: '1px solid var(--border)',
           borderRadius: 14, padding: '48px 24px', textAlign: 'center',
         }}>
-          <p style={{ color: 'var(--text-muted)', fontSize: 14, fontFamily: "'Figtree', sans-serif", marginBottom: 16 }}>
+          <p style={{
+            color: 'var(--text-muted)', fontSize: 14,
+            fontFamily: "'Figtree', sans-serif", marginBottom: 16,
+          }}>
             No vendors listed yet — be the first!
           </p>
           <Link href="/vendors/submit" style={{
@@ -407,13 +541,17 @@ export default function VendorsPageClient() {
         </div>
       ) : (
         <>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 12px' }}>
+          <p style={{
+            fontSize: 12, color: 'var(--text-muted)',
+            fontFamily: "'Figtree', sans-serif", margin: '0 0 12px',
+          }}>
             {vendors.length} vendor{vendors.length !== 1 ? 's' : ''}
-            {hasSearched ? ' sorted by distance' : ''}
-            {chainVendors.length > 0 ? ` · ${chainVendors.length} chain retailer${chainVendors.length !== 1 ? 's' : ''}` : ''}
+            {hasSearched ? ' · sorted by distance' : ''}
+            {chainVendors.length > 0
+              ? ` · ${chainVendors.length} chain retailer${chainVendors.length !== 1 ? 's' : ''}`
+              : ''}
           </p>
 
-          {/* Local/single vendors */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {vendors.map(v => <VendorCard key={v.id} vendor={v} />)}
           </div>
@@ -423,7 +561,10 @@ export default function VendorsPageClient() {
             <div style={{ marginTop: 32 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
                 <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", letterSpacing: 0.5 }}>
+                <div style={{
+                  fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
+                  fontFamily: "'Figtree', sans-serif", letterSpacing: 0.5,
+                }}>
                   📦 CHAIN RETAILERS & NATIONWIDE STORES
                 </div>
                 <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
