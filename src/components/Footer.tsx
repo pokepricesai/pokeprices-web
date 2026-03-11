@@ -1,5 +1,4 @@
 import Link from 'next/link'
-
 const topSets = [
   'Base Set',
   'Jungle',
@@ -10,7 +9,6 @@ const topSets = [
   'Hidden Fates',
   'Evolving Skies',
 ]
-
 export default function Footer() {
   return (
     <footer style={{
@@ -21,7 +19,6 @@ export default function Footer() {
       <div style={{ marginBottom: 14 }}>
         <img src="/logo.png" alt="PokePrices" style={{ height: 34, margin: '0 auto' }} />
       </div>
-
       {/* Main nav links */}
       <div style={{
         display: 'flex', justifyContent: 'center', gap: 24,
@@ -31,6 +28,7 @@ export default function Footer() {
           { label: 'Home', href: '/' },
           { label: 'Insights', href: '/insights' },
           { label: 'Cards & Sets', href: '/browse' },
+          { label: 'Vendor Directory', href: '/vendors' },
           { label: 'Contact', href: '/contact' },
         ].map((link) => (
           <Link key={link.label} href={link.href} style={{
@@ -39,7 +37,6 @@ export default function Footer() {
           }}>{link.label}</Link>
         ))}
       </div>
-
       {/* Popular sets */}
       <div style={{ marginBottom: 20 }}>
         <p style={{
@@ -56,7 +53,6 @@ export default function Footer() {
           ))}
         </div>
       </div>
-
       <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12, margin: '0 auto 6px', maxWidth: 500 }}>
         Built by collectors, for collectors. Not affiliated with or endorsed by Nintendo, The Pokémon Company, or any grading service.
       </p>
