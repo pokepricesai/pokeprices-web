@@ -638,16 +638,24 @@ function DealVerdict({ dealerCards, customerCards, mode, cashPct, tradePct, regi
   const dealerTotal   = dealerCards.reduce((s, c) => s + dealerCardValue(c, region), 0)
   const customerTotal = customerCards.reduce((s, c) => s + customerCardValue(c, mode, cashPct, tradePct, region), 0)
 
+  // For trade mode we need a second pass at cash rates — if dealer is ahead,
+  // the customer pays cash (not trade credit), so the gap should be based on cash %
+  const customerTotalAtCash = customerCards.reduce((s, c) => s + customerCardValue(c, 'cash', cashPct, tradePct, region), 0)
+
   // diff = dealerTotal - customerTotal
   // positive → dealer giving more → customer owes the difference
   // negative → customer giving more → dealer owes the difference
   const diff    = dealerTotal - customerTotal
-  const absDiff = Math.abs(diff)
-  const isEven  = absDiff < 0.50
-  const whoOwes = diff > 0 ? 'customer' : 'dealer'  // who needs to add something
+  const isEven  = Math.abs(diff) < 0.50
+  const whoOwes = diff > 0 ? 'customer' : 'dealer'
 
-  // Compute blended split: how much of the gap is trade credit vs cash
-  // trade credit portion = tradePct / (cashPct + tradePct) of the difference
+  // In trade mode when dealer is winning, gap is calculated at cash rates
+  const effectiveCustomerTotal = (mode === 'trade' && whoOwes === 'customer') ? customerTotalAtCash : customerTotal
+  const effectiveDiff    = dealerTotal - effectiveCustomerTotal
+  const absDiff  = Math.abs(effectiveDiff)
+  const isEffectiveEven = absDiff < 0.50
+
+  // Compute blended split
   const tradeWeight  = tradePct / (cashPct + tradePct || 1)
   const cashWeight   = cashPct  / (cashPct + tradePct || 1)
   const tradePortion = absDiff * tradeWeight
@@ -662,9 +670,8 @@ function DealVerdict({ dealerCards, customerCards, mode, cashPct, tradePct, regi
     blended: `Half cash (${cashPct}%) + half store credit (${tradePct}%), averaged`,
   }
 
-  // ── Verdict content by mode ──
   function renderVerdict() {
-    if (isEven) return (
+    if (isEven || isEffectiveEven) return (
       <div style={{ textAlign: 'center' as const, padding: '8px 0' }}>
         <div style={{ fontSize: 26, fontWeight: 900, color: '#16a34a', fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>✓ Even deal</div>
         <div style={{ fontSize: 14, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
@@ -674,7 +681,6 @@ function DealVerdict({ dealerCards, customerCards, mode, cashPct, tradePct, regi
     )
 
     if (mode === 'cash') {
-      // Pure cash — straightforward
       return (
         <VerdictBox
           color={whoOwes === 'customer' ? '#b45309' : '#1d4ed8'}
@@ -695,12 +701,12 @@ function DealVerdict({ dealerCards, customerCards, mode, cashPct, tradePct, regi
 
     if (mode === 'trade') {
       if (whoOwes === 'dealer') {
-        // Customer's cards worth more → customer has store credit to spend
+        // Customer's cards worth more at trade % → customer has store credit to spend
         return (
           <VerdictBox
             color="#b45309"
             headline={`Customer has ${fmt(absDiff, region)} store credit`}
-            subtext={`Customer's cards are worth ${fmt(absDiff, region)} more than the dealer's offer. That difference becomes store credit for the customer to spend in store.`}
+            subtext={`Customer's cards are worth ${fmt(absDiff, region)} more than the dealer's offer at trade credit rates. That difference becomes store credit to spend in store.`}
             breakdown={[
               { label: 'Dealer cards', value: fmt(dealerTotal, region), color: '#1d4ed8' },
               { label: 'Customer offer', value: fmt(customerTotal, region), color: '#b45309' },
@@ -709,15 +715,15 @@ function DealVerdict({ dealerCards, customerCards, mode, cashPct, tradePct, regi
           />
         )
       } else {
-        // Dealer cards worth more → customer pays cash to top up
+        // Dealer cards worth more → customer pays cash (valued at cash % rate, not trade %)
         return (
           <VerdictBox
             color="#b45309"
             headline={`Customer pays ${fmt(absDiff, region)} cash`}
-            subtext={`Dealer's cards are worth ${fmt(absDiff, region)} more. Store credit only flows from dealer to customer — the customer needs to make up the difference in cash.`}
+            subtext={`Dealer's cards are worth more. Store credit only flows dealer → customer, so the shortfall is treated as a cash payment at your ${cashPct}% cash rate.`}
             breakdown={[
               { label: 'Dealer cards', value: fmt(dealerTotal, region), color: '#1d4ed8' },
-              { label: 'Customer offer', value: fmt(customerTotal, region), color: '#b45309' },
+              { label: 'Customer offer (cash rate)', value: fmt(customerTotalAtCash, region), color: '#b45309' },
               { label: 'Cash to pay', value: fmt(absDiff, region), sublabel: 'from customer', color: '#b45309' },
             ]}
           />
@@ -816,10 +822,10 @@ function DealVerdict({ dealerCards, customerCards, mode, cashPct, tradePct, regi
             Customer cards
           </div>
           <div style={{ fontSize: 28, fontWeight: 900, color: '#b45309', fontFamily: "'Figtree', sans-serif", lineHeight: 1 }}>
-            {fmt(customerTotal, region)}
+            {fmt(effectiveCustomerTotal, region)}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 3 }}>
-            {customerCards.length} card{customerCards.length !== 1 ? 's' : ''} · {mode === 'cash' ? `${cashPct}%` : mode === 'trade' ? `${tradePct}%` : 'blended'} offer
+            {customerCards.length} card{customerCards.length !== 1 ? 's' : ''} · {mode === 'trade' && whoOwes === 'customer' ? `${cashPct}% cash rate` : mode === 'cash' ? `${cashPct}%` : mode === 'trade' ? `${tradePct}%` : 'blended'} offer
           </div>
         </div>
       </div>
