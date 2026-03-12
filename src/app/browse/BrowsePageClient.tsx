@@ -8,7 +8,7 @@ import { getSetAssets } from '@/lib/setAssets'
 interface SetInfo {
   set_name: string
   card_count: number
-  avg_raw_usd: number | null
+  avg_raw_usd: number | null      // cents
   set_image_url: string | null
   set_release_date: string | null
 }
@@ -16,8 +16,8 @@ interface SetInfo {
 interface TrendingSet {
   set_name: string
   card_count: number
-  avg_raw_usd: number
-  total_raw_usd: number
+  avg_raw_usd: number             // cents
+  total_raw_usd: number           // cents
   avg_pct_30d: number
   avg_pct_90d: number
   total_pct_30d: number
@@ -26,13 +26,30 @@ interface TrendingSet {
 
 type SortOption = 'release_desc' | 'release_asc' | 'az' | 'za' | 'price_desc' | 'price_asc' | 'cards_desc'
 
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+// Format a cents value as a compact dollar/pound string e.g. $1.2k / $15.9k
+function fmtCompact(cents: number): string {
+  const dollars = cents / 100
+  if (dollars >= 1_000_000) return `$${(dollars / 1_000_000).toFixed(1)}M`
+  if (dollars >= 1_000)     return `$${(dollars / 1_000).toFixed(1)}k`
+  return `$${dollars.toFixed(0)}`
+}
+
+// Format cents as a dollar price with 2dp
+function fmtDollars(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`
+}
+
+// ── TrendingRow ────────────────────────────────────────────────────────────────
+
 function TrendingRow({ set, isRising }: { set: TrendingSet; isRising: boolean }) {
   const color30 = isRising ? '#22c55e' : '#ef4444'
   const color90 = (set.avg_pct_90d ?? 0) >= 0 ? '#22c55e' : '#ef4444'
-  const totalUsd = set.total_raw_usd >= 1000
-    ? `$${(set.total_raw_usd / 1000).toFixed(1)}k`
-    : `$${set.total_raw_usd.toFixed(0)}`
   const { symbolUrl } = getSetAssets(set.set_name)
+
+  // total_raw_usd is in cents — format as compact
+  const totalDisplay = fmtCompact(set.total_raw_usd)
 
   return (
     <Link href={`/set/${encodeURIComponent(set.set_name)}`} style={{ textDecoration: 'none' }}>
@@ -56,7 +73,7 @@ function TrendingRow({ set, isRising }: { set: TrendingSet; isRising: boolean })
             {set.set_name}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-            {set.card_count} cards · {totalUsd} total
+            {set.card_count} cards · {totalDisplay} total
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
@@ -82,6 +99,8 @@ function TrendingRow({ set, isRising }: { set: TrendingSet; isRising: boolean })
   )
 }
 
+// ── TrendingSetsPanel ──────────────────────────────────────────────────────────
+
 function TrendingSetsPanel({ data }: { data: { rising: TrendingSet[]; falling: TrendingSet[] } }) {
   return (
     <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: '20px 24px', marginBottom: 28 }}>
@@ -93,15 +112,15 @@ function TrendingSetsPanel({ data }: { data: { rising: TrendingSet[]; falling: T
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
         <div>
-          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase', color: '#22c55e', marginBottom: 10, fontFamily: "'Figtree', sans-serif" }}>📈 Gaining</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase' as const, color: '#22c55e', marginBottom: 10, fontFamily: "'Figtree', sans-serif" }}>📈 Gaining</div>
+          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 6 }}>
             {data.rising.map(s => <TrendingRow key={s.set_name} set={s} isRising={true} />)}
             {data.rising.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>No data yet</p>}
           </div>
         </div>
         <div>
-          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase', color: '#ef4444', marginBottom: 10, fontFamily: "'Figtree', sans-serif" }}>📉 Cooling</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase' as const, color: '#ef4444', marginBottom: 10, fontFamily: "'Figtree', sans-serif" }}>📉 Cooling</div>
+          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 6 }}>
             {data.falling.map(s => <TrendingRow key={s.set_name} set={s} isRising={false} />)}
             {data.falling.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>No data yet</p>}
           </div>
@@ -114,36 +133,72 @@ function TrendingSetsPanel({ data }: { data: { rising: TrendingSet[]; falling: T
   )
 }
 
+// ── SetInsightsBar ─────────────────────────────────────────────────────────────
+
 function SetInsightsBar({ sets }: { sets: SetInfo[] }) {
   if (!sets.length) return null
+
+  // avg_raw_usd is in cents; card_count is a plain integer
   const withPrice = sets.filter(s => s.avg_raw_usd && s.avg_raw_usd > 0)
+
+  // Total value of a set = avg_raw_usd (cents) * card_count — result is in cents
   const byTotalValue = [...withPrice].sort((a, b) => (b.avg_raw_usd! * b.card_count) - (a.avg_raw_usd! * a.card_count))
-  const byAvgPrice = [...withPrice].sort((a, b) => b.avg_raw_usd! - a.avg_raw_usd!)
-  const byCardCount = [...sets].sort((a, b) => b.card_count - a.card_count)
-  const topValue = byTotalValue[0]
-  const topAvg = byAvgPrice[0]
-  const biggest = byCardCount[0]
-  const totalMarket = withPrice.reduce((sum, s) => sum + (s.avg_raw_usd! * s.card_count), 0)
+  const byAvgPrice   = [...withPrice].sort((a, b) => b.avg_raw_usd! - a.avg_raw_usd!)
+  const byCardCount  = [...sets].sort((a, b) => b.card_count - a.card_count)
+
+  const topValue  = byTotalValue[0]
+  const topAvg    = byAvgPrice[0]
+  const biggest   = byCardCount[0]
+
+  // Sum of (avg_raw_usd_cents * card_count) across all sets — still in cents
+  const totalMarketCents = withPrice.reduce((sum, s) => sum + (s.avg_raw_usd! * s.card_count), 0)
+  const totalMarketDollars = totalMarketCents / 100
 
   const stats = [
-    { icon: '👑', label: 'Most Valuable Set', value: topValue?.set_name ?? '—', sub: topValue ? `$${((topValue.avg_raw_usd! * topValue.card_count) / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })} total raw value` : '', href: topValue ? `/set/${encodeURIComponent(topValue.set_name)}` : null },
-    { icon: '💰', label: 'Highest Avg Card Price', value: topAvg?.set_name ?? '—', sub: topAvg ? `$${(topAvg.avg_raw_usd! / 100).toFixed(2)} avg per card` : '', href: topAvg ? `/set/${encodeURIComponent(topAvg.set_name)}` : null },
-    { icon: '📦', label: 'Largest Set', value: biggest?.set_name ?? '—', sub: biggest ? `${biggest.card_count.toLocaleString()} cards` : '', href: biggest ? `/set/${encodeURIComponent(biggest.set_name)}` : null },
-    { icon: '📊', label: 'Total Tracked Value', value: `$${(totalMarket / 100 / 1000000).toFixed(1)}M`, sub: `across ${withPrice.length} sets`, href: null },
+    {
+      icon: '👑',
+      label: 'Most Valuable Set',
+      value: topValue?.set_name ?? '—',
+      sub: topValue ? `${fmtCompact(topValue.avg_raw_usd! * topValue.card_count)} total raw value` : '',
+      href: topValue ? `/set/${encodeURIComponent(topValue.set_name)}` : null,
+    },
+    {
+      icon: '💰',
+      label: 'Highest Avg Card Price',
+      value: topAvg?.set_name ?? '—',
+      sub: topAvg ? `${fmtDollars(topAvg.avg_raw_usd!)} avg per card` : '',
+      href: topAvg ? `/set/${encodeURIComponent(topAvg.set_name)}` : null,
+    },
+    {
+      icon: '📦',
+      label: 'Largest Set',
+      value: biggest?.set_name ?? '—',
+      sub: biggest ? `${biggest.card_count.toLocaleString()} cards` : '',
+      href: biggest ? `/set/${encodeURIComponent(biggest.set_name)}` : null,
+    },
+    {
+      icon: '📊',
+      label: 'Total Tracked Value',
+      value: totalMarketDollars >= 1_000_000
+        ? `$${(totalMarketDollars / 1_000_000).toFixed(1)}M`
+        : `$${(totalMarketDollars / 1_000).toFixed(0)}k`,
+      sub: `across ${withPrice.length} sets`,
+      href: null,
+    },
   ]
 
   return (
     <div style={{ background: 'linear-gradient(135deg, rgba(26,95,173,0.06), rgba(59,130,246,0.04))', border: '1px solid rgba(26,95,173,0.15)', borderRadius: 16, padding: '20px 24px', marginBottom: 28 }}>
-      <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--text-muted)', margin: '0 0 14px', fontFamily: "'Figtree', sans-serif" }}>Set Insights</p>
+      <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: 2, textTransform: 'uppercase' as const, color: 'var(--text-muted)', margin: '0 0 14px', fontFamily: "'Figtree', sans-serif" }}>Set Insights</p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
         {stats.map(stat => {
           const inner = (
-            <div key={stat.label} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div key={stat.label} style={{ display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
                 <span style={{ fontSize: 16 }}>{stat.icon}</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, fontFamily: "'Figtree', sans-serif" }}>{stat.label}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' as const, letterSpacing: 0.5, fontFamily: "'Figtree', sans-serif" }}>{stat.label}</span>
               </div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: stat.href ? 'var(--primary)' : 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{stat.value}</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: stat.href ? 'var(--primary)' : 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.3, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' }}>{stat.value}</div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>{stat.sub}</div>
             </div>
           )
@@ -156,11 +211,13 @@ function SetInsightsBar({ sets }: { sets: SetInfo[] }) {
   )
 }
 
+// ── Main ───────────────────────────────────────────────────────────────────────
+
 export default function BrowsePageClient() {
-  const [search, setSearch] = useState('')
-  const [sets, setSets] = useState<SetInfo[]>([])
-  const [loading, setLoading] = useState(true)
-  const [sort, setSort] = useState<SortOption>('release_desc')
+  const [search, setSearch]           = useState('')
+  const [sets, setSets]               = useState<SetInfo[]>([])
+  const [loading, setLoading]         = useState(true)
+  const [sort, setSort]               = useState<SortOption>('release_desc')
   const [trendingSets, setTrendingSets] = useState<{ rising: TrendingSet[]; falling: TrendingSet[] } | null>(null)
 
   useEffect(() => {
@@ -201,9 +258,11 @@ export default function BrowsePageClient() {
         Browse all {sets.length} sets in our database. Click any set to see prices, trends and grading data.
       </p>
 
-      <a href="#set-list" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 20, padding: '6px 16px', textDecoration: 'none', color: 'var(--text)', fontSize: 12, fontFamily: "'Figtree', sans-serif", fontWeight: 600, marginBottom: 28, transition: 'border-color 0.15s' }}
-        onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--primary)' }}
-        onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)' }}>
+      <a href="#set-list"
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 20, padding: '6px 16px', textDecoration: 'none', color: 'var(--text)', fontSize: 12, fontFamily: "'Figtree', sans-serif", fontWeight: 600, marginBottom: 28, transition: 'border-color 0.15s' }}
+        onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--primary)'}
+        onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)'}
+      >
         🃏 Jump to Set List
       </a>
 
@@ -212,22 +271,22 @@ export default function BrowsePageClient() {
       )}
       {!loading && <SetInsightsBar sets={sets} />}
 
-      <div id="set-list" style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div id="set-list" style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' as const, alignItems: 'center' }}>
         <input
           value={search}
           onChange={e => setSearch(e.target.value)}
           placeholder="Search sets..."
           style={{ flex: 1, minWidth: 200, padding: '10px 16px', fontSize: 14, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--card)', color: 'var(--text)', fontFamily: "'Figtree', sans-serif", outline: 'none' }}
         />
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
           {(([
             ['release_desc', 'Newest First'],
-            ['release_asc', 'Oldest First'],
-            ['az', 'A-Z'],
-            ['za', 'Z-A'],
-            ['price_desc', 'Highest Avg'],
-            ['price_asc', 'Lowest Avg'],
-            ['cards_desc', 'Most Cards'],
+            ['release_asc',  'Oldest First'],
+            ['az',           'A–Z'],
+            ['za',           'Z–A'],
+            ['price_desc',   'Highest Avg'],
+            ['price_asc',    'Lowest Avg'],
+            ['cards_desc',   'Most Cards'],
           ] as [SortOption, string][]).map(([val, label]) => (
             <button key={val} className={`sort-btn ${sort === val ? 'active' : ''}`} onClick={() => setSort(val)} style={{ fontFamily: "'Figtree', sans-serif" }}>{label}</button>
           )))}
@@ -244,7 +303,6 @@ export default function BrowsePageClient() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12 }}>
           {filtered.map(s => {
             const { logoUrl, symbolUrl } = getSetAssets(s.set_name)
-            // Prefer set logo asset; fall back to a card image from DB; then show symbol or emoji
             const thumbSrc = logoUrl || s.set_image_url
 
             return (
@@ -254,7 +312,6 @@ export default function BrowsePageClient() {
                 className="card-hover holo-shimmer"
                 style={{ background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)', padding: '16px', textDecoration: 'none', color: 'var(--text)', display: 'flex', gap: 14, alignItems: 'center' }}
               >
-                {/* Thumbnail */}
                 <div style={{ flexShrink: 0, width: 72, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   {thumbSrc ? (
                     <img src={thumbSrc} alt={s.set_name} style={{ width: 72, height: 52, objectFit: 'contain' }} loading="lazy" />
@@ -264,9 +321,8 @@ export default function BrowsePageClient() {
                     <span style={{ fontSize: 24, color: 'var(--border)' }}>🃏</span>
                   )}
                 </div>
-
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: "'Figtree', sans-serif" }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: "'Figtree', sans-serif" }}>
                     {s.set_name}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2, fontFamily: "'Figtree', sans-serif" }}>
@@ -285,7 +341,7 @@ export default function BrowsePageClient() {
       )}
 
       {!loading && filtered.length === 0 && (
-        <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40, fontFamily: "'Figtree', sans-serif" }}>
+        <p style={{ color: 'var(--text-muted)', textAlign: 'center' as const, padding: 40, fontFamily: "'Figtree', sans-serif" }}>
           No sets found matching &ldquo;{search}&rdquo;
         </p>
       )}
