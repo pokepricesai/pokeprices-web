@@ -240,7 +240,7 @@ export default function HomeClient() {
             Know what your cards<br />are <span style={{ color: 'var(--accent)' }}>really</span> worth
           </h1>
           <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 15, margin: '0 0 24px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif" }}>
-            40,000+ Pokémon cards. Daily prices from real sold listings. True landed costs including VAT, shipping, and fees.
+            The full Pokémon TCG — prices, trends, grading intelligence, and a chat that knows the market.
           </p>
           <InlineChat />
           <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, marginTop: 12, fontFamily: "'Figtree', sans-serif" }}>
