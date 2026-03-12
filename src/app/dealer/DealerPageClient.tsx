@@ -1062,7 +1062,7 @@ export default function DealerPageClient() {
                   onRemove={() => removeCustomer(card.id)}
                   onPctChange={p => updateCustomer(card.id, { customPct: p, overrideValue: null })}
                   onValueOverride={v => updateCustomer(card.id, { overrideValue: v, customPct: null })}
-                  onGradeChange={g => updateCustomer(card.id, { grade: g, sellingPrice: null } as unknown as Partial<CustomerCard>)}
+                  onGradeChange={g => updateCustomer(card.id, { grade: g, overrideValue: null, customPct: null })}
                 />
               ))}
           </div>
@@ -1095,12 +1095,14 @@ export default function DealerPageClient() {
               title: 'Dealer side — cards going out',
               body: "Search for each card you're giving the customer. The price defaults to the last sold market value — click it to enter your actual store price instead.",
               tip: 'If a card is priced at £45 in your display case, type £45. That\'s what goes into the deal.',
+              bullets: undefined,
             },
             {
               num: '2',
               color: '#b45309',
               title: 'Customer side — cards coming in',
               body: "Add the cards the customer is bringing. Each one is valued at your global offer rate automatically. Two ways to override on a per-card basis:",
+              tip: undefined,
               bullets: [
                 'Click the % badge to adjust the rate for that card (e.g. damaged card, lower the %)',
                 'Click the offer value directly to set a fixed amount — useful after checking recent sold listings. This ignores the % for that card.',
@@ -1111,6 +1113,7 @@ export default function DealerPageClient() {
               color: '#7c3aed',
               title: 'Pick your deal type',
               body: 'Choose Cash, Trade Credit, or Blended in the verdict panel:',
+              tip: undefined,
               bullets: [
                 'Cash — dealer pays money. Verdict shows who adds cash and how much.',
                 'Trade Credit — dealer gives store credit. Customer either has credit to spend or tops up with cash.',
@@ -1123,8 +1126,9 @@ export default function DealerPageClient() {
               title: 'Set your default rates',
               body: 'Use the sliders at the top to set your standard cash offer % and trade credit % — these apply to all customer cards unless individually overridden. Most shops run 40–60% cash and 60–80% trade credit.',
               tip: 'You can type directly into the % field or drag the slider.',
+              bullets: undefined,
             },
-          ] as const).map(({ num, color, title, body, tip, bullets }, i, arr) => (
+          ] as { num: string; color: string; title: string; body: string; tip?: string; bullets?: string[] }[]).map(({ num, color, title, body, tip, bullets }, i, arr) => (
             <div key={num} style={{
               display: 'grid', gridTemplateColumns: '28px 1fr', gap: '0 16px',
               paddingBottom: i < arr.length - 1 ? 20 : 0,
