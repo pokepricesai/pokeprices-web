@@ -142,14 +142,13 @@ function SearchBox({ region, onAdd }: { region: Region; onAdd: (card: DealCard) 
     let psa9Usd: number | null = null
     let psa10Usd: number | null = null
     try {
-      const { data } = await supabase
-        .from('cards')
-        .select('psa9_usd, psa10_usd')
-        .eq('card_url_slug', r.url_slug)
+      // Use get_card_detail_by_url_slug RPC — already returns psa9_usd and psa10_usd in cents
+      const { data: detail } = await supabase
+        .rpc('get_card_detail_by_url_slug', { url_slug: r.url_slug })
         .maybeSingle()
-      if (data) {
-        psa9Usd = data.psa9_usd ? data.psa9_usd / 100 : null
-        psa10Usd = data.psa10_usd ? data.psa10_usd / 100 : null
+      if (detail) {
+        psa9Usd = detail.psa9_usd ? detail.psa9_usd / 100 : null
+        psa10Usd = detail.psa10_usd ? detail.psa10_usd / 100 : null
       }
     } catch {}
     onAdd({
