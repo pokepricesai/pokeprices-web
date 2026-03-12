@@ -18,7 +18,8 @@ interface SearchResult {
   url_slug: string
 }
 
-interface DealCard {
+// Dealer card: selling price (defaults to market, override with actual £ amount)
+interface DealerCard {
   id: string
   name: string
   set: string
@@ -29,15 +30,33 @@ interface DealCard {
   cgc95Usd: number | null
   cgc10Usd: number | null
   grade: Grade
-  customPct: number | null
   urlSlug: string
+  sellingPrice: number | null // null = use market price; set = dealer's actual price
+}
+
+// Customer card: offer value via % of market OR a fixed override value
+// Override value wins if set; otherwise market × %
+interface CustomerCard {
+  id: string
+  name: string
+  set: string
+  image: string | null
+  rawUsd: number
+  psa9Usd: number | null
+  psa10Usd: number | null
+  cgc95Usd: number | null
+  cgc10Usd: number | null
+  grade: Grade
+  urlSlug: string
+  customPct: number | null   // null = global default
+  overrideValue: number | null // null = use pct calc; set = fixed value
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const USD_TO_GBP         = 0.79
-const DEFAULT_CASH_PCT   = 50   // dealer buying outright — pays below market
-const DEFAULT_TRADE_PCT  = 70   // store credit — more generous
+const USD_TO_GBP        = 0.79
+const DEFAULT_CASH_PCT  = 50
+const DEFAULT_TRADE_PCT = 70
 
 const GRADE_LABELS: Record<Grade, string> = {
   raw: 'Raw', psa9: 'PSA 9', psa10: 'PSA 10', cgc95: 'CGC 9.5', cgc10: 'CGC 10',
@@ -50,10 +69,14 @@ function convert(usd: number, region: Region): number {
 }
 
 function fmt(v: number, region: Region): string {
-  return region === 'UK' ? `£${Math.abs(v).toFixed(2)}` : `$${Math.abs(v).toFixed(2)}`
+  return (region === 'UK' ? '£' : '$') + Math.abs(v).toFixed(2)
 }
 
-function getGradePrice(card: DealCard, region: Region): number {
+function sym(region: Region): string { return region === 'UK' ? '£' : '$' }
+
+type GradedCard = Pick<DealerCard, 'rawUsd' | 'psa9Usd' | 'psa10Usd' | 'cgc95Usd' | 'cgc10Usd' | 'grade'>
+
+function getGradeMarket(card: GradedCard, region: Region): number {
   let usd = card.rawUsd
   if (card.grade === 'psa9'  && card.psa9Usd)  usd = card.psa9Usd
   if (card.grade === 'psa10' && card.psa10Usd) usd = card.psa10Usd
@@ -62,7 +85,7 @@ function getGradePrice(card: DealCard, region: Region): number {
   return convert(usd, region)
 }
 
-function gradeAvailable(card: DealCard, grade: Grade): boolean {
+function gradeAvailable(card: Pick<DealerCard, 'psa9Usd' | 'psa10Usd' | 'cgc95Usd' | 'cgc10Usd'>, grade: Grade): boolean {
   if (grade === 'raw')   return true
   if (grade === 'psa9')  return !!card.psa9Usd
   if (grade === 'psa10') return !!card.psa10Usd
@@ -71,25 +94,89 @@ function gradeAvailable(card: DealCard, grade: Grade): boolean {
   return false
 }
 
-function cardOfferValue(card: DealCard, mode: DealMode, cashPct: number, tradePct: number, region: Region): number {
-  const market = getGradePrice(card, region)
-  const cp = card.customPct ?? cashPct
-  const tp = card.customPct ?? tradePct
-  if (mode === 'cash')    return market * (cp / 100)
-  if (mode === 'trade')   return market * (tp / 100)
-  return market * ((cp + tp) / 200)   // blended = midpoint
-}
-
-function ebayUrl(card: DealCard, region: Region): string {
-  const gradeStr = card.grade !== 'raw' ? ` ${GRADE_LABELS[card.grade]}` : ''
-  const q = encodeURIComponent(`${card.name} ${card.set}${gradeStr} pokemon card`)
+function ebayUrl(name: string, set: string, grade: Grade, region: Region): string {
+  const g = grade !== 'raw' ? ` ${GRADE_LABELS[grade]}` : ''
+  const q = encodeURIComponent(`${name} ${set}${g} pokemon card`)
   const base = region === 'UK' ? 'https://www.ebay.co.uk' : 'https://www.ebay.com'
   return `${base}/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13`
 }
 
+function dealerCardValue(card: DealerCard, region: Region): number {
+  return card.sellingPrice ?? getGradeMarket(card, region)
+}
+
+function customerCardValue(
+  card: CustomerCard,
+  mode: DealMode,
+  cashPct: number,
+  tradePct: number,
+  region: Region
+): number {
+  // Fixed override wins if set
+  if (card.overrideValue !== null) return card.overrideValue
+  const market = getGradeMarket(card, region)
+  const cp = card.customPct ?? cashPct
+  const tp = card.customPct ?? tradePct
+  if (mode === 'cash')  return market * (cp / 100)
+  if (mode === 'trade') return market * (tp / 100)
+  return market * ((cp + tp) / 200)
+}
+
+async function fetchGradedPrices(urlSlug: string) {
+  try {
+    const { data: cardRow } = await supabase
+      .from('cards').select('card_slug')
+      .eq('card_url_slug', urlSlug).maybeSingle()
+    if (!cardRow?.card_slug) return { psa9Usd: null, psa10Usd: null, cgc95Usd: null, cgc10Usd: null }
+    const { data: dp } = await supabase
+      .from('daily_prices')
+      .select('psa9_usd, psa10_usd, cgc95_usd, cgc10_usd')
+      .eq('card_slug', 'pc-' + cardRow.card_slug)
+      .order('date', { ascending: false }).limit(1).maybeSingle()
+    return {
+      psa9Usd:  dp?.psa9_usd  ? dp.psa9_usd  / 100 : null,
+      psa10Usd: dp?.psa10_usd ? dp.psa10_usd / 100 : null,
+      cgc95Usd: dp?.cgc95_usd ? dp.cgc95_usd / 100 : null,
+      cgc10Usd: dp?.cgc10_usd ? dp.cgc10_usd / 100 : null,
+    }
+  } catch {
+    return { psa9Usd: null, psa10Usd: null, cgc95Usd: null, cgc10Usd: null }
+  }
+}
+
+// ── Grade Pills ────────────────────────────────────────────────────────────────
+
+function GradePills({ card, onGradeChange }: {
+  card: Pick<DealerCard, 'psa9Usd' | 'psa10Usd' | 'cgc95Usd' | 'cgc10Usd' | 'grade'>
+  onGradeChange: (g: Grade) => void
+}) {
+  const grades: Grade[] = ['raw', 'psa9', 'psa10', 'cgc95', 'cgc10']
+  return (
+    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' as const }}>
+      {grades.map(g => {
+        const avail  = gradeAvailable(card, g)
+        const active = card.grade === g
+        return (
+          <button key={g} onClick={() => avail && onGradeChange(g)}
+            title={!avail ? 'No price data for this grade' : ''}
+            style={{
+              padding: '3px 8px', borderRadius: 5, cursor: avail ? 'pointer' : 'not-allowed',
+              fontSize: 11, fontWeight: active ? 700 : 500, fontFamily: "'Figtree', sans-serif",
+              background: active ? 'var(--primary)' : 'var(--bg)',
+              color: active ? '#fff' : avail ? 'var(--text-muted)' : 'var(--border)',
+              border: `1px solid ${active ? 'var(--primary)' : 'var(--border)'}`,
+              opacity: avail ? 1 : 0.35, transition: 'all 0.1s',
+            }}
+          >{GRADE_LABELS[g]}</button>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── Search Box ─────────────────────────────────────────────────────────────────
 
-function SearchBox({ region, onAdd }: { region: Region; onAdd: (card: DealCard) => void }) {
+function SearchBox({ region, onAdd }: { region: Region; onAdd: (r: SearchResult) => void }) {
   const [query, setQuery]     = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [loading, setLoading] = useState(false)
@@ -111,48 +198,12 @@ function SearchBox({ region, onAdd }: { region: Region; onAdd: (card: DealCard) 
   }, [query])
 
   useEffect(() => {
-    function onClickOutside(e: MouseEvent) {
+    function onOut(e: MouseEvent) {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
     }
-    document.addEventListener('mousedown', onClickOutside)
-    return () => document.removeEventListener('mousedown', onClickOutside)
+    document.addEventListener('mousedown', onOut)
+    return () => document.removeEventListener('mousedown', onOut)
   }, [])
-
-  async function handleAdd(r: SearchResult) {
-    if (!r.price_usd) return
-    setQuery(''); setResults([]); setOpen(false)
-
-    let psa9Usd: number | null = null, psa10Usd: number | null = null
-    let cgc95Usd: number | null = null, cgc10Usd: number | null = null
-
-    try {
-      const { data: cardRow } = await supabase
-        .from('cards').select('card_slug')
-        .eq('card_url_slug', r.url_slug).maybeSingle()
-
-      if (cardRow?.card_slug) {
-        const { data: dp } = await supabase
-          .from('daily_prices')
-          .select('psa9_usd, psa10_usd, cgc95_usd, cgc10_usd')
-          .eq('card_slug', 'pc-' + cardRow.card_slug)
-          .order('date', { ascending: false }).limit(1).maybeSingle()
-
-        if (dp) {
-          psa9Usd  = dp.psa9_usd  ? dp.psa9_usd  / 100 : null
-          psa10Usd = dp.psa10_usd ? dp.psa10_usd / 100 : null
-          cgc95Usd = dp.cgc95_usd ? dp.cgc95_usd / 100 : null
-          cgc10Usd = dp.cgc10_usd ? dp.cgc10_usd / 100 : null
-        }
-      }
-    } catch {}
-
-    onAdd({
-      id: `${r.url_slug}-${Date.now()}`,
-      name: r.name, set: r.subtitle, image: r.image_url,
-      rawUsd: r.price_usd / 100, psa9Usd, psa10Usd, cgc95Usd, cgc10Usd,
-      grade: 'raw', customPct: null, urlSlug: r.url_slug,
-    })
-  }
 
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
@@ -164,25 +215,24 @@ function SearchBox({ region, onAdd }: { region: Region; onAdd: (card: DealCard) 
           style={{
             width: '100%', boxSizing: 'border-box' as const,
             background: 'var(--bg)', border: '1px solid var(--border)',
-            borderRadius: 10, padding: '9px 12px 9px 36px',
-            color: 'var(--text)', fontSize: 13, fontFamily: "'Figtree', sans-serif", outline: 'none',
+            borderRadius: 10, padding: '11px 12px 11px 38px',
+            color: 'var(--text)', fontSize: 15, fontFamily: "'Figtree', sans-serif", outline: 'none',
           }}
           onFocus={e => { e.currentTarget.style.borderColor = 'var(--primary)'; if (results.length) setOpen(true) }}
           onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'}
         />
         {loading && <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: 11 }}>...</span>}
       </div>
-
       {open && results.length > 0 && (
         <div style={{
-          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 100,
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 200,
           background: 'var(--card)', border: '1px solid var(--border)',
-          borderRadius: 12, overflow: 'hidden', boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+          borderRadius: 12, overflow: 'hidden', boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
         }}>
           {results.map(r => (
-            <div
-              key={r.url_slug} onMouseDown={() => handleAdd(r)}
-              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border-light)' }}
+            <div key={r.url_slug}
+              onMouseDown={() => { onAdd(r); setQuery(''); setResults([]); setOpen(false) }}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border-light)' }}
               onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-light)'}
               onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = 'transparent'}
             >
@@ -191,7 +241,7 @@ function SearchBox({ region, onAdd }: { region: Region; onAdd: (card: DealCard) 
                 : <div style={{ width: 26, height: 36, background: 'var(--bg)', borderRadius: 3, flexShrink: 0 }} />}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>{r.subtitle}{r.card_number_display ? ` · ${r.card_number_display}` : ''}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>{r.subtitle}</div>
               </div>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", flexShrink: 0 }}>
                 {fmt(convert(r.price_usd! / 100, region), region)}
@@ -205,280 +255,540 @@ function SearchBox({ region, onAdd }: { region: Region; onAdd: (card: DealCard) 
   )
 }
 
-// ── Card Row ───────────────────────────────────────────────────────────────────
+// ── Inline price editor ────────────────────────────────────────────────────────
 
-function CardRow({
-  card, mode, cashPct, tradePct, region,
-  onRemove, onOverride, onGradeChange,
-}: {
-  card: DealCard; mode: DealMode; cashPct: number; tradePct: number; region: Region
-  onRemove: () => void; onOverride: (pct: number | null) => void; onGradeChange: (g: Grade) => void
+function PriceEditor({ value, region, isOverridden, label, color, onCommit, onReset }: {
+  value: number
+  region: Region
+  isOverridden: boolean
+  label: string
+  color: string
+  onCommit: (v: number) => void
+  onReset: () => void
 }) {
-  const [editingPct, setEditingPct] = useState(false)
-  const [pctInput, setPctInput]     = useState('')
+  const [editing, setEditing] = useState(false)
+  const [input, setInput]     = useState('')
 
-  const marketPrice = getGradePrice(card, region)
-  const offerValue  = cardOfferValue(card, mode, cashPct, tradePct, region)
-  const grades: Grade[] = ['raw', 'psa9', 'psa10', 'cgc95', 'cgc10']
+  function start() { setInput(value.toFixed(2)); setEditing(true) }
+  function commit() {
+    const v = parseFloat(input)
+    if (!isNaN(v) && v >= 0) onCommit(v)
+    setEditing(false)
+  }
 
-  const modeLabel = mode === 'cash' ? 'Cash offer' : mode === 'trade' ? 'Trade credit' : 'Blended'
-  const modeColor = mode === 'cash' ? '#16a34a'   : mode === 'trade' ? 'var(--primary)' : '#7c3aed'
+  return (
+    <div>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' as const, letterSpacing: 1, fontFamily: "'Figtree', sans-serif", fontWeight: 700, marginBottom: 3 }}>
+        {label}
+      </div>
+      {editing ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ fontSize: 16, fontWeight: 800, color, fontFamily: "'Figtree', sans-serif" }}>{sym(region)}</span>
+          <input
+            autoFocus type="number" min={0} step={0.01} value={input}
+            onChange={e => setInput(e.target.value)}
+            onBlur={commit}
+            onKeyDown={e => { if (e.key === 'Enter') commit() }}
+            style={{
+              width: 80, background: 'var(--bg-light)', border: `1px solid ${color}`,
+              borderRadius: 6, color: 'var(--text)', fontSize: 16, fontWeight: 800,
+              padding: '3px 6px', fontFamily: "'Figtree', sans-serif", outline: 'none',
+            }}
+          />
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button onClick={start} style={{
+            background: isOverridden ? `${color}15` : 'transparent',
+            border: `1px solid ${isOverridden ? color + '55' : 'var(--border)'}`,
+            borderRadius: 8, padding: '4px 12px', cursor: 'pointer',
+            fontSize: 20, fontWeight: 900, color: isOverridden ? color : 'var(--text)',
+            fontFamily: "'Figtree', sans-serif",
+          }}>
+            {fmt(value, region)}
+          </button>
+          {isOverridden && (
+            <button onClick={onReset}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textDecoration: 'underline', padding: 0 }}
+            >reset</button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Dealer Card Row ────────────────────────────────────────────────────────────
+
+function DealerCardRow({ card, region, onRemove, onPriceChange, onGradeChange }: {
+  card: DealerCard
+  region: Region
+  onRemove: () => void
+  onPriceChange: (price: number | null) => void
+  onGradeChange: (g: Grade) => void
+}) {
+  const marketPrice    = getGradeMarket(card, region)
+  const effectivePrice = dealerCardValue(card, region)
+  const isOverridden   = card.sellingPrice !== null
+
+  function handleCommit(v: number) {
+    // If they type the market price exactly, clear override so it tracks naturally
+    onPriceChange(Math.abs(v - marketPrice) < 0.005 ? null : v)
+  }
 
   return (
     <div style={{ background: 'var(--bg-light)', borderRadius: 12, border: '1px solid var(--border-light)', marginBottom: 8, overflow: 'hidden' }}>
-      {/* Card info row */}
       <div style={{ display: 'grid', gridTemplateColumns: '44px 1fr auto', gap: 10, padding: '10px 12px', alignItems: 'start' }}>
         {card.image
           ? <img src={card.image} alt={card.name} style={{ width: 44, height: 61, objectFit: 'contain', borderRadius: 4 }} />
           : <div style={{ width: 44, height: 61, background: 'var(--bg)', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🃏</div>}
-
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.3, marginBottom: 2 }}>{card.name}</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 7 }}>{card.set}</div>
-          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' as const }}>
-            {grades.map(g => {
-              const avail  = gradeAvailable(card, g)
-              const active = card.grade === g
-              return (
-                <button key={g} onClick={() => avail && onGradeChange(g)}
-                  title={!avail ? 'No price data for this grade' : ''}
-                  style={{
-                    padding: '2px 7px', borderRadius: 5,
-                    cursor: avail ? 'pointer' : 'not-allowed',
-                    fontSize: 10, fontWeight: active ? 700 : 500,
-                    fontFamily: "'Figtree', sans-serif",
-                    background: active ? 'var(--primary)' : 'var(--bg)',
-                    color: active ? '#fff' : avail ? 'var(--text-muted)' : 'var(--border)',
-                    border: `1px solid ${active ? 'var(--primary)' : 'var(--border)'}`,
-                    opacity: avail ? 1 : 0.35, transition: 'all 0.1s',
-                  }}
-                >{GRADE_LABELS[g]}</button>
-              )
-            })}
-          </div>
+          <GradePills card={card} onGradeChange={onGradeChange} />
         </div>
-
         <button onClick={onRemove}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 20, padding: '0 4px', lineHeight: 1 }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 22, padding: '0 4px', lineHeight: 1 }}
           onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
           onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-muted)')}
         >×</button>
       </div>
 
-      {/* Price bar */}
       <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' as const,
-        padding: '8px 12px', background: 'var(--bg)', borderTop: '1px solid var(--border-light)', gap: 8,
+        display: 'flex', alignItems: 'center', flexWrap: 'wrap' as const,
+        padding: '8px 12px', background: 'var(--bg)', borderTop: '1px solid var(--border-light)', gap: 14,
       }}>
+        {/* Market reference — greyed out */}
         <div>
           <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' as const, letterSpacing: 1, fontFamily: "'Figtree', sans-serif", fontWeight: 700 }}>
-            Market ({GRADE_LABELS[card.grade]})
+            Market
           </div>
-          <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textDecoration: isOverridden ? 'line-through' : 'none' }}>
             {fmt(marketPrice, region)}
           </div>
         </div>
 
-        {/* Per-card % override */}
-        <div style={{ display: 'flex', flexDirection: 'column' as const, alignItems: 'center', gap: 2 }}>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' as const, letterSpacing: 1, fontFamily: "'Figtree', sans-serif", fontWeight: 700 }}>
-            Override %
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            {editingPct ? (
-              <>
-                <input autoFocus type="number" min={10} max={100} value={pctInput}
-                  onChange={e => setPctInput(e.target.value)}
-                  onBlur={() => {
-                    const v = parseInt(pctInput)
-                    onOverride(!isNaN(v) && v >= 10 && v <= 100 ? v : null)
-                    setEditingPct(false)
-                  }}
-                  onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                  style={{ width: 44, background: 'var(--bg-light)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontSize: 12, padding: '3px 5px', fontFamily: "'Figtree', sans-serif" }}
-                />
-                <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>%</span>
-              </>
-            ) : (
-              <button
-                onClick={() => { setPctInput(String(card.customPct ?? '')); setEditingPct(true) }}
-                style={{
-                  background: card.customPct != null ? 'rgba(245,158,11,0.12)' : 'var(--bg-light)',
-                  border: `1px solid ${card.customPct != null ? 'rgba(245,158,11,0.4)' : 'var(--border)'}`,
-                  borderRadius: 6, padding: '3px 10px', cursor: 'pointer',
-                  fontSize: 12, fontWeight: 700,
-                  color: card.customPct != null ? '#d97706' : 'var(--text-muted)',
-                  fontFamily: "'Figtree', sans-serif",
-                }}
-              >
-                {card.customPct != null ? `${card.customPct}%` : '—'}
-              </button>
-            )}
-            {card.customPct != null && !editingPct && (
-              <button onClick={() => onOverride(null)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textDecoration: 'underline', padding: 0 }}
-              >reset</button>
-            )}
-          </div>
+        <div style={{ color: 'var(--border)', fontSize: 16 }}>→</div>
+
+        {/* Selling price — click to edit */}
+        <div style={{ flex: 1 }}>
+          <PriceEditor
+            value={effectivePrice}
+            region={region}
+            isOverridden={isOverridden}
+            label="Your selling price"
+            color="#1d4ed8"
+            onCommit={handleCommit}
+            onReset={() => onPriceChange(null)}
+          />
         </div>
 
-        {/* Offer value */}
-        <div style={{ textAlign: 'center' as const }}>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' as const, letterSpacing: 1, fontFamily: "'Figtree', sans-serif", fontWeight: 700 }}>
-            {modeLabel}
-          </div>
-          <div style={{ fontSize: 18, fontWeight: 900, color: modeColor, fontFamily: "'Figtree', sans-serif" }}>
-            {fmt(offerValue, region)}
-          </div>
-        </div>
-
-        <a href={ebayUrl(card, region)} target="_blank" rel="noopener noreferrer"
+        <a href={ebayUrl(card.name, card.set, card.grade, region)} target="_blank" rel="noopener noreferrer"
           style={{
-            display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 8,
+            display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 8,
             background: 'rgba(232,121,0,0.08)', border: '1px solid rgba(232,121,0,0.2)',
             color: '#c05500', fontSize: 11, fontWeight: 700,
-            fontFamily: "'Figtree', sans-serif", textDecoration: 'none',
+            fontFamily: "'Figtree', sans-serif", textDecoration: 'none', whiteSpace: 'nowrap' as const,
           }}
           onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(232,121,0,0.15)'}
           onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(232,121,0,0.08)'}
-        >🛒 eBay last sold ↗</a>
+        >🛒 eBay sold ↗</a>
       </div>
     </div>
   )
 }
 
-// ── Deal Panel ─────────────────────────────────────────────────────────────────
+// ── Customer Card Row ──────────────────────────────────────────────────────────
 
-function DealPanel({
-  title, side, cards, mode, cashPct, tradePct, region,
-  accentColor, emptyText,
-  onAdd, onRemove, onOverride, onGradeChange,
-}: {
-  title: string; side: 'dealer' | 'customer'
-  cards: DealCard[]; mode: DealMode; cashPct: number; tradePct: number; region: Region
-  accentColor: string; emptyText: string
-  onAdd: (c: DealCard) => void; onRemove: (id: string) => void
-  onOverride: (id: string, pct: number | null) => void; onGradeChange: (id: string, g: Grade) => void
+function CustomerCardRow({ card, mode, cashPct, tradePct, region, onRemove, onPctChange, onValueOverride, onGradeChange }: {
+  card: CustomerCard
+  mode: DealMode
+  cashPct: number
+  tradePct: number
+  region: Region
+  onRemove: () => void
+  onPctChange: (pct: number | null) => void
+  onValueOverride: (v: number | null) => void
+  onGradeChange: (g: Grade) => void
 }) {
-  const total = cards.reduce((s, c) => s + cardOfferValue(c, mode, cashPct, tradePct, region), 0)
+  const [editingPct, setEditingPct] = useState(false)
+  const [pctInput, setPctInput]     = useState('')
+
+  const marketPrice  = getGradeMarket(card, region)
+  const offerValue   = customerCardValue(card, mode, cashPct, tradePct, region)
+  const isValueFixed = card.overrideValue !== null
+  const isPctCustom  = card.customPct !== null && !isValueFixed
+
+  const activePct = (() => {
+    const cp = card.customPct ?? cashPct
+    const tp = card.customPct ?? tradePct
+    if (mode === 'cash')  return cp
+    if (mode === 'trade') return tp
+    return Math.round((cp + tp) / 2)
+  })()
+
+  const modeLabel = mode === 'cash' ? 'Cash offer' : mode === 'trade' ? 'Trade credit' : 'Blended'
+  const modeColor = mode === 'cash' ? '#16a34a' : mode === 'trade' ? 'var(--primary)' : '#7c3aed'
 
   return (
-    <div style={{ background: 'var(--card)', border: `2px solid ${accentColor}22`, borderRadius: 16, padding: '18px 16px', display: 'flex', flexDirection: 'column' as const, gap: 12 }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase' as const, letterSpacing: 1.5, color: accentColor, fontFamily: "'Figtree', sans-serif", marginBottom: 2 }}>
-            {side === 'dealer' ? 'Dealer' : 'Customer'}
-          </div>
-          <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>{title}</div>
+    <div style={{ background: 'var(--bg-light)', borderRadius: 12, border: '1px solid var(--border-light)', marginBottom: 8, overflow: 'hidden' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '44px 1fr auto', gap: 10, padding: '10px 12px', alignItems: 'start' }}>
+        {card.image
+          ? <img src={card.image} alt={card.name} style={{ width: 44, height: 61, objectFit: 'contain', borderRadius: 4 }} />
+          : <div style={{ width: 44, height: 61, background: 'var(--bg)', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🃏</div>}
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.3, marginBottom: 2 }}>{card.name}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 7 }}>{card.set}</div>
+          <GradePills card={card} onGradeChange={onGradeChange} />
         </div>
-        {cards.length > 0 && (
-          <div style={{ textAlign: 'right' as const }}>
-            <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' as const, letterSpacing: 1, fontFamily: "'Figtree', sans-serif", fontWeight: 700 }}>
-              {cards.length} card{cards.length !== 1 ? 's' : ''}
+        <button onClick={onRemove}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 22, padding: '0 4px', lineHeight: 1 }}
+          onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+          onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-muted)')}
+        >×</button>
+      </div>
+
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', flexWrap: 'wrap' as const,
+        padding: '8px 12px', background: 'var(--bg)', borderTop: '1px solid var(--border-light)', gap: 14,
+      }}>
+        {/* Market */}
+        <div>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' as const, letterSpacing: 1, fontFamily: "'Figtree', sans-serif", fontWeight: 700 }}>
+            Market
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+            {fmt(marketPrice, region)}
+          </div>
+        </div>
+
+        {/* % override — only relevant when not value-fixed */}
+        {!isValueFixed && (
+          <div>
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' as const, letterSpacing: 1, fontFamily: "'Figtree', sans-serif", fontWeight: 700, marginBottom: 3 }}>
+              Rate %
             </div>
-            <div style={{ fontSize: 22, fontWeight: 900, color: accentColor, fontFamily: "'Figtree', sans-serif" }}>
-              {fmt(total, region)}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              {editingPct ? (
+                <>
+                  <input autoFocus type="number" min={1} max={100} value={pctInput}
+                    onChange={e => setPctInput(e.target.value)}
+                    onBlur={() => {
+                      const v = parseInt(pctInput)
+                      onPctChange(!isNaN(v) && v >= 1 && v <= 100 ? v : null)
+                      setEditingPct(false)
+                    }}
+                    onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                    style={{ width: 48, background: 'var(--bg-light)', border: '1px solid var(--primary)', borderRadius: 6, color: 'var(--text)', fontSize: 14, fontWeight: 700, padding: '3px 6px', fontFamily: "'Figtree', sans-serif", outline: 'none' }}
+                  />
+                  <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>%</span>
+                </>
+              ) : (
+                <button
+                  onClick={() => { setPctInput(String(card.customPct ?? activePct)); setEditingPct(true) }}
+                  style={{
+                    background: isPctCustom ? 'rgba(245,158,11,0.1)' : 'var(--bg-light)',
+                    border: `1px solid ${isPctCustom ? 'rgba(245,158,11,0.4)' : 'var(--border)'}`,
+                    borderRadius: 6, padding: '4px 10px', cursor: 'pointer',
+                    fontSize: 14, fontWeight: 700,
+                    color: isPctCustom ? '#d97706' : 'var(--text-muted)',
+                    fontFamily: "'Figtree', sans-serif",
+                  }}
+                >
+                  {activePct}%
+                </button>
+              )}
+              {isPctCustom && !editingPct && (
+                <button onClick={() => onPctChange(null)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textDecoration: 'underline', padding: 0 }}
+                >reset</button>
+              )}
             </div>
           </div>
         )}
-      </div>
 
-      {/* Cards */}
-      <div>
-        {cards.length === 0 ? (
-          <div style={{
-            textAlign: 'center' as const, padding: '24px 16px',
-            color: 'var(--text-muted)', fontSize: 13,
-            fontFamily: "'Figtree', sans-serif", lineHeight: 1.5,
-            border: '1px dashed var(--border)', borderRadius: 10,
-          }}>
-            {emptyText}
-          </div>
-        ) : cards.map(card => (
-          <CardRow
-            key={card.id} card={card} mode={mode}
-            cashPct={cashPct} tradePct={tradePct} region={region}
-            onRemove={() => onRemove(card.id)}
-            onOverride={pct => onOverride(card.id, pct)}
-            onGradeChange={g => onGradeChange(card.id, g)}
+        {/* Fixed value override */}
+        <div style={{ flex: 1 }}>
+          <PriceEditor
+            value={offerValue}
+            region={region}
+            isOverridden={isValueFixed}
+            label={isValueFixed ? 'Fixed offer value' : modeLabel}
+            color={isValueFixed ? '#d97706' : modeColor}
+            onCommit={v => {
+              // Setting a value override clears pct override
+              onPctChange(null)
+              onValueOverride(Math.abs(v - customerCardValue({ ...card, overrideValue: null }, mode, cashPct, tradePct, region)) < 0.005 ? null : v)
+            }}
+            onReset={() => onValueOverride(null)}
           />
-        ))}
-      </div>
+          {isValueFixed && (
+            <div style={{ fontSize: 10, color: '#d97706', fontFamily: "'Figtree', sans-serif", marginTop: 2 }}>
+              Fixed — ignoring % rate
+            </div>
+          )}
+        </div>
 
-      <SearchBox region={region} onAdd={onAdd} />
+        <a href={ebayUrl(card.name, card.set, card.grade, region)} target="_blank" rel="noopener noreferrer"
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 8,
+            background: 'rgba(232,121,0,0.08)', border: '1px solid rgba(232,121,0,0.2)',
+            color: '#c05500', fontSize: 11, fontWeight: 700,
+            fontFamily: "'Figtree', sans-serif", textDecoration: 'none', whiteSpace: 'nowrap' as const,
+          }}
+          onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(232,121,0,0.15)'}
+          onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(232,121,0,0.08)'}
+        >🛒 eBay sold ↗</a>
+      </div>
+    </div>
+  )
+}
+
+// ── Rate Controls ──────────────────────────────────────────────────────────────
+
+function RateControls({ cashPct, tradePct, onCashChange, onTradeChange }: {
+  cashPct: number; tradePct: number
+  onCashChange: (v: number) => void; onTradeChange: (v: number) => void
+}) {
+  const [cashInput, setCashInput]   = useState(String(cashPct))
+  const [tradeInput, setTradeInput] = useState(String(tradePct))
+
+  // Keep inputs in sync if sliders change
+  useEffect(() => { setCashInput(String(cashPct)) },  [cashPct])
+  useEffect(() => { setTradeInput(String(tradePct)) }, [tradePct])
+
+  function handleCashInput(raw: string) {
+    setCashInput(raw)
+    const v = parseInt(raw)
+    if (!isNaN(v) && v >= 1 && v <= 100) onCashChange(v)
+  }
+  function handleTradeInput(raw: string) {
+    setTradeInput(raw)
+    const v = parseInt(raw)
+    if (!isNaN(v) && v >= 1 && v <= 100) onTradeChange(v)
+  }
+
+  const rates = [
+    { label: '💵 Cash offer %', value: cashPct, input: cashInput, onChange: onCashChange, onInputChange: handleCashInput, color: '#16a34a' },
+    { label: '🔄 Trade credit %', value: tradePct, input: tradeInput, onChange: onTradeChange, onInputChange: handleTradeInput, color: '#1d4ed8' },
+  ]
+
+  return (
+    <div style={{
+      background: 'var(--card)', border: '1px solid var(--border)',
+      borderRadius: 14, padding: '16px 20px', display: 'flex', flexDirection: 'column' as const, gap: 14,
+    }}>
+      <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase' as const, letterSpacing: 1.2, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+        Default offer rates
+      </div>
+      {rates.map(({ label, value, input, onChange, onInputChange, color }) => (
+        <div key={label}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>{label}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="number" min={1} max={100} value={input}
+                onChange={e => onInputChange(e.target.value)}
+                style={{
+                  width: 56, background: 'var(--bg)', border: '1px solid var(--border)',
+                  borderRadius: 7, padding: '5px 8px', fontSize: 16, fontWeight: 800,
+                  color, fontFamily: "'Figtree', sans-serif", outline: 'none', textAlign: 'center' as const,
+                }}
+                onFocus={e => e.currentTarget.style.borderColor = color}
+                onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'}
+              />
+              <span style={{ fontSize: 16, fontWeight: 800, color, fontFamily: "'Figtree', sans-serif" }}>%</span>
+            </div>
+          </div>
+          <input
+            type="range" min={1} max={100} value={value}
+            onChange={e => onChange(parseInt(e.target.value))}
+            style={{ width: '100%', height: 8, accentColor: color, cursor: 'pointer' }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 4 }}>
+            <span>1%</span><span>50%</span><span>100%</span>
+          </div>
+        </div>
+      ))}
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", paddingTop: 4, borderTop: '1px solid var(--border-light)' }}>
+        Override per card by clicking its offer value
+      </div>
     </div>
   )
 }
 
 // ── Deal Verdict ───────────────────────────────────────────────────────────────
 
-function DealVerdict({
-  dealerCards, customerCards, mode, cashPct, tradePct, region, onModeChange,
-}: {
-  dealerCards: DealCard[]; customerCards: DealCard[]
-  mode: DealMode; cashPct: number; tradePct: number; region: Region
+function DealVerdict({ dealerCards, customerCards, mode, cashPct, tradePct, region, onModeChange }: {
+  dealerCards: DealerCard[]
+  customerCards: CustomerCard[]
+  mode: DealMode
+  cashPct: number
+  tradePct: number
+  region: Region
   onModeChange: (m: DealMode) => void
 }) {
   if (dealerCards.length === 0 && customerCards.length === 0) return null
 
-  const dealerTotal   = dealerCards.reduce((s, c)   => s + cardOfferValue(c, mode, cashPct, tradePct, region), 0)
-  const customerTotal = customerCards.reduce((s, c) => s + cardOfferValue(c, mode, cashPct, tradePct, region), 0)
+  const dealerTotal   = dealerCards.reduce((s, c) => s + dealerCardValue(c, region), 0)
+  const customerTotal = customerCards.reduce((s, c) => s + customerCardValue(c, mode, cashPct, tradePct, region), 0)
 
-  // diff > 0 → dealer cards worth more → dealer is giving more value → customer should add cash
-  // diff < 0 → customer cards worth more → customer is giving more value → dealer should add cash
+  // diff = dealerTotal - customerTotal
+  // positive → dealer giving more → customer owes the difference
+  // negative → customer giving more → dealer owes the difference
   const diff    = dealerTotal - customerTotal
   const absDiff = Math.abs(diff)
   const isEven  = absDiff < 0.50
-  const whoOwes = diff > 0 ? 'customer' : 'dealer'
+  const whoOwes = diff > 0 ? 'customer' : 'dealer'  // who needs to add something
+
+  // Compute blended split: how much of the gap is trade credit vs cash
+  // trade credit portion = tradePct / (cashPct + tradePct) of the difference
+  const tradeWeight  = tradePct / (cashPct + tradePct || 1)
+  const cashWeight   = cashPct  / (cashPct + tradePct || 1)
+  const tradePortion = absDiff * tradeWeight
+  const cashPortion  = absDiff * cashWeight
 
   const modeColors: Record<DealMode, string> = {
-    cash: '#16a34a', trade: 'var(--primary)', blended: '#7c3aed',
+    cash: '#16a34a', trade: '#1d4ed8', blended: '#7c3aed',
   }
   const modeDescriptions: Record<DealMode, string> = {
-    cash:    `Dealer pays cash — ${cashPct}% of market value`,
-    trade:   `Dealer gives store credit — ${tradePct}% of market value`,
-    blended: `Split: cash at ${cashPct}% + trade credit at ${tradePct}%, averaged`,
+    cash:    `Paying cash at ${cashPct}% of market`,
+    trade:   `Giving store credit at ${tradePct}% of market`,
+    blended: `Half cash (${cashPct}%) + half store credit (${tradePct}%), averaged`,
+  }
+
+  // ── Verdict content by mode ──
+  function renderVerdict() {
+    if (isEven) return (
+      <div style={{ textAlign: 'center' as const, padding: '8px 0' }}>
+        <div style={{ fontSize: 26, fontWeight: 900, color: '#16a34a', fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>✓ Even deal</div>
+        <div style={{ fontSize: 14, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+          Both sides are within {fmt(0.50, region)} — no cash needed.
+        </div>
+      </div>
+    )
+
+    if (mode === 'cash') {
+      // Pure cash — straightforward
+      return (
+        <VerdictBox
+          color={whoOwes === 'customer' ? '#b45309' : '#1d4ed8'}
+          headline={whoOwes === 'customer'
+            ? `Customer adds ${fmt(absDiff, region)} cash`
+            : `Dealer adds ${fmt(absDiff, region)} cash`}
+          subtext={whoOwes === 'customer'
+            ? `Dealer's cards are worth ${fmt(absDiff, region)} more. Customer tops up in cash.`
+            : `Customer's cards are worth ${fmt(absDiff, region)} more. Dealer tops up in cash.`}
+          breakdown={[
+            { label: 'Dealer cards', value: fmt(dealerTotal, region), color: '#1d4ed8' },
+            { label: 'Customer offer', value: fmt(customerTotal, region), color: '#b45309' },
+            { label: 'Cash to add', value: fmt(absDiff, region), sublabel: `from ${whoOwes}`, color: whoOwes === 'customer' ? '#b45309' : '#1d4ed8' },
+          ]}
+        />
+      )
+    }
+
+    if (mode === 'trade') {
+      // Trade credit mode:
+      // - If dealer cards > customer cards: dealer has more to offer → customer gets store credit for the difference
+      // - If customer cards > dealer cards: customer's stuff is worth more → customer still needs cash for the remainder
+      if (whoOwes === 'customer') {
+        // Dealer giving more → customer gets store credit for the gap
+        return (
+          <VerdictBox
+            color="#1d4ed8"
+            headline={`${fmt(absDiff, region)} store credit to customer`}
+            subtext={`Dealer's cards are worth ${fmt(absDiff, region)} more. Customer receives that as store credit — nothing extra needed.`}
+            breakdown={[
+              { label: 'Dealer cards', value: fmt(dealerTotal, region), color: '#1d4ed8' },
+              { label: 'Customer offer', value: fmt(customerTotal, region), color: '#b45309' },
+              { label: 'Store credit', value: fmt(absDiff, region), sublabel: 'to customer', color: '#1d4ed8' },
+            ]}
+          />
+        )
+      } else {
+        // Customer's cards worth more — they still need to pay cash for the difference
+        return (
+          <VerdictBox
+            color="#b45309"
+            headline={`Customer adds ${fmt(absDiff, region)} cash`}
+            subtext={`Customer's cards are worth ${fmt(absDiff, region)} more than the dealer's offer. Customer tops up with cash.`}
+            breakdown={[
+              { label: 'Dealer cards', value: fmt(dealerTotal, region), color: '#1d4ed8' },
+              { label: 'Customer offer', value: fmt(customerTotal, region), color: '#b45309' },
+              { label: 'Cash to add', value: fmt(absDiff, region), sublabel: 'from customer', color: '#b45309' },
+            ]}
+          />
+        )
+      }
+    }
+
+    // Blended mode — split the difference proportionally
+    if (whoOwes === 'customer') {
+      // Dealer giving more → customer gets store credit for trade portion, pays cash for cash portion
+      return (
+        <VerdictBox
+          color="#7c3aed"
+          headline={`Split: ${fmt(tradePortion, region)} store credit + ${fmt(cashPortion, region)} cash from customer`}
+          subtext={`Dealer's cards are worth ${fmt(absDiff, region)} more. Blended deal: part store credit back to customer, part cash from customer.`}
+          breakdown={[
+            { label: 'Dealer cards', value: fmt(dealerTotal, region), color: '#1d4ed8' },
+            { label: 'Customer offer', value: fmt(customerTotal, region), color: '#b45309' },
+            { label: 'Store credit', value: fmt(tradePortion, region), sublabel: 'to customer', color: '#1d4ed8' },
+            { label: 'Cash to add', value: fmt(cashPortion, region), sublabel: 'from customer', color: '#b45309' },
+          ]}
+        />
+      )
+    } else {
+      // Customer giving more → dealer tops up with cash portion, gives store credit for trade portion
+      return (
+        <VerdictBox
+          color="#7c3aed"
+          headline={`Split: dealer adds ${fmt(cashPortion, region)} cash + ${fmt(tradePortion, region)} store credit`}
+          subtext={`Customer's cards are worth ${fmt(absDiff, region)} more. Dealer balances with a cash payment and additional store credit.`}
+          breakdown={[
+            { label: 'Dealer cards', value: fmt(dealerTotal, region), color: '#1d4ed8' },
+            { label: 'Customer offer', value: fmt(customerTotal, region), color: '#b45309' },
+            { label: 'Cash from dealer', value: fmt(cashPortion, region), sublabel: 'dealer pays', color: '#1d4ed8' },
+            { label: 'Store credit', value: fmt(tradePortion, region), sublabel: 'dealer gives', color: '#7c3aed' },
+          ]}
+        />
+      )
+    }
   }
 
   return (
     <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden' }}>
-
       {/* Mode selector */}
-      <div style={{
-        padding: '14px 20px', borderBottom: '1px solid var(--border)',
-        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap' as const, gap: 10,
-      }}>
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase' as const, letterSpacing: 1.5, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 8 }}>
-            Deal type
-          </div>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-            {(['cash', 'trade', 'blended'] as DealMode[]).map(m => (
-              <button key={m} onClick={() => onModeChange(m)}
-                style={{
-                  padding: '7px 18px', borderRadius: 20, cursor: 'pointer',
-                  fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
-                  background: mode === m ? modeColors[m] : 'var(--bg)',
-                  color: mode === m ? '#fff' : 'var(--text-muted)',
-                  border: `1px solid ${mode === m ? modeColors[m] : 'var(--border)'}`,
-                  transition: 'all 0.15s',
-                }}
-              >
-                {m === 'cash' ? '💵 Cash' : m === 'trade' ? '🔄 Trade Credit' : '⚖️ Blended'}
-              </button>
-            ))}
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-            {modeDescriptions[mode]}
-          </div>
+      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase' as const, letterSpacing: 1.5, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 10 }}>
+          Deal type
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, marginBottom: 8 }}>
+          {(['cash', 'trade', 'blended'] as DealMode[]).map(m => (
+            <button key={m} onClick={() => onModeChange(m)}
+              style={{
+                padding: '8px 20px', borderRadius: 20, cursor: 'pointer',
+                fontSize: 14, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
+                background: mode === m ? modeColors[m] : 'var(--bg)',
+                color: mode === m ? '#fff' : 'var(--text-muted)',
+                border: `2px solid ${mode === m ? modeColors[m] : 'var(--border)'}`,
+                transition: 'all 0.15s',
+              }}
+            >
+              {m === 'cash' ? '💵 Cash' : m === 'trade' ? '🔄 Trade Credit' : '⚖️ Blended'}
+            </button>
+          ))}
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+          {modeDescriptions[mode]}
         </div>
       </div>
 
-      {/* Totals */}
+      {/* Totals VS bar */}
       <div style={{
         display: 'grid', gridTemplateColumns: '1fr auto 1fr',
-        alignItems: 'center', padding: '18px 24px', gap: 16,
+        alignItems: 'center', padding: '18px 24px', gap: 12,
         borderBottom: '1px solid var(--border)',
       }}>
         <div>
@@ -489,18 +799,16 @@ function DealVerdict({
             {fmt(dealerTotal, region)}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 3 }}>
-            {dealerCards.length} card{dealerCards.length !== 1 ? 's' : ''}
+            {dealerCards.length} card{dealerCards.length !== 1 ? 's' : ''} · selling prices
           </div>
         </div>
-
         <div style={{
-          width: 40, height: 40, borderRadius: '50%',
-          background: 'var(--bg)', border: '1px solid var(--border)',
+          width: 44, height: 44, borderRadius: '50%',
+          background: 'var(--bg)', border: '2px solid var(--border)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 11, fontWeight: 800, color: 'var(--text-muted)',
+          fontSize: 12, fontWeight: 800, color: 'var(--text-muted)',
           fontFamily: "'Figtree', sans-serif", flexShrink: 0,
         }}>VS</div>
-
         <div style={{ textAlign: 'right' as const }}>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: 1.2, color: '#b45309', fontFamily: "'Figtree', sans-serif", marginBottom: 4 }}>
             Customer cards
@@ -509,122 +817,59 @@ function DealVerdict({
             {fmt(customerTotal, region)}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 3 }}>
-            {customerCards.length} card{customerCards.length !== 1 ? 's' : ''}
+            {customerCards.length} card{customerCards.length !== 1 ? 's' : ''} · {mode === 'cash' ? `${cashPct}%` : mode === 'trade' ? `${tradePct}%` : 'blended'} offer
           </div>
         </div>
       </div>
 
       {/* Verdict */}
       <div style={{ padding: '20px 24px' }}>
-        {isEven ? (
-          <div style={{ textAlign: 'center' as const }}>
-            <div style={{ fontSize: 24, fontWeight: 900, color: '#16a34a', fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>
-              ✓ Even deal
-            </div>
-            <div style={{ fontSize: 14, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-              Both sides are within {fmt(0.50, region)} — this trade is fair as-is, no cash needed.
-            </div>
-          </div>
-        ) : (
-          <>
-            {/* Main verdict */}
-            <div style={{
-              background: whoOwes === 'customer' ? 'rgba(180,83,9,0.06)' : 'rgba(29,78,216,0.06)',
-              border: `1px solid ${whoOwes === 'customer' ? 'rgba(180,83,9,0.2)' : 'rgba(29,78,216,0.2)'}`,
-              borderRadius: 12, padding: '16px 20px', marginBottom: 14,
-            }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase' as const, letterSpacing: 1, marginBottom: 8 }}>
-                To make this deal fair
-              </div>
-              <div style={{ fontSize: 22, fontWeight: 900, fontFamily: "'Figtree', sans-serif", color: whoOwes === 'customer' ? '#b45309' : '#1d4ed8', marginBottom: 6 }}>
-                {whoOwes === 'customer'
-                  ? `Customer adds ${fmt(absDiff, region)} cash`
-                  : `Dealer adds ${fmt(absDiff, region)} cash`}
-              </div>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
-                {whoOwes === 'customer'
-                  ? `The dealer's cards are worth ${fmt(absDiff, region)} more at these rates. Customer tops up with cash to balance the deal.`
-                  : `The customer's cards are worth ${fmt(absDiff, region)} more at these rates. Dealer tops up with cash to balance the deal.`}
-              </div>
-            </div>
-
-            {/* Breakdown */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-              <div style={{ background: 'var(--bg-light)', borderRadius: 10, padding: '10px 14px' }}>
-                <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: 1, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 4 }}>
-                  Dealer cards
-                </div>
-                <div style={{ fontSize: 17, fontWeight: 800, color: '#1d4ed8', fontFamily: "'Figtree', sans-serif" }}>
-                  {fmt(dealerTotal, region)}
-                </div>
-              </div>
-              <div style={{ background: 'var(--bg-light)', borderRadius: 10, padding: '10px 14px' }}>
-                <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: 1, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 4 }}>
-                  Customer cards
-                </div>
-                <div style={{ fontSize: 17, fontWeight: 800, color: '#b45309', fontFamily: "'Figtree', sans-serif" }}>
-                  {fmt(customerTotal, region)}
-                </div>
-              </div>
-              <div style={{
-                background: whoOwes === 'customer' ? 'rgba(180,83,9,0.06)' : 'rgba(29,78,216,0.06)',
-                border: `1px solid ${whoOwes === 'customer' ? 'rgba(180,83,9,0.15)' : 'rgba(29,78,216,0.15)'}`,
-                borderRadius: 10, padding: '10px 14px',
-              }}>
-                <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: 1, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 4 }}>
-                  Cash to add
-                </div>
-                <div style={{ fontSize: 17, fontWeight: 800, color: whoOwes === 'customer' ? '#b45309' : '#1d4ed8', fontFamily: "'Figtree', sans-serif" }}>
-                  {fmt(absDiff, region)}
-                </div>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 2 }}>
-                  from {whoOwes}
-                </div>
-              </div>
-            </div>
-          </>
-        )}
+        {renderVerdict()}
       </div>
     </div>
   )
 }
 
-// ── Rate Controls ──────────────────────────────────────────────────────────────
+// ── Verdict Box ────────────────────────────────────────────────────────────────
 
-function RateControls({
-  cashPct, tradePct, onCashChange, onTradeChange,
-}: {
-  cashPct: number; tradePct: number
-  onCashChange: (v: number) => void; onTradeChange: (v: number) => void
+function VerdictBox({ color, headline, subtext, breakdown }: {
+  color: string
+  headline: string
+  subtext: string
+  breakdown: { label: string; value: string; sublabel?: string; color: string }[]
 }) {
   return (
-    <div style={{
-      background: 'var(--card)', border: '1px solid var(--border)',
-      borderRadius: 12, padding: '12px 16px',
-      display: 'flex', gap: 24, flexWrap: 'wrap' as const, alignItems: 'center',
-    }}>
-      <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase' as const, letterSpacing: 1.2, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", flexShrink: 0 }}>
-        Default rates
-      </div>
-      {([
-        { label: '💵 Cash offer', value: cashPct, onChange: onCashChange, color: '#16a34a' },
-        { label: '🔄 Trade credit', value: tradePct, onChange: onTradeChange, color: '#1d4ed8' },
-      ] as const).map(({ label, value, onChange, color }) => (
-        <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap' as const }}>{label}</span>
-          <input type="range" min={20} max={100} value={value}
-            onChange={e => onChange(parseInt(e.target.value))}
-            style={{ width: 80, accentColor: color }}
-          />
-          <span style={{ fontSize: 15, fontWeight: 800, color, fontFamily: "'Figtree', sans-serif", minWidth: 36 }}>
-            {value}%
-          </span>
+    <>
+      <div style={{
+        background: `${color}0d`, border: `1px solid ${color}33`,
+        borderRadius: 12, padding: '16px 20px', marginBottom: 14,
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase' as const, letterSpacing: 1, marginBottom: 8 }}>
+          To make this deal fair
         </div>
-      ))}
-      <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginLeft: 'auto' }}>
-        Click — on any card to set a per-card rate
+        <div style={{ fontSize: 20, fontWeight: 900, color, fontFamily: "'Figtree', sans-serif", marginBottom: 6, lineHeight: 1.2 }}>
+          {headline}
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
+          {subtext}
+        </div>
       </div>
-    </div>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${breakdown.length}, 1fr)`, gap: 8 }}>
+        {breakdown.map(({ label, value, sublabel, color: c }) => (
+          <div key={label} style={{ background: 'var(--bg-light)', borderRadius: 10, padding: '10px 14px' }}>
+            <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: 1, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 4 }}>
+              {label}
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: c, fontFamily: "'Figtree', sans-serif" }}>
+              {value}
+            </div>
+            {sublabel && (
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 2 }}>{sublabel}</div>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
   )
 }
 
@@ -635,41 +880,82 @@ export default function DealerPageClient() {
   const [mode, setMode]                   = useState<DealMode>('cash')
   const [cashPct, setCashPct]             = useState(DEFAULT_CASH_PCT)
   const [tradePct, setTradePct]           = useState(DEFAULT_TRADE_PCT)
-  const [dealerCards, setDealerCards]     = useState<DealCard[]>([])
-  const [customerCards, setCustomerCards] = useState<DealCard[]>([])
+  const [dealerCards, setDealerCards]     = useState<DealerCard[]>([])
+  const [customerCards, setCustomerCards] = useState<CustomerCard[]>([])
 
-  const addDealer      = (c: DealCard) => setDealerCards(prev => [...prev, c])
-  const addCustomer    = (c: DealCard) => setCustomerCards(prev => [...prev, c])
-  const removeDealer   = (id: string)  => setDealerCards(prev => prev.filter(x => x.id !== id))
-  const removeCustomer = (id: string)  => setCustomerCards(prev => prev.filter(x => x.id !== id))
+  async function addDealerCard(r: SearchResult) {
+    if (!r.price_usd) return
+    const graded = await fetchGradedPrices(r.url_slug)
+    setDealerCards(prev => [...prev, {
+      id: `${r.url_slug}-${Date.now()}`,
+      name: r.name, set: r.subtitle, image: r.image_url,
+      rawUsd: r.price_usd / 100, ...graded,
+      grade: 'raw', urlSlug: r.url_slug, sellingPrice: null,
+    }])
+  }
 
-  const overrideDealer   = (id: string, pct: number | null) => setDealerCards(prev => prev.map(x => x.id === id ? { ...x, customPct: pct } : x))
-  const overrideCustomer = (id: string, pct: number | null) => setCustomerCards(prev => prev.map(x => x.id === id ? { ...x, customPct: pct } : x))
-  const gradeDealer      = (id: string, g: Grade)           => setDealerCards(prev => prev.map(x => x.id === id ? { ...x, grade: g } : x))
-  const gradeCustomer    = (id: string, g: Grade)           => setCustomerCards(prev => prev.map(x => x.id === id ? { ...x, grade: g } : x))
+  async function addCustomerCard(r: SearchResult) {
+    if (!r.price_usd) return
+    const graded = await fetchGradedPrices(r.url_slug)
+    setCustomerCards(prev => [...prev, {
+      id: `${r.url_slug}-${Date.now()}`,
+      name: r.name, set: r.subtitle, image: r.image_url,
+      rawUsd: r.price_usd / 100, ...graded,
+      grade: 'raw', urlSlug: r.url_slug, customPct: null, overrideValue: null,
+    }])
+  }
+
+  async function fetchGradedPrices(urlSlug: string) {
+    try {
+      const { data: cardRow } = await supabase
+        .from('cards').select('card_slug').eq('card_url_slug', urlSlug).maybeSingle()
+      if (!cardRow?.card_slug) return { psa9Usd: null, psa10Usd: null, cgc95Usd: null, cgc10Usd: null }
+      const { data: dp } = await supabase
+        .from('daily_prices').select('psa9_usd, psa10_usd, cgc95_usd, cgc10_usd')
+        .eq('card_slug', 'pc-' + cardRow.card_slug)
+        .order('date', { ascending: false }).limit(1).maybeSingle()
+      return {
+        psa9Usd:  dp?.psa9_usd  ? dp.psa9_usd  / 100 : null,
+        psa10Usd: dp?.psa10_usd ? dp.psa10_usd / 100 : null,
+        cgc95Usd: dp?.cgc95_usd ? dp.cgc95_usd / 100 : null,
+        cgc10Usd: dp?.cgc10_usd ? dp.cgc10_usd / 100 : null,
+      }
+    } catch { return { psa9Usd: null, psa10Usd: null, cgc95Usd: null, cgc10Usd: null } }
+  }
+
+  const removeDealer   = (id: string) => setDealerCards(p => p.filter(x => x.id !== id))
+  const removeCustomer = (id: string) => setCustomerCards(p => p.filter(x => x.id !== id))
+
+  const updateDealer = (id: string, patch: Partial<DealerCard>) =>
+    setDealerCards(p => p.map(x => x.id === id ? { ...x, ...patch } : x))
+  const updateCustomer = (id: string, patch: Partial<CustomerCard>) =>
+    setCustomerCards(p => p.map(x => x.id === id ? { ...x, ...patch } : x))
+
+  const dealerTotal   = dealerCards.reduce((s, c) => s + dealerCardValue(c, region), 0)
+  const customerTotal = customerCards.reduce((s, c) => s + customerCardValue(c, mode, cashPct, tradePct, region), 0)
 
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 20px' }}>
+    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 16px' }}>
 
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 30, margin: '0 0 6px', color: 'var(--text)', letterSpacing: -0.5 }}>
+        <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, margin: '0 0 6px', color: 'var(--text)', letterSpacing: -0.5 }}>
           Deal Calculator
         </h1>
         <p style={{ margin: 0, fontSize: 14, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-          Build both sides of a trade or purchase. Pick cash, trade credit, or blended — the verdict tells you exactly who needs to add cash and how much.
+          Build both sides of a trade or purchase. Dealer sets selling prices; customer cards are valued at your offer rate. The verdict shows exactly who adds what.
         </p>
       </div>
 
-      {/* Controls bar */}
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' as const, marginBottom: 12 }}>
-        {/* Region toggle */}
+      {/* Top bar */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' as const, marginBottom: 14 }}>
+        {/* Region */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>Region</span>
           <div style={{ display: 'flex', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 20, overflow: 'hidden' }}>
             {(['UK', 'US'] as Region[]).map(r => (
               <button key={r} onClick={() => setRegion(r)} style={{
-                padding: '6px 16px', border: 'none', cursor: 'pointer',
+                padding: '7px 16px', border: 'none', cursor: 'pointer',
                 fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
                 background: region === r ? 'var(--primary)' : 'transparent',
                 color: region === r ? '#fff' : 'var(--text-muted)',
@@ -680,13 +966,12 @@ export default function DealerPageClient() {
             ))}
           </div>
         </div>
-
         <button
           onClick={() => { setDealerCards([]); setCustomerCards([]) }}
           style={{
             marginLeft: 'auto', padding: '7px 16px', borderRadius: 8,
             background: 'var(--bg-light)', border: '1px solid var(--border)',
-            color: 'var(--text-muted)', fontSize: 12, fontWeight: 700,
+            color: 'var(--text-muted)', fontSize: 13, fontWeight: 700,
             fontFamily: "'Figtree', sans-serif", cursor: 'pointer',
           }}
           onMouseEnter={e => (e.currentTarget.style.borderColor = '#ef4444')}
@@ -699,24 +984,82 @@ export default function DealerPageClient() {
         <RateControls cashPct={cashPct} tradePct={tradePct} onCashChange={setCashPct} onTradeChange={setTradePct} />
       </div>
 
-      {/* Two-column layout */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-        <DealPanel
-          title="Cards you're giving out" side="dealer"
-          cards={dealerCards} mode={mode} cashPct={cashPct} tradePct={tradePct} region={region}
-          accentColor="#1d4ed8"
-          emptyText="Add cards the dealer is giving to the customer"
-          onAdd={addDealer} onRemove={removeDealer}
-          onOverride={overrideDealer} onGradeChange={gradeDealer}
-        />
-        <DealPanel
-          title="Cards coming in" side="customer"
-          cards={customerCards} mode={mode} cashPct={cashPct} tradePct={tradePct} region={region}
-          accentColor="#b45309"
-          emptyText="Add cards the customer is bringing in to sell or trade"
-          onAdd={addCustomer} onRemove={removeCustomer}
-          onOverride={overrideCustomer} onGradeChange={gradeCustomer}
-        />
+      {/* Two-column panels — stacks on mobile */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14, marginBottom: 14 }}>
+
+        {/* Dealer panel */}
+        <div style={{ background: 'var(--card)', border: '2px solid rgba(29,78,216,0.15)', borderRadius: 16, padding: '18px 16px', display: 'flex', flexDirection: 'column' as const, gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase' as const, letterSpacing: 1.5, color: '#1d4ed8', fontFamily: "'Figtree', sans-serif", marginBottom: 2 }}>Dealer</div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>Cards going out</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 2 }}>Set your actual selling price per card</div>
+            </div>
+            {dealerCards.length > 0 && (
+              <div style={{ textAlign: 'right' as const }}>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' as const, letterSpacing: 1, fontFamily: "'Figtree', sans-serif", fontWeight: 700 }}>
+                  {dealerCards.length} card{dealerCards.length !== 1 ? 's' : ''}
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 900, color: '#1d4ed8', fontFamily: "'Figtree', sans-serif" }}>
+                  {fmt(dealerTotal, region)}
+                </div>
+              </div>
+            )}
+          </div>
+          <div>
+            {dealerCards.length === 0
+              ? <div style={{ textAlign: 'center' as const, padding: '24px 16px', color: 'var(--text-muted)', fontSize: 13, fontFamily: "'Figtree', sans-serif", border: '1px dashed var(--border)', borderRadius: 10 }}>
+                  Add cards the dealer is giving out
+                </div>
+              : dealerCards.map(card => (
+                <DealerCardRow
+                  key={card.id} card={card} region={region}
+                  onRemove={() => removeDealer(card.id)}
+                  onPriceChange={p => updateDealer(card.id, { sellingPrice: p })}
+                  onGradeChange={g => updateDealer(card.id, { grade: g, sellingPrice: null })}
+                />
+              ))}
+          </div>
+          <SearchBox region={region} onAdd={addDealerCard} />
+        </div>
+
+        {/* Customer panel */}
+        <div style={{ background: 'var(--card)', border: '2px solid rgba(180,83,9,0.15)', borderRadius: 16, padding: '18px 16px', display: 'flex', flexDirection: 'column' as const, gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase' as const, letterSpacing: 1.5, color: '#b45309', fontFamily: "'Figtree', sans-serif", marginBottom: 2 }}>Customer</div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>Cards coming in</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 2 }}>Override % or set a fixed value per card</div>
+            </div>
+            {customerCards.length > 0 && (
+              <div style={{ textAlign: 'right' as const }}>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' as const, letterSpacing: 1, fontFamily: "'Figtree', sans-serif", fontWeight: 700 }}>
+                  {customerCards.length} card{customerCards.length !== 1 ? 's' : ''}
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 900, color: '#b45309', fontFamily: "'Figtree', sans-serif" }}>
+                  {fmt(customerTotal, region)}
+                </div>
+              </div>
+            )}
+          </div>
+          <div>
+            {customerCards.length === 0
+              ? <div style={{ textAlign: 'center' as const, padding: '24px 16px', color: 'var(--text-muted)', fontSize: 13, fontFamily: "'Figtree', sans-serif", border: '1px dashed var(--border)', borderRadius: 10 }}>
+                  Add cards the customer is bringing in
+                </div>
+              : customerCards.map(card => (
+                <CustomerCardRow
+                  key={card.id} card={card} mode={mode}
+                  cashPct={cashPct} tradePct={tradePct} region={region}
+                  onRemove={() => removeCustomer(card.id)}
+                  onPctChange={p => updateCustomer(card.id, { customPct: p, overrideValue: null })}
+                  onValueOverride={v => updateCustomer(card.id, { overrideValue: v, customPct: null })}
+                  onGradeChange={g => updateCustomer(card.id, { grade: g, sellingPrice: null } as unknown as Partial<CustomerCard>)}
+                />
+              ))}
+          </div>
+          <SearchBox region={region} onAdd={addCustomerCard} />
+        </div>
       </div>
 
       {/* Verdict */}
