@@ -1,16 +1,51 @@
-// app/insights/InsightsPageClient.tsx
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { supabase, formatDate } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 
 interface Insight {
-  id: number
+  id: string
   slug: string
-  title: string
-  summary: string
-  category: string
+  headline: string
+  intro: string
+  theme: string
+  theme_label: string
   published_at: string
+}
+
+const THEME_COLOURS: Record<string, string> = {
+  movers:    '#ef4444',
+  grading:   '#a78bfa',
+  set_watch: '#3b82f6',
+  sleepers:  '#22c55e',
+  pulse:     '#f59e0b',
+  collector: '#ec4899',
+  history:   '#94a3b8',
+}
+
+const THEME_LABELS: Record<string, string> = {
+  movers: 'The Movers', grading: 'Grading Desk', set_watch: 'Set Watch',
+  sleepers: 'Sleeper Picks', pulse: 'Market Pulse',
+  collector: "Collector's Corner", history: 'History Lesson',
+}
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString('en-GB', {
+    day: 'numeric', month: 'short', year: 'numeric',
+  })
+}
+
+function ThemeTag({ theme, label }: { theme: string; label: string }) {
+  const color = THEME_COLOURS[theme] ?? '#94a3b8'
+  return (
+    <span style={{
+      fontSize: 10, fontWeight: 700, letterSpacing: 1.5,
+      textTransform: 'uppercase' as const, color,
+      fontFamily: "'Figtree', sans-serif",
+    }}>
+      {label}
+    </span>
+  )
 }
 
 export default function InsightsPageClient() {
@@ -21,9 +56,10 @@ export default function InsightsPageClient() {
     async function load() {
       const { data } = await supabase
         .from('insights')
-        .select('id, slug, title, summary, category, published_at')
+        .select('id, slug, headline, intro, theme, theme_label, published_at')
+        .eq('status', 'published')
         .order('published_at', { ascending: false })
-        .limit(20)
+        .limit(40)
       if (data) setInsights(data)
       setLoading(false)
     }
@@ -31,66 +67,33 @@ export default function InsightsPageClient() {
   }, [])
 
   return (
-    <div style={{ maxWidth: 720, margin: '0 auto', padding: '40px 24px' }}>
-      <h1 style={{
-        fontFamily: "'Playfair Display', serif", fontSize: 32,
-        margin: '0 0 8px', color: 'var(--text)',
-      }}>Market Insights</h1>
-      <p style={{ color: 'var(--text-muted)', fontSize: 15, margin: '0 0 32px', fontFamily: "'Figtree', sans-serif" }}>
-        Weekly market analysis, trend reports, and collecting guides — powered by real data.
-      </p>
+    <div style={{ maxWidth: 900, margin: '0 auto', padding: '40px 24px' }}>
 
-      {loading ? (
-        <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40, fontFamily: "'Figtree', sans-serif" }}>Loading insights...</p>
-      ) : insights.length === 0 ? (
-        <div style={{
-          background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)',
-          padding: '48px 32px', textAlign: 'center',
+      <div style={{ marginBottom: 28 }}>
+        <h1 style={{
+          fontFamily: "'Playfair Display', serif", fontSize: 34,
+          margin: '0 0 8px', color: 'var(--text)', letterSpacing: -0.5,
         }}>
-          <div style={{ fontSize: 36, marginBottom: 12 }}>📝</div>
-          <h3 style={{ fontFamily: "'Figtree', sans-serif", fontWeight: 700, fontSize: 18, margin: '0 0 8px' }}>
-            Coming soon
-          </h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: 14, maxWidth: 400, margin: '0 auto', fontFamily: "'Figtree', sans-serif" }}>
-            Our first batch of data-driven market insights are being written. Check back soon for weekly trend reports, set analyses, and collecting guides.
-          </p>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {insights.map((ins) => (
-            <Link
-              key={ins.id}
-              href={`/insights/${ins.slug}`}
-              style={{
-                background: 'var(--card)', borderRadius: 12,
-                border: '1px solid var(--border)', padding: '20px 24px',
-                textDecoration: 'none', color: 'var(--text)',
-                transition: 'box-shadow 0.2s',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = '0 4px 16px rgba(0,0,0,0.06)' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = 'none' }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 12 }}>
-                <div>
-                  <span style={{
-                    fontSize: 11, fontWeight: 700, color: 'var(--accent)',
-                    textTransform: 'uppercase', letterSpacing: 1, fontFamily: "'Figtree', sans-serif",
-                  }}>{ins.category}</span>
-                  <h3 style={{ fontSize: 17, fontWeight: 700, margin: '4px 0 6px', fontFamily: "'Figtree', sans-serif" }}>
-                    {ins.title}
-                  </h3>
-                  <p style={{ fontSize: 14, color: 'var(--text-muted)', margin: 0, lineHeight: 1.5, fontFamily: "'Figtree', sans-serif" }}>
-                    {ins.summary}
-                  </p>
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap', marginTop: 2, fontFamily: "'Figtree', sans-serif" }}>
-                  {formatDate(ins.published_at)}
-                </div>
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
+          Market Insights
+        </h1>
+        <p style={{
+          color: 'var(--text-muted)', fontSize: 14, margin: 0,
+          fontFamily: "'Figtree', sans-serif", lineHeight: 1.6,
+        }}>
+          Daily articles from live price data — movers, sleepers, grading intelligence, set analysis.
+        </p>
+      </div>
+
+      {/* Theme key */}
+      <div style={{
+        display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 28,
+        paddingBottom: 20, borderBottom: '1px solid var(--border)',
+      }}>
+        {Object.entries(THEME_LABELS).map(([theme, label]) => (
+          <div key={theme} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ width: 7, height: 7, borderRadius: '50%', background: THEME_COLOURS[theme], flexShrink: 0 }} />
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+              {label}
+            </span>
+          </div>
+        ))}
