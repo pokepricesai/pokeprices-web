@@ -46,7 +46,6 @@ export default function Navbar() {
   const [activeIndex, setActiveIndex] = useState(-1)
   const debounceRef = useRef<NodeJS.Timeout>()
   const searchRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
 
   const cardResults = allResults.filter(r => r.result_type === 'card')
   const setResults = allResults.filter(r => r.result_type === 'set')
@@ -112,11 +111,12 @@ export default function Navbar() {
       height: 60,
       display: 'flex',
       alignItems: 'center',
-      gap: 16,
+      justifyContent: 'space-between',
       position: 'sticky',
       top: 0,
       zIndex: 100,
       boxShadow: '0 2px 15px rgba(26,95,173,0.3)',
+      gap: 16,
     }}>
 
       {/* Mobile hamburger */}
@@ -131,20 +131,23 @@ export default function Navbar() {
         {menuOpen ? '✕' : '☰'}
       </button>
 
-      {/* Logo */}
+      {/* LEFT — Logo */}
       <Link href="/" style={{ textDecoration: 'none', flexShrink: 0 }}>
         <img src="/logo.png" alt="PokePrices" style={{ height: 38, display: 'block' }} />
       </Link>
 
-      {/* Search bar */}
-      <div ref={searchRef} style={{ flex: 1, maxWidth: 480, position: 'relative' }} className="nav-search">
+      {/* CENTRE — Search */}
+      <div
+        ref={searchRef}
+        style={{ flex: 1, maxWidth: 500, margin: '0 16px', position: 'relative' }}
+        className="nav-search"
+      >
         <div style={{ position: 'relative' }}>
           <span style={{
             position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
-            fontSize: 14, opacity: 0.5, pointerEvents: 'none',
+            fontSize: 13, opacity: 0.5, pointerEvents: 'none',
           }}>🔍</span>
           <input
-            ref={inputRef}
             value={query}
             onChange={e => handleSearch(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -152,16 +155,15 @@ export default function Navbar() {
             placeholder="Search cards, sets, Pokémon..."
             style={{
               width: '100%',
-              padding: '8px 12px 8px 36px',
+              padding: '8px 36px 8px 36px',
               borderRadius: 10,
               border: 'none',
-              background: 'rgba(255,255,255,0.15)',
+              background: 'rgba(255,255,255,0.18)',
               color: '#fff',
               fontSize: 13,
               fontFamily: "'Figtree', sans-serif",
               outline: 'none',
               boxSizing: 'border-box',
-              transition: 'background 0.2s',
             }}
           />
           {searching && (
@@ -172,7 +174,7 @@ export default function Navbar() {
           )}
         </div>
 
-        {/* Results dropdown */}
+        {/* Dropdown */}
         {showResults && allResults.length > 0 && (
           <div style={{
             position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0,
@@ -191,27 +193,24 @@ export default function Navbar() {
                   fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase',
                 }}>Cards</div>
                 {cardResults.map((r, i) => {
-                  const globalIndex = i
-                  const isActive = activeIndex === globalIndex
+                  const isActive = activeIndex === i
                   return (
                     <div
                       key={i}
                       onMouseDown={() => navigateTo(r)}
-                      onMouseEnter={() => setActiveIndex(globalIndex)}
+                      onMouseEnter={() => setActiveIndex(i)}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 10,
                         padding: '8px 14px', cursor: 'pointer',
                         background: isActive ? 'var(--bg-light)' : 'transparent',
-                        transition: 'background 0.1s',
                         borderBottom: '1px solid var(--border)',
                       }}
                     >
                       {r.image_url ? (
-                        <img
-                          src={r.image_url}
-                          alt={r.name}
-                          style={{ width: 32, height: 44, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }}
-                        />
+                        <img src={r.image_url} alt={r.name} style={{
+                          width: 32, height: 44, objectFit: 'contain',
+                          borderRadius: 3, flexShrink: 0,
+                        }} />
                       ) : (
                         <div style={{
                           width: 32, height: 44, borderRadius: 3, flexShrink: 0,
@@ -224,9 +223,7 @@ export default function Navbar() {
                           fontSize: 13, fontWeight: 700, color: 'var(--text)',
                           fontFamily: "'Figtree', sans-serif",
                           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                        }}>
-                          {r.name}
-                        </div>
+                        }}>{r.name}</div>
                         <div style={{
                           fontSize: 11, color: 'var(--text-muted)',
                           fontFamily: "'Figtree', sans-serif",
@@ -236,10 +233,8 @@ export default function Navbar() {
                           {r.card_number_display && (
                             <span style={{
                               background: 'var(--bg-light)', border: '1px solid var(--border)',
-                              borderRadius: 4, padding: '0px 5px', fontSize: 10, fontWeight: 700,
-                            }}>
-                              {r.card_number_display}
-                            </span>
+                              borderRadius: 4, padding: '0 5px', fontSize: 10, fontWeight: 700,
+                            }}>{r.card_number_display}</span>
                           )}
                         </div>
                       </div>
@@ -247,9 +242,7 @@ export default function Navbar() {
                         <div style={{
                           fontSize: 13, fontWeight: 800, color: 'var(--primary)',
                           fontFamily: "'Figtree', sans-serif", flexShrink: 0,
-                        }}>
-                          {formatPrice(r.price_usd)}
-                        </div>
+                        }}>{formatPrice(r.price_usd)}</div>
                       )}
                     </div>
                   )
@@ -277,7 +270,6 @@ export default function Navbar() {
                         display: 'flex', alignItems: 'center', gap: 10,
                         padding: '10px 14px', cursor: 'pointer',
                         background: isActive ? 'var(--bg-light)' : 'transparent',
-                        transition: 'background 0.1s',
                         borderBottom: '1px solid var(--border)',
                       }}
                     >
@@ -318,7 +310,6 @@ export default function Navbar() {
                         display: 'flex', alignItems: 'center', gap: 10,
                         padding: '10px 14px', cursor: 'pointer',
                         background: isActive ? 'var(--bg-light)' : 'transparent',
-                        transition: 'background 0.1s',
                         borderBottom: '1px solid var(--border)',
                       }}
                     >
@@ -342,18 +333,19 @@ export default function Navbar() {
         )}
       </div>
 
-      {/* Desktop nav links */}
-      <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexShrink: 0 }} className="desktop-nav">
+      {/* RIGHT — Desktop nav links */}
+      <div style={{
+        display: 'flex', gap: 20, alignItems: 'center', flexShrink: 0,
+      }} className="desktop-nav">
         {navLinks.map((item) => (
           <Link key={item.label} href={item.href} style={{
             color: 'rgba(255,255,255,0.85)', textDecoration: 'none',
-            fontSize: 13, fontWeight: 700, transition: 'color 0.2s',
-            letterSpacing: 0.3, whiteSpace: 'nowrap',
+            fontSize: 13, fontWeight: 700, letterSpacing: 0.3, whiteSpace: 'nowrap',
           }}>{item.label}</Link>
         ))}
       </div>
 
-      {/* Mobile menu dropdown */}
+      {/* Mobile dropdown */}
       {menuOpen && (
         <div style={{
           position: 'absolute', top: 60, left: 0, right: 0,
@@ -425,7 +417,7 @@ export default function Navbar() {
         input::placeholder { color: rgba(255,255,255,0.5); }
         @media (min-width: 768px) {
           .mobile-menu-btn { display: none !important; }
-          .nav-search { display: flex !important; }
+          .nav-search { display: block !important; }
         }
         @media (max-width: 767px) {
           .mobile-menu-btn { display: block !important; }
