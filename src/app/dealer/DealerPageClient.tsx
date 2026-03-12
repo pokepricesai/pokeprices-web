@@ -694,34 +694,31 @@ function DealVerdict({ dealerCards, customerCards, mode, cashPct, tradePct, regi
     }
 
     if (mode === 'trade') {
-      // Trade credit mode:
-      // - If dealer cards > customer cards: dealer has more to offer → customer gets store credit for the difference
-      // - If customer cards > dealer cards: customer's stuff is worth more → customer still needs cash for the remainder
-      if (whoOwes === 'customer') {
-        // Dealer giving more → customer gets store credit for the gap
-        return (
-          <VerdictBox
-            color="#1d4ed8"
-            headline={`${fmt(absDiff, region)} store credit to customer`}
-            subtext={`Dealer's cards are worth ${fmt(absDiff, region)} more. Customer receives that as store credit — nothing extra needed.`}
-            breakdown={[
-              { label: 'Dealer cards', value: fmt(dealerTotal, region), color: '#1d4ed8' },
-              { label: 'Customer offer', value: fmt(customerTotal, region), color: '#b45309' },
-              { label: 'Store credit', value: fmt(absDiff, region), sublabel: 'to customer', color: '#1d4ed8' },
-            ]}
-          />
-        )
-      } else {
-        // Customer's cards worth more — they have store credit to spend
+      if (whoOwes === 'dealer') {
+        // Customer's cards worth more → customer has store credit to spend
         return (
           <VerdictBox
             color="#b45309"
             headline={`Customer has ${fmt(absDiff, region)} store credit`}
-            subtext={`Customer's cards are worth ${fmt(absDiff, region)} more than the dealer's offer. That difference becomes store credit for the customer to spend.`}
+            subtext={`Customer's cards are worth ${fmt(absDiff, region)} more than the dealer's offer. That difference becomes store credit for the customer to spend in store.`}
             breakdown={[
               { label: 'Dealer cards', value: fmt(dealerTotal, region), color: '#1d4ed8' },
               { label: 'Customer offer', value: fmt(customerTotal, region), color: '#b45309' },
               { label: 'Store credit', value: fmt(absDiff, region), sublabel: 'customer to spend', color: '#b45309' },
+            ]}
+          />
+        )
+      } else {
+        // Dealer cards worth more → customer pays cash to top up
+        return (
+          <VerdictBox
+            color="#b45309"
+            headline={`Customer pays ${fmt(absDiff, region)} cash`}
+            subtext={`Dealer's cards are worth ${fmt(absDiff, region)} more. Store credit only flows from dealer to customer — the customer needs to make up the difference in cash.`}
+            breakdown={[
+              { label: 'Dealer cards', value: fmt(dealerTotal, region), color: '#1d4ed8' },
+              { label: 'Customer offer', value: fmt(customerTotal, region), color: '#b45309' },
+              { label: 'Cash to pay', value: fmt(absDiff, region), sublabel: 'from customer', color: '#b45309' },
             ]}
           />
         )
