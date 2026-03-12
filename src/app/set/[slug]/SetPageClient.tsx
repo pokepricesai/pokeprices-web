@@ -45,6 +45,17 @@ const statLabel: React.CSSProperties = {
   textTransform: 'uppercase', letterSpacing: 1, fontWeight: 600, marginTop: 2,
 }
 
+function formatSetAge(releaseDate: string): string {
+  const release = new Date(releaseDate)
+  const now = new Date()
+  let years = now.getFullYear() - release.getFullYear()
+  let months = now.getMonth() - release.getMonth()
+  if (months < 0) { years--; months += 12 }
+  if (years === 0) return months <= 1 ? 'New' : `${months}mo old`
+  if (months === 0) return `${years}y old`
+  return `${years}y ${months}mo old`
+}
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.8, color: 'var(--text-muted)', marginBottom: 12, fontFamily: "'Figtree', sans-serif" }}>
@@ -137,7 +148,7 @@ function SealedSection({ sealedCards, setName }: { sealedCards: Card[]; setName:
 }
 
 // ── Set Header with era/logo/symbol ──────────────────────────────────────────
-function SetHeader({ setName }: { setName: string }) {
+function SetHeader({ setName, releaseDate }: { setName: string; releaseDate: string | null }) {
   const { logoUrl, symbolUrl, eraUrl, eraDisplay } = getSetAssets(setName)
 
   return (
@@ -146,7 +157,7 @@ function SetHeader({ setName }: { setName: string }) {
         ← Back to sets
       </Link>
 
-      {/* Era row — no box, just image + label */}
+      {/* Era row */}
       {eraUrl && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <img src={eraUrl} alt={eraDisplay ?? ''} style={{ height: 22, width: 'auto', objectFit: 'contain' }} loading="lazy" />
@@ -170,6 +181,26 @@ function SetHeader({ setName }: { setName: string }) {
           {setName}
         </h1>
       </div>
+
+      {/* Release date + age */}
+      {releaseDate && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+          <span style={{
+            fontSize: 12, fontWeight: 600, color: 'var(--text-muted)',
+            fontFamily: "'Figtree', sans-serif",
+          }}>
+            Released {new Date(releaseDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+          </span>
+          <span style={{
+            fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
+            background: 'var(--bg-light)', border: '1px solid var(--border)',
+            borderRadius: 20, padding: '2px 10px',
+            fontFamily: "'Figtree', sans-serif",
+          }}>
+            {formatSetAge(releaseDate)}
+          </span>
+        </div>
+      )}
     </div>
   )
 }
@@ -179,6 +210,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
   const [cards, setCards] = useState<Card[]>([])
   const [loading, setLoading] = useState(true)
   const [sort, setSort] = useState<SortOption>('raw_desc')
+  const [releaseDate, setReleaseDate] = useState<string | null>(null)
   const [insight, setInsight] = useState<string | null>(null)
   const [priceHistory, setPriceHistory] = useState<any[]>([])
   const [popStats, setPopStats] = useState<PopStats | null>(null)
@@ -193,7 +225,24 @@ export default function SetPageClient({ slug }: { slug: string }) {
 
       const { data, error: err } = await supabase.rpc('get_set_cards_sortable', { set_text: setName, sort_col: sort })
       if (err || !data) setError(true)
-      else setCards(data)
+      else {
+        setCards(data)
+        // Grab release date from first card that has one
+        const dateCard = data.find((c: any) => c.set_release_date)
+        if (dateCard?.set_release_date) setReleaseDate(dateCard.set_release_date)
+      }
+
+      // Fallback: fetch release date directly if not in RPC response
+      if (!releaseDate) {
+        const { data: rdData } = await supabase
+          .from('cards')
+          .select('set_release_date')
+          .eq('set_name', setName)
+          .not('set_release_date', 'is', null)
+          .limit(1)
+          .single()
+        if (rdData?.set_release_date) setReleaseDate(rdData.set_release_date)
+      }
 
       const { data: insightData } = await supabase.rpc('get_set_insight', { set_text: setName })
       if (insightData) setInsight(insightData)
@@ -255,8 +304,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 24px' }}>
-      {/* ── Set header: back link + era/logo/symbol + title ── */}
-      <SetHeader setName={setName} />
+      <SetHeader setName={setName} releaseDate={releaseDate} />
 
       {/* ── Section jump links ── */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
