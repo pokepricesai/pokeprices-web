@@ -99,10 +99,180 @@ export default function Navbar() {
   function navigateTo(result: SearchResult) {
     setShowResults(false)
     setQuery('')
-    if (result.result_type === 'card') router.push(`/card/${result.url_slug}`)
-    else if (result.result_type === 'set') router.push(`/set/${result.url_slug}`)
-    else if (result.result_type === 'pokemon') router.push(`/pokemon/${result.url_slug.toLowerCase()}`)
+    if (result.result_type === 'card') {
+      router.push(`/set/${encodeURIComponent(result.subtitle)}/card/${result.url_slug}`)
+    } else if (result.result_type === 'set') {
+      router.push(`/set/${encodeURIComponent(result.name)}`)
+    } else if (result.result_type === 'pokemon') {
+      router.push(`/pokemon/${result.url_slug.toLowerCase()}`)
+    }
   }
+
+  const ResultsDropdown = ({ mobile = false }: { mobile?: boolean }) => (
+    <div style={{
+      position: mobile ? 'relative' : 'absolute',
+      top: mobile ? undefined : 'calc(100% + 8px)',
+      left: 0, right: 0,
+      background: 'var(--card)',
+      border: '1px solid var(--border)',
+      borderRadius: 14, overflow: 'hidden',
+      boxShadow: '0 12px 40px rgba(0,0,0,0.2)',
+      zIndex: 200,
+      maxHeight: mobile ? 300 : 480,
+      overflowY: 'auto',
+      marginTop: mobile ? 6 : undefined,
+    }}>
+
+      {/* Cards */}
+      {cardResults.length > 0 && (
+        <>
+          <div style={{
+            padding: '8px 14px 4px', fontSize: 10, fontWeight: 800,
+            letterSpacing: 1.5, color: 'var(--text-muted)',
+            fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase' as const,
+          }}>Cards</div>
+          {cardResults.map((r, i) => {
+            const isActive = activeIndex === i
+            return (
+              <div
+                key={i}
+                onMouseDown={() => navigateTo(r)}
+                onMouseEnter={() => setActiveIndex(i)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '8px 14px', cursor: 'pointer',
+                  background: isActive ? 'var(--bg-light)' : 'transparent',
+                  borderBottom: '1px solid var(--border)',
+                  transition: 'background 0.1s',
+                }}
+              >
+                {r.image_url ? (
+                  <img src={r.image_url} alt={r.name} style={{
+                    width: 32, height: 44, objectFit: 'contain',
+                    borderRadius: 3, flexShrink: 0,
+                  }} />
+                ) : (
+                  <div style={{
+                    width: 32, height: 44, borderRadius: 3, flexShrink: 0,
+                    background: 'var(--bg-light)', display: 'flex',
+                    alignItems: 'center', justifyContent: 'center', fontSize: 16,
+                  }}>🃏</div>
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 13, fontWeight: 700, color: 'var(--text)',
+                    fontFamily: "'Figtree', sans-serif",
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>{r.name}</div>
+                  <div style={{
+                    fontSize: 11, color: 'var(--text-muted)',
+                    fontFamily: "'Figtree', sans-serif",
+                    display: 'flex', gap: 6, alignItems: 'center',
+                  }}>
+                    <span>{r.subtitle}</span>
+                    {r.card_number_display && (
+                      <span style={{
+                        background: 'var(--bg-light)', border: '1px solid var(--border)',
+                        borderRadius: 4, padding: '0 5px', fontSize: 10, fontWeight: 700,
+                      }}>{r.card_number_display}</span>
+                    )}
+                  </div>
+                </div>
+                {r.price_usd && (
+                  <div style={{
+                    fontSize: 13, fontWeight: 800, color: 'var(--primary)',
+                    fontFamily: "'Figtree', sans-serif", flexShrink: 0,
+                  }}>{formatPrice(r.price_usd)}</div>
+                )}
+              </div>
+            )
+          })}
+        </>
+      )}
+
+      {/* Sets */}
+      {setResults.length > 0 && (
+        <>
+          <div style={{
+            padding: '8px 14px 4px', fontSize: 10, fontWeight: 800,
+            letterSpacing: 1.5, color: 'var(--text-muted)',
+            fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase' as const,
+          }}>Sets</div>
+          {setResults.map((r, i) => {
+            const globalIndex = cardResults.length + i
+            const isActive = activeIndex === globalIndex
+            return (
+              <div
+                key={i}
+                onMouseDown={() => navigateTo(r)}
+                onMouseEnter={() => setActiveIndex(globalIndex)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '10px 14px', cursor: 'pointer',
+                  background: isActive ? 'var(--bg-light)' : 'transparent',
+                  borderBottom: '1px solid var(--border)',
+                  transition: 'background 0.1s',
+                }}
+              >
+                <span style={{ fontSize: 20 }}>📦</span>
+                <div>
+                  <div style={{
+                    fontSize: 13, fontWeight: 700, color: 'var(--text)',
+                    fontFamily: "'Figtree', sans-serif",
+                  }}>{r.name}</div>
+                  <div style={{
+                    fontSize: 11, color: 'var(--text-muted)',
+                    fontFamily: "'Figtree', sans-serif",
+                  }}>{r.subtitle}</div>
+                </div>
+              </div>
+            )
+          })}
+        </>
+      )}
+
+      {/* Pokémon */}
+      {pokemonResults.length > 0 && (
+        <>
+          <div style={{
+            padding: '8px 14px 4px', fontSize: 10, fontWeight: 800,
+            letterSpacing: 1.5, color: 'var(--text-muted)',
+            fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase' as const,
+          }}>Pokémon</div>
+          {pokemonResults.map((r, i) => {
+            const globalIndex = cardResults.length + setResults.length + i
+            const isActive = activeIndex === globalIndex
+            return (
+              <div
+                key={i}
+                onMouseDown={() => navigateTo(r)}
+                onMouseEnter={() => setActiveIndex(globalIndex)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '10px 14px', cursor: 'pointer',
+                  background: isActive ? 'var(--bg-light)' : 'transparent',
+                  borderBottom: '1px solid var(--border)',
+                  transition: 'background 0.1s',
+                }}
+              >
+                <span style={{ fontSize: 20 }}>⚡</span>
+                <div>
+                  <div style={{
+                    fontSize: 13, fontWeight: 700, color: 'var(--text)',
+                    fontFamily: "'Figtree', sans-serif", textTransform: 'capitalize',
+                  }}>{r.name}</div>
+                  <div style={{
+                    fontSize: 11, color: 'var(--text-muted)',
+                    fontFamily: "'Figtree', sans-serif",
+                  }}>{r.subtitle}</div>
+                </div>
+              </div>
+            )
+          })}
+        </>
+      )}
+    </div>
+  )
 
   return (
     <nav style={{
@@ -152,7 +322,7 @@ export default function Navbar() {
             onChange={e => handleSearch(e.target.value)}
             onKeyDown={handleKeyDown}
             onFocus={() => allResults.length > 0 && setShowResults(true)}
-            placeholder="Search cards, sets, Pokémon..."
+            placeholder="Search cards, sets, Pokémon... try 'Pikachu 50' or '4/102'"
             style={{
               width: '100%',
               padding: '8px 36px 8px 36px',
@@ -174,163 +344,7 @@ export default function Navbar() {
           )}
         </div>
 
-        {/* Dropdown */}
-        {showResults && allResults.length > 0 && (
-          <div style={{
-            position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0,
-            background: 'var(--card)', border: '1px solid var(--border)',
-            borderRadius: 14, overflow: 'hidden',
-            boxShadow: '0 12px 40px rgba(0,0,0,0.2)',
-            zIndex: 200, maxHeight: 480, overflowY: 'auto',
-          }}>
-
-            {/* Cards */}
-            {cardResults.length > 0 && (
-              <>
-                <div style={{
-                  padding: '8px 14px 4px', fontSize: 10, fontWeight: 800,
-                  letterSpacing: 1.5, color: 'var(--text-muted)',
-                  fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase',
-                }}>Cards</div>
-                {cardResults.map((r, i) => {
-                  const isActive = activeIndex === i
-                  return (
-                    <div
-                      key={i}
-                      onMouseDown={() => navigateTo(r)}
-                      onMouseEnter={() => setActiveIndex(i)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 10,
-                        padding: '8px 14px', cursor: 'pointer',
-                        background: isActive ? 'var(--bg-light)' : 'transparent',
-                        borderBottom: '1px solid var(--border)',
-                      }}
-                    >
-                      {r.image_url ? (
-                        <img src={r.image_url} alt={r.name} style={{
-                          width: 32, height: 44, objectFit: 'contain',
-                          borderRadius: 3, flexShrink: 0,
-                        }} />
-                      ) : (
-                        <div style={{
-                          width: 32, height: 44, borderRadius: 3, flexShrink: 0,
-                          background: 'var(--bg-light)', display: 'flex',
-                          alignItems: 'center', justifyContent: 'center', fontSize: 16,
-                        }}>🃏</div>
-                      )}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{
-                          fontSize: 13, fontWeight: 700, color: 'var(--text)',
-                          fontFamily: "'Figtree', sans-serif",
-                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                        }}>{r.name}</div>
-                        <div style={{
-                          fontSize: 11, color: 'var(--text-muted)',
-                          fontFamily: "'Figtree', sans-serif",
-                          display: 'flex', gap: 6, alignItems: 'center',
-                        }}>
-                          <span>{r.subtitle}</span>
-                          {r.card_number_display && (
-                            <span style={{
-                              background: 'var(--bg-light)', border: '1px solid var(--border)',
-                              borderRadius: 4, padding: '0 5px', fontSize: 10, fontWeight: 700,
-                            }}>{r.card_number_display}</span>
-                          )}
-                        </div>
-                      </div>
-                      {r.price_usd && (
-                        <div style={{
-                          fontSize: 13, fontWeight: 800, color: 'var(--primary)',
-                          fontFamily: "'Figtree', sans-serif", flexShrink: 0,
-                        }}>{formatPrice(r.price_usd)}</div>
-                      )}
-                    </div>
-                  )
-                })}
-              </>
-            )}
-
-            {/* Sets */}
-            {setResults.length > 0 && (
-              <>
-                <div style={{
-                  padding: '8px 14px 4px', fontSize: 10, fontWeight: 800,
-                  letterSpacing: 1.5, color: 'var(--text-muted)',
-                  fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase',
-                }}>Sets</div>
-                {setResults.map((r, i) => {
-                  const globalIndex = cardResults.length + i
-                  const isActive = activeIndex === globalIndex
-                  return (
-                    <div
-                      key={i}
-                      onMouseDown={() => navigateTo(r)}
-                      onMouseEnter={() => setActiveIndex(globalIndex)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 10,
-                        padding: '10px 14px', cursor: 'pointer',
-                        background: isActive ? 'var(--bg-light)' : 'transparent',
-                        borderBottom: '1px solid var(--border)',
-                      }}
-                    >
-                      <span style={{ fontSize: 20 }}>📦</span>
-                      <div>
-                        <div style={{
-                          fontSize: 13, fontWeight: 700, color: 'var(--text)',
-                          fontFamily: "'Figtree', sans-serif",
-                        }}>{r.name}</div>
-                        <div style={{
-                          fontSize: 11, color: 'var(--text-muted)',
-                          fontFamily: "'Figtree', sans-serif",
-                        }}>{r.subtitle}</div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </>
-            )}
-
-            {/* Pokémon */}
-            {pokemonResults.length > 0 && (
-              <>
-                <div style={{
-                  padding: '8px 14px 4px', fontSize: 10, fontWeight: 800,
-                  letterSpacing: 1.5, color: 'var(--text-muted)',
-                  fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase',
-                }}>Pokémon</div>
-                {pokemonResults.map((r, i) => {
-                  const globalIndex = cardResults.length + setResults.length + i
-                  const isActive = activeIndex === globalIndex
-                  return (
-                    <div
-                      key={i}
-                      onMouseDown={() => navigateTo(r)}
-                      onMouseEnter={() => setActiveIndex(globalIndex)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 10,
-                        padding: '10px 14px', cursor: 'pointer',
-                        background: isActive ? 'var(--bg-light)' : 'transparent',
-                        borderBottom: '1px solid var(--border)',
-                      }}
-                    >
-                      <span style={{ fontSize: 20 }}>⚡</span>
-                      <div>
-                        <div style={{
-                          fontSize: 13, fontWeight: 700, color: 'var(--text)',
-                          fontFamily: "'Figtree', sans-serif", textTransform: 'capitalize',
-                        }}>{r.name}</div>
-                        <div style={{
-                          fontSize: 11, color: 'var(--text-muted)',
-                          fontFamily: "'Figtree', sans-serif",
-                        }}>{r.subtitle}</div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </>
-            )}
-          </div>
-        )}
+        {showResults && allResults.length > 0 && <ResultsDropdown />}
       </div>
 
       {/* RIGHT — Desktop nav links */}
@@ -354,7 +368,7 @@ export default function Navbar() {
           boxShadow: '0 8px 20px rgba(0,0,0,0.15)',
           zIndex: 99,
         }}>
-          <div style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 12, position: 'relative' }}>
             <input
               value={query}
               onChange={e => handleSearch(e.target.value)}
@@ -367,39 +381,7 @@ export default function Navbar() {
                 outline: 'none', boxSizing: 'border-box',
               }}
             />
-            {showResults && allResults.length > 0 && (
-              <div style={{
-                background: 'var(--card)', border: '1px solid var(--border)',
-                borderRadius: 10, marginTop: 6, overflow: 'hidden',
-                maxHeight: 300, overflowY: 'auto',
-              }}>
-                {allResults.map((r, i) => (
-                  <div
-                    key={i}
-                    onMouseDown={() => { navigateTo(r); setMenuOpen(false) }}
-                    style={{
-                      padding: '10px 14px', cursor: 'pointer',
-                      borderBottom: '1px solid var(--border)',
-                      display: 'flex', alignItems: 'center', gap: 8,
-                    }}
-                  >
-                    <ResultIcon type={r.result_type} />
-                    <div>
-                      <div style={{
-                        fontSize: 13, fontWeight: 700, color: 'var(--text)',
-                        fontFamily: "'Figtree', sans-serif",
-                      }}>{r.name}</div>
-                      <div style={{
-                        fontSize: 11, color: 'var(--text-muted)',
-                        fontFamily: "'Figtree', sans-serif",
-                      }}>
-                        {r.subtitle}{r.card_number_display ? ` · ${r.card_number_display}` : ''}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            {showResults && allResults.length > 0 && <ResultsDropdown mobile />}
           </div>
           {navLinks.map((item) => (
             <Link key={item.label} href={item.href}
