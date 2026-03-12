@@ -1080,80 +1080,97 @@ export default function DealerPageClient() {
       {/* How to use */}
       <div id="how-to-use" style={{
         marginTop: 32, background: 'var(--card)', border: '1px solid var(--border)',
-        borderRadius: 16, padding: '24px 28px',
+        borderRadius: 16, padding: '28px 32px',
       }}>
-        <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, margin: '0 0 20px', color: 'var(--text)' }}>
+        <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, margin: '0 0 24px', color: 'var(--text)' }}>
           How to use the Deal Calculator
         </h2>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 20 }}>
+        <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 0 }}>
 
-          {/* Step 1 */}
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase' as const, letterSpacing: 1.5, color: '#1d4ed8', fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>
-              1 · Dealer side — cards going out
-            </div>
-            <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.6 }}>
-              Search for each card you're giving the customer and add it. The price defaults to the PriceCharting market value, but <strong>click the price to override it</strong> with your actual store price.
-            </p>
-            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
-              💡 If a card is in your display case at £45, type £45 — that's what goes into the deal, not the market rate.
-            </p>
-          </div>
+          {([
+            {
+              num: '1',
+              color: '#1d4ed8',
+              title: 'Dealer side — cards going out',
+              body: "Search for each card you're giving the customer. The price defaults to the last sold market value — click it to enter your actual store price instead.",
+              tip: 'If a card is priced at £45 in your display case, type £45. That\'s what goes into the deal.',
+            },
+            {
+              num: '2',
+              color: '#b45309',
+              title: 'Customer side — cards coming in',
+              body: "Add the cards the customer is bringing. Each one is valued at your global offer rate automatically. Two ways to override on a per-card basis:",
+              bullets: [
+                'Click the % badge to adjust the rate for that card (e.g. damaged card, lower the %)',
+                'Click the offer value directly to set a fixed amount — useful after checking recent sold listings. This ignores the % for that card.',
+              ],
+            },
+            {
+              num: '3',
+              color: '#7c3aed',
+              title: 'Pick your deal type',
+              body: 'Choose Cash, Trade Credit, or Blended in the verdict panel:',
+              bullets: [
+                'Cash — dealer pays money. Verdict shows who adds cash and how much.',
+                'Trade Credit — dealer gives store credit. Customer either has credit to spend or tops up with cash.',
+                'Blended — part cash, part store credit, split proportionally across your two rates.',
+              ],
+            },
+            {
+              num: '4',
+              color: '#16a34a',
+              title: 'Set your default rates',
+              body: 'Use the sliders at the top to set your standard cash offer % and trade credit % — these apply to all customer cards unless individually overridden. Most shops run 40–60% cash and 60–80% trade credit.',
+              tip: 'You can type directly into the % field or drag the slider.',
+            },
+          ] as const).map(({ num, color, title, body, tip, bullets }, i, arr) => (
+            <div key={num} style={{
+              display: 'grid', gridTemplateColumns: '28px 1fr', gap: '0 16px',
+              paddingBottom: i < arr.length - 1 ? 20 : 0,
+              marginBottom: i < arr.length - 1 ? 20 : 0,
+              borderBottom: i < arr.length - 1 ? '1px solid var(--border-light)' : 'none',
+            }}>
+              {/* Number */}
+              <div style={{
+                width: 28, height: 28, borderRadius: '50%',
+                background: `${color}15`, border: `1px solid ${color}33`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 12, fontWeight: 900, color, fontFamily: "'Figtree', sans-serif",
+                flexShrink: 0, marginTop: 1,
+              }}>{num}</div>
 
-          {/* Step 2 */}
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase' as const, letterSpacing: 1.5, color: '#b45309', fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>
-              2 · Customer side — cards coming in
+              {/* Content */}
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>
+                  {title}
+                </div>
+                <p style={{ margin: '0 0 6px', fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.6 }}>
+                  {body}
+                </p>
+                {bullets && (
+                  <ul style={{ margin: '6px 0', padding: '0 0 0 16px', fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.7 }}>
+                    {bullets.map(b => <li key={b}>{b}</li>)}
+                  </ul>
+                )}
+                {tip && (
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 6, paddingLeft: 2 }}>
+                    💡 {tip}
+                  </div>
+                )}
+              </div>
             </div>
-            <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.6 }}>
-              Add the cards the customer is bringing. Their offer value is calculated at your global cash or trade rate automatically.
-            </p>
-            <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
-              <strong>Override the %</strong> on a specific card by clicking the rate badge — useful if one card is damaged or you know the market has moved.
-            </p>
-            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
-              <strong>Override the value directly</strong> by clicking the offer amount — useful when you've just checked eBay last sold and want to value it at that number instead. This ignores the % entirely for that card.
-            </p>
-          </div>
-
-          {/* Step 3 */}
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase' as const, letterSpacing: 1.5, color: '#7c3aed', fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>
-              3 · Pick your deal type
-            </div>
-            <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.6 }}>
-              Choose <strong>Cash</strong>, <strong>Trade Credit</strong>, or <strong>Blended</strong> in the verdict panel. This affects how customer cards are valued and what the verdict says.
-            </p>
-            <ul style={{ margin: 0, padding: '0 0 0 16px', fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.7 }}>
-              <li><strong>Cash</strong> — dealer pays out money. Verdict says who adds cash.</li>
-              <li><strong>Trade Credit</strong> — dealer gives store credit. If the customer's cards are worth more, they have credit to spend. If less, they pay cash to top up.</li>
-              <li><strong>Blended</strong> — a mix of cash and store credit, split proportionally between your two rates.</li>
-            </ul>
-          </div>
-
-          {/* Step 4 */}
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase' as const, letterSpacing: 1.5, color: '#16a34a', fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>
-              4 · Default rates
-            </div>
-            <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.6 }}>
-              Set your shop's standard <strong>cash offer %</strong> and <strong>trade credit %</strong> at the top — these apply to all customer cards unless you override them individually.
-            </p>
-            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
-              💡 Most shops run cash at 40–60% and trade credit at 60–80%. You can type directly into the % box or drag the slider.
-            </p>
-          </div>
+          ))}
 
         </div>
 
         <div style={{
-          marginTop: 20, padding: '14px 18px',
+          marginTop: 24, padding: '13px 18px',
           background: 'var(--bg-light)', borderRadius: 10,
           borderLeft: '3px solid var(--primary)',
         }}>
           <div style={{ fontSize: 13, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.6 }}>
-            <strong>Tip:</strong> All prices come from PriceCharting sold listings — they're a solid starting point, but always cross-reference with the eBay last sold link on each card for the most recent data before committing to a deal.
+            <strong>Remember:</strong> Market prices are based on recent sold listings and historical data — a solid baseline, but always check the eBay last sold link on each card before locking in a deal.
           </div>
         </div>
       </div>
