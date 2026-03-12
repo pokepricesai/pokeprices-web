@@ -34,8 +34,9 @@ interface DealerCard {
   sellingPrice: number | null // null = use market price; set = dealer's actual price
 }
 
-// Customer card: offer value via % of market OR a fixed override value
-// Override value wins if set; otherwise market × %
+// Customer card: market value can be overridden (e.g. dealer checks eBay last sold and uses that instead)
+// Offer = overrideMarket (or grade market) × cash/trade %
+// customPct overrides the global rate for this card only
 interface CustomerCard {
   id: string
   name: string
@@ -48,8 +49,8 @@ interface CustomerCard {
   cgc10Usd: number | null
   grade: Grade
   urlSlug: string
-  customPct: number | null   // null = global default
-  overrideValue: number | null // null = use pct calc; set = fixed value
+  customPct: number | null      // null = global default
+  marketOverride: number | null // null = use grade market; set = dealer's agreed market value
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -112,9 +113,8 @@ function customerCardValue(
   tradePct: number,
   region: Region
 ): number {
-  // Fixed override wins if set
-  if (card.overrideValue !== null) return card.overrideValue
-  const market = getGradeMarket(card, region)
+  // Use overridden market value if set, otherwise grade market price
+  const market = card.marketOverride ?? getGradeMarket(card, region)
   const cp = card.customPct ?? cashPct
   const tp = card.customPct ?? tradePct
   if (mode === 'cash')  return market * (cp / 100)
@@ -403,7 +403,7 @@ function DealerCardRow({ card, region, onRemove, onPriceChange, onGradeChange }:
 
 // ── Customer Card Row ──────────────────────────────────────────────────────────
 
-function CustomerCardRow({ card, mode, cashPct, tradePct, region, onRemove, onPctChange, onValueOverride, onGradeChange }: {
+function CustomerCardRow({ card, mode, cashPct, tradePct, region, onRemove, onPctChange, onMarketOverride, onGradeChange }: {
   card: CustomerCard
   mode: DealMode
   cashPct: number
@@ -411,16 +411,17 @@ function CustomerCardRow({ card, mode, cashPct, tradePct, region, onRemove, onPc
   region: Region
   onRemove: () => void
   onPctChange: (pct: number | null) => void
-  onValueOverride: (v: number | null) => void
+  onMarketOverride: (v: number | null) => void
   onGradeChange: (g: Grade) => void
 }) {
   const [editingPct, setEditingPct] = useState(false)
   const [pctInput, setPctInput]     = useState('')
 
-  const marketPrice  = getGradeMarket(card, region)
-  const offerValue   = customerCardValue(card, mode, cashPct, tradePct, region)
-  const isValueFixed = card.overrideValue !== null
-  const isPctCustom  = card.customPct !== null && !isValueFixed
+  const gradeMarket      = getGradeMarket(card, region)
+  const effectiveMarket  = card.marketOverride ?? gradeMarket
+  const isMarketOverride = card.marketOverride !== null
+  const offerValue       = customerCardValue(card, mode, cashPct, tradePct, region)
+  const isPctCustom      = card.customPct !== null
 
   const activePct = (() => {
     const cp = card.customPct ?? cashPct
@@ -455,83 +456,82 @@ function CustomerCardRow({ card, mode, cashPct, tradePct, region, onRemove, onPc
         display: 'flex', alignItems: 'flex-start', flexWrap: 'wrap' as const,
         padding: '8px 12px', background: 'var(--bg)', borderTop: '1px solid var(--border-light)', gap: 14,
       }}>
-        {/* Market */}
-        <div>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' as const, letterSpacing: 1, fontFamily: "'Figtree', sans-serif", fontWeight: 700 }}>
-            Market
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-            {fmt(marketPrice, region)}
+
+        {/* Market value — editable */}
+        <div style={{ flex: 1 }}>
+          <PriceEditor
+            value={effectiveMarket}
+            region={region}
+            isOverridden={isMarketOverride}
+            label="Market value"
+            color="#b45309"
+            onCommit={v => {
+              onMarketOverride(Math.abs(v - gradeMarket) < 0.005 ? null : v)
+            }}
+            onReset={() => onMarketOverride(null)}
+          />
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 3 }}>
+            {isMarketOverride ? 'Using your value — click to change, or reset to data' : 'From our data — click to set your own (e.g. eBay last sold)'}
           </div>
         </div>
 
-        {/* % override — only relevant when not value-fixed */}
-        {!isValueFixed && (
-          <div>
-            <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' as const, letterSpacing: 1, fontFamily: "'Figtree', sans-serif", fontWeight: 700, marginBottom: 3 }}>
-              Rate %
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              {editingPct ? (
-                <>
-                  <input autoFocus type="number" min={1} max={100} value={pctInput}
-                    onChange={e => setPctInput(e.target.value)}
-                    onBlur={() => {
-                      const v = parseInt(pctInput)
-                      onPctChange(!isNaN(v) && v >= 1 && v <= 100 ? v : null)
-                      setEditingPct(false)
-                    }}
-                    onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                    style={{ width: 48, background: 'var(--bg-light)', border: '1px solid var(--primary)', borderRadius: 6, color: 'var(--text)', fontSize: 14, fontWeight: 700, padding: '3px 6px', fontFamily: "'Figtree', sans-serif", outline: 'none' }}
-                  />
-                  <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>%</span>
-                </>
-              ) : (
-                <button
-                  onClick={() => { setPctInput(String(card.customPct ?? activePct)); setEditingPct(true) }}
-                  style={{
-                    background: isPctCustom ? 'rgba(245,158,11,0.1)' : 'var(--bg-light)',
-                    border: `1px solid ${isPctCustom ? 'rgba(245,158,11,0.4)' : 'var(--border)'}`,
-                    borderRadius: 6, padding: '4px 10px', cursor: 'pointer',
-                    fontSize: 14, fontWeight: 700,
-                    color: isPctCustom ? '#d97706' : 'var(--text-muted)',
-                    fontFamily: "'Figtree', sans-serif",
-                  }}
-                >
-                  {activePct}%
-                </button>
-              )}
-              {isPctCustom && !editingPct && (
-                <button onClick={() => onPctChange(null)}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textDecoration: 'underline', padding: 0 }}
-                >reset</button>
-              )}
-            </div>
-            <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 3 }}>
-              {isPctCustom ? 'Card-specific rate set' : 'Click to override for this card'}
-            </div>
+        {/* % rate */}
+        <div>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' as const, letterSpacing: 1, fontFamily: "'Figtree', sans-serif", fontWeight: 700, marginBottom: 3 }}>
+            Rate %
           </div>
-        )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {editingPct ? (
+              <>
+                <input autoFocus type="number" min={1} max={100} value={pctInput}
+                  onChange={e => setPctInput(e.target.value)}
+                  onBlur={() => {
+                    const v = parseInt(pctInput)
+                    onPctChange(!isNaN(v) && v >= 1 && v <= 100 ? v : null)
+                    setEditingPct(false)
+                  }}
+                  onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                  style={{ width: 48, background: 'var(--bg-light)', border: '1px solid var(--primary)', borderRadius: 6, color: 'var(--text)', fontSize: 14, fontWeight: 700, padding: '3px 6px', fontFamily: "'Figtree', sans-serif", outline: 'none' }}
+                />
+                <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>%</span>
+              </>
+            ) : (
+              <button
+                onClick={() => { setPctInput(String(card.customPct ?? activePct)); setEditingPct(true) }}
+                style={{
+                  background: isPctCustom ? 'rgba(245,158,11,0.1)' : 'var(--bg-light)',
+                  border: `1px solid ${isPctCustom ? 'rgba(245,158,11,0.4)' : 'var(--border)'}`,
+                  borderRadius: 6, padding: '4px 10px', cursor: 'pointer',
+                  fontSize: 14, fontWeight: 700,
+                  color: isPctCustom ? '#d97706' : 'var(--text-muted)',
+                  fontFamily: "'Figtree', sans-serif",
+                }}
+              >
+                {activePct}%
+              </button>
+            )}
+            {isPctCustom && !editingPct && (
+              <button onClick={() => onPctChange(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textDecoration: 'underline', padding: 0 }}
+              >reset</button>
+            )}
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 3 }}>
+            {isPctCustom ? 'Card-specific rate set' : 'Click to override for this card'}
+          </div>
+        </div>
 
-        {/* Fixed value override */}
-        <div style={{ flex: 1 }}>
-          <PriceEditor
-            value={offerValue}
-            region={region}
-            isOverridden={isValueFixed}
-            label={isValueFixed ? 'Fixed offer value' : modeLabel}
-            color={isValueFixed ? '#d97706' : modeColor}
-            onCommit={v => {
-              // Setting a value override clears pct override
-              onPctChange(null)
-              onValueOverride(Math.abs(v - customerCardValue({ ...card, overrideValue: null }, mode, cashPct, tradePct, region)) < 0.005 ? null : v)
-            }}
-            onReset={() => onValueOverride(null)}
-          />
-          {isValueFixed
-            ? <div style={{ fontSize: 10, color: '#d97706', fontFamily: "'Figtree', sans-serif", marginTop: 2 }}>Fixed value — % rate ignored for this card</div>
-            : <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 2 }}>Click to fix at a specific value (e.g. last eBay sold)</div>
-          }
+        {/* Calculated offer — read only, derived from market × % */}
+        <div>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' as const, letterSpacing: 1, fontFamily: "'Figtree', sans-serif", fontWeight: 700, marginBottom: 3 }}>
+            {modeLabel}
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: modeColor, fontFamily: "'Figtree', sans-serif" }}>
+            {fmt(offerValue, region)}
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 3 }}>
+            {effectiveMarket > 0 ? `${activePct}% of ${fmt(effectiveMarket, region)}` : ''}
+          </div>
         </div>
 
         <a href={ebayUrl(card.name, card.set, card.grade, region)} target="_blank" rel="noopener noreferrer"
@@ -906,7 +906,7 @@ export default function DealerPageClient() {
       id: `${r.url_slug}-${Date.now()}`,
       name: r.name, set: r.subtitle, image: r.image_url,
       rawUsd: r.price_usd / 100, ...graded,
-      grade: 'raw', urlSlug: r.url_slug, customPct: null, overrideValue: null,
+      grade: 'raw', urlSlug: r.url_slug, customPct: null, marketOverride: null,
     }])
   }
 
@@ -1060,9 +1060,9 @@ export default function DealerPageClient() {
                   key={card.id} card={card} mode={mode}
                   cashPct={cashPct} tradePct={tradePct} region={region}
                   onRemove={() => removeCustomer(card.id)}
-                  onPctChange={p => updateCustomer(card.id, { customPct: p, overrideValue: null })}
-                  onValueOverride={v => updateCustomer(card.id, { overrideValue: v, customPct: null })}
-                  onGradeChange={g => updateCustomer(card.id, { grade: g, overrideValue: null, customPct: null })}
+                  onPctChange={p => updateCustomer(card.id, { customPct: p })}
+                  onMarketOverride={v => updateCustomer(card.id, { marketOverride: v })}
+                  onGradeChange={g => updateCustomer(card.id, { grade: g, marketOverride: null, customPct: null })}
                 />
               ))}
           </div>
@@ -1101,11 +1101,11 @@ export default function DealerPageClient() {
               num: '2',
               color: '#b45309',
               title: 'Customer side — cards coming in',
-              body: "Add the cards the customer is bringing. Each one is valued at your global offer rate automatically. Two ways to override on a per-card basis:",
+              body: "Add the cards the customer is bringing. Each one pulls a market value from our data, and the offer is calculated as market value × your rate automatically.",
               tip: undefined,
               bullets: [
-                'Click the % badge to adjust the rate for that card (e.g. damaged card, lower the %)',
-                'Click the offer value directly to set a fixed amount — useful after checking recent sold listings. This ignores the % for that card.',
+                'Click the market value to override it — e.g. if eBay last sold shows £150 but our data says £175, set it to £150. The cash or trade offer recalculates from that.',
+                'Click the % badge to adjust the rate for that card only — e.g. lower it for a damaged card.',
               ],
             },
             {
