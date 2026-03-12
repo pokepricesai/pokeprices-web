@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import Script from 'next/script'
 import './globals.css'
 import Navbar from '@/components/Navbar'
 import Footer from '@/components/Footer'
@@ -35,7 +36,7 @@ export const metadata: Metadata = {
     description: 'Real Pokemon card prices for 40,000+ cards. Daily updates, PSA population data, grading advice. Free.',
     images: ['/og-image.png'],
   },
-robots: {
+  robots: {
     index: true,
     follow: true,
     googleBot: {
@@ -62,6 +63,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet" />
       </head>
       <body className="min-h-screen flex flex-col" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+        <Script
+          src="https://www.googletagmanager.com/gtag/js?id=G-91WBNN7V11"
+          strategy="afterInteractive"
+        />
+        <Script id="google-analytics" strategy="afterInteractive">
+          {`
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+            gtag('config', 'G-91WBNN7V11');
+          `}
+        </Script>
         <Navbar />
         <main className="flex-1">{children}</main>
         <Footer />
