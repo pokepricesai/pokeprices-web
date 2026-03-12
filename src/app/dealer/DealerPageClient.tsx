@@ -707,16 +707,16 @@ function DealVerdict({ dealerCards, customerCards, mode, cashPct, tradePct, regi
           />
         )
       } else {
-        // Customer's cards worth more — they still need to pay cash for the difference
+        // Customer's cards worth more — they have store credit to spend
         return (
           <VerdictBox
             color="#b45309"
-            headline={`Customer adds ${fmt(absDiff, region)} cash`}
-            subtext={`Customer's cards are worth ${fmt(absDiff, region)} more than the dealer's offer. Customer tops up with cash.`}
+            headline={`Customer has ${fmt(absDiff, region)} store credit`}
+            subtext={`Customer's cards are worth ${fmt(absDiff, region)} more than the dealer's offer. That difference becomes store credit for the customer to spend.`}
             breakdown={[
               { label: 'Dealer cards', value: fmt(dealerTotal, region), color: '#1d4ed8' },
               { label: 'Customer offer', value: fmt(customerTotal, region), color: '#b45309' },
-              { label: 'Cash to add', value: fmt(absDiff, region), sublabel: 'from customer', color: '#b45309' },
+              { label: 'Store credit', value: fmt(absDiff, region), sublabel: 'customer to spend', color: '#b45309' },
             ]}
           />
         )
