@@ -40,7 +40,7 @@ export default function Navbar() {
   const router = useRouter()
   const [menuOpen, setMenuOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState<SearchResult[]>([])
+  const [allResults, setAllResults] = useState<SearchResult[]>([])
   const [searching, setSearching] = useState(false)
   const [showResults, setShowResults] = useState(false)
   const [activeIndex, setActiveIndex] = useState(-1)
@@ -48,7 +48,10 @@ export default function Navbar() {
   const searchRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Close on outside click
+  const cardResults = allResults.filter(r => r.result_type === 'card')
+  const setResults = allResults.filter(r => r.result_type === 'set')
+  const pokemonResults = allResults.filter(r => r.result_type === 'pokemon')
+
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
@@ -63,7 +66,7 @@ export default function Navbar() {
     setQuery(val)
     setActiveIndex(-1)
     if (val.length < 2) {
-      setResults([])
+      setAllResults([])
       setShowResults(false)
       return
     }
@@ -71,23 +74,23 @@ export default function Navbar() {
     debounceRef.current = setTimeout(async () => {
       setSearching(true)
       const { data } = await supabase.rpc('search_global', { query: val })
-      setResults(data ?? [])
+      setAllResults(data ?? [])
       setShowResults(true)
       setSearching(false)
     }, 250)
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (!showResults || results.length === 0) return
+    if (!showResults || allResults.length === 0) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      setActiveIndex(i => Math.min(i + 1, results.length - 1))
+      setActiveIndex(i => Math.min(i + 1, allResults.length - 1))
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
       setActiveIndex(i => Math.max(i - 1, -1))
     } else if (e.key === 'Enter') {
       e.preventDefault()
-      const target = activeIndex >= 0 ? results[activeIndex] : results[0]
+      const target = activeIndex >= 0 ? allResults[activeIndex] : allResults[0]
       if (target) navigateTo(target)
     } else if (e.key === 'Escape') {
       setShowResults(false)
@@ -101,10 +104,6 @@ export default function Navbar() {
     else if (result.result_type === 'set') router.push(`/set/${result.url_slug}`)
     else if (result.result_type === 'pokemon') router.push(`/pokemon/${result.url_slug.toLowerCase()}`)
   }
-
-  const cardResults = results.filter(r => r.result_type === 'card')
-  const setResults = results.filter(r => r.result_type === 'set')
-  const pokemonResults = results.filter(r => r.result_type === 'pokemon')
 
   return (
     <nav style={{
@@ -125,8 +124,7 @@ export default function Navbar() {
         onClick={() => setMenuOpen(!menuOpen)}
         style={{
           background: 'none', border: 'none', color: '#fff',
-          fontSize: 22, cursor: 'pointer', padding: '4px 8px',
-          flexShrink: 0,
+          fontSize: 22, cursor: 'pointer', padding: '4px 8px', flexShrink: 0,
         }}
         className="mobile-menu-btn"
       >
@@ -150,7 +148,7 @@ export default function Navbar() {
             value={query}
             onChange={e => handleSearch(e.target.value)}
             onKeyDown={handleKeyDown}
-            onFocus={() => results.length > 0 && setShowResults(true)}
+            onFocus={() => allResults.length > 0 && setShowResults(true)}
             placeholder="Search cards, sets, Pokémon..."
             style={{
               width: '100%',
@@ -165,12 +163,6 @@ export default function Navbar() {
               boxSizing: 'border-box',
               transition: 'background 0.2s',
             }}
-            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.2)')}
-            onMouseLeave={e => {
-              if (document.activeElement !== e.currentTarget) {
-                e.currentTarget.style.background = 'rgba(255,255,255,0.15)'
-              }
-            }}
           />
           {searching && (
             <span style={{
@@ -181,24 +173,22 @@ export default function Navbar() {
         </div>
 
         {/* Results dropdown */}
-        {showResults && results.length > 0 && (
+        {showResults && allResults.length > 0 && (
           <div style={{
             position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0,
             background: 'var(--card)', border: '1px solid var(--border)',
             borderRadius: 14, overflow: 'hidden',
             boxShadow: '0 12px 40px rgba(0,0,0,0.2)',
-            zIndex: 200,
-            maxHeight: 480, overflowY: 'auto',
+            zIndex: 200, maxHeight: 480, overflowY: 'auto',
           }}>
 
             {/* Cards */}
             {cardResults.length > 0 && (
               <>
                 <div style={{
-                  padding: '8px 14px 4px',
-                  fontSize: 10, fontWeight: 800, letterSpacing: 1.5,
-                  color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif",
-                  textTransform: 'uppercase',
+                  padding: '8px 14px 4px', fontSize: 10, fontWeight: 800,
+                  letterSpacing: 1.5, color: 'var(--text-muted)',
+                  fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase',
                 }}>Cards</div>
                 {cardResults.map((r, i) => {
                   const globalIndex = i
@@ -216,7 +206,6 @@ export default function Navbar() {
                         borderBottom: '1px solid var(--border)',
                       }}
                     >
-                      {/* Card image */}
                       {r.image_url ? (
                         <img
                           src={r.image_url}
@@ -272,10 +261,9 @@ export default function Navbar() {
             {setResults.length > 0 && (
               <>
                 <div style={{
-                  padding: '8px 14px 4px',
-                  fontSize: 10, fontWeight: 800, letterSpacing: 1.5,
-                  color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif",
-                  textTransform: 'uppercase',
+                  padding: '8px 14px 4px', fontSize: 10, fontWeight: 800,
+                  letterSpacing: 1.5, color: 'var(--text-muted)',
+                  fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase',
                 }}>Sets</div>
                 {setResults.map((r, i) => {
                   const globalIndex = cardResults.length + i
@@ -314,10 +302,9 @@ export default function Navbar() {
             {pokemonResults.length > 0 && (
               <>
                 <div style={{
-                  padding: '8px 14px 4px',
-                  fontSize: 10, fontWeight: 800, letterSpacing: 1.5,
-                  color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif",
-                  textTransform: 'uppercase',
+                  padding: '8px 14px 4px', fontSize: 10, fontWeight: 800,
+                  letterSpacing: 1.5, color: 'var(--text-muted)',
+                  fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase',
                 }}>Pokémon</div>
                 {pokemonResults.map((r, i) => {
                   const globalIndex = cardResults.length + setResults.length + i
@@ -351,17 +338,6 @@ export default function Navbar() {
                 })}
               </>
             )}
-
-            {/* No results */}
-            {results.length === 0 && !searching && (
-              <div style={{
-                padding: '20px 14px', textAlign: 'center',
-                fontSize: 13, color: 'var(--text-muted)',
-                fontFamily: "'Figtree', sans-serif",
-              }}>
-                No results for "{query}"
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -386,7 +362,6 @@ export default function Navbar() {
           boxShadow: '0 8px 20px rgba(0,0,0,0.15)',
           zIndex: 99,
         }}>
-          {/* Mobile search */}
           <div style={{ marginBottom: 12 }}>
             <input
               value={query}
@@ -400,13 +375,13 @@ export default function Navbar() {
                 outline: 'none', boxSizing: 'border-box',
               }}
             />
-            {showResults && results.length > 0 && (
+            {showResults && allResults.length > 0 && (
               <div style={{
                 background: 'var(--card)', border: '1px solid var(--border)',
                 borderRadius: 10, marginTop: 6, overflow: 'hidden',
                 maxHeight: 300, overflowY: 'auto',
               }}>
-                {results.map((r, i) => (
+                {allResults.map((r, i) => (
                   <div
                     key={i}
                     onMouseDown={() => { navigateTo(r); setMenuOpen(false) }}
@@ -418,11 +393,15 @@ export default function Navbar() {
                   >
                     <ResultIcon type={r.result_type} />
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>
-                        {r.name}
-                      </div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-                        {r.subtitle} {r.card_number_display && `· ${r.card_number_display}`}
+                      <div style={{
+                        fontSize: 13, fontWeight: 700, color: 'var(--text)',
+                        fontFamily: "'Figtree', sans-serif",
+                      }}>{r.name}</div>
+                      <div style={{
+                        fontSize: 11, color: 'var(--text-muted)',
+                        fontFamily: "'Figtree', sans-serif",
+                      }}>
+                        {r.subtitle}{r.card_number_display ? ` · ${r.card_number_display}` : ''}
                       </div>
                     </div>
                   </div>
