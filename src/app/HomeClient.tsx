@@ -13,18 +13,18 @@ const upcomingReleases = [
 ]
 
 const features = [
-  { icon: '📊', title: 'Real Sales Data', desc: 'Daily prices from actual completed sales. No estimates, no guesswork.' },
-  { icon: '💷', title: 'True Landed Cost', desc: 'VAT, shipping, customs, handling — the full picture for UK buyers.' },
-  { icon: '📈', title: 'Trend Analysis', desc: '7 days to 5 years of price history. Spot movement before it happens.' },
-  { icon: '💎', title: 'Grading Intelligence', desc: 'PSA population data, grade premiums, and honest grading advice.' },
+  { icon: '◈', title: 'Real Sales Data', desc: 'Daily prices from actual completed sales. No estimates, no guesswork.' },
+  { icon: '◈', title: 'True Landed Cost', desc: 'VAT, shipping, customs, handling — the real cost of buying a card, not just the sticker price.' },
+  { icon: '◈', title: 'Trend Analysis', desc: '7 days to 5 years of price history. Spot movement before it happens.' },
+  { icon: '◈', title: 'Grading Intelligence', desc: 'PSA population data, grade premiums, and honest grading advice.' },
 ]
 
 const faqs = [
   { q: 'Where does the pricing data come from?', a: 'All prices are sourced from actual completed sales scraped daily from PriceCharting. We update every night so you always have current market values.' },
   { q: 'Is this really free?', a: 'Genuinely free. No login, no email capture, no premium tier. Revenue comes from optional affiliate links when you\'re ready to buy.' },
-  { q: 'Do you cover UK import costs?', a: 'Yes. We factor in VAT, Royal Mail handling fees, shipping, and customs so you see the true landed cost — not the sticker price.' },
-  { q: 'What grading companies do you track?', a: 'We track PSA and CGC prices and population data across 32,000+ entries. Grading advice covers PSA, CGC, BGS, SGC, and ACE.' },
-  { q: 'Can I find a card shop near me?', a: 'Yes — check the Vendor Directory. You can search by postcode or town to find your nearest physical shops, retailers, and grading services.' },
+  { q: 'Do you cover import costs?', a: 'Yes. The true landed cost tool factors in VAT, handling fees, shipping, and customs so you see what a card actually costs to get in hand — not just the listed price.' },
+  { q: 'What grading companies do you track?', a: 'PSA and CGC prices and population data across 32,000+ entries. Grading advice covers PSA, CGC, BGS, SGC, and ACE.' },
+  { q: 'Can I find a card shop near me?', a: 'Yes — check the Vendor Directory. You can search by postcode or town to find physical shops, retailers, and grading services near you.' },
 ]
 
 interface MarketIndexRow {
@@ -128,12 +128,12 @@ function heatColor(band: string) {
 
 function categoryMeta(cat: string) {
   switch (cat) {
-    case 'top_riser':     return { label: '🚀 Top Riser (30d)',  color: '#22c55e' }
-    case 'top_faller':    return { label: '📉 Top Faller (30d)', color: '#ef4444' }
-    case 'most_volatile': return { label: '⚡ Most Volatile',    color: '#f59e0b' }
-    case 'new_ath':       return { label: '🏆 New High',         color: '#a78bfa' }
-    case 'most_traded':   return { label: '🔥 Most Traded',      color: '#3b82f6' }
-    default:              return { label: cat,                    color: '#94a3b8' }
+    case 'top_riser':     return { label: 'Top Riser (30d)',  color: '#22c55e' }
+    case 'top_faller':    return { label: 'Top Faller (30d)', color: '#ef4444' }
+    case 'most_volatile': return { label: 'Most Volatile',    color: '#f59e0b' }
+    case 'new_ath':       return { label: 'New High',         color: '#a78bfa' }
+    case 'most_traded':   return { label: 'Most Traded',      color: '#3b82f6' }
+    default:              return { label: cat,                 color: '#94a3b8' }
   }
 }
 
@@ -240,7 +240,7 @@ export default function HomeClient() {
             Know what your cards<br />are <span style={{ color: 'var(--accent)' }}>really</span> worth
           </h1>
           <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 15, margin: '0 0 24px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif" }}>
-            40,000+ Pokémon cards. Daily price updates. Real landed costs for UK collectors.<br />Search from the bar above or ask the chatbot below.
+            40,000+ Pokémon cards. Daily prices from real sold listings. True landed costs including VAT, shipping, and fees.
           </p>
           <InlineChat />
           <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, marginTop: 12, fontFamily: "'Figtree', sans-serif" }}>
@@ -423,9 +423,9 @@ export default function HomeClient() {
             background: 'linear-gradient(135deg, rgba(167,139,250,0.07), rgba(59,130,246,0.05))',
             border: '1px solid rgba(167,139,250,0.18)', borderRadius: 18, padding: '24px',
           }}>
-            <h2 style={{ fontSize: 20, margin: '0 0 4px', fontFamily: "'Playfair Display', serif" }}>💎 Hidden Gems</h2>
+            <h2 style={{ fontSize: 20, margin: '0 0 4px', fontFamily: "'Playfair Display', serif" }}>Hidden Gems</h2>
             <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '0 0 16px', fontFamily: "'Figtree', sans-serif" }}>
-              Rising price · low pop · under the radar — cards collectors are sleeping on
+              Rising price · low pop · under the radar — cards worth a closer look
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
               {hiddenGems.map(gem => {
@@ -517,7 +517,7 @@ export default function HomeClient() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
           {features.map((f, i) => (
             <div key={f.title} className={`card-hover animate-fade-in-up delay-${i + 1}`} style={{ background: 'var(--card)', borderRadius: 16, padding: '22px 18px', border: '1px solid var(--border)', textAlign: 'center' }}>
-              <div style={{ fontSize: 30, marginBottom: 8 }}>{f.icon}</div>
+              <div style={{ fontSize: 22, marginBottom: 8, color: 'var(--text-muted)' }}>{f.icon}</div>
               <h3 style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)', margin: '0 0 6px', fontFamily: "'Figtree', sans-serif" }}>{f.title}</h3>
               <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5, margin: 0, fontFamily: "'Figtree', sans-serif" }}>{f.desc}</p>
             </div>
