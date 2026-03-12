@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { supabase, formatPrice, formatPct } from '@/lib/supabase'
 import InlineChat from '@/components/InlineChat'
-import SearchBar from '@/components/SearchBar'
 
 const upcomingReleases = [
   { name: 'Perfect Order', date: 'Mar 27, 2026', confirmed: true, type: 'Main Set' },
@@ -14,17 +13,18 @@ const upcomingReleases = [
 ]
 
 const features = [
-  { icon: '📊', title: 'Real Sales Data', desc: 'Daily prices from actual completed sales across major marketplaces.' },
+  { icon: '📊', title: 'Real Sales Data', desc: 'Daily prices from actual completed sales. No estimates, no guesswork.' },
   { icon: '💷', title: 'True Landed Cost', desc: 'VAT, shipping, customs, handling — the full picture for UK buyers.' },
-  { icon: '📈', title: 'Trend Analysis', desc: '30 days, 6 months, or 5 years. Spot market movement early.' },
-  { icon: '💎', title: 'Grading Intelligence', desc: 'Pop counts, grade premiums, and honest UK grading advice.' },
+  { icon: '📈', title: 'Trend Analysis', desc: '7 days to 5 years of price history. Spot movement before it happens.' },
+  { icon: '💎', title: 'Grading Intelligence', desc: 'PSA population data, grade premiums, and honest grading advice.' },
 ]
 
 const faqs = [
-  { q: 'Where does the pricing data come from?', a: 'All prices are sourced from actual completed sales on major marketplaces. We update daily so you always have current market values.' },
-  { q: "Is this really free?", a: "Genuinely free. No login, no email capture, no premium tier. Revenue comes from optional affiliate links when you're ready to buy." },
-  { q: 'Do you cover UK import costs?', a: 'Yes. We factor in VAT, Royal Mail handling fees, shipping, and customs so you see the true landed cost.' },
-  { q: 'What grading companies do you track?', a: 'We track PSA and CGC prices and population data. Our grading advice covers PSA, CGC, BGS, SGC, and ACE.' },
+  { q: 'Where does the pricing data come from?', a: 'All prices are sourced from actual completed sales scraped daily from PriceCharting. We update every night so you always have current market values.' },
+  { q: 'Is this really free?', a: 'Genuinely free. No login, no email capture, no premium tier. Revenue comes from optional affiliate links when you\'re ready to buy.' },
+  { q: 'Do you cover UK import costs?', a: 'Yes. We factor in VAT, Royal Mail handling fees, shipping, and customs so you see the true landed cost — not the sticker price.' },
+  { q: 'What grading companies do you track?', a: 'We track PSA and CGC prices and population data across 32,000+ entries. Grading advice covers PSA, CGC, BGS, SGC, and ACE.' },
+  { q: 'Can I find a card shop near me?', a: 'Yes — check the Vendor Directory. You can search by postcode or town to find your nearest physical shops, retailers, and grading services.' },
 ]
 
 interface MarketIndexRow {
@@ -96,7 +96,6 @@ function Sparkles() {
   )
 }
 
-// ── Mini sparkline SVG ────────────────────────────────────────
 function Sparkline({ data, color = '#22c55e', height = 48 }: { data: number[], color?: string, height?: number }) {
   if (!data || data.length < 2) return null
   const min = Math.min(...data)
@@ -131,10 +130,10 @@ function categoryMeta(cat: string) {
   switch (cat) {
     case 'top_riser':     return { label: '🚀 Top Riser (30d)',  color: '#22c55e' }
     case 'top_faller':    return { label: '📉 Top Faller (30d)', color: '#ef4444' }
-    case 'most_volatile': return { label: '⚡ Most Volatile',  color: '#f59e0b' }
-    case 'new_ath':       return { label: '🏆 New High',       color: '#a78bfa' }
-    case 'most_traded':   return { label: '🔥 Most Traded',     color: '#3b82f6' }
-    default:              return { label: cat,                  color: '#94a3b8' }
+    case 'most_volatile': return { label: '⚡ Most Volatile',    color: '#f59e0b' }
+    case 'new_ath':       return { label: '🏆 New High',         color: '#a78bfa' }
+    case 'most_traded':   return { label: '🔥 Most Traded',      color: '#3b82f6' }
+    default:              return { label: cat,                    color: '#94a3b8' }
   }
 }
 
@@ -147,7 +146,6 @@ export default function HomeClient() {
   const [heatmap, setHeatmap] = useState<HeatmapCard[]>([])
   const [hiddenGems, setHiddenGems] = useState<HiddenGem[]>([])
 
-  // Countdown timer
   useEffect(() => {
     const tick = () => {
       const diff = nextRelease.getTime() - Date.now()
@@ -162,7 +160,6 @@ export default function HomeClient() {
     return () => clearInterval(id)
   }, [])
 
-  // Analytics: market index + hidden gems (fast, load together)
   useEffect(() => {
     async function loadAnalytics() {
       const [indexRes, gemsRes] = await Promise.all([
@@ -186,7 +183,6 @@ export default function HomeClient() {
     loadAnalytics()
   }, [])
 
-  // Weekly report — separate with retry (heavier query, occasionally slow)
   useEffect(() => {
     let cancelled = false
     async function load(attempt = 1) {
@@ -202,7 +198,6 @@ export default function HomeClient() {
     return () => { cancelled = true }
   }, [])
 
-  // Heatmap — top 30 cards by raw price, coloured by 30d change
   useEffect(() => {
     async function loadHeatmap() {
       const res = await supabase.rpc('get_heatmap_top_cards', { lim: 30 })
@@ -244,22 +239,12 @@ export default function HomeClient() {
           }}>
             Know what your cards<br />are <span style={{ color: 'var(--accent)' }}>really</span> worth
           </h1>
-          <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 15, margin: '0 0 20px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif" }}>
-            Real market data for 40,000+ Pokemon cards. Ask anything — prices, trends, grading advice.
+          <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 15, margin: '0 0 24px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif" }}>
+            40,000+ Pokémon cards. Daily price updates. Real landed costs for UK collectors.<br />Search from the bar above or ask the chatbot below.
           </p>
-          <div style={{ marginBottom: 16 }}>
-            <SearchBar placeholder="Search cards or sets…" />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '0 auto 16px', maxWidth: 560 }}>
-            <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.15)' }} />
-            <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, fontFamily: "'Figtree', sans-serif", fontWeight: 600, letterSpacing: 0.5 }}>
-              or ask the chatbot
-            </span>
-            <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.15)' }} />
-          </div>
           <InlineChat />
           <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, marginTop: 12, fontFamily: "'Figtree', sans-serif" }}>
-            Updated daily from actual sold listings
+            Updated nightly from actual sold listings
           </p>
         </div>
       </section>
@@ -362,7 +347,7 @@ export default function HomeClient() {
         <div style={{ marginBottom: 16 }}>
           <h2 style={{ fontSize: 24, margin: '0 0 4px', fontFamily: "'Playfair Display', serif" }}>Market Heatmap</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0, fontFamily: "'Figtree', sans-serif" }}>
-            The 30 most valuable actively-traded cards right now — colour shows 30-day price movement
+            The most valuable actively-traded cards right now — colour shows 30-day price movement
           </p>
         </div>
         {heatmap.length > 0 ? (
@@ -527,8 +512,8 @@ export default function HomeClient() {
 
       {/* ── BUILT DIFFERENT ───────────────────────────────────── */}
       <section style={{ padding: '16px 24px 44px', maxWidth: 900, margin: '0 auto' }}>
-        <h2 style={{ fontSize: 24, textAlign: 'center', margin: '0 0 6px', fontFamily: "'Playfair Display', serif" }}>Built different</h2>
-        <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: 14, margin: '0 0 28px', fontFamily: "'Figtree', sans-serif" }}>No login. No paywall. No data collection.</p>
+        <h2 style={{ fontSize: 24, textAlign: 'center', margin: '0 0 6px', fontFamily: "'Playfair Display', serif" }}>Built for collectors, not investors</h2>
+        <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: 14, margin: '0 0 28px', fontFamily: "'Figtree', sans-serif" }}>No login. No paywall. No data collection. Ever.</p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
           {features.map((f, i) => (
             <div key={f.title} className={`card-hover animate-fade-in-up delay-${i + 1}`} style={{ background: 'var(--card)', borderRadius: 16, padding: '22px 18px', border: '1px solid var(--border)', textAlign: 'center' }}>
@@ -547,7 +532,7 @@ export default function HomeClient() {
             { val: '40,000+', label: 'Cards Tracked' },
             { val: '156', label: 'Sets Covered' },
             { val: '5+ Years', label: 'Price History' },
-            { val: 'Daily', label: 'Price Updates' },
+            { val: 'Nightly', label: 'Price Updates' },
             { val: totalMarket ? `$${(totalMarket.value / 100 / 1000000).toFixed(1)}M` : '—', label: 'Market Tracked' },
           ].map(s => (
             <div key={s.label} style={{ textAlign: 'center' }}>
