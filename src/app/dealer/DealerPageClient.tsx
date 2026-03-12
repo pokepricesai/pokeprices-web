@@ -28,7 +28,7 @@ interface HotMover {
   set_name: string
   current_raw: number
   raw_pct_30d: number
-  card_url_slug: string | null
+  card_url_slug?: string | null
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
