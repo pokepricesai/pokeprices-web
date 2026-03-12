@@ -135,19 +135,33 @@ function SearchBox({ region, onAdd }: { region: Region; onAdd: (card: DealCard) 
     return () => document.removeEventListener('mousedown', onClick)
   }, [])
 
-  function handleAdd(r: SearchResult) {
+  async function handleAdd(r: SearchResult) {
     if (!r.price_usd) return
+    setQuery(''); setResults([]); setOpen(false)
+    // price_usd from search_global is in cents
+    let psa9Usd: number | null = null
+    let psa10Usd: number | null = null
+    try {
+      const { data } = await supabase
+        .from('cards')
+        .select('psa9_usd, psa10_usd')
+        .eq('card_url_slug', r.url_slug)
+        .maybeSingle()
+      if (data) {
+        psa9Usd = data.psa9_usd ? data.psa9_usd / 100 : null
+        psa10Usd = data.psa10_usd ? data.psa10_usd / 100 : null
+      }
+    } catch {}
     onAdd({
       id: `${r.url_slug}-${Date.now()}`,
       name: r.name, set: r.subtitle,
       image: r.image_url,
-      rawUsd: r.price_usd,
-      psa9Usd: (r as any).psa9_usd ?? null,
-      psa10Usd: (r as any).psa10_usd ?? null,
+      rawUsd: r.price_usd / 100,
+      psa9Usd,
+      psa10Usd,
       grade: 'raw', customPct: null,
       urlSlug: r.url_slug,
     })
-    setQuery(''); setResults([]); setOpen(false)
   }
 
   return (
@@ -186,8 +200,8 @@ function SearchBox({ region, onAdd }: { region: Region; onAdd: (card: DealCard) 
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>{r.subtitle}{r.card_number_display ? ` · ${r.card_number_display}` : ''}</div>
               </div>
               <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>{fmt(convert(r.price_usd!, region), region)}</div>
-                {r.psa10_usd && <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>PSA 10: {fmt(convert(r.psa10_usd, region), region)}</div>}
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>{fmt(convert(r.price_usd! / 100, region), region)}</div>
+                {r.psa10_usd && <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>PSA 10: {fmt(convert(r.psa10_usd / 100, region), region)}</div>}
               </div>
               <span style={{ fontSize: 11, color: 'var(--primary)', fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>+ ADD</span>
             </div>
@@ -421,14 +435,20 @@ function HotMovers({ region }: { region: Region }) {
 
   useEffect(() => {
     async function load() {
-      const { data } = await supabase.from('card_trends')
-        .select('card_name, set_name, current_raw, raw_pct_30d')
-        .not('raw_pct_30d', 'is', null).gt('current_raw', 500)
-        .order('raw_pct_30d', { ascending: false }).limit(200)
-      if (!data) return
-      const reliable = data.filter((d: any) => Math.abs(d.raw_pct_30d) <= 300)
-      setRisers(reliable.filter((d: any) => d.raw_pct_30d > 0).slice(0, 10))
-      setFallers(reliable.filter((d: any) => d.raw_pct_30d < 0).sort((a: any, b: any) => a.raw_pct_30d - b.raw_pct_30d).slice(0, 10))
+      const [risersRes, fallersRes] = await Promise.all([
+        supabase.from('card_trends')
+          .select('card_name, set_name, current_raw, raw_pct_30d')
+          .not('raw_pct_30d', 'is', null).gt('current_raw', 500)
+          .gt('raw_pct_30d', 0).lte('raw_pct_30d', 300)
+          .order('raw_pct_30d', { ascending: false }).limit(10),
+        supabase.from('card_trends')
+          .select('card_name, set_name, current_raw, raw_pct_30d')
+          .not('raw_pct_30d', 'is', null).gt('current_raw', 500)
+          .lt('raw_pct_30d', 0).gte('raw_pct_30d', -300)
+          .order('raw_pct_30d', { ascending: true }).limit(10),
+      ])
+      if (risersRes.data) setRisers(risersRes.data)
+      if (fallersRes.data) setFallers(fallersRes.data)
     }
     load()
   }, [])
