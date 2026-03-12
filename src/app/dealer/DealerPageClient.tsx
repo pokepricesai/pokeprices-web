@@ -381,6 +381,9 @@ function DealerCardRow({ card, region, onRemove, onPriceChange, onGradeChange }:
             onCommit={handleCommit}
             onReset={() => onPriceChange(null)}
           />
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 3 }}>
+            {isOverridden ? 'Using your price — click to change, or reset to market' : 'Defaults to market — click to set your store price'}
+          </div>
         </div>
 
         <a href={ebayUrl(card.name, card.set, card.grade, region)} target="_blank" rel="noopener noreferrer"
@@ -504,6 +507,9 @@ function CustomerCardRow({ card, mode, cashPct, tradePct, region, onRemove, onPc
                 >reset</button>
               )}
             </div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 3 }}>
+              {isPctCustom ? 'Card-specific rate set' : 'Click to override for this card'}
+            </div>
           </div>
         )}
 
@@ -522,11 +528,10 @@ function CustomerCardRow({ card, mode, cashPct, tradePct, region, onRemove, onPc
             }}
             onReset={() => onValueOverride(null)}
           />
-          {isValueFixed && (
-            <div style={{ fontSize: 10, color: '#d97706', fontFamily: "'Figtree', sans-serif", marginTop: 2 }}>
-              Fixed — ignoring % rate
-            </div>
-          )}
+          {isValueFixed
+            ? <div style={{ fontSize: 10, color: '#d97706', fontFamily: "'Figtree', sans-serif", marginTop: 2 }}>Fixed value — % rate ignored for this card</div>
+            : <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 2 }}>Click to fix at a specific value (e.g. last eBay sold)</div>
+          }
         </div>
 
         <a href={ebayUrl(card.name, card.set, card.grade, region)} target="_blank" rel="noopener noreferrer"
@@ -942,9 +947,12 @@ export default function DealerPageClient() {
         <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, margin: '0 0 6px', color: 'var(--text)', letterSpacing: -0.5 }}>
           Deal Calculator
         </h1>
-        <p style={{ margin: 0, fontSize: 14, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+        <p style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
           Build both sides of a trade or purchase. Dealer sets selling prices; customer cards are valued at your offer rate. The verdict shows exactly who adds what.
         </p>
+        <a href="#how-to-use" style={{ fontSize: 13, color: 'var(--primary)', fontFamily: "'Figtree', sans-serif", fontWeight: 600, textDecoration: 'none' }}>
+          ↓ How to use this tool
+        </a>
       </div>
 
       {/* Top bar */}
@@ -1068,6 +1076,87 @@ export default function DealerPageClient() {
         mode={mode} cashPct={cashPct} tradePct={tradePct}
         region={region} onModeChange={setMode}
       />
+
+      {/* How to use */}
+      <div id="how-to-use" style={{
+        marginTop: 32, background: 'var(--card)', border: '1px solid var(--border)',
+        borderRadius: 16, padding: '24px 28px',
+      }}>
+        <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, margin: '0 0 20px', color: 'var(--text)' }}>
+          How to use the Deal Calculator
+        </h2>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 20 }}>
+
+          {/* Step 1 */}
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase' as const, letterSpacing: 1.5, color: '#1d4ed8', fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>
+              1 · Dealer side — cards going out
+            </div>
+            <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.6 }}>
+              Search for each card you're giving the customer and add it. The price defaults to the PriceCharting market value, but <strong>click the price to override it</strong> with your actual store price.
+            </p>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
+              💡 If a card is in your display case at £45, type £45 — that's what goes into the deal, not the market rate.
+            </p>
+          </div>
+
+          {/* Step 2 */}
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase' as const, letterSpacing: 1.5, color: '#b45309', fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>
+              2 · Customer side — cards coming in
+            </div>
+            <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.6 }}>
+              Add the cards the customer is bringing. Their offer value is calculated at your global cash or trade rate automatically.
+            </p>
+            <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
+              <strong>Override the %</strong> on a specific card by clicking the rate badge — useful if one card is damaged or you know the market has moved.
+            </p>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
+              <strong>Override the value directly</strong> by clicking the offer amount — useful when you've just checked eBay last sold and want to value it at that number instead. This ignores the % entirely for that card.
+            </p>
+          </div>
+
+          {/* Step 3 */}
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase' as const, letterSpacing: 1.5, color: '#7c3aed', fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>
+              3 · Pick your deal type
+            </div>
+            <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.6 }}>
+              Choose <strong>Cash</strong>, <strong>Trade Credit</strong>, or <strong>Blended</strong> in the verdict panel. This affects how customer cards are valued and what the verdict says.
+            </p>
+            <ul style={{ margin: 0, padding: '0 0 0 16px', fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.7 }}>
+              <li><strong>Cash</strong> — dealer pays out money. Verdict says who adds cash.</li>
+              <li><strong>Trade Credit</strong> — dealer gives store credit. If the customer's cards are worth more, they have credit to spend. If less, they pay cash to top up.</li>
+              <li><strong>Blended</strong> — a mix of cash and store credit, split proportionally between your two rates.</li>
+            </ul>
+          </div>
+
+          {/* Step 4 */}
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase' as const, letterSpacing: 1.5, color: '#16a34a', fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>
+              4 · Default rates
+            </div>
+            <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.6 }}>
+              Set your shop's standard <strong>cash offer %</strong> and <strong>trade credit %</strong> at the top — these apply to all customer cards unless you override them individually.
+            </p>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
+              💡 Most shops run cash at 40–60% and trade credit at 60–80%. You can type directly into the % box or drag the slider.
+            </p>
+          </div>
+
+        </div>
+
+        <div style={{
+          marginTop: 20, padding: '14px 18px',
+          background: 'var(--bg-light)', borderRadius: 10,
+          borderLeft: '3px solid var(--primary)',
+        }}>
+          <div style={{ fontSize: 13, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.6 }}>
+            <strong>Tip:</strong> All prices come from PriceCharting sold listings — they're a solid starting point, but always cross-reference with the eBay last sold link on each card for the most recent data before committing to a deal.
+          </div>
+        </div>
+      </div>
 
     </div>
   )
