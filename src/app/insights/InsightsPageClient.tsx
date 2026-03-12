@@ -24,9 +24,13 @@ const THEME_COLOURS: Record<string, string> = {
 }
 
 const THEME_LABELS: Record<string, string> = {
-  movers: 'The Movers', grading: 'Grading Desk', set_watch: 'Set Watch',
-  sleepers: 'Sleeper Picks', pulse: 'Market Pulse',
-  collector: "Collector's Corner", history: 'History Lesson',
+  movers: 'The Movers',
+  grading: 'Grading Desk',
+  set_watch: 'Set Watch',
+  sleepers: 'Sleeper Picks',
+  pulse: 'Market Pulse',
+  collector: "Collector's Corner",
+  history: 'History Lesson',
 }
 
 function formatDate(iso: string) {
@@ -84,7 +88,6 @@ export default function InsightsPageClient() {
         </p>
       </div>
 
-      {/* Theme key */}
       <div style={{
         display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 28,
         paddingBottom: 20, borderBottom: '1px solid var(--border)',
@@ -117,7 +120,6 @@ export default function InsightsPageClient() {
         </div>
       ) : (
         <>
-          {/* Featured — latest article large */}
           {insights[0] && (
             <Link href={`/insights/${insights[0].slug}`} style={{ textDecoration: 'none', color: 'inherit', display: 'block', marginBottom: 14 }}>
               <div
@@ -153,7 +155,6 @@ export default function InsightsPageClient() {
             </Link>
           )}
 
-          {/* Grid — remaining */}
           {insights.length > 1 && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12 }}>
               {insights.slice(1).map(ins => (
