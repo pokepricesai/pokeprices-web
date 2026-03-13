@@ -1,4 +1,5 @@
 import Link from 'next/link'
+
 const topSets = [
   'Base Set',
   'Jungle',
@@ -9,6 +10,7 @@ const topSets = [
   'Hidden Fates',
   'Evolving Skies',
 ]
+
 export default function Footer() {
   return (
     <footer style={{
@@ -19,6 +21,7 @@ export default function Footer() {
       <div style={{ marginBottom: 14 }}>
         <img src="/logo.png" alt="PokePrices" style={{ height: 34, margin: '0 auto' }} />
       </div>
+
       {/* Main nav links */}
       <div style={{
         display: 'flex', justifyContent: 'center', gap: 24,
@@ -37,6 +40,7 @@ export default function Footer() {
           }}>{link.label}</Link>
         ))}
       </div>
+
       {/* Popular sets */}
       <div style={{ marginBottom: 20 }}>
         <p style={{
@@ -53,12 +57,23 @@ export default function Footer() {
           ))}
         </div>
       </div>
+
       <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12, margin: '0 auto 6px', maxWidth: 500 }}>
         Built by collectors, for collectors. Not affiliated with or endorsed by Nintendo, The Pokémon Company, or any grading service.
       </p>
-      <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: 11, margin: 0 }}>
+      <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: 11, margin: '0 0 14px' }}>
         Prices sourced from public marketplaces and displayed in USD. Informational only.
       </p>
+
+      {/* Legal link */}
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 14 }}>
+        <Link href="/terms" style={{
+          color: 'rgba(255,255,255,0.3)', textDecoration: 'none', fontSize: 11,
+          fontWeight: 500, transition: 'color 0.15s',
+        }}>
+          Terms of Service
+        </Link>
+      </div>
     </footer>
   )
 }
