@@ -20,7 +20,7 @@ const features = [
 ]
 
 const faqs = [
-  { q: 'Where does the pricing data come from?', a: 'All prices are sourced from actual completed sales scraped daily from PriceCharting. We update every night so you always have current market values.' },
+  { q: 'Where does the pricing data come from?', a: 'All prices are sourced from actual completed sales, updated every night. We track last sold prices and historical data so you always have current market values.' },
   { q: 'Is this really free?', a: 'Genuinely free. No login, no email capture, no premium tier. Revenue comes from optional affiliate links when you\'re ready to buy.' },
   { q: 'Do you cover import costs?', a: 'Yes. The true landed cost tool factors in VAT, handling fees, shipping, and customs so you see what a card actually costs to get in hand — not just the listed price.' },
   { q: 'What grading companies do you track?', a: 'PSA and CGC prices and population data across 32,000+ entries. Grading advice covers PSA, CGC, BGS, SGC, and ACE.' },
@@ -69,6 +69,11 @@ interface HiddenGem {
   sales_30d: number
   live_listings: number
   gem_score: number
+}
+
+interface MarketTotal {
+  total_raw_usd: number
+  cards_tracked: number
 }
 
 function Sparkles() {
@@ -137,14 +142,26 @@ function categoryMeta(cat: string) {
   }
 }
 
+// Format total market value — uses card_trends sum, not market_index
+function formatMarketTotal(cents: number): string {
+  const dollars = cents / 100
+  if (dollars >= 1_000_000) return `$${(dollars / 1_000_000).toFixed(1)}M`
+  if (dollars >= 1_000) return `$${(dollars / 1_000).toFixed(0)}K`
+  return `$${dollars.toFixed(0)}`
+}
+
 export default function HomeClient() {
   const nextRelease = new Date('2026-03-27T00:00:00')
   const [countdown, setCountdown] = useState({ days: 0, hours: 0, mins: 0 })
   const [marketIndex, setMarketIndex] = useState<MarketIndexRow[]>([])
-  const [totalMarket, setTotalMarket] = useState<{ value: number, pct30d: number | null } | null>(null)
+  // totalMarket now sourced from card_trends via get_market_total() RPC
+  // so it reflects all cards with price data, not just today's scrape
+  const [totalMarket, setTotalMarket] = useState<{ value: number, pct30d: number | null, cardsTracked: number } | null>(null)
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReportRow[]>([])
   const [heatmap, setHeatmap] = useState<HeatmapCard[]>([])
   const [hiddenGems, setHiddenGems] = useState<HiddenGem[]>([])
+  const [heatmapUpdated, setHeatmapUpdated] = useState<string | null>(null)
+  const [weeklyUpdated, setWeeklyUpdated] = useState<string | null>(null)
 
   useEffect(() => {
     const tick = () => {
@@ -162,22 +179,32 @@ export default function HomeClient() {
 
   useEffect(() => {
     async function loadAnalytics() {
-      const [indexRes, gemsRes] = await Promise.all([
+      const [indexRes, gemsRes, totalRes] = await Promise.all([
+        // Market index sparkline — last 80 data points for the chart
         supabase.from('market_index')
           .select('date, total_raw_usd, median_raw_usd, raw_pct_30d')
           .order('date', { ascending: true })
           .limit(80),
         supabase.rpc('get_hidden_gems', { lim: 6 }),
+        // FIX: use card_trends sum via RPC — accurate total regardless of scrape completeness
+        // This matches the $6.2M shown on the browse/sets page
+        supabase.rpc('get_market_total'),
       ])
+
       if (indexRes.data && indexRes.data.length > 0) {
         setMarketIndex(indexRes.data)
         const latest = indexRes.data[indexRes.data.length - 1]
-        const prev = indexRes.data.length >= 2 ? indexRes.data[indexRes.data.length - 2] : null
-        const pct30d = latest.raw_pct_30d != null
-          ? Number(latest.raw_pct_30d)
-          : prev ? ((latest.total_raw_usd - prev.total_raw_usd) / prev.total_raw_usd * 100) : null
-        setTotalMarket({ value: latest.total_raw_usd, pct30d })
+
+        // Use card_trends total if available, fall back to market_index
+        const displayValue = (totalRes.data as MarketTotal)?.total_raw_usd ?? latest.total_raw_usd
+        const cardsTracked = (totalRes.data as MarketTotal)?.cards_tracked ?? 0
+
+        // pct30d from market_index is still valid for the trend badge
+        const pct30d = latest.raw_pct_30d != null ? Number(latest.raw_pct_30d) : null
+
+        setTotalMarket({ value: displayValue, pct30d, cardsTracked })
       }
+
       if (gemsRes.data && gemsRes.data.length > 0) setHiddenGems(gemsRes.data)
     }
     loadAnalytics()
@@ -190,6 +217,8 @@ export default function HomeClient() {
       if (cancelled) return
       if (data && data.length > 0) {
         setWeeklyReport(data)
+        // Show the date this was generated — should update daily after nightly run
+        setWeeklyUpdated(new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))
       } else if (attempt < 3) {
         setTimeout(() => load(attempt + 1), 1500 * attempt)
       }
@@ -202,7 +231,10 @@ export default function HomeClient() {
     async function loadHeatmap() {
       const res = await supabase.rpc('get_heatmap_top_cards', { lim: 30 })
       const rows = res.data?.results ?? res.data
-      if (rows && rows.length > 0) setHeatmap(rows)
+      if (rows && rows.length > 0) {
+        setHeatmap(rows)
+        setHeatmapUpdated(new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))
+      }
     }
     loadHeatmap()
   }, [])
@@ -263,7 +295,7 @@ export default function HomeClient() {
               </p>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 34, fontWeight: 900, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", letterSpacing: -1 }}>
-                  ${(totalMarket.value / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  {formatMarketTotal(totalMarket.value)}
                 </span>
                 {totalMarket.pct30d != null && (
                   <span style={{
@@ -277,7 +309,8 @@ export default function HomeClient() {
                 )}
               </div>
               <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: '4px 0 0', fontFamily: "'Figtree', sans-serif" }}>
-                Ungraded (raw) card values · {marketIndex.length > 0 ? `${marketIndex.length} data points from ${marketIndex[0].date.slice(0, 7)}` : ''}
+                Ungraded (raw) card values
+                {totalMarket.cardsTracked > 0 && ` · ${totalMarket.cardsTracked.toLocaleString()} cards tracked`}
               </p>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
@@ -291,9 +324,16 @@ export default function HomeClient() {
       {/* ── WEEKLY MARKET REPORT ──────────────────────────────── */}
       {weeklyReport.length > 0 && (
         <section style={{ padding: '32px 24px 12px', maxWidth: 960, margin: '0 auto' }}>
-          <h2 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 4px', fontFamily: "'Figtree', sans-serif" }}>
-            This week in the market
-          </h2>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
+            <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, fontFamily: "'Figtree', sans-serif" }}>
+              This week in the market
+            </h2>
+            {weeklyUpdated && (
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+                Updated {weeklyUpdated}
+              </span>
+            )}
+          </div>
           <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '0 0 14px', fontFamily: "'Figtree', sans-serif" }}>
             Auto-generated daily from price data — no editorial, just numbers
           </p>
@@ -344,11 +384,18 @@ export default function HomeClient() {
 
       {/* ── MARKET HEATMAP ────────────────────────────────────── */}
       <section style={{ padding: '8px 24px 40px', maxWidth: 960, margin: '0 auto' }}>
-        <div style={{ marginBottom: 16 }}>
-          <h2 style={{ fontSize: 24, margin: '0 0 4px', fontFamily: "'Playfair Display', serif" }}>Market Heatmap</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0, fontFamily: "'Figtree', sans-serif" }}>
-            The most valuable actively-traded cards right now — colour shows 30-day price movement
-          </p>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+          <div>
+            <h2 style={{ fontSize: 24, margin: '0 0 4px', fontFamily: "'Playfair Display', serif" }}>Market Heatmap</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0, fontFamily: "'Figtree', sans-serif" }}>
+              The most valuable actively-traded cards right now — colour shows 30-day price movement
+            </p>
+          </div>
+          {heatmapUpdated && (
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", flexShrink: 0 }}>
+              Updated {heatmapUpdated}
+            </span>
+          )}
         </div>
         {heatmap.length > 0 ? (
           <>
@@ -449,7 +496,7 @@ export default function HomeClient() {
                           {gem.psa10_pop > 0 && <span style={{ marginLeft: 6, color: '#a78bfa' }}>pop {gem.psa10_pop}</span>}
                         </div>
                       </div>
-                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+<div style={{ textAlign: 'right', flexShrink: 0 }}>
                         <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>
                           ${priceUsd >= 100 ? priceUsd.toFixed(0) : priceUsd.toFixed(2)}
                         </div>
@@ -533,7 +580,8 @@ export default function HomeClient() {
             { val: '156', label: 'Sets Covered' },
             { val: '5+ Years', label: 'Price History' },
             { val: 'Nightly', label: 'Price Updates' },
-            { val: totalMarket ? `$${(totalMarket.value / 100 / 1000000).toFixed(1)}M` : '—', label: 'Market Tracked' },
+            // FIX: use card_trends total (same source as sets page) — not market_index daily total
+            { val: totalMarket ? formatMarketTotal(totalMarket.value) : '—', label: 'Market Tracked' },
           ].map(s => (
             <div key={s.label} style={{ textAlign: 'center' }}>
               <div style={{ color: 'var(--accent)', fontSize: 26, fontWeight: 900, fontFamily: "'Figtree', sans-serif" }}>{s.val}</div>
