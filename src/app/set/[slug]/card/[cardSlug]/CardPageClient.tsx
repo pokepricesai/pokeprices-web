@@ -479,7 +479,19 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
       </div>
 
       <div style={{ margin: '0 0 28px' }}>
-        <InlineChat cardContext={`${card.card_name} from ${card.set_name}`} prefillMessage={prefillMessage} />
+        <InlineChat
+  cardContext={[
+    `${card.card_name} from ${card.set_name}`,
+    card.raw_usd   ? `raw:$${(card.raw_usd/100).toFixed(2)}/£${(card.raw_usd/127).toFixed(2)}`       : null,
+    card.psa9_usd  ? `psa9:$${(card.psa9_usd/100).toFixed(2)}/£${(card.psa9_usd/127).toFixed(2)}`   : null,
+    card.psa10_usd ? `psa10:$${(card.psa10_usd/100).toFixed(2)}/£${(card.psa10_usd/127).toFixed(2)}` : null,
+    card.psa8_usd  ? `psa8:$${(card.psa8_usd/100).toFixed(2)}/£${(card.psa8_usd/127).toFixed(2)}`   : null,
+    psaPop ? `psa_pop:total=${psaPop.total_graded} psa9=${psaPop.psa_9} psa10=${psaPop.psa_10} gem_rate=${psaPop.gem_rate}%` : null,
+    trend?.raw_pct_30d != null ? `trend_30d:${trend.raw_pct_30d > 0 ? '+' : ''}${trend.raw_pct_30d.toFixed(1)}%` : null,
+    trend?.raw_pct_90d != null ? `trend_90d:${trend.raw_pct_90d > 0 ? '+' : ''}${trend.raw_pct_90d.toFixed(1)}%` : null,
+  ].filter(Boolean).join(' | ')}
+  prefillMessage={prefillMessage}
+/>
       </div>
 
       {/* ── Hero: image + core data ─────────────────────────────────── */}
