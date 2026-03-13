@@ -36,8 +36,7 @@ export default function TermsPage() {
       <div style={{ marginBottom: 40 }}>
         <Link href="/" style={{
           fontSize: 13, color: 'var(--text-muted)', textDecoration: 'none',
-          fontFamily: "'Figtree', sans-serif", display: 'inline-flex', alignItems: 'center', gap: 4,
-          marginBottom: 24, display: 'block',
+          fontFamily: "'Figtree', sans-serif", display: 'block', marginBottom: 24,
         }}>
           ← Back to PokePrices
         </Link>
