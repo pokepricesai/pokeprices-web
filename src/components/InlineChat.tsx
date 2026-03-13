@@ -47,7 +47,7 @@ export default function InlineChat({ cardContext, prefillMessage, suggestedPromp
   prefillMessage?: string
   suggestedPrompts?: string[]
 }) {
-  const [input, setInput] = useState(prefillMessage || '')
+  const [input, setInput] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
   const [sessionId, setSessionId] = useState(() => 'web-' + Math.random().toString(36).slice(2, 10))
@@ -103,7 +103,7 @@ export default function InlineChat({ cardContext, prefillMessage, suggestedPromp
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)', boxShadow: '0 0 6px rgba(39,174,96,0.4)' }} />
           <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 700 }}>
-            {cardContext ? `Ask about ${cardContext}` : 'Ask me anything about Pokemon cards'}
+            {cardContext ? `Ask about ${cardContext.split(' | ')[0]}` : 'Ask me anything about Pokemon cards'}
           </span>
         </div>
         {messages.length > 0 && (
