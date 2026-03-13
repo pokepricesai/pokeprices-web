@@ -20,15 +20,15 @@ const supabase = createClient(
 async function fetchAll<T>(
   table: string,
   select: string,
-  filter?: (q: ReturnType<typeof supabase.from>) => ReturnType<typeof supabase.from>
+  filter?: (q: any) => any
 ): Promise<T[]> {
   const BATCH = 1000
   let offset = 0
   const results: T[] = []
 
   while (true) {
-    let query = supabase.from(table).select(select).range(offset, offset + BATCH - 1)
-    if (filter) query = filter(query) as any
+    let query: any = supabase.from(table).select(select).range(offset, offset + BATCH - 1)
+    if (filter) query = filter(query)
     const { data, error } = await query
     if (error || !data || data.length === 0) break
     results.push(...(data as T[]))
