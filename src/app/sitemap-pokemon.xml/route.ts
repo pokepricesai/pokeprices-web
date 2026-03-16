@@ -14,7 +14,7 @@ export async function GET() {
     .from('pokemon_species')
     .select('name')
     .order('id')
-    .limit(1100)
+    .limit(1099)
 
   if (error) console.error('sitemap-pokemon error:', error)
 
