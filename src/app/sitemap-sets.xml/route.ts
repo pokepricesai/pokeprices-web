@@ -1,4 +1,4 @@
-// app/sitemap-cards-2.xml/route.ts
+// app/sitemap-sets.xml/route.ts
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
@@ -10,32 +10,19 @@ export async function GET() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
-  const { data: cards, error } = await supabase
-    .from('cards')
-    .select('card_url_slug, set_name')
-    .not('card_url_slug', 'is', null)
-    .not('set_name', 'is', null)
-    .order('id', { ascending: true })
-    .range(10000, 19999)
+  const { data: sets, error } = await supabase
+    .from('set_metadata')
+    .select('set_name, updated_at')
+    .order('set_name')
 
-  if (error) {
-    console.error('sitemap-cards-2 error:', error)
-    return new NextResponse('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>', {
-      headers: { 'Content-Type': 'application/xml' },
-    })
-  }
+  if (error) console.error('sitemap-sets error:', error)
 
   const now = new Date().toISOString()
-  const rows = cards || []
-
-  const urls = rows
-    .filter((c: any) => c.card_url_slug && c.set_name)
-    .map((c: any) => `  <url>\n    <loc>https://www.pokeprices.io/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}</loc>\n    <lastmod>${now}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.75</priority>\n  </url>`)
-    .join('\n')
+  const urls = (sets || []).map((s: any) =>
+    `  <url>\n    <loc>${BASE_URL}/set/${encodeURIComponent(s.set_name)}</loc>\n    <lastmod>${s.updated_at ? new Date(s.updated_at).toISOString() : now}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.85</priority>\n  </url>`
+  ).join('\n')
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>`
 
-  return new NextResponse(xml, {
-    headers: { 'Content-Type': 'application/xml' },
-  })
+  return new NextResponse(xml, { headers: { 'Content-Type': 'application/xml' } })
 }
