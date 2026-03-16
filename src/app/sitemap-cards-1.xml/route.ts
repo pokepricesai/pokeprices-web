@@ -1,4 +1,4 @@
-// app/sitemap-cards-4.xml/route.ts
+// app/sitemap-cards-1.xml/route.ts
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
@@ -16,10 +16,10 @@ export async function GET() {
     .not('card_url_slug', 'is', null)
     .not('set_name', 'is', null)
     .order('id', { ascending: true })
-    .range(30000, 39999)
+    .range(0, 9999)
 
   if (error) {
-    console.error('sitemap-cards-4 error:', error)
+    console.error('sitemap-cards-1 error:', error)
     return new NextResponse('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>', {
       headers: { 'Content-Type': 'application/xml' },
     })
