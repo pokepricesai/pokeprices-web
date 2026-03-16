@@ -17,6 +17,7 @@ export async function GET() {
     .not('set_name', 'is', null)
     .order('id', { ascending: true })
     .range(30000, 39999)
+    .limit(10000)
 
   if (error) {
     console.error('sitemap-cards-4 error:', error)
