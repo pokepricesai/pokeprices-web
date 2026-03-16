@@ -110,7 +110,7 @@ function TrendingSetsPanel({ data }: { data: { rising: TrendingSet[]; falling: T
           Which sets are gaining or losing value — averaged across all cards in the set
         </p>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase' as const, color: '#22c55e', marginBottom: 10, fontFamily: "'Figtree', sans-serif" }}>📈 Gaining</div>
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 6 }}>
