@@ -3,27 +3,37 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 const BASE_URL = 'https://www.pokeprices.io'
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
 
 export async function GET() {
-  const { data: cards } = await supabase
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+
+  const { data: cards, error } = await supabase
     .from('cards')
-    .select('card_url_slug, set_name, updated_at')
+    .select('card_url_slug, set_name')
     .not('card_url_slug', 'is', null)
+    .not('set_name', 'is', null)
     .order('id', { ascending: true })
     .range(30000, 39999)
 
-  const now = new Date().toISOString()
+  if (error) {
+    console.error('sitemap-cards-4 error:', error)
+    return new NextResponse('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>', {
+      headers: { 'Content-Type': 'application/xml' },
+    })
+  }
 
-  const urls = (cards || [])
+  const now = new Date().toISOString()
+  const rows = cards || []
+
+  const urls = rows
     .filter((c: any) => c.card_url_slug && c.set_name)
-    .map((c: any) => '  <url>\n    <loc>' + BASE_URL + '/set/' + encodeURIComponent(c.set_name) + '/card/' + c.card_url_slug + '</loc>\n    <lastmod>' + (c.updated_at ? new Date(c.updated_at).toISOString() : now) + '</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.75</priority>\n  </url>')
+    .map((c: any) => `  <url>\n    <loc>https://www.pokeprices.io/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}</loc>\n    <lastmod>${now}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.75</priority>\n  </url>`)
     .join('\n')
 
-  const xml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + urls + '\n</urlset>'
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>`
 
   return new NextResponse(xml, {
     headers: { 'Content-Type': 'application/xml' },
