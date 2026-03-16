@@ -11,7 +11,7 @@ export async function GET() {
   )
 
   const BATCH_START = 30000
-  const BATCH_END = 40000
+  const BATCH_END = 50000
   const PAGE_SIZE = 1000
   let allCards: any[] = []
 
