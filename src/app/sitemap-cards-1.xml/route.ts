@@ -17,7 +17,8 @@ export async function GET() {
     .not('set_name', 'is', null)
     .order('id', { ascending: true })
     .range(0, 9999)
-
+    .limit(10000)
+  
   if (error) {
     console.error('sitemap-cards-1 error:', error)
     return new NextResponse('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>', {
