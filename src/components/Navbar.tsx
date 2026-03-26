@@ -29,13 +29,6 @@ function formatPrice(cents: number | null) {
   return `£${gbp.toFixed(2)}`
 }
 
-function ResultIcon({ type }: { type: string }) {
-  if (type === 'card') return <span>🃏</span>
-  if (type === 'set') return <span>📦</span>
-  if (type === 'pokemon') return <span>⚡</span>
-  return null
-}
-
 export default function Navbar() {
   const router = useRouter()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -108,6 +101,17 @@ export default function Navbar() {
     }
   }
 
+  const SectionHeader = ({ label }: { label: string }) => (
+    <div style={{
+      padding: '8px 14px 4px', fontSize: 10, fontWeight: 800,
+      letterSpacing: 1.5, color: 'var(--text-muted)',
+      fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase' as const,
+      background: 'var(--card)',
+    }}>{label}</div>
+  )
+
+  // FIX: overflow hidden removed, overflowY auto on outer div works correctly now
+  // FIX: Sets rendered BEFORE cards
   const ResultsDropdown = ({ mobile = false }: { mobile?: boolean }) => (
     <div style={{
       position: mobile ? 'relative' : 'absolute',
@@ -115,29 +119,63 @@ export default function Navbar() {
       left: 0, right: 0,
       background: 'var(--card)',
       border: '1px solid var(--border)',
-      borderRadius: 14, overflow: 'hidden',
+      borderRadius: 14,
       boxShadow: '0 12px 40px rgba(0,0,0,0.2)',
       zIndex: 200,
       maxHeight: mobile ? 300 : 480,
-      overflowY: 'auto',
+      overflowY: 'auto',  // FIX: no overflow:hidden conflict
       marginTop: mobile ? 6 : undefined,
     }}>
 
-      {/* Cards */}
-      {cardResults.length > 0 && (
+      {/* FIX: Sets FIRST */}
+      {setResults.length > 0 && (
         <>
-          <div style={{
-            padding: '8px 14px 4px', fontSize: 10, fontWeight: 800,
-            letterSpacing: 1.5, color: 'var(--text-muted)',
-            fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase' as const,
-          }}>Cards</div>
-          {cardResults.map((r, i) => {
-            const isActive = activeIndex === i
+          <SectionHeader label="Sets" />
+          {setResults.map((r, i) => {
+            const globalIndex = i  // sets are first now
+            const isActive = activeIndex === globalIndex
             return (
               <div
                 key={i}
                 onMouseDown={() => navigateTo(r)}
-                onMouseEnter={() => setActiveIndex(i)}
+                onMouseEnter={() => setActiveIndex(globalIndex)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '10px 14px', cursor: 'pointer',
+                  background: isActive ? 'var(--bg-light)' : 'transparent',
+                  borderBottom: '1px solid var(--border)',
+                  transition: 'background 0.1s',
+                }}
+              >
+                <span style={{ fontSize: 20 }}>📦</span>
+                <div>
+                  <div style={{
+                    fontSize: 13, fontWeight: 700, color: 'var(--text)',
+                    fontFamily: "'Figtree', sans-serif",
+                  }}>{r.name}</div>
+                  <div style={{
+                    fontSize: 11, color: 'var(--text-muted)',
+                    fontFamily: "'Figtree', sans-serif",
+                  }}>{r.subtitle}</div>
+                </div>
+              </div>
+            )
+          })}
+        </>
+      )}
+
+      {/* Cards after sets */}
+      {cardResults.length > 0 && (
+        <>
+          <SectionHeader label="Cards" />
+          {cardResults.map((r, i) => {
+            const globalIndex = setResults.length + i
+            const isActive = activeIndex === globalIndex
+            return (
+              <div
+                key={i}
+                onMouseDown={() => navigateTo(r)}
+                onMouseEnter={() => setActiveIndex(globalIndex)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10,
                   padding: '8px 14px', cursor: 'pointer',
@@ -190,57 +228,12 @@ export default function Navbar() {
         </>
       )}
 
-      {/* Sets */}
-      {setResults.length > 0 && (
-        <>
-          <div style={{
-            padding: '8px 14px 4px', fontSize: 10, fontWeight: 800,
-            letterSpacing: 1.5, color: 'var(--text-muted)',
-            fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase' as const,
-          }}>Sets</div>
-          {setResults.map((r, i) => {
-            const globalIndex = cardResults.length + i
-            const isActive = activeIndex === globalIndex
-            return (
-              <div
-                key={i}
-                onMouseDown={() => navigateTo(r)}
-                onMouseEnter={() => setActiveIndex(globalIndex)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '10px 14px', cursor: 'pointer',
-                  background: isActive ? 'var(--bg-light)' : 'transparent',
-                  borderBottom: '1px solid var(--border)',
-                  transition: 'background 0.1s',
-                }}
-              >
-                <span style={{ fontSize: 20 }}>📦</span>
-                <div>
-                  <div style={{
-                    fontSize: 13, fontWeight: 700, color: 'var(--text)',
-                    fontFamily: "'Figtree', sans-serif",
-                  }}>{r.name}</div>
-                  <div style={{
-                    fontSize: 11, color: 'var(--text-muted)',
-                    fontFamily: "'Figtree', sans-serif",
-                  }}>{r.subtitle}</div>
-                </div>
-              </div>
-            )
-          })}
-        </>
-      )}
-
       {/* Pokémon */}
       {pokemonResults.length > 0 && (
         <>
-          <div style={{
-            padding: '8px 14px 4px', fontSize: 10, fontWeight: 800,
-            letterSpacing: 1.5, color: 'var(--text-muted)',
-            fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase' as const,
-          }}>Pokémon</div>
+          <SectionHeader label="Pokémon" />
           {pokemonResults.map((r, i) => {
-            const globalIndex = cardResults.length + setResults.length + i
+            const globalIndex = setResults.length + cardResults.length + i
             const isActive = activeIndex === globalIndex
             return (
               <div
@@ -287,6 +280,7 @@ export default function Navbar() {
       zIndex: 100,
       boxShadow: '0 2px 15px rgba(26,95,173,0.3)',
       gap: 16,
+      overflow: 'visible',  // FIX: allow dropdown to overflow navbar
     }}>
 
       {/* Mobile hamburger */}
