@@ -27,7 +27,7 @@ interface Message { role: 'user' | 'assistant'; content: string }
 
 function ChatLink({ href, children }: { href?: string; children?: React.ReactNode }) {
   if (!href) return <>{children}</>
-  const isInternal = href.startsWith('/card/') || href.startsWith('/set/')
+  const isInternal = href.startsWith('/') 
   if (isInternal) {
     return (
       <Link href={href} style={{ color: 'var(--primary)', textDecoration: 'underline', fontWeight: 700 }}>
@@ -40,6 +40,68 @@ function ChatLink({ href, children }: { href?: string; children?: React.ReactNod
       {children}
     </a>
   )
+}
+
+// Known sets — used to detect set mentions and linkify them
+const KNOWN_SETS = [
+  'Base Set', 'Jungle', 'Fossil', 'Team Rocket', 'Neo Genesis', 'Neo Discovery',
+  'Neo Revelation', 'Neo Destiny', 'Legendary Collection', 'Expedition',
+  'Aquapolis', 'Skyridge', 'EX Ruby & Sapphire', 'EX Sandstorm', 'EX Dragon',
+  'EX Team Magma vs Team Aqua', 'EX Hidden Legends', 'EX FireRed & LeafGreen',
+  'EX Team Rocket Returns', 'EX Deoxys', 'EX Emerald', 'EX Unseen Forces',
+  'EX Delta Species', 'EX Legend Maker', 'EX Holon Phantoms', 'EX Crystal Guardians',
+  'EX Dragon Frontiers', 'EX Power Keepers',
+  'Diamond & Pearl', 'Mysterious Treasures', 'Secret Wonders', 'Great Encounters',
+  'Majestic Dawn', 'Legends Awakened', 'Stormfront',
+  'Platinum', 'Rising Rivals', 'Supreme Victors', 'Arceus',
+  'HeartGold SoulSilver', 'Unleashed', 'Undaunted', 'Triumphant',
+  'Call of Legends', 'Black & White', 'Emerging Powers', 'Noble Victories',
+  'Next Destinies', 'Dark Explorers', 'Dragons Exalted', 'Boundaries Crossed',
+  'Plasma Storm', 'Plasma Freeze', 'Plasma Blast', 'Legendary Treasures',
+  'XY', 'Flashfire', 'Furious Fists', 'Phantom Forces', 'Primal Clash',
+  'Roaring Skies', 'Ancient Origins', 'BREAKthrough', 'BREAKpoint',
+  'Generations', 'Fates Collide', 'Steam Siege', 'Evolutions',
+  'Sun & Moon', 'Guardians Rising', 'Burning Shadows', 'Crimson Invasion',
+  'Ultra Prism', 'Forbidden Light', 'Celestial Storm', 'Dragon Majesty',
+  'Lost Thunder', 'Team Up', 'Unbroken Bonds', 'Unified Minds',
+  'Cosmic Eclipse', 'Hidden Fates', 'Shining Fates',
+  'Sword & Shield', 'Rebel Clash', 'Darkness Ablaze', 'Vivid Voltage',
+  'Shining Fates', 'Battle Styles', 'Chilling Reign', 'Evolving Skies',
+  'Celebrations', 'Fusion Strike', 'Brilliant Stars', 'Astral Radiance',
+  'Pokemon GO', 'Lost Origin', 'Silver Tempest', 'Crown Zenith',
+  'Scarlet & Violet', 'Paldea Evolved', 'Obsidian Flames', 'Paradox Rift',
+  'Paldean Fates', 'Temporal Forces', 'Twilight Masquerade', 'Shrouded Fable',
+  'Stellar Crown', 'Surging Sparks', 'Prismatic Evolutions', 'Journey Together',
+]
+
+// Sort longest first so multi-word sets match before single words
+const SETS_SORTED = [...KNOWN_SETS].sort((a, b) => b.length - a.length)
+
+// Convert set mentions and card+set mentions in AI response to markdown links
+function linkifyResponse(text: string): string {
+  let result = text
+
+  // Match patterns like "Charizard from Evolving Skies", "Umbreon VMAX (Evolving Skies)"
+  // and wrap with markdown link to the set page
+  for (const set of SETS_SORTED) {
+    const escaped = set.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    
+    // "X from [Set]" or "X in [Set]" or "X ([Set])" — link the set name
+    const fromPattern = new RegExp(`(from|in|from the|within the|\\()\\s*(${escaped})([^\\w])`, 'gi')
+    result = result.replace(fromPattern, (match, pre, setName, post) => {
+      const url = `/set/${encodeURIComponent(setName)}`
+      return `${pre} [${setName}](${url})${post}`
+    })
+
+    // Standalone set name not already in a link
+    const standalonePattern = new RegExp(`(?<!\\[)(?<!\\()\\b(${escaped})\\b(?!\\])(?!\\))(?![^[]*\\])`, 'g')
+    result = result.replace(standalonePattern, (match) => {
+      const url = `/set/${encodeURIComponent(match)}`
+      return `[${match}](${url})`
+    })
+  }
+
+  return result
 }
 
 export default function InlineChat({ cardContext, prefillMessage, suggestedPrompts }: {
@@ -77,14 +139,16 @@ export default function InlineChat({ cardContext, prefillMessage, suggestedPromp
         body: JSON.stringify({ message: fullMsg, session_id: sessionId, history: [...messages, userMsg].slice(-10) }),
       })
       const data = await res.json()
-      setMessages((prev) => [...prev, { role: 'assistant', content: data.answer || 'Sorry, something went wrong.' }])
+      const rawAnswer = data.answer || 'Sorry, something went wrong.'
+      // Linkify set mentions in the response
+      const linkedAnswer = linkifyResponse(rawAnswer)
+      setMessages((prev) => [...prev, { role: 'assistant', content: linkedAnswer }])
     } catch {
       setMessages((prev) => [...prev, { role: 'assistant', content: 'Sorry, I had trouble connecting. Please try again.' }])
     }
     setLoading(false)
   }
 
-  // suggestedPrompts prop overrides defaults — lets each page pass context-specific questions
   const suggestions = suggestedPrompts ?? (cardContext ? cardQuickQuestions : quickQuestions)
 
   return (
@@ -177,7 +241,7 @@ export default function InlineChat({ cardContext, prefillMessage, suggestedPromp
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-          placeholder="Any ask questions here..."
+          placeholder="Ask any questions here..."
           style={{ flex: 1, border: 'none', outline: 'none', fontSize: 14, color: 'var(--text)', background: 'transparent', fontFamily: 'inherit', fontWeight: 600 }}
         />
         <button onClick={() => sendMessage()} disabled={loading} style={{
