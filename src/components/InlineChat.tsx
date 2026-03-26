@@ -27,14 +27,7 @@ interface Message { role: 'user' | 'assistant'; content: string }
 
 function ChatLink({ href, children }: { href?: string; children?: React.ReactNode }) {
   if (!href) return <>{children}</>
-  const isInternal = href.startsWith('/') 
-  if (isInternal) {
-    return (
-      <Link href={href} style={{ color: 'var(--primary)', textDecoration: 'underline', fontWeight: 700 }}>
-        {children}
-      </Link>
-    )
-  }
+  // All links open in new tab
   return (
     <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', textDecoration: 'underline', fontWeight: 700 }}>
       {children}
