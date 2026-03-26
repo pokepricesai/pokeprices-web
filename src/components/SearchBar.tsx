@@ -49,7 +49,7 @@ async function searchByNumber(num: string) {
   const padded2 = stripped.padStart(2, '0')  // "15" → "15"
   const padded3 = stripped.padStart(3, '0')  // "15" → "015"
 
-  const numbersToTry = [...new Set([num, stripped, padded2, padded3])]
+  const numbersToTry = Array.from(new Set([num, stripped, padded2, padded3]))
 
   const { data } = await supabase
     .from('cards')
@@ -105,7 +105,7 @@ export default function SearchBar({ placeholder = 'Search cards, sets, or number
         // Name + number with leading zero support
         const stripped = String(parseInt(nameAndNumber.number, 10))
         const padded3 = stripped.padStart(3, '0')
-        const numbersToTry = [...new Set([nameAndNumber.number, stripped, padded3])]
+        const numbersToTry = Array.from(new Set([nameAndNumber.number, stripped, padded3]))
 
         const { data: cards } = await supabase
           .from('cards')
