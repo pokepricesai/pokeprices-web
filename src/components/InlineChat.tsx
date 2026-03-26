@@ -1,7 +1,6 @@
-// v2
+// v3
 'use client'
 import { useState, useRef, useEffect, useCallback } from 'react'
-import Link from 'next/link'
 import ReactMarkdown from 'react-markdown'
 import { CHAT_ENDPOINT } from '@/lib/supabase'
 
@@ -27,7 +26,6 @@ interface Message { role: 'user' | 'assistant'; content: string }
 
 function ChatLink({ href, children }: { href?: string; children?: React.ReactNode }) {
   if (!href) return <>{children}</>
-  // All links open in new tab
   return (
     <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', textDecoration: 'underline', fontWeight: 700 }}>
       {children}
@@ -35,7 +33,6 @@ function ChatLink({ href, children }: { href?: string; children?: React.ReactNod
   )
 }
 
-// Known sets — used to detect set mentions and linkify them
 const KNOWN_SETS = [
   'Base Set', 'Jungle', 'Fossil', 'Team Rocket', 'Neo Genesis', 'Neo Discovery',
   'Neo Revelation', 'Neo Destiny', 'Legendary Collection', 'Expedition',
@@ -59,7 +56,7 @@ const KNOWN_SETS = [
   'Lost Thunder', 'Team Up', 'Unbroken Bonds', 'Unified Minds',
   'Cosmic Eclipse', 'Hidden Fates', 'Shining Fates',
   'Sword & Shield', 'Rebel Clash', 'Darkness Ablaze', 'Vivid Voltage',
-  'Shining Fates', 'Battle Styles', 'Chilling Reign', 'Evolving Skies',
+  'Battle Styles', 'Chilling Reign', 'Evolving Skies',
   'Celebrations', 'Fusion Strike', 'Brilliant Stars', 'Astral Radiance',
   'Pokemon GO', 'Lost Origin', 'Silver Tempest', 'Crown Zenith',
   'Scarlet & Violet', 'Paldea Evolved', 'Obsidian Flames', 'Paradox Rift',
@@ -67,31 +64,28 @@ const KNOWN_SETS = [
   'Stellar Crown', 'Surging Sparks', 'Prismatic Evolutions', 'Journey Together',
 ]
 
-// Sort longest first so multi-word sets match before single words
+// Sort longest first so multi-word sets match before substrings
 const SETS_SORTED = [...KNOWN_SETS].sort((a, b) => b.length - a.length)
 
-// Convert set mentions and card+set mentions in AI response to markdown links
 function linkifyResponse(text: string): string {
+  // Track which ranges are already linked to avoid double-linking
+  const linked = new Set<string>()
   let result = text
 
-  // Match patterns like "Charizard from Evolving Skies", "Umbreon VMAX (Evolving Skies)"
-  // and wrap with markdown link to the set page
   for (const set of SETS_SORTED) {
+    if (linked.has(set)) continue
+    // Only match if not already inside a markdown link
     const escaped = set.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    
-    // "X from [Set]" or "X in [Set]" or "X ([Set])" — link the set name
-    const fromPattern = new RegExp(`(from|in|from the|within the|\\()\\s*(${escaped})([^\\w])`, 'gi')
-    result = result.replace(fromPattern, (match, pre, setName, post) => {
-      const url = `/set/${encodeURIComponent(setName)}`
-      return `${pre} [${setName}](${url})${post}`
-    })
-
-    // Standalone set name not already in a link
-    const standalonePattern = new RegExp(`(?<!\\[)(?<!\\()\\b(${escaped})\\b(?!\\])(?!\\))(?![^[]*\\])`, 'g')
-    result = result.replace(standalonePattern, (match) => {
-      const url = `/set/${encodeURIComponent(match)}`
+    const pattern = new RegExp(`(?<!\\[)(?<![/(])\\b(${escaped})\\b(?!\\])(?!\\))`, 'g')
+    const url = `/set/${encodeURIComponent(set)}`
+    const replaced = result.replace(pattern, (match) => {
+      linked.add(set)
       return `[${match}](${url})`
     })
+    if (replaced !== result) {
+      result = replaced
+      linked.add(set)
+    }
   }
 
   return result
@@ -133,7 +127,6 @@ export default function InlineChat({ cardContext, prefillMessage, suggestedPromp
       })
       const data = await res.json()
       const rawAnswer = data.answer || 'Sorry, something went wrong.'
-      // Linkify set mentions in the response
       const linkedAnswer = linkifyResponse(rawAnswer)
       setMessages((prev) => [...prev, { role: 'assistant', content: linkedAnswer }])
     } catch {
