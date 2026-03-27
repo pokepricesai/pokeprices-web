@@ -1,8 +1,9 @@
-import { createClient } from '@supabase/supabase-js'
+// app/creators/[slug]/page.tsx
+'use client'
+import { useState, useEffect } from 'react'
+import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
-
-export const dynamic = 'force-dynamic'
+import { supabase } from '@/lib/supabase'
 
 const PLATFORM_ICONS: Record<string, string> = {
   YouTube: '▶',
@@ -24,23 +25,39 @@ const PLATFORM_COLORS: Record<string, string> = {
   Podcast: '#8b5cf6',
 }
 
-async function getCreator(slug: string) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
-  const { data } = await supabase
-    .from('creators')
-    .select('*')
-    .eq('slug', slug)
-    .eq('status', 'approved')
-    .single()
-  return data
-}
+export default function CreatorProfilePage() {
+  const params = useParams()
+  const router = useRouter()
+  const slug = params?.slug as string
+  const [creator, setCreator] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
 
-export default async function CreatorProfilePage({ params }: { params: { slug: string } }) {
-  const creator = await getCreator(params.slug)
-  if (!creator) notFound()
+  useEffect(() => {
+    if (!slug) return
+    async function load() {
+      const { data, error } = await supabase
+        .from('creators')
+        .select('*')
+        .eq('slug', slug)
+        .eq('status', 'approved')
+        .single()
+      if (error || !data) {
+        router.push('/creators')
+        return
+      }
+      setCreator(data)
+      setLoading(false)
+    }
+    load()
+  }, [slug])
+
+  if (loading) return (
+    <div style={{ textAlign: 'center', padding: '80px 24px', color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+      Loading...
+    </div>
+  )
+
+  if (!creator) return null
 
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '40px 24px 60px' }}>
