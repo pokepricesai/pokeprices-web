@@ -2,13 +2,15 @@
 import { createClient } from '@supabase/supabase-js'
 import CreatorsClient from './CreatorsClient'
 
-export const revalidate = 3600
+export const dynamic = 'force-dynamic'
 
 async function getCreators() {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+  if (!supabaseUrl || !supabaseKey) return []
+
+  const supabase = createClient(supabaseUrl, supabaseKey)
   const { data } = await supabase
     .from('creators')
     .select('*')
