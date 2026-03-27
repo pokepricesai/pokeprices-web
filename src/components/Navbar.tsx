@@ -20,6 +20,7 @@ const navLinks = [
   { label: 'Pokémon', href: '/pokemon' },
   { label: 'Cards & Sets', href: '/browse' },
   { label: 'Vendors', href: '/vendors' },
+  { label: 'Creators', href: '/creators' },
   { label: 'Contact', href: '/contact' },
 ]
 
