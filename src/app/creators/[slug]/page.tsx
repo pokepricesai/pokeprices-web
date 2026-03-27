@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
-export const revalidate = 3600
+export const dynamic = 'force-dynamic'
 
 const PLATFORM_ICONS: Record<string, string> = {
   YouTube: '▶',
@@ -27,7 +27,7 @@ const PLATFORM_COLORS: Record<string, string> = {
 async function getCreator(slug: string) {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
   const { data } = await supabase
     .from('creators')
