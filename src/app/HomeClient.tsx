@@ -21,7 +21,7 @@ const features = [
 
 const faqs = [
   { q: 'Where does the pricing data come from?', a: 'All prices are sourced from actual completed sales, updated every night. We track last sold prices and historical data so you always have current market values.' },
-  { q: 'Is this really free?', a: 'Genuinely free. No login, no email capture, no premium tier. Revenue comes from optional affiliate links when you\'re ready to buy.' },
+  { q: 'Is this really free?', a: "Genuinely free. No login, no email capture, no premium tier. Revenue comes from optional affiliate links when you're ready to buy." },
   { q: 'Do you cover import costs?', a: 'Yes. The true landed cost tool factors in VAT, handling fees, shipping, and customs so you see what a card actually costs to get in hand — not just the listed price.' },
   { q: 'What grading companies do you track?', a: 'PSA and CGC prices and population data across 32,000+ entries. Grading advice covers PSA, CGC, BGS, SGC, and ACE.' },
   { q: 'Can I find a card shop near me?', a: 'Yes — check the Vendor Directory. You can search by postcode or town to find physical shops, retailers, and grading services near you.' },
@@ -76,17 +76,60 @@ interface MarketTotal {
   cards_tracked: number
 }
 
+// ── Pokémon silhouettes using PokeAPI sprites ────────────────────────────────
+// Iconic Pokémon that everyone recognises as silhouettes
+const HERO_POKEMON = [
+  { id: 6,   x: '4%',  y: '10%', size: 90,  opacity: 0.07, delay: '0s'    }, // Charizard
+  { id: 249, x: '88%', y: '5%',  size: 110, opacity: 0.06, delay: '0.5s'  }, // Lugia
+  { id: 384, x: '78%', y: '55%', size: 80,  opacity: 0.07, delay: '1s'    }, // Rayquaza
+  { id: 150, x: '12%', y: '60%', size: 70,  opacity: 0.06, delay: '1.5s'  }, // Mewtwo
+  { id: 25,  x: '50%', y: '5%',  size: 55,  opacity: 0.08, delay: '0.8s'  }, // Pikachu
+  { id: 197, x: '65%', y: '20%', size: 65,  opacity: 0.06, delay: '2s'    }, // Umbreon
+  { id: 130, x: '30%', y: '70%', size: 75,  opacity: 0.05, delay: '1.2s'  }, // Gyarados
+]
+
+function PokemonSilhouettes() {
+  return (
+    <>
+      {HERO_POKEMON.map((p, i) => (
+        <div
+          key={i}
+          style={{
+            position: 'absolute',
+            left: p.x,
+            top: p.y,
+            width: p.size,
+            height: p.size,
+            opacity: p.opacity,
+            pointerEvents: 'none',
+            animation: `float 6s ease-in-out ${p.delay} infinite`,
+            filter: 'brightness(0) invert(1)',
+          }}
+        >
+          <img
+            src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.id}.png`}
+            alt=""
+            width={p.size}
+            height={p.size}
+            style={{ objectFit: 'contain', width: '100%', height: '100%' }}
+          />
+        </div>
+      ))}
+    </>
+  )
+}
+
 function Sparkles() {
   return (
     <>
       {[
-        { top: '8%', left: '10%', size: 6, delay: '0s' },
+        { top: '8%',  left: '10%',  size: 6, delay: '0s'   },
         { top: '15%', right: '15%', size: 8, delay: '0.8s' },
-        { top: '25%', left: '20%', size: 5, delay: '1.6s' },
+        { top: '25%', left: '20%',  size: 5, delay: '1.6s' },
         { top: '12%', right: '30%', size: 7, delay: '0.4s' },
-        { top: '30%', left: '5%', size: 4, delay: '1.2s' },
-        { top: '20%', right: '8%', size: 6, delay: '2s' },
-        { top: '5%', left: '40%', size: 5, delay: '0.6s' },
+        { top: '30%', left: '5%',   size: 4, delay: '1.2s' },
+        { top: '20%', right: '8%',  size: 6, delay: '2s'   },
+        { top: '5%',  left: '40%',  size: 5, delay: '0.6s' },
         { top: '35%', right: '20%', size: 4, delay: '1.4s' },
       ].map((s, i) => (
         <div key={i} style={{
@@ -123,11 +166,11 @@ function Sparkline({ data, color = '#22c55e', height = 48 }: { data: number[], c
 
 function heatColor(band: string) {
   switch (band) {
-    case 'strong_up':   return { bg: 'rgba(34,197,94,0.15)',   border: 'rgba(34,197,94,0.3)',   text: '#16a34a' }
-    case 'up':          return { bg: 'rgba(34,197,94,0.07)',   border: 'rgba(34,197,94,0.18)',  text: '#22c55e' }
-    case 'strong_down': return { bg: 'rgba(239,68,68,0.15)',   border: 'rgba(239,68,68,0.3)',   text: '#dc2626' }
-    case 'down':        return { bg: 'rgba(239,68,68,0.07)',   border: 'rgba(239,68,68,0.18)',  text: '#ef4444' }
-    default:            return { bg: 'rgba(148,163,184,0.06)', border: 'rgba(148,163,184,0.18)', text: '#94a3b8' }
+    case 'strong_up':   return { bg: 'rgba(34,197,94,0.15)',    border: 'rgba(34,197,94,0.3)',    text: '#16a34a' }
+    case 'up':          return { bg: 'rgba(34,197,94,0.07)',    border: 'rgba(34,197,94,0.18)',   text: '#22c55e' }
+    case 'strong_down': return { bg: 'rgba(239,68,68,0.15)',    border: 'rgba(239,68,68,0.3)',    text: '#dc2626' }
+    case 'down':        return { bg: 'rgba(239,68,68,0.07)',    border: 'rgba(239,68,68,0.18)',   text: '#ef4444' }
+    default:            return { bg: 'rgba(148,163,184,0.06)',  border: 'rgba(148,163,184,0.18)', text: '#94a3b8' }
   }
 }
 
@@ -142,7 +185,6 @@ function categoryMeta(cat: string) {
   }
 }
 
-// Format total market value — uses card_trends sum, not market_index
 function formatMarketTotal(cents: number): string {
   const dollars = cents / 100
   if (dollars >= 1_000_000) return `$${(dollars / 1_000_000).toFixed(1)}M`
@@ -151,11 +193,9 @@ function formatMarketTotal(cents: number): string {
 }
 
 export default function HomeClient() {
-  const nextRelease = new Date('2026-03-27T00:00:00')
+  const nextRelease = new Date('2026-05-22T00:00:00')
   const [countdown, setCountdown] = useState({ days: 0, hours: 0, mins: 0 })
   const [marketIndex, setMarketIndex] = useState<MarketIndexRow[]>([])
-  // totalMarket now sourced from card_trends via get_market_total() RPC
-  // so it reflects all cards with price data, not just today's scrape
   const [totalMarket, setTotalMarket] = useState<{ value: number, pct30d: number | null, cardsTracked: number } | null>(null)
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReportRow[]>([])
   const [heatmap, setHeatmap] = useState<HeatmapCard[]>([])
@@ -180,28 +220,20 @@ export default function HomeClient() {
   useEffect(() => {
     async function loadAnalytics() {
       const [indexRes, gemsRes, totalRes] = await Promise.all([
-        // Market index sparkline — last 80 data points for the chart
         supabase.from('market_index')
           .select('date, total_raw_usd, median_raw_usd, raw_pct_30d')
           .order('date', { ascending: true })
           .limit(80),
         supabase.rpc('get_hidden_gems', { lim: 6 }),
-        // FIX: use card_trends sum via RPC — accurate total regardless of scrape completeness
-        // This matches the $6.2M shown on the browse/sets page
         supabase.rpc('get_market_total'),
       ])
 
       if (indexRes.data && indexRes.data.length > 0) {
         setMarketIndex(indexRes.data)
         const latest = indexRes.data[indexRes.data.length - 1]
-
-        // Use card_trends total if available, fall back to market_index
         const displayValue = (totalRes.data as MarketTotal)?.total_raw_usd ?? latest.total_raw_usd
         const cardsTracked = (totalRes.data as MarketTotal)?.cards_tracked ?? 0
-
-        // pct30d from market_index is still valid for the trend badge
         const pct30d = latest.raw_pct_30d != null ? Number(latest.raw_pct_30d) : null
-
         setTotalMarket({ value: displayValue, pct30d, cardsTracked })
       }
 
@@ -217,7 +249,6 @@ export default function HomeClient() {
       if (cancelled) return
       if (data && data.length > 0) {
         setWeeklyReport(data)
-        // Show the date this was generated — should update daily after nightly run
         setWeeklyUpdated(new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))
       } else if (attempt < 3) {
         setTimeout(() => load(attempt + 1), 1500 * attempt)
@@ -249,13 +280,18 @@ export default function HomeClient() {
         background: 'linear-gradient(170deg, #1a5fad 0%, #3b8fe8 35%, #6ab0f5 60%, #9dcbfa 80%, var(--bg) 100%)',
         padding: '40px 24px 70px', position: 'relative', overflow: 'hidden',
       }}>
+        {/* Pokémon silhouettes — subtle background decoration */}
+        <PokemonSilhouettes />
         <Sparkles />
+
         <div style={{ maxWidth: 720, margin: '0 auto', textAlign: 'center', position: 'relative', zIndex: 1 }}>
           <img src="/logo.png" alt="PokePrices" style={{
             height: 120, margin: '0 auto 16px', display: 'block',
             filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.2))',
             animation: 'float 4s ease-in-out infinite',
           }} />
+
+          {/* Trust pills */}
           <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
             {['100% Free', 'No Login', 'No Data Collection'].map(pill => (
               <span key={pill} style={{
@@ -265,16 +301,23 @@ export default function HomeClient() {
               }}>{pill}</span>
             ))}
           </div>
+
           <h1 style={{
             fontSize: 38, color: '#fff', margin: '0 0 10px', lineHeight: 1.15,
             textShadow: '0 2px 10px rgba(0,0,0,0.15)', fontFamily: "'Playfair Display', serif",
           }}>
             Know what your cards<br />are <span style={{ color: 'var(--accent)' }}>really</span> worth
           </h1>
-          <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 15, margin: '0 0 24px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif" }}>
-            The full Pokémon TCG — prices, trends, grading intelligence, and a chat that knows the market.
+
+          <p style={{ color: 'rgba(255,255,255,0.85)', fontSize: 16, margin: '0 0 8px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif", fontWeight: 600 }}>
+            Pokémon TCG prices · PSA 10 values · Grading calculator · Market trends
           </p>
+          <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, margin: '0 0 24px', lineHeight: 1.5, fontFamily: "'Figtree', sans-serif" }}>
+            40,000+ cards · 156+ sets · Updated nightly from real sold listings
+          </p>
+
           <InlineChat />
+
           <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, marginTop: 12, fontFamily: "'Figtree', sans-serif" }}>
             Updated nightly from actual sold listings
           </p>
@@ -440,11 +483,11 @@ export default function HomeClient() {
             </div>
             <div style={{ display: 'flex', gap: 16, marginTop: 14, justifyContent: 'center', flexWrap: 'wrap' }}>
               {[
-                { band: 'strong_up', label: '+10% or more' },
-                { band: 'up', label: '+2% to +10%' },
-                { band: 'flat', label: 'Flat (±2%)' },
-                { band: 'down', label: '-2% to -10%' },
-                { band: 'strong_down', label: '-10% or more' },
+                { band: 'strong_up',   label: '+10% or more'   },
+                { band: 'up',          label: '+2% to +10%'    },
+                { band: 'flat',        label: 'Flat (±2%)'     },
+                { band: 'down',        label: '-2% to -10%'    },
+                { band: 'strong_down', label: '-10% or more'   },
               ].map(({ band, label }) => {
                 const { bg, border } = heatColor(band)
                 return (
@@ -496,7 +539,7 @@ export default function HomeClient() {
                           {gem.psa10_pop > 0 && <span style={{ marginLeft: 6, color: '#a78bfa' }}>pop {gem.psa10_pop}</span>}
                         </div>
                       </div>
-<div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
                         <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>
                           ${priceUsd >= 100 ? priceUsd.toFixed(0) : priceUsd.toFixed(2)}
                         </div>
@@ -529,8 +572,8 @@ export default function HomeClient() {
           <div style={{ background: 'linear-gradient(135deg, #1a5fad, #2874c8)', padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14 }}>
             <div>
               <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, letterSpacing: 2, margin: '0 0 2px', textTransform: 'uppercase', fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>Next Release</p>
-              <h3 style={{ color: '#fff', fontSize: 22, margin: 0, fontWeight: 800, fontFamily: "'Playfair Display', serif" }}>Perfect Order</h3>
-              <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, margin: '2px 0 0', fontFamily: "'Figtree', sans-serif" }}>March 27, 2026</p>
+              <h3 style={{ color: '#fff', fontSize: 22, margin: 0, fontWeight: 800, fontFamily: "'Playfair Display', serif" }}>Chaos Rising</h3>
+              <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, margin: '2px 0 0', fontFamily: "'Figtree', sans-serif" }}>May 22, 2026</p>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               {[{ val: countdown.days, label: 'Days' }, { val: countdown.hours, label: 'Hrs' }, { val: countdown.mins, label: 'Min' }].map(t => (
@@ -576,11 +619,10 @@ export default function HomeClient() {
       <section style={{ background: 'linear-gradient(135deg, #1a5fad, #2874c8)', padding: '30px 24px' }}>
         <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', justifyContent: 'space-around', flexWrap: 'wrap', gap: 20 }}>
           {[
-            { val: '40,000+', label: 'Cards Tracked' },
-            { val: '156', label: 'Sets Covered' },
-            { val: '5+ Years', label: 'Price History' },
-            { val: 'Nightly', label: 'Price Updates' },
-            // FIX: use card_trends total (same source as sets page) — not market_index daily total
+            { val: '40,000+',  label: 'Cards Tracked'  },
+            { val: '156+',     label: 'Sets Covered'   },
+            { val: '5+ Years', label: 'Price History'  },
+            { val: 'Nightly',  label: 'Price Updates'  },
             { val: totalMarket ? formatMarketTotal(totalMarket.value) : '—', label: 'Market Tracked' },
           ].map(s => (
             <div key={s.label} style={{ textAlign: 'center' }}>
