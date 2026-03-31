@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import NewsletterSignup from '@/components/NewsletterSignup'
 
 const topSets = [
   'Base Set',
@@ -21,17 +22,18 @@ export default function Footer() {
       <div style={{ marginBottom: 14 }}>
         <img src="/logo.png" alt="PokePrices" style={{ height: 34, margin: '0 auto' }} />
       </div>
+
       {/* Main nav links */}
       <div style={{
         display: 'flex', justifyContent: 'center', gap: 24,
-        marginBottom: 20, flexWrap: 'wrap',
+        marginBottom: 28, flexWrap: 'wrap',
       }}>
         {[
-          { label: 'Home', href: '/' },
-          { label: 'Insights', href: '/insights' },
-          { label: 'Cards & Sets', href: '/browse' },
-          { label: 'Vendor Directory', href: '/vendors' },
-          { label: 'Contact', href: '/contact' },
+          { label: 'Home',             href: '/'         },
+          { label: 'Insights',         href: '/insights' },
+          { label: 'Cards & Sets',     href: '/browse'   },
+          { label: 'Vendor Directory', href: '/vendors'  },
+          { label: 'Contact',          href: '/contact'  },
         ].map((link) => (
           <Link key={link.label} href={link.href} style={{
             color: 'rgba(255,255,255,0.7)', textDecoration: 'none', fontSize: 13,
@@ -39,6 +41,31 @@ export default function Footer() {
           }}>{link.label}</Link>
         ))}
       </div>
+
+      {/* ── Newsletter signup ── */}
+      <div style={{
+        background: 'rgba(255,255,255,0.08)',
+        border: '1px solid rgba(255,255,255,0.15)',
+        borderRadius: 16,
+        padding: '20px 24px',
+        maxWidth: 480,
+        margin: '0 auto 28px',
+      }}>
+        <p style={{
+          color: '#fff', fontSize: 15, fontWeight: 700, margin: '0 0 4px',
+          fontFamily: "'Figtree', sans-serif",
+        }}>
+          📬 Monthly collector digest
+        </p>
+        <p style={{
+          color: 'rgba(255,255,255,0.55)', fontSize: 12, margin: '0 0 14px',
+          fontFamily: "'Figtree', sans-serif", lineHeight: 1.5,
+        }}>
+          Market moves, grading tips, hidden gems and set previews — once a month, no spam.
+        </p>
+        <NewsletterSignup source="footer" dark />
+      </div>
+
       {/* Popular sets */}
       <div style={{ marginBottom: 20 }}>
         <p style={{
@@ -49,23 +76,23 @@ export default function Footer() {
           {topSets.map((set) => (
             <Link key={set} href={`/set/${encodeURIComponent(set)}`} style={{
               color: 'rgba(255,255,255,0.5)', textDecoration: 'none', fontSize: 12,
-              fontWeight: 500,
-              transition: 'color 0.15s',
+              fontWeight: 500, transition: 'color 0.15s',
             }}>{set}</Link>
           ))}
         </div>
       </div>
+
       <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12, margin: '0 auto 6px', maxWidth: 500 }}>
         Built by collectors, for collectors. Not affiliated with or endorsed by Nintendo, The Pokémon Company, or any grading service.
       </p>
       <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: 11, margin: '0 0 14px' }}>
         Prices sourced from public marketplaces and displayed in USD. Informational only.
       </p>
-      {/* Legal + social links */}
+
+      {/* Legal + social */}
       <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 14, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
         <Link href="/terms" style={{
-          color: 'rgba(255,255,255,0.3)', textDecoration: 'none', fontSize: 11,
-          fontWeight: 500,
+          color: 'rgba(255,255,255,0.3)', textDecoration: 'none', fontSize: 11, fontWeight: 500,
         }}>
           Terms of Service
         </Link>
