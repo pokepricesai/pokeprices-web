@@ -7,6 +7,22 @@ import PriceChart from '@/components/PriceChart'
 import CardStructuredData from '@/components/CardStructuredData'
 import { getSetAssets } from '@/lib/setAssets'
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+// Card types that are NOT Pokémon — no species link for these
+const NON_POKEMON_PREFIXES = [
+  'energy', 'basic energy', 'special energy',
+  'trainer', 'supporter', 'item', 'stadium', 'tool',
+  'poké ball', 'pokeball', 'full heal', 'potion', 'revive',
+  'professor', 'lillie', 'cynthia', 'marnie', 'hop', 'boss',
+  'ultra ball', 'quick ball', 'level ball', 'nest ball',
+  'great ball', 'master ball', 'timer ball',
+]
+
+const NON_POKEMON_SUFFIXES = [
+  'energy', ' trainer', ' supporter', ' item', ' stadium',
+]
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function extractVariant(cardName: string): string | null {
@@ -30,6 +46,35 @@ function buildEbayUrl(cardName: string, setName: string, cardNumber: string | nu
   }
 }
 
+// Extract the base Pokémon name for species linking
+// "Charizard ex" → "charizard", "Umbreon VMAX #215" → "umbreon"
+function extractSpeciesSlug(cardName: string): string | null {
+  const lower = cardName.toLowerCase()
+
+  // Check if this is a non-Pokémon card
+  for (const prefix of NON_POKEMON_PREFIXES) {
+    if (lower.startsWith(prefix)) return null
+  }
+  for (const suffix of NON_POKEMON_SUFFIXES) {
+    if (lower.endsWith(suffix)) return null
+  }
+
+  // Strip number, brackets, and suffixes to get base name
+  const cleaned = cardName
+    .replace(/\s*#\d+.*$/, '')           // remove #123 onwards
+    .replace(/\[.*?\]/g, '')             // remove [Reverse Holo] etc
+    .replace(/\b(ex|EX|V|VMAX|VSTAR|GX|Tag Team|Prime|LV\.X|Break|Legend|SP|FB|GL|C|4|δ)\b.*/g, '') // stop at mechanic suffix
+    .trim()
+
+  if (!cleaned) return null
+
+  // Take first word as species slug
+  const slug = cleaned.split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9-]/g, '')
+  if (slug.length < 3) return null
+
+  return slug
+}
+
 // ─── Data quality policy ─────────────────────────────────────────────────────
 type PctQuality = 'clean' | 'warn' | 'suppress'
 
@@ -51,6 +96,107 @@ function pctQuality(pct: number | null, period = '30d'): PctQuality {
   if (abs > thresholds.warn) return 'warn'
   return 'clean'
 }
+
+// ─── Fallback insight generator ───────────────────────────────────────────────
+// Builds a meaningful 2-3 sentence insight from available data
+// Used when get_card_insight RPC returns null
+function generateFallbackInsight(
+  card: any,
+  trend: any,
+  metrics: any,
+  psaPop: any,
+): string | null {
+  if (!card) return null
+
+  const raw = metrics?.results?.[0] || metrics || {}
+  const parts: string[] = []
+
+  const cardName = card.card_name
+  const setName  = card.set_name
+  const rawUsd   = card.raw_usd ? (card.raw_usd / 100).toFixed(2) : null
+  const psa10Usd = card.psa10_usd ? (card.psa10_usd / 100).toFixed(2) : null
+
+  // Opening — price context
+  if (rawUsd) {
+    if (psa10Usd) {
+      const multiple = (card.psa10_usd / card.raw_usd).toFixed(1)
+      parts.push(
+        `${cardName} from ${setName} currently trades at $${rawUsd} raw, with PSA 10 copies reaching $${psa10Usd} — a ${multiple}x grade premium.`
+      )
+    } else {
+      parts.push(`${cardName} from ${setName} currently trades at $${rawUsd} raw.`)
+    }
+  }
+
+  // Trend context
+  const pct30d = trend?.raw_pct_30d
+  const pct90d = trend?.raw_pct_90d
+  const q30 = pctQuality(pct30d, '30d')
+  const q90 = pctQuality(pct90d, '90d')
+
+  if (pct30d != null && q30 === 'clean' && q90 === 'clean' && pct90d != null) {
+    const dir30 = pct30d > 0 ? 'up' : 'down'
+    const dir90 = pct90d > 0 ? 'up' : 'down'
+    if (Math.sign(pct30d) === Math.sign(pct90d)) {
+      parts.push(
+        `The card has moved ${dir30} ${Math.abs(pct30d).toFixed(1)}% over the past 30 days and ${dir90} ${Math.abs(pct90d).toFixed(1)}% over 90 days, suggesting ${pct30d > 0 ? 'sustained buying interest' : 'continued softness'}.`
+      )
+    } else {
+      parts.push(
+        `Price is ${dir30} ${Math.abs(pct30d).toFixed(1)}% in the last 30 days, though the 90-day trend tells a different story at ${pct90d > 0 ? '+' : ''}${pct90d.toFixed(1)}% — worth watching for a clearer direction.`
+      )
+    }
+  } else if (pct30d != null && q30 === 'clean') {
+    const dir = pct30d > 0 ? 'gained' : 'lost'
+    parts.push(
+      `The card has ${dir} ${Math.abs(pct30d).toFixed(1)}% over the past 30 days.`
+    )
+  }
+
+  // PSA pop / grading context
+  if (psaPop && psaPop.total_graded > 0 && psaPop.gem_rate != null) {
+    const gemRate = parseFloat(psaPop.gem_rate)
+    const total = psaPop.total_graded.toLocaleString()
+    if (gemRate < 5) {
+      parts.push(
+        `Only ${gemRate.toFixed(1)}% of ${total} graded copies have achieved PSA 10, making gem-quality examples genuinely scarce.`
+      )
+    } else if (gemRate > 40) {
+      parts.push(
+        `With ${gemRate.toFixed(1)}% of ${total} graded copies receiving PSA 10, gem examples are relatively plentiful — which moderates the grade premium.`
+      )
+    } else if (card.psa10_usd && card.raw_usd) {
+      parts.push(
+        `PSA population stands at ${total} graded with a ${gemRate.toFixed(1)}% gem rate.`
+      )
+    }
+  }
+
+  // ATH / drawdown context
+  const drawdown = raw.drawdown_pct != null ? parseFloat(raw.drawdown_pct) : null
+  if (drawdown != null && drawdown < -30 && parts.length < 3) {
+    parts.push(
+      `At ${drawdown.toFixed(0)}% below its all-time high, the card sits at a notable discount to peak — a potential entry point for patient collectors.`
+    )
+  } else if (drawdown != null && drawdown > -5 && parts.length < 3) {
+    parts.push(`The card is trading near its all-time high.`)
+  }
+
+  // Volume / liquidity
+  const salesMonthly = raw.sales_30d ?? raw.volume_30d ?? null
+  if (salesMonthly != null && parts.length < 3) {
+    if (salesMonthly < 2) {
+      parts.push(`Volume is very thin at roughly ${salesMonthly} sale per month — treat any single data point with caution.`)
+    } else if (salesMonthly >= 20) {
+      parts.push(`With around ${salesMonthly} sales per month, this is a highly liquid card with a reliable price signal.`)
+    }
+  }
+
+  if (parts.length === 0) return null
+  return parts.slice(0, 3).join(' ')
+}
+
+// ─── Sub-components ──────────────────────────────────────────────────────────
 
 function TrendCell({ val, label }: { val: number | null; label: string }) {
   const quality = pctQuality(val, label)
@@ -127,8 +273,6 @@ function HeroBanner({ trend, hasInsight }: { trend: any; hasInsight: boolean }) 
     </div>
   )
 }
-
-// ─── Sub-components ──────────────────────────────────────────────────────────
 
 function SectionLabel({ children, style = {} }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
@@ -232,8 +376,8 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   const [priceHistory, setPriceHistory] = useState<any[]>([])
   const [insight, setInsight] = useState<string | null>(null)
   const [psaPop, setPsaPop] = useState<any | null>(null)
-  const [ebayDeals, setEbayDeals] = useState<any[]>([])
   const [ebayListings, setEbayListings] = useState<any[]>([])
+  const [ebayDeals, setEbayDeals] = useState<any[]>([])
   const [highConfidenceListingCount, setHighConfidenceListingCount] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -263,6 +407,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
       if (histRes.data) setPriceHistory(histRes.data)
       if (insightRes.data) setInsight(insightRes.data)
 
+      // PSA population
       const baseName = cardData.card_name.split('[')[0].split('#')[0].trim()
       const variant = extractVariant(cardData.card_name)
       const setNameClean = cardData.set_name.replace(/^Pokemon /, '')
@@ -283,20 +428,30 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
       const { data: popData } = await popQuery.order('total_graded', { ascending: false }).limit(1)
       if (popData && popData.length > 0) setPsaPop(popData[0])
 
+      // ── eBay: HIGH confidence only ──────────────────────────────────
+      // First try deals
       const { data: dealsData } = await supabase
-        .from('daily_deals').select('*').eq('card_slug', slug)
-        .order('discount_pct', { ascending: false }).limit(5)
+        .from('daily_deals')
+        .select('*')
+        .eq('card_slug', slug)
+        .order('discount_pct', { ascending: false })
+        .limit(5)
 
       if (dealsData && dealsData.length > 0) {
         setEbayDeals(dealsData)
       } else {
+        // Only high confidence listings — no medium
         const { data: listingsData } = await supabase
-          .from('ebay_listings').select('*').eq('card_slug', slug)
-          .in('match_confidence', ['high', 'medium'])
-          .order('total_cost_cents', { ascending: true }).limit(5)
+          .from('ebay_listings')
+          .select('*')
+          .eq('card_slug', slug)
+          .eq('match_confidence', 'high')   // HIGH only
+          .order('total_cost_cents', { ascending: true })
+          .limit(5)
         if (listingsData) setEbayListings(listingsData)
       }
 
+      // Count high-confidence listings
       const { count } = await supabase
         .from('ebay_listings')
         .select('*', { count: 'exact', head: true })
@@ -335,12 +490,12 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   const raw = metrics?.results?.[0] || metrics || {}
 
   const grades = [
-    { label: 'Raw',    value: card.raw_usd   },
-    { label: 'PSA 7',  value: card.psa7_usd  },
-    { label: 'PSA 8',  value: card.psa8_usd  },
-    { label: 'PSA 9',  value: card.psa9_usd  },
-    { label: 'PSA 10', value: card.psa10_usd },
-    { label: 'CGC 9.5',value: card.cgc95_usd },
+    { label: 'Raw',     value: card.raw_usd   },
+    { label: 'PSA 7',   value: card.psa7_usd  },
+    { label: 'PSA 8',   value: card.psa8_usd  },
+    { label: 'PSA 9',   value: card.psa9_usd  },
+    { label: 'PSA 10',  value: card.psa10_usd },
+    { label: 'CGC 9.5', value: card.cgc95_usd },
   ]
 
   const hasAnyTrend = trend && (
@@ -447,13 +602,19 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   // ── Set assets ─────────────────────────────────────────────────────────────
   const { logoUrl, symbolUrl } = getSetAssets(card.set_name)
 
+  // ── Species link ───────────────────────────────────────────────────────────
+  const speciesSlug = extractSpeciesSlug(card.card_name)
+
+  // ── Insight: RPC first, fallback if null ───────────────────────────────────
+  const displayInsight = insight || generateFallbackInsight(card, trend, metrics, psaPop)
+
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 24px' }}>
       <CardStructuredData card={card} />
 
-      {/* ── Breadcrumb: set logo + symbol + name ── */}
-      <div style={{ marginBottom: 16 }}>
+      {/* ── Breadcrumb: set logo + symbol + name + species link ── */}
+      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <Link
           href={`/set/${encodeURIComponent(card.set_name)}`}
           style={{
@@ -477,6 +638,26 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
           )}
           <span>{card.set_name}</span>
         </Link>
+
+        {/* Species link — only for Pokémon cards */}
+        {speciesSlug && (
+          <Link
+            href={`/pokemon/${speciesSlug}`}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              textDecoration: 'none', color: 'var(--text-muted)',
+              fontSize: 13, fontFamily: "'Figtree', sans-serif",
+              padding: '5px 14px',
+              background: 'var(--card)', border: '1px solid var(--border)',
+              borderRadius: 20, transition: 'border-color 0.15s',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--primary)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)' }}
+          >
+            <span style={{ fontSize: 12 }}>🃏</span>
+            All {speciesSlug.charAt(0).toUpperCase() + speciesSlug.slice(1)} cards
+          </Link>
+        )}
       </div>
 
       <div style={{ margin: '0 0 28px' }}>
@@ -508,16 +689,17 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
             {card.set_name}{card.card_number ? ` · #${card.card_number}` : ''}
           </p>
 
-          <HeroBanner trend={trend} hasInsight={!!insight} />
+          <HeroBanner trend={trend} hasInsight={!!displayInsight} />
 
-          {insight && (
+          {/* Insight — RPC or fallback */}
+          {displayInsight && (
             <div style={{
               background: 'var(--card)', border: '1px solid var(--border)',
               borderLeft: '3px solid var(--primary)', borderRadius: 10,
               padding: '10px 14px', marginBottom: 16,
               fontSize: 13, lineHeight: 1.6, color: 'var(--text)',
               fontFamily: "'Figtree', sans-serif",
-            }}>{insight}</div>
+            }}>{displayInsight}</div>
           )}
 
           {/* Prices */}
@@ -597,7 +779,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
           sub: salesMonthly >= 10 ? 'Liquid market' : salesMonthly >= 3 ? 'Moderate volume' : 'Thin market',
         })
         if (highConfidenceListingCount != null && highConfidenceListingCount > 0) tiles.push({
-          label: 'Live Listings', value: highConfidenceListingCount.toString(), sub: 'High-confidence matches',
+          label: 'Live Listings', value: highConfidenceListingCount.toString(), sub: 'Verified matches',
         })
         const pct30dQualityLocal = pctQuality(trend?.raw_pct_30d, '30d')
         if (trend?.raw_pct_30d != null && pct30dQualityLocal === 'clean') tiles.push({
@@ -632,7 +814,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
         return (
           <Panel>
             <SectionLabel>Collector Intel</SectionLabel>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10, marginBottom: liquidityScore != null ? 16 : 0 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10, marginBottom: 8 }}>
               {tiles.map((t, i) => (
                 <div key={i} style={{
                   background: t.highlight ? 'rgba(26,95,173,0.06)' : 'var(--bg-light)',
@@ -802,16 +984,16 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
           <div>
             <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-muted)', marginBottom: 7, fontFamily: "'Figtree', sans-serif" }}>🇬🇧 eBay UK</div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <EbayButton href={ebayUkForSale} label="For Sale"       flag="🛒" variant="primary" />
-              <EbayButton href={ebayUkSold}    label="Sold Listings"  flag="✅" />
+              <EbayButton href={ebayUkForSale} label="For Sale"      flag="🛒" variant="primary" />
+              <EbayButton href={ebayUkSold}    label="Sold Listings" flag="✅" />
             </div>
           </div>
           <div style={{ width: 1, background: 'var(--border)', alignSelf: 'stretch', margin: '0 4px' }} />
           <div>
             <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-muted)', marginBottom: 7, fontFamily: "'Figtree', sans-serif" }}>🇺🇸 eBay US</div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <EbayButton href={ebayUsForSale} label="For Sale"       flag="🛒" variant="primary" />
-              <EbayButton href={ebayUsSold}    label="Sold Listings"  flag="✅" />
+              <EbayButton href={ebayUsForSale} label="For Sale"      flag="🛒" variant="primary" />
+              <EbayButton href={ebayUsSold}    label="Sold Listings" flag="✅" />
             </div>
           </div>
         </div>
@@ -820,7 +1002,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
         </p>
       </Panel>
 
-      {/* ── Live Deals / Listings ────────────────────────────────────── */}
+      {/* ── Live Deals / Listings (HIGH confidence only) ─────────────── */}
       {(hasDeals || hasListings) && (
         <Panel>
           <SectionLabel style={{ color: hasDeals ? 'var(--green)' : undefined }}>
@@ -860,7 +1042,10 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
             })}
           </div>
           <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '10px 0 0', fontFamily: "'Figtree', sans-serif" }}>
-            Prices scraped daily. Always verify listing before buying.
+            {hasDeals
+              ? 'Deals are pre-screened for 15%+ discount against market value. Verified sellers only. Always check the listing before buying.'
+              : 'Verified high-confidence matches only. Prices scraped daily — always check the listing before buying.'
+            }
           </p>
         </Panel>
       )}
