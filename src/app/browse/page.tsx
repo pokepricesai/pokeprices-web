@@ -3,12 +3,22 @@ import type { Metadata } from 'next'
 import BrowsePageClient from './BrowsePageClient'
 
 export const metadata: Metadata = {
-  title: 'Pokemon Card Sets — Browse All 156 Sets',
-  description: 'Browse all Pokemon TCG sets and find card prices. From Base Set to the latest releases — prices, PSA population data and grading insights for every set.',
+  title: 'Pokémon Card Sets — Browse All Sets & Prices | PokePrices',
+  description: 'Browse all Pokémon TCG sets from Base Set to the latest releases. Find card prices, PSA population data, grading insights and market trends for every set. Free, updated daily.',
   openGraph: {
-    title: 'Pokemon Card Sets — Browse All 156 Sets | PokePrices',
-    description: 'Browse all Pokemon TCG sets and find card prices. From Base Set to the latest releases.',
+    title: 'Pokémon Card Sets — Browse All Sets & Prices | PokePrices',
+    description: 'Browse all Pokémon TCG sets. Card prices, PSA population data and market trends for every set.',
     url: 'https://pokeprices.io/browse',
+    siteName: 'PokePrices',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'Pokémon Card Sets — Browse All Sets & Prices | PokePrices',
+    description: 'Browse all Pokémon TCG sets. Card prices, PSA data and market trends. Free, updated daily.',
+  },
+  alternates: {
+    canonical: 'https://pokeprices.io/browse',
   },
 }
 
