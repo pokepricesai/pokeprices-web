@@ -613,46 +613,60 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 24px' }}>
       <CardStructuredData card={card} />
 
-      {/* ── Breadcrumb: set logo + symbol + name + species link ── */}
-      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      {/* ── Breadcrumb ── */}
+      <div style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <Link
           href={`/set/${encodeURIComponent(card.set_name)}`}
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 8,
-            textDecoration: 'none', color: 'var(--text-muted)',
-            fontSize: 13, fontFamily: "'Figtree', sans-serif",
-            padding: '5px 12px 5px 8px',
+            textDecoration: 'none', color: 'var(--text)',
+            fontSize: 13, fontFamily: "'Figtree', sans-serif", fontWeight: 600,
+            padding: '7px 14px 7px 10px',
             background: 'var(--card)', border: '1px solid var(--border)',
-            borderRadius: 20, transition: 'border-color 0.15s',
+            borderRadius: 20, transition: 'all 0.15s',
           }}
-          onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--primary)' }}
-          onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)' }}
+          onMouseEnter={e => {
+            const el = e.currentTarget as HTMLAnchorElement
+            el.style.borderColor = 'var(--primary)'
+            el.style.color = 'var(--primary)'
+          }}
+          onMouseLeave={e => {
+            const el = e.currentTarget as HTMLAnchorElement
+            el.style.borderColor = 'var(--border)'
+            el.style.color = 'var(--text)'
+          }}
         >
+          <span style={{ fontSize: 11, opacity: 0.5 }}>←</span>
           {logoUrl ? (
             <img src={logoUrl} alt={card.set_name} style={{ height: 20, width: 'auto', objectFit: 'contain', maxWidth: 90 }} loading="lazy" />
-          ) : (
-            <span style={{ fontSize: 13 }}>←</span>
-          )}
+          ) : null}
           {symbolUrl && (
             <img src={symbolUrl} alt="" style={{ width: 16, height: 16, objectFit: 'contain' }} loading="lazy" />
           )}
           <span>{card.set_name}</span>
         </Link>
 
-        {/* Species link — only for Pokémon cards */}
         {speciesSlug && (
           <Link
             href={`/pokemon/${speciesSlug}`}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 6,
-              textDecoration: 'none', color: 'var(--text-muted)',
-              fontSize: 13, fontFamily: "'Figtree', sans-serif",
-              padding: '5px 14px',
+              textDecoration: 'none', color: 'var(--text)',
+              fontSize: 13, fontFamily: "'Figtree', sans-serif", fontWeight: 600,
+              padding: '7px 14px',
               background: 'var(--card)', border: '1px solid var(--border)',
-              borderRadius: 20, transition: 'border-color 0.15s',
+              borderRadius: 20, transition: 'all 0.15s',
             }}
-            onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--primary)' }}
-            onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)' }}
+            onMouseEnter={e => {
+              const el = e.currentTarget as HTMLAnchorElement
+              el.style.borderColor = 'var(--primary)'
+              el.style.color = 'var(--primary)'
+            }}
+            onMouseLeave={e => {
+              const el = e.currentTarget as HTMLAnchorElement
+              el.style.borderColor = 'var(--border)'
+              el.style.color = 'var(--text)'
+            }}
           >
             <span style={{ fontSize: 12 }}>🃏</span>
             All {speciesSlug.charAt(0).toUpperCase() + speciesSlug.slice(1)} cards
