@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { supabase, formatPrice, formatPct } from '@/lib/supabase'
 import InlineChat from '@/components/InlineChat'
+import NewsletterSignup from '@/components/NewsletterSignup'
 
 const upcomingReleases = [
   { name: 'Perfect Order', date: 'Mar 27, 2026', confirmed: true, type: 'Main Set' },
