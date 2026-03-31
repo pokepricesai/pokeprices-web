@@ -632,7 +632,39 @@ export default function HomeClient() {
           ))}
         </div>
       </section>
-
+      
+    {/* ── NEWSLETTER ────────────────────────────────────────── */}
+      <section style={{ padding: '0 24px 44px', maxWidth: 680, margin: '0 auto' }}>
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(26,95,173,0.06), rgba(59,130,246,0.04))',
+          border: '1px solid rgba(26,95,173,0.2)',
+          borderRadius: 20,
+          padding: '32px 28px',
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: 32, marginBottom: 10 }}>📬</div>
+          <h2 style={{
+            fontSize: 22, margin: '0 0 8px',
+            fontFamily: "'Playfair Display', serif", color: 'var(--text)',
+          }}>
+            Monthly collector digest
+          </h2>
+          <p style={{
+            color: 'var(--text-muted)', fontSize: 14, margin: '0 0 20px',
+            lineHeight: 1.6, fontFamily: "'Figtree', sans-serif", maxWidth: 420, marginLeft: 'auto', marginRight: 'auto',
+          }}>
+            Market moves, biggest risers and fallers, grading tips, hidden gems and upcoming set previews — once a month, no spam, no paywall.
+          </p>
+          <NewsletterSignup source="homepage" />
+          <p style={{
+            color: 'var(--text-muted)', fontSize: 11, margin: '12px 0 0',
+            fontFamily: "'Figtree', sans-serif",
+          }}>
+            No login required. Unsubscribe any time.
+          </p>
+        </div>
+      </section>
+      
       {/* ── FAQ ───────────────────────────────────────────────── */}
       <section style={{ padding: '44px 24px', maxWidth: 680, margin: '0 auto' }}>
         <h2 style={{ fontSize: 24, textAlign: 'center', margin: '0 0 24px', fontFamily: "'Playfair Display', serif" }}>Questions collectors ask</h2>
