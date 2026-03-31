@@ -9,6 +9,7 @@ interface SetInfo {
   set_name: string
   card_count: number
   avg_raw_usd: number | null      // cents
+  total_raw_usd: number | null    // cents
   set_image_url: string | null
   set_release_date: string | null
 }
@@ -28,7 +29,6 @@ type SortOption = 'release_desc' | 'release_asc' | 'az' | 'za' | 'price_desc' | 
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-// Format a cents value as a compact dollar/pound string e.g. $1.2k / $15.9k
 function fmtCompact(cents: number): string {
   const dollars = cents / 100
   if (dollars >= 1_000_000) return `$${(dollars / 1_000_000).toFixed(1)}M`
@@ -36,7 +36,6 @@ function fmtCompact(cents: number): string {
   return `$${dollars.toFixed(0)}`
 }
 
-// Format cents as a dollar price with 2dp
 function fmtDollars(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`
 }
@@ -47,9 +46,7 @@ function TrendingRow({ set, isRising }: { set: TrendingSet; isRising: boolean })
   const color30 = isRising ? '#22c55e' : '#ef4444'
   const color90 = (set.avg_pct_90d ?? 0) >= 0 ? '#22c55e' : '#ef4444'
   const { symbolUrl } = getSetAssets(set.set_name)
-
-  // total_raw_usd is in cents — format as compact
-  const totalDisplay = fmtCompact(set.total_raw_usd)
+  const totalDisplay = set.total_raw_usd > 0 ? fmtCompact(set.total_raw_usd * 100) : '—'
 
   return (
     <Link href={`/set/${encodeURIComponent(set.set_name)}`} style={{ textDecoration: 'none' }}>
@@ -138,20 +135,19 @@ function TrendingSetsPanel({ data }: { data: { rising: TrendingSet[]; falling: T
 function SetInsightsBar({ sets }: { sets: SetInfo[] }) {
   if (!sets.length) return null
 
-  // avg_raw_usd is in cents; card_count is a plain integer
-  const withPrice = sets.filter(s => s.avg_raw_usd && s.avg_raw_usd > 0)
+  const withPrice = sets.filter(s => s.total_raw_usd && s.total_raw_usd > 0)
+  const withAvg   = sets.filter(s => s.avg_raw_usd && s.avg_raw_usd > 0)
 
-  // Total value of a set = avg_raw_usd (cents) * card_count — result is in cents
-  const byTotalValue = [...withPrice].sort((a, b) => (b.avg_raw_usd! * b.card_count) - (a.avg_raw_usd! * a.card_count))
-  const byAvgPrice   = [...withPrice].sort((a, b) => b.avg_raw_usd! - a.avg_raw_usd!)
+  const byTotalValue = [...withPrice].sort((a, b) => (b.total_raw_usd! - a.total_raw_usd!))
+  const byAvgPrice   = [...withAvg].sort((a, b) => b.avg_raw_usd! - a.avg_raw_usd!)
   const byCardCount  = [...sets].sort((a, b) => b.card_count - a.card_count)
 
-  const topValue  = byTotalValue[0]
-  const topAvg    = byAvgPrice[0]
-  const biggest   = byCardCount[0]
+  const topValue = byTotalValue[0]
+  const topAvg   = byAvgPrice[0]
+  const biggest  = byCardCount[0]
 
-  // Sum of (avg_raw_usd_cents * card_count) across all sets — still in cents
-  const totalMarketCents = withPrice.reduce((sum, s) => sum + (s.avg_raw_usd! * s.card_count), 0)
+  // Sum of set_total_value across all sets (already in cents)
+  const totalMarketCents   = withPrice.reduce((sum, s) => sum + s.total_raw_usd!, 0)
   const totalMarketDollars = totalMarketCents / 100
 
   const stats = [
@@ -159,7 +155,7 @@ function SetInsightsBar({ sets }: { sets: SetInfo[] }) {
       icon: '👑',
       label: 'Most Valuable Set',
       value: topValue?.set_name ?? '—',
-      sub: topValue ? `${fmtCompact(topValue.avg_raw_usd! * topValue.card_count)} total raw value` : '',
+      sub: topValue ? `${fmtCompact(topValue.total_raw_usd!)} total raw value` : '',
       href: topValue ? `/set/${encodeURIComponent(topValue.set_name)}` : null,
     },
     {
@@ -214,10 +210,10 @@ function SetInsightsBar({ sets }: { sets: SetInfo[] }) {
 // ── Main ───────────────────────────────────────────────────────────────────────
 
 export default function BrowsePageClient() {
-  const [search, setSearch]           = useState('')
-  const [sets, setSets]               = useState<SetInfo[]>([])
-  const [loading, setLoading]         = useState(true)
-  const [sort, setSort]               = useState<SortOption>('release_desc')
+  const [search, setSearch]             = useState('')
+  const [sets, setSets]                 = useState<SetInfo[]>([])
+  const [loading, setLoading]           = useState(true)
+  const [sort, setSort]                 = useState<SortOption>('release_desc')
   const [trendingSets, setTrendingSets] = useState<{ rising: TrendingSet[]; falling: TrendingSet[] } | null>(null)
 
   useEffect(() => {
