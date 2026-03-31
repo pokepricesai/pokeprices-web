@@ -420,10 +420,13 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
         .gt('total_graded', 0)
 
       if (variant) {
+        // Card has explicit variant tag e.g. [Reverse Holo] — match on that
         popQuery = popQuery.ilike('variant', `%${variant}%`)
-      } else {
-        popQuery = popQuery.or('variant.is.null,variant.eq.,variant.ilike.Standard%')
+      } else if (cardData.card_number) {
+        // No variant in name — use card number to pick the right row
+        popQuery = popQuery.eq('card_number', String(cardData.card_number))
       }
+      // If neither, just take highest total_graded
 
       const { data: popData } = await popQuery.order('total_graded', { ascending: false }).limit(1)
       if (popData && popData.length > 0) setPsaPop(popData[0])
