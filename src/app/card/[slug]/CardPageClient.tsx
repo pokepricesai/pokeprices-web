@@ -640,23 +640,20 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
         </Link>
 
         {/* Species link — only for Pokémon cards */}
-        {speciesSlug && (
+        {true && (
           <Link
-            href={`/pokemon/${speciesSlug}`}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-              textDecoration: 'none', color: 'var(--text-muted)',
-              fontSize: 13, fontFamily: "'Figtree', sans-serif",
-              padding: '5px 14px',
-              background: 'var(--card)', border: '1px solid var(--border)',
-              borderRadius: 20, transition: 'border-color 0.15s',
-            }}
-            onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--primary)' }}
-            onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)' }}
-          >
-            <span style={{ fontSize: 12 }}>🃏</span>
-            All {speciesSlug.charAt(0).toUpperCase() + speciesSlug.slice(1)} cards
-          </Link>
+  href={`/pokemon/${speciesSlug ?? 'test'}`}
+  style={{
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    textDecoration: 'none', color: 'var(--text-muted)',
+    fontSize: 13, fontFamily: "'Figtree', sans-serif",
+    padding: '5px 14px',
+    background: 'var(--card)', border: '1px solid var(--border)',
+    borderRadius: 20, transition: 'border-color 0.15s',
+  }}
+>
+  DEBUG: slug={speciesSlug ?? 'NULL'}
+</Link>
         )}
       </div>
 
