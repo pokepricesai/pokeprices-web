@@ -153,8 +153,28 @@ function SetHeader({ setName, releaseDate }: { setName: string; releaseDate: str
 
   return (
     <div style={{ marginBottom: 20 }}>
-      <Link href="/browse" style={{ color: 'var(--text-muted)', fontSize: 13, textDecoration: 'none', marginBottom: 12, display: 'inline-block', fontFamily: "'Figtree', sans-serif" }}>
-        ← Back to sets
+      <Link
+        href="/browse"
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          color: 'var(--text)', fontSize: 13, textDecoration: 'none',
+          marginBottom: 12, fontFamily: "'Figtree', sans-serif", fontWeight: 600,
+          padding: '6px 14px 6px 10px',
+          background: 'var(--card)', border: '1px solid var(--border)',
+          borderRadius: 20, transition: 'all 0.15s',
+        }}
+        onMouseEnter={e => {
+          const el = e.currentTarget as HTMLAnchorElement
+          el.style.borderColor = 'var(--primary)'
+          el.style.color = 'var(--primary)'
+        }}
+        onMouseLeave={e => {
+          const el = e.currentTarget as HTMLAnchorElement
+          el.style.borderColor = 'var(--border)'
+          el.style.color = 'var(--text)'
+        }}
+      >
+        <span style={{ fontSize: 11, opacity: 0.5 }}>←</span> Browse all sets
       </Link>
 
       {/* Era row */}
@@ -185,10 +205,7 @@ function SetHeader({ setName, releaseDate }: { setName: string; releaseDate: str
       {/* Release date + age */}
       {releaseDate && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-          <span style={{
-            fontSize: 12, fontWeight: 600, color: 'var(--text-muted)',
-            fontFamily: "'Figtree', sans-serif",
-          }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
             Released {new Date(releaseDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
           </span>
           <span style={{
@@ -226,9 +243,13 @@ export default function SetPageClient({ slug }: { slug: string }) {
       const { data, error: err } = await supabase.rpc('get_set_cards_sortable', { set_text: setName, sort_col: sort })
       if (err || !data) setError(true)
       else {
-        setCards(data)
-        // Grab release date from first card that has one
-        const dateCard = data.find((c: any) => c.set_release_date)
+        // ── Coerce is_sealed to boolean — RPC can return string "true"/"false" ──
+        const normalised = data.map((c: any) => ({
+          ...c,
+          is_sealed: c.is_sealed === true || c.is_sealed === 'true',
+        }))
+        setCards(normalised)
+        const dateCard = normalised.find((c: any) => c.set_release_date)
         if (dateCard?.set_release_date) setReleaseDate(dateCard.set_release_date)
       }
 
@@ -276,7 +297,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
           raw_usd: t.current_raw / 100,
           raw_pct_30d: t.raw_pct_30d,
           image_url: imgMap[t.card_slug]?.image_url ?? null,
-          is_sealed: imgMap[t.card_slug]?.is_sealed ?? false,
+          is_sealed: imgMap[t.card_slug]?.is_sealed === true || imgMap[t.card_slug]?.is_sealed === 'true',
         }))
 
         const isReliable = (t: any) => Math.abs(t.raw_pct_30d ?? 0) <= 300
