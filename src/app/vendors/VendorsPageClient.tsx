@@ -23,10 +23,11 @@ const SPECIALISM_LABELS: Record<string, string> = {
 }
 
 const FILTER_TYPES = [
-  { value: 'all',             label: 'All' },
-  { value: 'physical_shop',   label: '🏪 Shops' },
-  { value: 'retailer',        label: '📦 Retailers' },
-  { value: 'grading_service', label: '🏆 Grading' },
+  { value: 'all',             label: 'All'           },
+  { value: 'physical_shop',   label: '🏪 Shops'      },
+  { value: 'retailer',        label: '📦 Retailers'  },
+  { value: 'ebay_store',      label: '🛒 eBay Stores' },
+  { value: 'grading_service', label: '🏆 Grading'    },
 ]
 
 interface Vendor {
@@ -211,6 +212,15 @@ function VendorCard({ vendor }: { vendor: Vendor }) {
               🏆 Tournaments
             </span>
           )}
+          {vendor.ships_internationally && (
+            <span style={{
+              fontSize: 11, fontWeight: 600, fontFamily: "'Figtree', sans-serif",
+              background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)',
+              borderRadius: 20, padding: '2px 10px', color: '#3b82f6',
+            }}>
+              ✈️ Ships Worldwide
+            </span>
+          )}
         </div>
 
         {isChain && vendor.store_finder_url && (
@@ -267,7 +277,9 @@ export default function VendorsPageClient() {
         .from('vendors')
         .select('*')
         .eq('active', true)
-        .not('vendor_type', 'in', '(online_shop,ebay_store,marketplace,private_seller)')
+        // Allow physical shops, retailers, ebay stores and grading services
+        // Exclude online-only, marketplaces and private sellers from directory
+        .not('vendor_type', 'in', '(online_shop,marketplace,private_seller)')
         .order('verified', { ascending: false })
         .order('name', { ascending: true })
       if (type !== 'all') query = query.eq('vendor_type', type)
@@ -356,7 +368,7 @@ export default function VendorsPageClient() {
           color: 'var(--text-muted)', fontSize: 14,
           fontFamily: "'Figtree', sans-serif", margin: '0 0 16px',
         }}>
-          Find Pokémon card shops, retailers and grading services near you.
+          Find Pokémon card shops, retailers, eBay sellers and grading services.
         </p>
         <Link href="/vendors/submit" style={{
           display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -364,7 +376,7 @@ export default function VendorsPageClient() {
           padding: '8px 18px', borderRadius: 10, textDecoration: 'none',
           fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
         }}>
-          + List Your Store — It's Free
+          + List Your Store — It&apos;s Free
         </Link>
       </div>
 
@@ -381,21 +393,16 @@ export default function VendorsPageClient() {
           📍 Find Nearest Vendors
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-
-          {/* Input + dropdown wrapper */}
           <div style={{ flex: 1, minWidth: 240, position: 'relative' as const }}>
             <input
               value={locationQuery}
               onChange={e => handleLocationInput(e.target.value)}
               onKeyDown={e => {
-                if (e.key === 'Enter') {
-                  setShowSuggestions(false)
-                  handleManualSearch()
-                }
+                if (e.key === 'Enter') { setShowSuggestions(false); handleManualSearch() }
                 if (e.key === 'Escape') setShowSuggestions(false)
               }}
               onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-              placeholder="Enter postcode, town or city (UK or US)..."
+              placeholder="Enter postcode, town or city..."
               style={{
                 width: '100%', padding: '10px 16px', fontSize: 14,
                 border: `1px solid ${geocodeError ? '#ef4444' : 'var(--border)'}`,
@@ -404,8 +411,6 @@ export default function VendorsPageClient() {
                 boxSizing: 'border-box' as const,
               }}
             />
-
-            {/* Autocomplete dropdown */}
             {showSuggestions && suggestions.length > 0 && (
               <div style={{
                 position: 'absolute' as const, top: '100%', left: 0, right: 0,
@@ -425,25 +430,14 @@ export default function VendorsPageClient() {
                       style={{
                         padding: '10px 16px', fontSize: 13, cursor: 'pointer',
                         fontFamily: "'Figtree', sans-serif", color: 'var(--text)',
-                        borderBottom: i < suggestions.length - 1
-                          ? '1px solid var(--border)' : 'none',
+                        borderBottom: i < suggestions.length - 1 ? '1px solid var(--border)' : 'none',
                         transition: 'background 0.1s',
                       }}
-                      onMouseEnter={e => {
-                        (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-light)'
-                      }}
-                      onMouseLeave={e => {
-                        (e.currentTarget as HTMLDivElement).style.background = 'transparent'
-                      }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-light)' }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
                     >
                       <div style={{ fontWeight: 600 }}>{title}</div>
-                      {subtitle && (
-                        <div style={{
-                          fontSize: 11, color: 'var(--text-muted)', marginTop: 2,
-                        }}>
-                          {subtitle}
-                        </div>
-                      )}
+                      {subtitle && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{subtitle}</div>}
                     </div>
                   )
                 })}
@@ -482,18 +476,12 @@ export default function VendorsPageClient() {
         </div>
 
         {geocodeError && (
-          <p style={{
-            fontSize: 12, color: '#ef4444',
-            fontFamily: "'Figtree', sans-serif", margin: '8px 0 0',
-          }}>
+          <p style={{ fontSize: 12, color: '#ef4444', fontFamily: "'Figtree', sans-serif", margin: '8px 0 0' }}>
             Could not find that location. Try a postcode or city name.
           </p>
         )}
         {hasSearched && !geocodeError && (
-          <p style={{
-            fontSize: 12, color: 'var(--green)',
-            fontFamily: "'Figtree', sans-serif", margin: '8px 0 0', fontWeight: 600,
-          }}>
+          <p style={{ fontSize: 12, color: 'var(--green)', fontFamily: "'Figtree', sans-serif", margin: '8px 0 0', fontWeight: 600 }}>
             ✓ Showing nearest vendors to {locationQuery}
           </p>
         )}
@@ -525,10 +513,7 @@ export default function VendorsPageClient() {
           background: 'var(--card)', border: '1px solid var(--border)',
           borderRadius: 14, padding: '48px 24px', textAlign: 'center',
         }}>
-          <p style={{
-            color: 'var(--text-muted)', fontSize: 14,
-            fontFamily: "'Figtree', sans-serif", marginBottom: 16,
-          }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: 14, fontFamily: "'Figtree', sans-serif", marginBottom: 16 }}>
             No vendors listed yet — be the first!
           </p>
           <Link href="/vendors/submit" style={{
@@ -541,30 +526,21 @@ export default function VendorsPageClient() {
         </div>
       ) : (
         <>
-          <p style={{
-            fontSize: 12, color: 'var(--text-muted)',
-            fontFamily: "'Figtree', sans-serif", margin: '0 0 12px',
-          }}>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 12px' }}>
             {vendors.length} vendor{vendors.length !== 1 ? 's' : ''}
             {hasSearched ? ' · sorted by distance' : ''}
-            {chainVendors.length > 0
-              ? ` · ${chainVendors.length} chain retailer${chainVendors.length !== 1 ? 's' : ''}`
-              : ''}
+            {chainVendors.length > 0 ? ` · ${chainVendors.length} chain retailer${chainVendors.length !== 1 ? 's' : ''}` : ''}
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {vendors.map(v => <VendorCard key={v.id} vendor={v} />)}
           </div>
 
-          {/* Chain retailers */}
           {chainVendors.length > 0 && (
             <div style={{ marginTop: 32 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
                 <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-                <div style={{
-                  fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
-                  fontFamily: "'Figtree', sans-serif", letterSpacing: 0.5,
-                }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", letterSpacing: 0.5 }}>
                   📦 CHAIN RETAILERS & NATIONWIDE STORES
                 </div>
                 <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
