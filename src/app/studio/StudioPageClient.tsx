@@ -484,6 +484,7 @@ export default function StudioPageClient({ initialCardSlug }: { initialCardSlug?
   }, [search])
 
   async function selectCard(result: SearchResult) {
+    console.log('selectCard called', result.card_name)
     setSearch('')
     setSearchResults([])
     setLoading(true)
