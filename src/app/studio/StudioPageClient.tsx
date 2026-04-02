@@ -561,8 +561,8 @@ export default function StudioPageClient({ initialCardSlug }: { initialCardSlug?
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-              onBlur={() => setTimeout(() => setSearchResults([]), 150)}
-              placeholder="Search card name…"
+                onBlur={() => setTimeout(() => setSearchResults([]), 300)}
+                placeholder="Search card name…"
                 style={{
                   width: '100%', padding: '10px 14px', fontSize: 14, borderRadius: 10,
                   border: '1px solid var(--border)', background: 'var(--bg-light)',
@@ -571,7 +571,9 @@ export default function StudioPageClient({ initialCardSlug }: { initialCardSlug?
                 }}
               />
               {searchResults.length > 0 && (
-                <div style={{
+                <div
+                  onMouseDown={e => e.preventDefault()}
+                  style={{
                   position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
                   background: 'var(--card)', border: '1px solid var(--border)',
                   borderRadius: 12, marginTop: 4, overflow: 'hidden',
