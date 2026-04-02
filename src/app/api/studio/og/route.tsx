@@ -82,8 +82,6 @@ export async function GET(req: NextRequest) {
       ? (card.current_psa10 / card.current_raw).toFixed(1) + 'x raw'
       : null
 
-    const imgOptions = { ...dims, headers: { 'Content-Disposition': `attachment; filename="pokeprices-${cardSlug}-${visual}.png"` } }
-
   return new ImageResponse(
       <div style={{
         display: 'flex', flexDirection: 'column',
@@ -155,7 +153,7 @@ export async function GET(req: NextRequest) {
           <span style={{ fontSize: 12, color: muted }}>Not financial advice</span>
         </div>
       </div>,
-      imgOptions
+      { ...dims }
     )
   }
 
@@ -199,7 +197,7 @@ export async function GET(req: NextRequest) {
         </div>
         <div style={{ position: 'absolute', bottom: 24, fontSize: 14, fontWeight: 800, color: muted }}>pokeprices.io</div>
       </div>,
-      imgOptions
+      { ...dims }
     )
   }
 
