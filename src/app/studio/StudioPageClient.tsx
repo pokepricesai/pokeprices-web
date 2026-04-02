@@ -76,7 +76,7 @@ function InsightCard({ card, theme }: { card: SelectedCard; theme: Theme }) {
           <span style={{ fontSize: 11, fontWeight: 800, color: signal.color, background: 'rgba(0,0,0,0.25)', padding: '3px 12px', borderRadius: 20 }}>{signal.label}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          {card.image_url && <img src={card.image_url} alt="" style={{ width: 48, height: 67, objectFit: 'contain', borderRadius: 5, flexShrink: 0 }} />}
+          {card.image_url && <img crossOrigin="anonymous" src={card.image_url + '?v=1'} alt="" style={{ width: 48, height: 67, objectFit: 'contain', borderRadius: 5, flexShrink: 0 }} />}
           <div>
             <div style={{ fontSize: 20, fontWeight: 800, color: '#fff', lineHeight: 1.25, fontFamily: "'Playfair Display', serif" }}>{card.card_name}</div>
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 3 }}>{card.set_name}</div>
@@ -150,7 +150,7 @@ function PsaGauge({ card, theme }: { card: SelectedCard; theme: Theme }) {
     <div style={{ background: bg, borderRadius: 20, overflow: 'hidden', border: `1px solid ${border}`, boxShadow: dark ? '0 25px 50px rgba(0,0,0,0.5)' : '0 20px 40px rgba(0,0,0,0.1)', fontFamily: "'Figtree', sans-serif", padding: 24 }}>
       <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: muted, textTransform: 'uppercase', marginBottom: 4 }}>PSA Premium Gauge</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-        {card.image_url && <img src={card.image_url} alt="" style={{ width: 40, height: 56, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />}
+        {card.image_url && <img crossOrigin="anonymous" src={card.image_url + '?v=1'} alt="" style={{ width: 40, height: 56, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />}
         <div>
           <div style={{ fontSize: 18, fontWeight: 800, color: text, fontFamily: "'Playfair Display', serif", marginBottom: 2 }}>{card.card_name}</div>
           <div style={{ fontSize: 12, color: muted }}>{card.set_name}</div>
@@ -210,7 +210,7 @@ function PeakDistance({ card, theme }: { card: SelectedCard; theme: Theme }) {
     <div style={{ background: bg, borderRadius: 20, overflow: 'hidden', border: `1px solid ${border}`, boxShadow: dark ? '0 25px 50px rgba(0,0,0,0.5)' : '0 20px 40px rgba(0,0,0,0.1)', fontFamily: "'Figtree', sans-serif", padding: 24 }}>
       <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: muted, textTransform: 'uppercase', marginBottom: 4 }}>Peak vs Current</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-        {card.image_url && <img src={card.image_url} alt="" style={{ width: 40, height: 56, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />}
+        {card.image_url && <img crossOrigin="anonymous" src={card.image_url + '?v=1'} alt="" style={{ width: 40, height: 56, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />}
         <div>
           <div style={{ fontSize: 18, fontWeight: 800, color: text, fontFamily: "'Playfair Display', serif", marginBottom: 2 }}>{card.card_name}</div>
           <div style={{ fontSize: 12, color: muted }}>{card.set_name}</div>
@@ -267,7 +267,7 @@ function MarketTemperature({ card, theme }: { card: SelectedCard; theme: Theme }
     <div style={{ background: bg, borderRadius: 20, overflow: 'hidden', border: `1px solid ${border}`, boxShadow: dark ? '0 25px 50px rgba(0,0,0,0.5)' : '0 20px 40px rgba(0,0,0,0.1)', fontFamily: "'Figtree', sans-serif", padding: 24 }}>
       <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: muted, textTransform: 'uppercase', marginBottom: 4 }}>Market Temperature</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-        {card.image_url && <img src={card.image_url} alt="" style={{ width: 40, height: 56, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />}
+        {card.image_url && <img crossOrigin="anonymous" src={card.image_url + '?v=1'} alt="" style={{ width: 40, height: 56, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />}
         <div>
           <div style={{ fontSize: 18, fontWeight: 800, color: text, fontFamily: "'Playfair Display', serif", marginBottom: 2 }}>{card.card_name}</div>
           <div style={{ fontSize: 12, color: muted }}>{card.set_name}</div>
@@ -367,26 +367,33 @@ export default function StudioPageClient({ initialCardSlug }: { initialCardSlug?
 
   async function exportPng() {
     if (!selectedCard) return
-    // Find the preview div and screenshot it directly
     const previewEl = document.getElementById('studio-preview')
     if (!previewEl) return
     try {
       // Load html2canvas from CDN at runtime — no install needed
-      const script = document.createElement('script')
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'
-      document.head.appendChild(script)
-      await new Promise((resolve, reject) => {
-        script.onload = resolve
-        script.onerror = reject
+      if (!(window as any).html2canvas) {
+        const script = document.createElement('script')
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'
+        document.head.appendChild(script)
+        await new Promise((resolve, reject) => { script.onload = resolve; script.onerror = reject })
+      }
+      // Swap card images to use our proxy so CORS doesn't block them
+      const imgs = previewEl.querySelectorAll('img') as NodeListOf<HTMLImageElement>
+      const origSrcs: string[] = []
+      imgs.forEach(img => {
+        origSrcs.push(img.src)
+        if (img.src && !img.src.startsWith(window.location.origin)) {
+          img.src = `/api/imgproxy?url=${encodeURIComponent(img.src.split('?')[0])}`
+        }
       })
+      // Wait for images to reload
+      await Promise.all(Array.from(imgs).map(img =>
+        img.complete ? Promise.resolve() : new Promise(r => { img.onload = r; img.onerror = r })
+      ))
       const h2c = (window as any).html2canvas
-      const canvas = await h2c(previewEl, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: null,
-        logging: false,
-      })
+      const canvas = await h2c(previewEl, { scale: 2, useCORS: true, allowTaint: false, backgroundColor: null, logging: false })
+      // Restore original srcs
+      imgs.forEach((img, i) => { img.src = origSrcs[i] })
       const link = document.createElement('a')
       link.download = `pokeprices-${selectedCard.card_name.replace(/[^a-z0-9]/gi, '-')}-${visualType}.png`
       link.href = canvas.toDataURL('image/png')
