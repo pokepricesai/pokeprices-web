@@ -677,6 +677,22 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
         )}
       </div>
 
+      {/* Studio button */}
+      <div style={{ marginBottom: 16 }}>
+        <Link
+          href={`/studio?card=${card.card_slug}&visual=insight`}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 7,
+            padding: '8px 16px', borderRadius: 10, textDecoration: 'none',
+            background: 'rgba(255,203,5,0.1)', border: '1px solid rgba(255,203,5,0.3)',
+            color: 'var(--accent)', fontSize: 13, fontWeight: 700,
+            fontFamily: "'Figtree', sans-serif",
+          }}
+        >
+          <span>◈</span> Create Visual
+        </Link>
+      </div>
+
       <div style={{ margin: '0 0 28px' }}>
         <InlineChat cardContext={`${card.card_name} from ${card.set_name}`} prefillMessage={prefillMessage} />
       </div>
