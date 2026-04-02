@@ -719,7 +719,6 @@ export default function StudioPageClient({ initialCardSlug }: { initialCardSlug?
           </div>
 
           <div
-            ref={previewRef}
             style={{
               ...ratioStyle,
               maxWidth: '100%',
