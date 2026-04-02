@@ -149,8 +149,13 @@ function PsaGauge({ card, theme }: { card: SelectedCard; theme: Theme }) {
   return (
     <div style={{ background: bg, borderRadius: 20, overflow: 'hidden', border: `1px solid ${border}`, boxShadow: dark ? '0 25px 50px rgba(0,0,0,0.5)' : '0 20px 40px rgba(0,0,0,0.1)', fontFamily: "'Figtree', sans-serif", padding: 24 }}>
       <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: muted, textTransform: 'uppercase', marginBottom: 4 }}>PSA Premium Gauge</div>
-      <div style={{ fontSize: 19, fontWeight: 800, color: text, fontFamily: "'Playfair Display', serif", marginBottom: 2 }}>{card.card_name}</div>
-      <div style={{ fontSize: 12, color: muted, marginBottom: 20 }}>{card.set_name}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+        {card.image_url && <img src={card.image_url} alt="" style={{ width: 40, height: 56, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />}
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: text, fontFamily: "'Playfair Display', serif", marginBottom: 2 }}>{card.card_name}</div>
+          <div style={{ fontSize: 12, color: muted }}>{card.set_name}</div>
+        </div>
+      </div>
       <div style={{ display: 'flex', justifyContent: 'center' }}>
         <svg width={240} height={130} viewBox="0 0 240 130">
           {[{ s: -180, e: -135, c: '#3b82f6' }, { s: -135, e: -90, c: '#22c55e' }, { s: -90, e: -45, c: '#f59e0b' }, { s: -45, e: 0, c: '#ef4444' }].map((seg, i) => (
@@ -159,10 +164,10 @@ function PsaGauge({ card, theme }: { card: SelectedCard; theme: Theme }) {
           {multiple != null && <path d={arcPath(-180, needleAngle, r)} fill="none" stroke={gaugeColor} strokeWidth={14} strokeLinecap="round" opacity={0.95} />}
           <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={dark ? '#f1f5f9' : '#0f172a'} strokeWidth={3} strokeLinecap="round" opacity={0.7} />
           <circle cx={cx} cy={cy} r={6} fill={gaugeColor} />
-          <text x={28} y={120} fontSize={9} fill={muted} fontFamily="Figtree,sans-serif">Low</text>
-          <text x={75} y={30} fontSize={9} fill={muted} fontFamily="Figtree,sans-serif">Healthy</text>
-          <text x={143} y={30} fontSize={9} fill={muted} fontFamily="Figtree,sans-serif">Strong</text>
-          <text x={190} y={120} fontSize={9} fill={muted} fontFamily="Figtree,sans-serif">Extreme</text>
+          <text x={14} y={126} fontSize={9} fill={muted} fontFamily="Figtree,sans-serif">Low</text>
+          <text x={88} y={18} fontSize={9} fill={muted} fontFamily="Figtree,sans-serif">Healthy</text>
+          <text x={145} y={18} fontSize={9} fill={muted} fontFamily="Figtree,sans-serif">Strong</text>
+          <text x={194} y={126} fontSize={9} fill={muted} fontFamily="Figtree,sans-serif">Extreme</text>
         </svg>
       </div>
       <div style={{ textAlign: 'center', marginTop: 4, marginBottom: 16 }}>
@@ -204,8 +209,13 @@ function PeakDistance({ card, theme }: { card: SelectedCard; theme: Theme }) {
   return (
     <div style={{ background: bg, borderRadius: 20, overflow: 'hidden', border: `1px solid ${border}`, boxShadow: dark ? '0 25px 50px rgba(0,0,0,0.5)' : '0 20px 40px rgba(0,0,0,0.1)', fontFamily: "'Figtree', sans-serif", padding: 24 }}>
       <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: muted, textTransform: 'uppercase', marginBottom: 4 }}>Peak vs Current</div>
-      <div style={{ fontSize: 19, fontWeight: 800, color: text, fontFamily: "'Playfair Display', serif", marginBottom: 2 }}>{card.card_name}</div>
-      <div style={{ fontSize: 12, color: muted, marginBottom: 20 }}>{card.set_name}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+        {card.image_url && <img src={card.image_url} alt="" style={{ width: 40, height: 56, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />}
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: text, fontFamily: "'Playfair Display', serif", marginBottom: 2 }}>{card.card_name}</div>
+          <div style={{ fontSize: 12, color: muted }}>{card.set_name}</div>
+        </div>
+      </div>
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', marginBottom: 20 }}>
         <div style={{ position: 'relative', width: 44, height: barH + 32, flexShrink: 0 }}>
           <div style={{ position: 'absolute', left: 18, top: peakY, width: 8, height: barH, background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', borderRadius: 4 }} />
@@ -256,8 +266,13 @@ function MarketTemperature({ card, theme }: { card: SelectedCard; theme: Theme }
   return (
     <div style={{ background: bg, borderRadius: 20, overflow: 'hidden', border: `1px solid ${border}`, boxShadow: dark ? '0 25px 50px rgba(0,0,0,0.5)' : '0 20px 40px rgba(0,0,0,0.1)', fontFamily: "'Figtree', sans-serif", padding: 24 }}>
       <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: muted, textTransform: 'uppercase', marginBottom: 4 }}>Market Temperature</div>
-      <div style={{ fontSize: 19, fontWeight: 800, color: text, fontFamily: "'Playfair Display', serif", marginBottom: 2 }}>{card.card_name}</div>
-      <div style={{ fontSize: 12, color: muted, marginBottom: 24 }}>{card.set_name}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+        {card.image_url && <img src={card.image_url} alt="" style={{ width: 40, height: 56, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />}
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: text, fontFamily: "'Playfair Display', serif", marginBottom: 2 }}>{card.card_name}</div>
+          <div style={{ fontSize: 12, color: muted }}>{card.set_name}</div>
+        </div>
+      </div>
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
         <div style={{ fontSize: 60, marginBottom: 10, lineHeight: 1 }}>{tempEmoji}</div>
         <div style={{ fontSize: 38, fontWeight: 900, color: tempColor, marginBottom: 4 }}>{temp}</div>
@@ -353,10 +368,22 @@ export default function StudioPageClient({ initialCardSlug }: { initialCardSlug?
   async function exportPng() {
     if (!selectedCard) return
     const params = new URLSearchParams({ card: selectedCard.card_slug, visual: visualType, theme })
-    const link = document.createElement('a')
-    link.download = `pokeprices-${selectedCard.card_slug}-${visualType}.png`
-    link.href = `/api/studio/og?${params}`
-    link.click()
+    const url = `/api/studio/og?${params}`
+    // Fetch the image as a blob then trigger download
+    try {
+      const res = await fetch(url)
+      if (!res.ok) throw new Error('Failed to generate image')
+      const blob = await res.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.download = `pokeprices-${selectedCard.card_name.replace(/[^a-z0-9]/gi, '-')}-${visualType}.png`
+      link.href = blobUrl
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000)
+    } catch (e) {
+      // Fallback: open in new tab so user can save manually
+      window.open(url, '_blank')
+    }
   }
 
   function renderVisual() {
