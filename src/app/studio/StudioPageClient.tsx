@@ -441,13 +441,13 @@ export default function StudioPageClient({ initialCardSlug }: { initialCardSlug?
     const { data } = await supabase
       .from('card_trends')
       .select('card_slug, card_name, set_name, current_raw, current_psa9, current_psa10, raw_pct_30d, raw_pct_90d, high_12m, drawdown_pct')
-      .eq('card_slug', slug)
+      .eq('card_slug', Number(slug))
       .single()
     if (data) {
       const { data: cardData } = await supabase
         .from('cards')
         .select('card_url_slug, image_url')
-        .eq('card_slug', slug)
+        .eq('card_slug', Number(slug))
         .single()
       setSelectedCard({ ...data, card_url_slug: cardData?.card_url_slug || null, image_url: cardData?.image_url || null })
     }
@@ -484,14 +484,13 @@ export default function StudioPageClient({ initialCardSlug }: { initialCardSlug?
   }, [search])
 
   async function selectCard(result: SearchResult) {
-    console.log('selectCard called', result.card_name)
     setSearch('')
     setSearchResults([])
     setLoading(true)
     const { data } = await supabase
       .from('card_trends')
       .select('card_slug, card_name, set_name, current_raw, current_psa9, current_psa10, raw_pct_30d, raw_pct_90d, high_12m, drawdown_pct')
-      .eq('card_slug', result.card_slug)
+      .eq('card_slug', Number(result.card_slug))
       .single()
     if (data) {
       setSelectedCard({ ...data, card_url_slug: result.card_url_slug, image_url: result.image_url })
@@ -562,7 +561,6 @@ export default function StudioPageClient({ initialCardSlug }: { initialCardSlug?
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                onBlur={() => setTimeout(() => setSearchResults([]), 300)}
                 placeholder="Search card name…"
                 style={{
                   width: '100%', padding: '10px 14px', fontSize: 14, borderRadius: 10,
@@ -572,9 +570,7 @@ export default function StudioPageClient({ initialCardSlug }: { initialCardSlug?
                 }}
               />
               {searchResults.length > 0 && (
-                <div
-                  onMouseDown={e => e.preventDefault()}
-                  style={{
+                <div style={{
                   position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
                   background: 'var(--card)', border: '1px solid var(--border)',
                   borderRadius: 12, marginTop: 4, overflow: 'hidden',
@@ -723,6 +719,7 @@ export default function StudioPageClient({ initialCardSlug }: { initialCardSlug?
           </div>
 
           <div
+            ref={previewRef}
             style={{
               ...ratioStyle,
               maxWidth: '100%',
