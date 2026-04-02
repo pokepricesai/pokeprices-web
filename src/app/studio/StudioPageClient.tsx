@@ -561,7 +561,8 @@ export default function StudioPageClient({ initialCardSlug }: { initialCardSlug?
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Search card name…"
+              onBlur={() => setTimeout(() => setSearchResults([]), 150)}
+              placeholder="Search card name…"
                 style={{
                   width: '100%', padding: '10px 14px', fontSize: 14, borderRadius: 10,
                   border: '1px solid var(--border)', background: 'var(--bg-light)',
