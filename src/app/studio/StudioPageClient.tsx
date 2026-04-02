@@ -367,22 +367,33 @@ export default function StudioPageClient({ initialCardSlug }: { initialCardSlug?
 
   async function exportPng() {
     if (!selectedCard) return
-    const params = new URLSearchParams({ card: selectedCard.card_slug, visual: visualType, theme })
-    const url = `/api/studio/og?${params}`
-    // Fetch the image as a blob then trigger download
+    // Find the preview div and screenshot it directly
+    const previewEl = document.getElementById('studio-preview')
+    if (!previewEl) return
     try {
-      const res = await fetch(url)
-      if (!res.ok) throw new Error('Failed to generate image')
-      const blob = await res.blob()
-      const blobUrl = URL.createObjectURL(blob)
+      // Load html2canvas from CDN at runtime — no install needed
+      const script = document.createElement('script')
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'
+      document.head.appendChild(script)
+      await new Promise((resolve, reject) => {
+        script.onload = resolve
+        script.onerror = reject
+      })
+      const h2c = (window as any).html2canvas
+      const canvas = await h2c(previewEl, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: null,
+        logging: false,
+      })
       const link = document.createElement('a')
       link.download = `pokeprices-${selectedCard.card_name.replace(/[^a-z0-9]/gi, '-')}-${visualType}.png`
-      link.href = blobUrl
+      link.href = canvas.toDataURL('image/png')
       link.click()
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000)
     } catch (e) {
-      // Fallback: open in new tab so user can save manually
-      window.open(url, '_blank')
+      console.error('Export failed:', e)
+      alert('Export failed — try right-clicking the preview and saving the image.')
     }
   }
 
@@ -494,7 +505,7 @@ export default function StudioPageClient({ initialCardSlug }: { initialCardSlug?
             )}
           </div>
 
-          <div style={{ maxWidth: 520 }}>
+          <div id="studio-preview" style={{ maxWidth: 520 }}>
             {renderVisual()}
           </div>
 
