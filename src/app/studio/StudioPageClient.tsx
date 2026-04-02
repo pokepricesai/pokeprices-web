@@ -440,16 +440,16 @@ export default function StudioPageClient({ initialCardSlug }: { initialCardSlug?
     setLoading(true)
     const { data } = await supabase
       .from('card_trends')
-      .select('card_slug, card_name, set_name, current_raw, current_psa9, current_psa10, raw_pct_30d, raw_pct_90d, high_12m, drawdown_pct')
-      .eq('card_slug', Number(slug))
+      .select('card_slug, card_name, set_name, current_raw, current_psa9, current_psa10, raw_pct_30d, raw_pct_90d')
+      .eq('card_slug', slug)
       .single()
     if (data) {
       const { data: cardData } = await supabase
         .from('cards')
         .select('card_url_slug, image_url')
-        .eq('card_slug', Number(slug))
+        .eq('card_slug', slug)
         .single()
-      setSelectedCard({ ...data, card_url_slug: cardData?.card_url_slug || null, image_url: cardData?.image_url || null })
+      setSelectedCard({ ...data, card_url_slug: cardData?.card_url_slug || null, image_url: cardData?.image_url || null, high_12m: null, drawdown_pct: null })
     }
     setLoading(false)
   }
@@ -489,11 +489,11 @@ export default function StudioPageClient({ initialCardSlug }: { initialCardSlug?
     setLoading(true)
     const { data } = await supabase
       .from('card_trends')
-      .select('card_slug, card_name, set_name, current_raw, current_psa9, current_psa10, raw_pct_30d, raw_pct_90d, high_12m, drawdown_pct')
-      .eq('card_slug', Number(result.card_slug))
+      .select('card_slug, card_name, set_name, current_raw, current_psa9, current_psa10, raw_pct_30d, raw_pct_90d')
+      .eq('card_slug', result.card_slug)
       .single()
     if (data) {
-      setSelectedCard({ ...data, card_url_slug: result.card_url_slug, image_url: result.image_url })
+      setSelectedCard({ ...data, card_url_slug: result.card_url_slug, image_url: result.image_url, high_12m: null, drawdown_pct: null })
     }
     setLoading(false)
   }
@@ -719,6 +719,7 @@ export default function StudioPageClient({ initialCardSlug }: { initialCardSlug?
           </div>
 
           <div
+            ref={previewRef}
             style={{
               ...ratioStyle,
               maxWidth: '100%',
