@@ -193,7 +193,7 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
 
   if (!pokeData) return (
     <div style={{ maxWidth: 800, margin: '0 auto', padding: '60px 24px', textAlign: 'center' }}>
-      <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, marginBottom: 12 }}>Pokémon not found</h1>
+      <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 28, marginBottom: 12 }}>Pokémon not found</h1>
       <Link href="/pokemon" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>← All Pokémon</Link>
     </div>
   )
@@ -255,7 +255,7 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
             {isLegendary && <span style={{ fontSize: 10, fontWeight: 800, background: '#FFD166', color: '#1a1a1a', padding: '2px 8px', borderRadius: 20, fontFamily: "'Figtree', sans-serif", letterSpacing: 0.8, textTransform: 'uppercase' }}>Legendary</span>}
             {isMythical  && <span style={{ fontSize: 10, fontWeight: 800, background: '#C77DFF', color: '#fff',    padding: '2px 8px', borderRadius: 20, fontFamily: "'Figtree', sans-serif", letterSpacing: 0.8, textTransform: 'uppercase' }}>Mythical</span>}
           </div>
-          <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 36, margin: '0 0 4px', color: 'var(--text)', lineHeight: 1 }}>{capitalize(slug)}</h1>
+          <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 36, margin: '0 0 4px', color: 'var(--text)', lineHeight: 1 }}>{capitalize(slug)}</h1>
           {genus && <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 12px' }}>The {genus}</p>}
           <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
             {types.map(t => <TypeBadge key={t} type={t} />)}
@@ -306,7 +306,7 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
       {/* Cards grid */}
       <div style={{ marginBottom: 40 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-          <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, margin: 0, color: 'var(--text)' }}>
+          <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, margin: 0, color: 'var(--text)' }}>
             {regularCards.length > 0 ? `${regularCards.length} Cards` : 'Cards'}
           </h2>
           {regularCards.length > 0 && (
@@ -376,7 +376,7 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
       {/* ── Explore more by set ── */}
       {setCardCounts.length > 0 && (
         <div style={{ marginBottom: 40 }}>
-          <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 20, margin: '0 0 14px', color: 'var(--text)' }}>
+          <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, margin: '0 0 14px', color: 'var(--text)' }}>
             Explore {capitalize(slug)} by Set
           </h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
@@ -411,7 +411,7 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
 
       {/* ── Explore more Pokémon ── */}
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: '20px 24px' }}>
-        <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, margin: '0 0 14px', color: 'var(--text)' }}>
+        <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 18, margin: '0 0 14px', color: 'var(--text)' }}>
           Explore More Pokémon
         </h2>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
