@@ -482,7 +482,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
 
   if (!card) return (
     <div style={{ maxWidth: 800, margin: '0 auto', padding: '60px 24px', textAlign: 'center' }}>
-      <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 28, marginBottom: 12 }}>Card not found</h1>
+      <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, marginBottom: 12 }}>Card not found</h1>
       <p style={{ color: 'var(--text-muted)' }}>This card doesn&apos;t exist in our database.</p>
       <Link href="/browse" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>Browse sets →</Link>
     </div>
@@ -677,22 +677,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
         )}
       </div>
 
-      {/* Studio button */}
-      <div style={{ marginBottom: 16 }}>
-        <Link
-          href={`/studio?card=${card.card_slug}&visual=insight`}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 7,
-            padding: '8px 16px', borderRadius: 10, textDecoration: 'none',
-            background: 'rgba(255,203,5,0.1)', border: '1px solid rgba(255,203,5,0.3)',
-            color: 'var(--accent)', fontSize: 13, fontWeight: 700,
-            fontFamily: "'Figtree', sans-serif",
-          }}
-        >
-          <span>◈</span> Create Visual
-        </Link>
-      </div>
-
       <div style={{ margin: '0 0 28px' }}>
         <InlineChat cardContext={`${card.card_name} from ${card.set_name}`} prefillMessage={prefillMessage} />
       </div>
@@ -715,7 +699,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
 
         <div style={{ flex: 1, minWidth: 280 }}>
           <h1 style={{
-            fontFamily: "'Outfit', sans-serif", fontSize: 26,
+            fontFamily: "'Playfair Display', serif", fontSize: 26,
             margin: '0 0 4px', color: 'var(--text)', letterSpacing: '-0.3px',
           }}>{card.card_name}</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 16px', fontFamily: "'Figtree', sans-serif" }}>
@@ -1090,6 +1074,149 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
           <PriceChart data={priceHistory} height={280} />
         </Panel>
       )}
+
+      {/* ── Explore more: same Pokémon ───────────────────────────────── */}
+      {speciesSlug && <ExploreMoreSpecies speciesSlug={speciesSlug} currentUrlSlug={cardUrlSlug} setName={card.set_name} />}
+
+      {/* ── Explore more: same set ──────────────────────────────────── */}
+      <ExploreMoreSet setName={card.set_name} currentUrlSlug={cardUrlSlug} />
+
     </div>
+  )
+}
+
+// ── Explore More: same species ────────────────────────────────────────────────
+
+function ExploreMoreSpecies({ speciesSlug, currentUrlSlug, setName }: { speciesSlug: string; currentUrlSlug: string; setName: string }) {
+  const [cards, setCards] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const displayName = speciesSlug.charAt(0).toUpperCase() + speciesSlug.slice(1)
+    const namePatterns = [
+      `card_name.eq.${displayName}`,
+      `card_name.ilike.${displayName} %`,
+      `card_name.ilike.${displayName}[%`,
+      `card_name.ilike.% ${displayName}`,
+      `card_name.ilike.% ${displayName} %`,
+    ].join(',')
+
+    supabase
+      .from('cards')
+      .select('card_name, set_name, card_url_slug, image_url, card_number')
+      .or(namePatterns)
+      .eq('is_sealed', false)
+      .neq('card_url_slug', currentUrlSlug)
+      .order('set_name')
+      .limit(24)
+      .then(({ data }) => {
+        if (data) setCards(data)
+        setLoading(false)
+      })
+  }, [speciesSlug, currentUrlSlug])
+
+  if (loading || cards.length === 0) return null
+
+  const label = speciesSlug.charAt(0).toUpperCase() + speciesSlug.slice(1)
+
+  return (
+    <Panel>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', fontFamily: "'Outfit', sans-serif" }}>
+          More {label} Cards
+        </div>
+        <Link href={`/pokemon/${speciesSlug}`} style={{ fontSize: 13, fontWeight: 600, color: 'var(--primary)', fontFamily: "'Figtree', sans-serif", textDecoration: 'none' }}>
+          All {label} cards →
+        </Link>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 8 }}>
+        {cards.slice(0, 20).map((c, i) => (
+          <Link key={i} href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`} style={{ textDecoration: 'none' }}>
+            <div
+              style={{ background: 'var(--bg-light)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 8px', textAlign: 'center', transition: 'border-color 0.15s, transform 0.15s' }}
+              onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--primary)'; el.style.transform = 'translateY(-2px)' }}
+              onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--border)'; el.style.transform = 'translateY(0)' }}
+            >
+              {c.image_url ? (
+                <img
+                  src={c.image_url} alt={c.card_name}
+                  style={{ width: 72, height: 100, objectFit: 'contain', display: 'block', margin: '0 auto 6px', borderRadius: 4 }}
+                  loading="lazy"
+                  onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                />
+              ) : (
+                <div style={{ width: 72, height: 100, background: 'var(--border)', borderRadius: 4, margin: '0 auto 6px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🃏</div>
+              )}
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.3, marginBottom: 2 }}>{c.card_name}</div>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.set_name}</div>
+            </div>
+          </Link>
+        ))}
+      </div>
+    </Panel>
+  )
+}
+
+// ── Explore More: same set ────────────────────────────────────────────────────
+
+function ExploreMoreSet({ setName, currentUrlSlug }: { setName: string; currentUrlSlug: string }) {
+  const [cards, setCards] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    supabase
+      .from('cards')
+      .select('card_name, set_name, card_url_slug, image_url, card_number')
+      .eq('set_name', setName)
+      .eq('is_sealed', false)
+      .neq('card_url_slug', currentUrlSlug)
+      .order('card_number')
+      .limit(24)
+      .then(({ data }) => {
+        if (data) {
+          // Shuffle slightly to show variety — sort by card_number then pick spread
+          setCards(data)
+        }
+        setLoading(false)
+      })
+  }, [setName, currentUrlSlug])
+
+  if (loading || cards.length === 0) return null
+
+  return (
+    <Panel>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', fontFamily: "'Outfit', sans-serif" }}>
+          More from {setName}
+        </div>
+        <Link href={`/set/${encodeURIComponent(setName)}`} style={{ fontSize: 13, fontWeight: 600, color: 'var(--primary)', fontFamily: "'Figtree', sans-serif", textDecoration: 'none' }}>
+          View full set →
+        </Link>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 8 }}>
+        {cards.slice(0, 20).map((c, i) => (
+          <Link key={i} href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`} style={{ textDecoration: 'none' }}>
+            <div
+              style={{ background: 'var(--bg-light)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 8px', textAlign: 'center', transition: 'border-color 0.15s, transform 0.15s' }}
+              onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--primary)'; el.style.transform = 'translateY(-2px)' }}
+              onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--border)'; el.style.transform = 'translateY(0)' }}
+            >
+              {c.image_url ? (
+                <img
+                  src={c.image_url} alt={c.card_name}
+                  style={{ width: 72, height: 100, objectFit: 'contain', display: 'block', margin: '0 auto 6px', borderRadius: 4 }}
+                  loading="lazy"
+                  onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                />
+              ) : (
+                <div style={{ width: 72, height: 100, background: 'var(--border)', borderRadius: 4, margin: '0 auto 6px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🃏</div>
+              )}
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.3, marginBottom: 2 }}>{c.card_name}</div>
+              {c.card_number && <div style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>#{c.card_number}</div>}
+            </div>
+          </Link>
+        ))}
+      </div>
+    </Panel>
   )
 }
