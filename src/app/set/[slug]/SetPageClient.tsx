@@ -197,7 +197,7 @@ function SetHeader({ setName, releaseDate }: { setName: string; releaseDate: str
         {symbolUrl && (
           <img src={symbolUrl} alt="" style={{ width: 28, height: 28, objectFit: 'contain' }} loading="lazy" />
         )}
-        <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: logoUrl ? 26 : 34, fontWeight: 700, margin: 0, color: 'var(--text)', letterSpacing: '-0.5px', lineHeight: 1.2 }}>
+        <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: logoUrl ? 26 : 34, fontWeight: 700, margin: 0, color: 'var(--text)', letterSpacing: '-0.5px', lineHeight: 1.2 }}>
           {setName}
         </h1>
       </div>
