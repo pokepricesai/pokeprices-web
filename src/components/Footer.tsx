@@ -29,11 +29,14 @@ export default function Footer() {
         marginBottom: 28, flexWrap: 'wrap',
       }}>
         {[
-          { label: 'Home',             href: '/'         },
-          { label: 'Insights',         href: '/insights' },
-          { label: 'Cards & Sets',     href: '/browse'   },
-          { label: 'Vendor Directory', href: '/vendors'  },
-          { label: 'Contact',          href: '/contact'  },
+          { label: 'Home',             href: '/'          },
+          { label: 'Cards & Sets',     href: '/browse'    },
+          { label: 'Pokémon',          href: '/pokemon'   },
+          { label: 'Insights',         href: '/insights'  },
+          { label: 'Studio',           href: '/studio'    },
+          { label: 'Creators',         href: '/creators'  },
+          { label: 'Vendor Directory', href: '/vendors'   },
+          { label: 'Contact',          href: '/contact'   },
         ].map((link) => (
           <Link key={link.label} href={link.href} style={{
             color: 'rgba(255,255,255,0.7)', textDecoration: 'none', fontSize: 13,
