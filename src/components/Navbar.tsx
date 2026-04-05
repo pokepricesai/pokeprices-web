@@ -16,12 +16,12 @@ interface SearchResult {
 }
 
 const navLinks = [
+  { label: 'Cards & Sets', href: '/browse'    },
+  { label: 'Pokémon',      href: '/pokemon'   },
   { label: 'Insights',     href: '/insights'  },
   { label: 'Studio',       href: '/studio'    },
-  { label: 'Pokémon',      href: '/pokemon'   },
-  { label: 'Cards & Sets', href: '/browse'    },
-  { label: 'Vendors',      href: '/vendors'   },
   { label: 'Creators',     href: '/creators'  },
+  { label: 'Vendors',      href: '/vendors'   },
   { label: 'Contact',      href: '/contact'   },
 ]
 
