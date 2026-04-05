@@ -102,88 +102,86 @@ export default function SearchBar({ placeholder = 'Search cards, sets, Pokémon�
       const numberToken = tokens.find(t => /^\d{1,3}(\/\d+)?$/.test(t))
       const nameTokens  = tokens.filter(t => t !== numberToken).join(' ')
 
-      const queries: Promise<any>[] = []
+      const queries: (() => Promise<Result[]>)[] = []
 
       // Card name search (flexible — name tokens only)
       if (nameTokens.length >= 2) {
-        queries.push(
-          supabase.from('cards')
+        queries.push(async () => {
+          const r = await supabase.from('cards')
             .select('card_name, set_name, card_url_slug, image_url, card_number')
             .ilike('card_name', `%${nameTokens}%`)
             .not('card_url_slug', 'is', null)
             .limit(5)
-            .then(r => (r.data || []).map((c: any) => ({
-              type: 'card' as const,
-              label: c.card_name,
-              sublabel: c.card_number ? `${c.set_name} · #${c.card_number}` : c.set_name,
-              href: `/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`,
-              image_url: c.image_url,
-              price: null,
-            })))
-        )
-      }
-
-      // Full query as card name
-      queries.push(
-        supabase.from('cards')
-          .select('card_name, set_name, card_url_slug, image_url, card_number')
-          .ilike('card_name', `%${q}%`)
-          .not('card_url_slug', 'is', null)
-          .limit(5)
-          .then(r => (r.data || []).map((c: any) => ({
+          return (r.data || []).map((c: any) => ({
             type: 'card' as const,
             label: c.card_name,
             sublabel: c.card_number ? `${c.set_name} · #${c.card_number}` : c.set_name,
             href: `/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`,
             image_url: c.image_url,
             price: null,
-          })))
-      )
+          }))
+        })
+      }
+
+      // Full query as card name
+      queries.push(async () => {
+        const r = await supabase.from('cards')
+          .select('card_name, set_name, card_url_slug, image_url, card_number')
+          .ilike('card_name', `%${q}%`)
+          .not('card_url_slug', 'is', null)
+          .limit(5)
+        return (r.data || []).map((c: any) => ({
+          type: 'card' as const,
+          label: c.card_name,
+          sublabel: c.card_number ? `${c.set_name} · #${c.card_number}` : c.set_name,
+          href: `/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`,
+          image_url: c.image_url,
+          price: null,
+        }))
+      })
 
       // Set name search
-      queries.push(
-        supabase.from('cards')
+      queries.push(async () => {
+        const r = await supabase.from('cards')
           .select('set_name')
           .ilike('set_name', `%${q}%`)
           .limit(30)
-          .then(r => {
-            const seen = new Set<string>()
-            return (r.data || [])
-              .filter((s: any) => { if (seen.has(s.set_name)) return false; seen.add(s.set_name); return true })
-              .slice(0, 4)
-              .map((s: any) => ({
-                type: 'set' as const,
-                label: s.set_name,
-                sublabel: 'View set',
-                href: `/set/${encodeURIComponent(s.set_name)}`,
-                image_url: null,
-                price: null,
-              }))
-          })
-      )
+        const seen = new Set<string>()
+        return (r.data || [])
+          .filter((s: any) => { if (seen.has(s.set_name)) return false; seen.add(s.set_name); return true })
+          .slice(0, 4)
+          .map((s: any) => ({
+            type: 'set' as const,
+            label: s.set_name,
+            sublabel: 'View set',
+            href: `/set/${encodeURIComponent(s.set_name)}`,
+            image_url: null,
+            price: null,
+          }))
+      })
 
       // Card number search
       if (numberToken) {
         const num = parseInt(numberToken, 10).toString()
         const padded = num.padStart(3, '0')
-        queries.push(
-          supabase.from('cards')
+        queries.push(async () => {
+          const r = await supabase.from('cards')
             .select('card_name, set_name, card_url_slug, image_url, card_number')
             .in('card_number', [num, padded])
             .not('card_url_slug', 'is', null)
             .limit(4)
-            .then(r => (r.data || []).map((c: any) => ({
-              type: 'card' as const,
-              label: c.card_name,
-              sublabel: `${c.set_name} · #${c.card_number}`,
-              href: `/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`,
-              image_url: c.image_url,
-              price: null,
-            })))
-        )
+          return (r.data || []).map((c: any) => ({
+            type: 'card' as const,
+            label: c.card_name,
+            sublabel: `${c.set_name} · #${c.card_number}`,
+            href: `/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`,
+            image_url: c.image_url,
+            price: null,
+          }))
+        })
       }
 
-      const batches = await Promise.all(queries)
+      const batches = await Promise.all(queries.map(fn => fn()))
       if (cancelled) return
 
       // Merge, deduplicate by href, sets first
