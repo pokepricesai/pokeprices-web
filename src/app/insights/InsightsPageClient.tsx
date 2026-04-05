@@ -78,10 +78,10 @@ export default function InsightsPageClient() {
       {/* Header */}
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 34, margin: '0 0 8px', color: 'var(--text)', letterSpacing: -0.5 }}>
-          Market Insights
+          Insights
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: 0, fontFamily: "'Figtree', sans-serif", lineHeight: 1.6 }}>
-          Thoughtful writing on grading, collecting, and the Pokémon TCG market.
+          Short reads on grading, collecting, and the Pokémon TCG market.
         </p>
       </div>
 
