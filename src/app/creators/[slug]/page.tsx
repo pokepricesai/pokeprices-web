@@ -81,7 +81,7 @@ export default function CreatorProfilePage() {
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
-            <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, margin: 0 }}>{creator.name}</h1>
+            <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 28, margin: 0 }}>{creator.name}</h1>
             {creator.featured && (
               <span style={{
                 background: 'var(--accent)', color: '#000', fontSize: 10, fontWeight: 800,
