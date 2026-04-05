@@ -67,7 +67,7 @@ export default function VendorDetailClient({ vendor }: { vendor: any }) {
       {/* Header */}
       <div style={{ marginBottom: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
-          <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 32, margin: 0, color: 'var(--text)' }}>
+          <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 32, margin: 0, color: 'var(--text)' }}>
             {vendor.name}
           </h1>
           {vendor.verified && (
