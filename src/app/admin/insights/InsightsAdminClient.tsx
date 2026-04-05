@@ -223,7 +223,11 @@ Use UK English. Never say "delve", "realm", "embark", "unleash", or similar AI c
       published_at: status === 'published' ? (form.published_at || new Date().toISOString()) : form.published_at,
     }
 
-    await onSave(toSave)
+    try {
+      await onSave(toSave)
+    } catch (e: any) {
+      alert('Unexpected error: ' + e.message)
+    }
     setSaving(false)
   }
 
@@ -595,9 +599,11 @@ export default function InsightsAdminClient() {
   async function handleSave(data: Partial<Article>) {
     if (data.id) {
       const { id, created_at, ...updates } = data as any
-      await supabase.from('insights').update(updates).eq('id', id)
+      const { error } = await supabase.from('insights').update(updates).eq('id', id)
+      if (error) { alert('Save failed: ' + error.message); return }
     } else {
-      await supabase.from('insights').insert([data])
+      const { error } = await supabase.from('insights').insert([data])
+      if (error) { alert('Save failed: ' + error.message); return }
     }
     handleBack()
   }
