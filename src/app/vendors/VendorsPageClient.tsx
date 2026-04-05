@@ -105,7 +105,7 @@ function VendorCard({ vendor }: { vendor: Vendor }) {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3, flexWrap: 'wrap' }}>
               <h3 style={{
-                fontFamily: "'Playfair Display', serif", fontSize: 17,
+                fontFamily: "'Outfit', sans-serif", fontSize: 17,
                 fontWeight: 700, color: 'var(--text)', margin: 0,
               }}>
                 {vendor.name}
@@ -359,7 +359,7 @@ export default function VendorsPageClient() {
       {/* Header */}
       <div style={{ marginBottom: 28 }}>
         <h1 style={{
-          fontFamily: "'Playfair Display', serif", fontSize: 32,
+          fontFamily: "'Outfit', sans-serif", fontSize: 32,
           margin: '0 0 8px', color: 'var(--text)',
         }}>
           Vendor Directory
