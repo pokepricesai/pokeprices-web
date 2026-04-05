@@ -947,7 +947,7 @@ export default function DealerPageClient() {
 
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, margin: '0 0 6px', color: 'var(--text)', letterSpacing: -0.5 }}>
+        <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 28, margin: '0 0 6px', color: 'var(--text)', letterSpacing: -0.5 }}>
           Deal Calculator
         </h1>
         <p style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
@@ -1085,7 +1085,7 @@ export default function DealerPageClient() {
         marginTop: 32, background: 'var(--card)', border: '1px solid var(--border)',
         borderRadius: 16, padding: '28px 32px',
       }}>
-        <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, margin: '0 0 24px', color: 'var(--text)' }}>
+        <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, margin: '0 0 24px', color: 'var(--text)' }}>
           How to use the Deal Calculator
         </h2>
 
