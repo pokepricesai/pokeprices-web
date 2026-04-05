@@ -42,7 +42,7 @@ export default function TermsPage() {
         </Link>
         <h1 style={{
           fontSize: 32, fontWeight: 900, margin: '0 0 8px',
-          fontFamily: "'Playfair Display', serif", color: 'var(--text)',
+          fontFamily: "'Outfit', sans-serif", color: 'var(--text)',
         }}>
           Terms of Service
         </h1>
