@@ -102,7 +102,7 @@ function TrendingSetsPanel({ data }: { data: { rising: TrendingSet[]; falling: T
   return (
     <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: '20px 24px', marginBottom: 28 }}>
       <div style={{ marginBottom: 16 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 4px', fontFamily: "'Playfair Display', serif", color: 'var(--text)' }}>Set Momentum</h2>
+        <h2 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 4px', fontFamily: "'Outfit', sans-serif", color: 'var(--text)' }}>Set Momentum</h2>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0, fontFamily: "'Figtree', sans-serif" }}>
           Which sets are gaining or losing value — averaged across all cards in the set
         </p>
@@ -249,7 +249,7 @@ export default function BrowsePageClient() {
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 24px' }}>
-      <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 30, margin: '0 0 6px', color: 'var(--text)' }}>Pokemon Card Sets</h1>
+      <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 30, margin: '0 0 6px', color: 'var(--text)' }}>Pokemon Card Sets</h1>
       <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 16px', fontFamily: "'Figtree', sans-serif" }}>
         Browse all {sets.length} sets in our database. Click any set to see prices, trends and grading data.
       </p>
