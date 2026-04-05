@@ -42,8 +42,10 @@ export default function SearchBar({ placeholder = 'Search cards, sets, Pokémon�
   }, [])
 
   useEffect(() => {
+    // Don't trim dq for length check — trailing space is intentional (user still typing)
+    if (dq.length < 2) { setResults([]); setOpen(false); return }
     const q = dq.trim()
-    if (q.length < 2) { setResults([]); setOpen(false); return }
+    if (q.length < 2) return
     let cancelled = false
 
     async function run() {
@@ -101,6 +103,34 @@ export default function SearchBar({ placeholder = 'Search cards, sets, Pokémon�
       const tokens = q.split(/\s+/)
       const numberToken = tokens.find(t => /^\d{1,3}(\/\d+)?$/.test(t))
       const nameTokens  = tokens.filter(t => t !== numberToken).join(' ')
+
+      // ── Set name + card number: "Black Bolt 5" or "Evolving Skies 215" ──
+      if (numberToken && nameTokens.length >= 2) {
+        const num = parseInt(numberToken, 10).toString()
+        const padded = num.padStart(3, '0')
+        const { data: setCardData } = await supabase
+          .from('cards')
+          .select('card_name, set_name, card_url_slug, image_url, card_number')
+          .ilike('set_name', `%${nameTokens}%`)
+          .in('card_number', [num, padded])
+          .not('card_url_slug', 'is', null)
+          .limit(8)
+        if (!cancelled && setCardData && setCardData.length > 0) {
+          const mapped: Result[] = setCardData.map((c: any) => ({
+            type: 'card' as const,
+            label: c.card_name,
+            sublabel: `${c.set_name} · #${c.card_number}`,
+            href: `/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`,
+            image_url: c.image_url,
+            price: null,
+          }))
+          setResults(mapped)
+          setOpen(true)
+          setHighlighted(-1)
+          setLoading(false)
+          return
+        }
+      }
 
       const queries: (() => Promise<Result[]>)[] = []
 
