@@ -103,7 +103,7 @@ export default function SubmitCreatorPage() {
     return (
       <div style={{ maxWidth: 560, margin: '80px auto', padding: '0 24px', textAlign: 'center' }}>
         <div style={{ fontSize: 48, marginBottom: 16 }}>🎉</div>
-        <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, margin: '0 0 12px' }}>Submission received!</h1>
+        <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 28, margin: '0 0 12px' }}>Submission received!</h1>
         <p style={{ color: 'var(--text-muted)', fontSize: 15, fontFamily: "'Figtree', sans-serif", marginBottom: 24 }}>
           Your profile is under review and will appear in the directory once approved. Usually 1-2 days.
         </p>
@@ -132,7 +132,7 @@ export default function SubmitCreatorPage() {
   return (
     <div style={{ maxWidth: 640, margin: '0 auto', padding: '40px 24px 60px' }}>
       <div style={{ marginBottom: 32 }}>
-        <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 32, margin: '0 0 8px' }}>
+        <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 32, margin: '0 0 8px' }}>
           Submit Your Channel
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: 14, fontFamily: "'Figtree', sans-serif", margin: 0 }}>
