@@ -185,7 +185,7 @@ export default function CreatorsClient({ creators }: { creators: Creator[] }) {
       }}>
         <h1 style={{
           fontSize: 36, color: '#fff', margin: '0 0 8px',
-          fontFamily: "'Playfair Display', serif",
+          fontFamily: "'Outfit', sans-serif",
           textShadow: '0 2px 10px rgba(0,0,0,0.15)',
         }}>Creator Directory</h1>
         <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 15, margin: '0 0 24px', fontFamily: "'Figtree', sans-serif" }}>
