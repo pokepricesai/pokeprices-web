@@ -305,7 +305,7 @@ export default function HomeClient() {
 
           <h1 style={{
             fontSize: 38, color: '#fff', margin: '0 0 10px', lineHeight: 1.15,
-            textShadow: '0 2px 10px rgba(0,0,0,0.15)', fontFamily: "'Playfair Display', serif",
+            textShadow: '0 2px 10px rgba(0,0,0,0.15)', fontFamily: "'Outfit', sans-serif",
           }}>
             Know what your cards<br />are <span style={{ color: 'var(--accent)' }}>really</span> worth
           </h1>
@@ -430,7 +430,7 @@ export default function HomeClient() {
       <section style={{ padding: '8px 24px 40px', maxWidth: 960, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
           <div>
-            <h2 style={{ fontSize: 24, margin: '0 0 4px', fontFamily: "'Playfair Display', serif" }}>Market Heatmap</h2>
+            <h2 style={{ fontSize: 24, margin: '0 0 4px', fontFamily: "'Outfit', sans-serif" }}>Market Heatmap</h2>
             <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0, fontFamily: "'Figtree', sans-serif" }}>
               The most valuable actively-traded cards right now — colour shows 30-day price movement
             </p>
@@ -514,7 +514,7 @@ export default function HomeClient() {
             background: 'linear-gradient(135deg, rgba(167,139,250,0.07), rgba(59,130,246,0.05))',
             border: '1px solid rgba(167,139,250,0.18)', borderRadius: 18, padding: '24px',
           }}>
-            <h2 style={{ fontSize: 20, margin: '0 0 4px', fontFamily: "'Playfair Display', serif" }}>Hidden Gems</h2>
+            <h2 style={{ fontSize: 20, margin: '0 0 4px', fontFamily: "'Outfit', sans-serif" }}>Hidden Gems</h2>
             <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '0 0 16px', fontFamily: "'Figtree', sans-serif" }}>
               Rising price · low pop · under the radar — cards worth a closer look
             </p>
@@ -573,7 +573,7 @@ export default function HomeClient() {
           <div style={{ background: 'linear-gradient(135deg, #1a5fad, #2874c8)', padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14 }}>
             <div>
               <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, letterSpacing: 2, margin: '0 0 2px', textTransform: 'uppercase', fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>Next Release</p>
-              <h3 style={{ color: '#fff', fontSize: 22, margin: 0, fontWeight: 800, fontFamily: "'Playfair Display', serif" }}>Chaos Rising</h3>
+              <h3 style={{ color: '#fff', fontSize: 22, margin: 0, fontWeight: 800, fontFamily: "'Outfit', sans-serif" }}>Chaos Rising</h3>
               <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, margin: '2px 0 0', fontFamily: "'Figtree', sans-serif" }}>May 22, 2026</p>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -603,7 +603,7 @@ export default function HomeClient() {
 
       {/* ── BUILT DIFFERENT ───────────────────────────────────── */}
       <section style={{ padding: '16px 24px 44px', maxWidth: 900, margin: '0 auto' }}>
-        <h2 style={{ fontSize: 24, textAlign: 'center', margin: '0 0 6px', fontFamily: "'Playfair Display', serif" }}>Built for collectors, not investors</h2>
+        <h2 style={{ fontSize: 24, textAlign: 'center', margin: '0 0 6px', fontFamily: "'Outfit', sans-serif" }}>Built for collectors, not investors</h2>
         <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: 14, margin: '0 0 28px', fontFamily: "'Figtree', sans-serif" }}>No login. No paywall. No data collection. Ever.</p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
           {features.map((f, i) => (
@@ -646,7 +646,7 @@ export default function HomeClient() {
           <div style={{ fontSize: 32, marginBottom: 10 }}>📬</div>
           <h2 style={{
             fontSize: 22, margin: '0 0 8px',
-            fontFamily: "'Playfair Display', serif", color: 'var(--text)',
+            fontFamily: "'Outfit', sans-serif", color: 'var(--text)',
           }}>
             Monthly collector digest
           </h2>
@@ -668,7 +668,7 @@ export default function HomeClient() {
       
       {/* ── FAQ ───────────────────────────────────────────────── */}
       <section style={{ padding: '44px 24px', maxWidth: 680, margin: '0 auto' }}>
-        <h2 style={{ fontSize: 24, textAlign: 'center', margin: '0 0 24px', fontFamily: "'Playfair Display', serif" }}>Questions collectors ask</h2>
+        <h2 style={{ fontSize: 24, textAlign: 'center', margin: '0 0 24px', fontFamily: "'Outfit', sans-serif" }}>Questions collectors ask</h2>
         {faqs.map((faq, i) => (
           <details key={i} style={{ background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)', marginBottom: 8, overflow: 'hidden' }}>
             <summary style={{ padding: '14px 18px', fontSize: 14, fontWeight: 700, color: 'var(--text)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: "'Figtree', sans-serif" }}>
