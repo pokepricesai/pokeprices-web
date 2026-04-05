@@ -95,7 +95,7 @@ export default function PokemonPageClient() {
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
       <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 32, margin: '0 0 6px', color: 'var(--text)' }}>
+        <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 32, margin: '0 0 6px', color: 'var(--text)' }}>
           Pokémon
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: 14, fontFamily: "'Figtree', sans-serif", margin: 0 }}>
