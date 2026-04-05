@@ -124,7 +124,7 @@ function InsightCard({ card, theme }: { card: CardData; theme: Theme }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <CardImg src={card.image_url} w={52} h={72} />
           <div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: '#fff', lineHeight: 1.2, fontFamily: "'Playfair Display', serif" }}>{card.card_name}</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: '#fff', lineHeight: 1.2, fontFamily: "'Outfit', sans-serif" }}>{card.card_name}</div>
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 4 }}>{card.set_name}</div>
           </div>
         </div>
@@ -199,7 +199,7 @@ function PsaGauge({ card, theme }: { card: CardData; theme: Theme }) {
           <CardImg src={card.image_url} w={48} h={67} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: mu, textTransform: 'uppercase', marginBottom: 3 }}>PSA Premium Gauge</div>
-            <div style={{ fontSize: 17, fontWeight: 800, color: tx, fontFamily: "'Playfair Display', serif", lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.card_name}</div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: tx, fontFamily: "'Outfit', sans-serif", lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.card_name}</div>
             <div style={{ fontSize: 11, color: mu, marginTop: 2 }}>{card.set_name}</div>
           </div>
         </div>
@@ -266,7 +266,7 @@ function PeakDistance({ card, theme }: { card: CardData; theme: Theme }) {
           <CardImg src={card.image_url} w={48} h={67} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: mu, textTransform: 'uppercase', marginBottom: 3 }}>Peak vs Current</div>
-            <div style={{ fontSize: 17, fontWeight: 800, color: tx, fontFamily: "'Playfair Display', serif", lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.card_name}</div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: tx, fontFamily: "'Outfit', sans-serif", lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.card_name}</div>
             <div style={{ fontSize: 11, color: mu, marginTop: 2 }}>{card.set_name}</div>
           </div>
         </div>
@@ -332,7 +332,7 @@ function MarketTemperature({ card, theme }: { card: CardData; theme: Theme }) {
           <CardImg src={card.image_url} w={48} h={67} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: mu, textTransform: 'uppercase', marginBottom: 3 }}>Market Temperature</div>
-            <div style={{ fontSize: 17, fontWeight: 800, color: tx, fontFamily: "'Playfair Display', serif", lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.card_name}</div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: tx, fontFamily: "'Outfit', sans-serif", lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.card_name}</div>
             <div style={{ fontSize: 11, color: mu, marginTop: 2 }}>{card.set_name}</div>
           </div>
         </div>
