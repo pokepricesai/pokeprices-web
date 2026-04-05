@@ -74,12 +74,22 @@ interface Card {
   is_sealed: boolean
 }
 
+function safeImageUrl(url: string | null): string | null {
+  if (!url) return null
+  try {
+    // Already encoded — return as-is
+    return url
+  } catch {
+    return null
+  }
+}
+
 export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
-  const [pokeData, setPokeData] = useState<any>(null)
+  const [pokeData, setPokeData]     = useState<any>(null)
   const [speciesData, setSpeciesData] = useState<any>(null)
-  const [cards, setCards] = useState<Card[]>([])
-  const [loading, setLoading] = useState(true)
-  const [cardSort, setCardSort] = useState<'set' | 'price_desc' | 'price_asc' | 'name'>('price_desc')
+  const [cards, setCards]           = useState<Card[]>([])
+  const [loading, setLoading]       = useState(true)
+  const [cardSort, setCardSort]     = useState<'set' | 'price_desc' | 'price_asc' | 'name'>('price_desc')
 
   useEffect(() => {
     async function load() {
@@ -92,10 +102,28 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
       setPokeData(poke)
       setSpeciesData(species)
 
-      // Fetch cards from Supabase — exclude sealed, no limit, paginate
+      // Build the display name — capitalised slug
       const displayName = slug.split('-').map((w: string) => w[0].toUpperCase() + w.slice(1)).join(' ')
 
-      // Paginate to get all matching cards (no 1000-row limit)
+      // ── FIX: Match exact species name to prevent e.g. Kabuto matching Kabutops ──
+      // We match cards whose name:
+      //   - equals the display name exactly (e.g. "Kabuto")
+      //   - starts with "displayName " (e.g. "Kabuto #44", "Kabuto ex")
+      //   - starts with "displayName [" (e.g. "Kabuto [Reverse Holo]")
+      //   - starts with "Lt. Surge's displayName", "Misty's displayName" etc (trainer prefix)
+      //   - starts with "Dark displayName", "Light displayName", "Shining displayName" etc
+      // We achieve this with multiple ilike patterns ORed together:
+      const namePatterns = [
+        `card_name.eq.${displayName}`,
+        `card_name.ilike.${displayName} %`,
+        `card_name.ilike.${displayName} [%`,
+        `card_name.ilike.${displayName}#%`,
+        `card_name.ilike.% ${displayName}`,        // trainer prefix e.g. "Lt. Surge's Kabuto"
+        `card_name.ilike.% ${displayName} %`,      // trainer prefix + suffix e.g. "Dark Kabuto ex"
+        `card_name.ilike.% ${displayName}[%`,
+        `card_name.ilike.% ${displayName}#%`,
+      ].join(',')
+
       let allCardData: any[] = []
       let page = 0
       let done = false
@@ -103,7 +131,7 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
         const { data, error } = await supabase
           .from('cards')
           .select('card_name, set_name, card_url_slug, image_url, card_number, is_sealed')
-          .ilike('card_name', `%${displayName}%`)
+          .or(namePatterns)
           .eq('is_sealed', false)
           .order('set_name')
           .range(page * 1000, page * 1000 + 999)
@@ -114,10 +142,7 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
       }
 
       if (allCardData.length > 0) {
-        // Get unique card names to fetch prices
         const uniqueNames = Array.from(new Set(allCardData.map((c: any) => c.card_name)))
-
-        // Paginate prices too if needed
         let allPrices: any[] = []
         for (let i = 0; i < uniqueNames.length; i += 100) {
           const batch = uniqueNames.slice(i, i + 100)
@@ -127,21 +152,15 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
             .in('card_name', batch)
           if (priceData) allPrices = [...allPrices, ...priceData]
         }
-
         const priceMap: Record<string, any> = {}
         allPrices.forEach((p: any) => {
           const key = `${p.card_name}|||${p.set_name}`
           priceMap[key] = p
         })
-
         const enriched: Card[] = allCardData.map((c: any) => {
           const key = `${c.card_name}|||${c.set_name}`
           const price = priceMap[key]
-          return {
-            ...c,
-            raw_usd: price?.current_raw ?? null,
-            psa10_usd: price?.current_psa10 ?? null,
-          }
+          return { ...c, raw_usd: price?.current_raw ?? null, psa10_usd: price?.current_psa10 ?? null }
         })
         setCards(enriched)
       }
@@ -154,8 +173,8 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
 
   const sortedCards = [...cards].sort((a, b) => {
     if (cardSort === 'price_desc') return (b.raw_usd ?? 0) - (a.raw_usd ?? 0)
-    if (cardSort === 'price_asc') return (a.raw_usd ?? Infinity) - (b.raw_usd ?? Infinity)
-    if (cardSort === 'name') return a.card_name.localeCompare(b.card_name)
+    if (cardSort === 'price_asc')  return (a.raw_usd ?? Infinity) - (b.raw_usd ?? Infinity)
+    if (cardSort === 'name')       return a.card_name.localeCompare(b.card_name)
     return a.set_name.localeCompare(b.set_name)
   })
 
@@ -179,38 +198,41 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
     </div>
   )
 
-  // Derived data
-  const types: string[] = pokeData.types.map((t: any) => t.type.name)
-  const primaryType = types[0]
-  const typeColor = TYPE_COLORS[primaryType] ?? { bg: 'var(--primary)', text: '#fff', light: 'rgba(26,95,173,0.08)' }
+  const types: string[]         = pokeData.types.map((t: any) => t.type.name)
+  const primaryType             = types[0]
+  const typeColor               = TYPE_COLORS[primaryType] ?? { bg: 'var(--primary)', text: '#fff', light: 'rgba(26,95,173,0.08)' }
   const stats: { name: string; value: number }[] = pokeData.stats.map((s: any) => ({ name: s.stat.name, value: s.base_stat }))
-  const totalStats = stats.reduce((sum, s) => sum + s.value, 0)
-  const abilities: string[] = pokeData.abilities.map((a: any) => a.ability.name.split('-').map((w: string) => w[0].toUpperCase() + w.slice(1)).join(' '))
-  const artworkUrl = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${pokeData.id}.png`
+  const totalStats              = stats.reduce((sum, s) => sum + s.value, 0)
+  const abilities: string[]     = pokeData.abilities.map((a: any) => a.ability.name.split('-').map((w: string) => w[0].toUpperCase() + w.slice(1)).join(' '))
+  const artworkUrl              = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${pokeData.id}.png`
+  const flavorText              = speciesData?.flavor_text_entries?.filter((f: any) => f.language.name === 'en')?.slice(-1)[0]?.flavor_text?.replace(/\f/g, ' ')?.replace(/\u00ad/g, '') ?? null
+  const genus                   = speciesData?.genera?.find((g: any) => g.language.name === 'en')?.genus ?? null
+  const isLegendary             = speciesData?.is_legendary
+  const isMythical              = speciesData?.is_mythical
+  const heightM                 = (pokeData.height / 10).toFixed(1)
+  const weightKg                = (pokeData.weight / 10).toFixed(1)
 
-  const flavorText = speciesData?.flavor_text_entries
-    ?.filter((f: any) => f.language.name === 'en')
-    ?.slice(-1)[0]?.flavor_text
-    ?.replace(/\f/g, ' ')
-    ?.replace(/\u00ad/g, '')
-    ?? null
+  const regularCards            = cards.filter(c => !c.is_sealed)
+  const uniqueSets              = Array.from(new Set(regularCards.map(c => c.set_name)))
+  const mostExpensiveCard       = [...regularCards].sort((a, b) => (b.raw_usd ?? 0) - (a.raw_usd ?? 0))[0]
+  const mostExpensivePsa10      = [...regularCards].sort((a, b) => (b.psa10_usd ?? 0) - (a.psa10_usd ?? 0))[0]
+  const priceRange              = regularCards.filter(c => c.raw_usd)
+  const avgPrice                = priceRange.length ? priceRange.reduce((s, c) => s + (c.raw_usd ?? 0), 0) / priceRange.length : null
 
-  const genus = speciesData?.genera?.find((g: any) => g.language.name === 'en')?.genus ?? null
-  const isLegendary = speciesData?.is_legendary
-  const isMythical = speciesData?.is_mythical
-  const heightM = (pokeData.height / 10).toFixed(1)
-  const weightKg = (pokeData.weight / 10).toFixed(1)
+  // Related Pokémon for "Explore more" — evolution family from species data
+  const evolutionSlugs: string[] = []
+  if (speciesData?.evolves_from_species?.name) evolutionSlugs.push(speciesData.evolves_from_species.name)
 
-  // Card analytics
-  const regularCards = cards.filter(c => !c.is_sealed)
-  const uniqueSets = new Set(regularCards.map(c => c.set_name)).size
-  const mostExpensiveCard = [...regularCards].sort((a, b) => (b.raw_usd ?? 0) - (a.raw_usd ?? 0))[0]
-  const mostExpensivePsa10 = [...regularCards].sort((a, b) => (b.psa10_usd ?? 0) - (a.psa10_usd ?? 0))[0]
-  const priceRange = regularCards.filter(c => c.raw_usd)
-  const avgPrice = priceRange.length ? priceRange.reduce((s, c) => s + (c.raw_usd ?? 0), 0) / priceRange.length : null
+  // Top sets by card count for "Explore by set" section
+  const setCardCounts = uniqueSets.map(setName => ({
+    setName,
+    count: regularCards.filter(c => c.set_name === setName).length,
+    topCard: [...regularCards.filter(c => c.set_name === setName)].sort((a, b) => (b.raw_usd ?? 0) - (a.raw_usd ?? 0))[0],
+  })).sort((a, b) => b.count - a.count).slice(0, 6)
 
   return (
     <div style={{ maxWidth: 1000, margin: '0 auto', padding: '32px 24px' }}>
+
       {/* Breadcrumb */}
       <div style={{ marginBottom: 20 }}>
         <Link href="/pokemon" style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textDecoration: 'none' }}>
@@ -218,71 +240,40 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
         </Link>
       </div>
 
-      {/* Hero section */}
+      {/* Hero */}
       <div style={{
         background: typeColor.light, border: '1px solid var(--border)', borderRadius: 20,
         padding: '28px 32px', marginBottom: 24,
         display: 'flex', gap: 32, flexWrap: 'wrap', alignItems: 'center',
       }}>
-        {/* Artwork */}
         <div style={{ flex: '0 0 auto', textAlign: 'center' }}>
-          <img
-            src={artworkUrl}
-            alt={capitalize(slug)}
-            style={{ width: 180, height: 180, objectFit: 'contain', filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.15))' }}
-          />
+          <img src={artworkUrl} alt={capitalize(slug)} style={{ width: 180, height: 180, objectFit: 'contain', filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.15))' }} />
         </div>
-
-        {/* Core info */}
         <div style={{ flex: 1, minWidth: 260 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-              #{String(pokeData.id).padStart(3, '0')}
-            </span>
-            {isLegendary && (
-              <span style={{ fontSize: 10, fontWeight: 800, background: '#FFD166', color: '#1a1a1a', padding: '2px 8px', borderRadius: 20, fontFamily: "'Figtree', sans-serif", letterSpacing: 0.8, textTransform: 'uppercase' }}>Legendary</span>
-            )}
-            {isMythical && (
-              <span style={{ fontSize: 10, fontWeight: 800, background: '#C77DFF', color: '#fff', padding: '2px 8px', borderRadius: 20, fontFamily: "'Figtree', sans-serif", letterSpacing: 0.8, textTransform: 'uppercase' }}>Mythical</span>
-            )}
+            <span style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>#{String(pokeData.id).padStart(3, '0')}</span>
+            {isLegendary && <span style={{ fontSize: 10, fontWeight: 800, background: '#FFD166', color: '#1a1a1a', padding: '2px 8px', borderRadius: 20, fontFamily: "'Figtree', sans-serif", letterSpacing: 0.8, textTransform: 'uppercase' }}>Legendary</span>}
+            {isMythical  && <span style={{ fontSize: 10, fontWeight: 800, background: '#C77DFF', color: '#fff',    padding: '2px 8px', borderRadius: 20, fontFamily: "'Figtree', sans-serif", letterSpacing: 0.8, textTransform: 'uppercase' }}>Mythical</span>}
           </div>
-
-          <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 36, margin: '0 0 4px', color: 'var(--text)', lineHeight: 1 }}>
-            {capitalize(slug)}
-          </h1>
-          {genus && (
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 12px' }}>
-              The {genus}
-            </p>
-          )}
-
+          <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 36, margin: '0 0 4px', color: 'var(--text)', lineHeight: 1 }}>{capitalize(slug)}</h1>
+          {genus && <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 12px' }}>The {genus}</p>}
           <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
             {types.map(t => <TypeBadge key={t} type={t} />)}
           </div>
-
           {flavorText && (
             <p style={{ fontSize: 14, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.7, margin: '0 0 16px', fontStyle: 'italic', maxWidth: 420 }}>
               "{flavorText}"
             </p>
           )}
-
           <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-            <div>
-              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>Height</div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>{heightM}m</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>Weight</div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>{weightKg}kg</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>Abilities</div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>{abilities.join(', ')}</div>
-            </div>
+            {[{ label: 'Height', val: `${heightM}m` }, { label: 'Weight', val: `${weightKg}kg` }, { label: 'Abilities', val: abilities.join(', ') }].map(s => (
+              <div key={s.label}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>{s.label}</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>{s.val}</div>
+              </div>
+            ))}
           </div>
         </div>
-
-        {/* Stats */}
         <div style={{ flex: '0 0 auto', minWidth: 240, background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)', padding: '16px 20px' }}>
           <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.5, color: 'var(--text-muted)', marginBottom: 14, fontFamily: "'Figtree', sans-serif" }}>
             Base Stats · {totalStats} total
@@ -297,11 +288,11 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
       {regularCards.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10, marginBottom: 24 }}>
           {[
-            { label: 'Total Cards', value: regularCards.length.toString() },
-            { label: 'Sets Featured In', value: uniqueSets.toString() },
+            { label: 'Total Cards',        value: regularCards.length.toString() },
+            { label: 'Sets Featured In',   value: uniqueSets.length.toString() },
             { label: 'Most Expensive Raw', value: mostExpensiveCard?.raw_usd ? `$${(mostExpensiveCard.raw_usd / 100).toFixed(0)}` : '—', sub: mostExpensiveCard?.card_name },
-            { label: 'Best PSA 10', value: mostExpensivePsa10?.psa10_usd ? `$${(mostExpensivePsa10.psa10_usd / 100).toFixed(0)}` : '—', sub: mostExpensivePsa10?.card_name },
-            { label: 'Avg Raw Price', value: avgPrice ? `$${(avgPrice / 100).toFixed(0)}` : '—' },
+            { label: 'Best PSA 10',        value: mostExpensivePsa10?.psa10_usd ? `$${(mostExpensivePsa10.psa10_usd / 100).toFixed(0)}` : '—', sub: mostExpensivePsa10?.card_name },
+            { label: 'Avg Raw Price',      value: avgPrice ? `$${(avgPrice / 100).toFixed(0)}` : '—' },
           ].map((s, i) => (
             <div key={i} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
               <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1, marginBottom: 4 }}>{s.value}</div>
@@ -312,8 +303,8 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
         </div>
       )}
 
-      {/* Cards section */}
-      <div>
+      {/* Cards grid */}
+      <div style={{ marginBottom: 40 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
           <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, margin: 0, color: 'var(--text)' }}>
             {regularCards.length > 0 ? `${regularCards.length} Cards` : 'Cards'}
@@ -335,44 +326,121 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
           <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, padding: '40px 24px', textAlign: 'center' }}>
             <div style={{ fontSize: 32, marginBottom: 12 }}>🃏</div>
             <p style={{ color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0 }}>
-              {capitalize(slug)} hasn't appeared on any Pokémon TCG cards in our database yet.
+              {capitalize(slug)} hasn&apos;t appeared on any Pokémon TCG cards in our database yet.
             </p>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
-            {sortedCards.map((card, i) => (
-              <Link key={i} href={`/set/${encodeURIComponent(card.set_name)}/card/${card.card_url_slug}`} style={{ textDecoration: 'none' }}>
-                <div style={{
-                  background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12,
-                  padding: '12px 10px', textAlign: 'center', transition: 'border-color 0.15s, transform 0.15s',
-                }}
+            {sortedCards.map((card, i) => {
+              const imgSrc = safeImageUrl(card.image_url)
+              return (
+                <Link key={i} href={`/set/${encodeURIComponent(card.set_name)}/card/${card.card_url_slug}`} style={{ textDecoration: 'none' }}>
+                  <div
+                    style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '12px 10px', textAlign: 'center', transition: 'border-color 0.15s, transform 0.15s', height: '100%', boxSizing: 'border-box' }}
+                    onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--primary)'; el.style.transform = 'translateY(-2px)' }}
+                    onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--border)'; el.style.transform = 'translateY(0)' }}
+                  >
+                    {/* FIX: display block + margin auto to properly center the image */}
+                    {imgSrc ? (
+                      <img
+                        src={imgSrc}
+                        alt={card.card_name}
+                        style={{ width: 90, height: 126, objectFit: 'contain', borderRadius: 6, marginBottom: 8, display: 'block', margin: '0 auto 8px' }}
+                        loading="lazy"
+                        onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                      />
+                    ) : (
+                      <div style={{ width: 90, height: 126, background: 'var(--bg-light)', borderRadius: 6, margin: '0 auto 8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>🃏</div>
+                    )}
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", marginBottom: 2, lineHeight: 1.3 }}>
+                      {card.card_name}
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>
+                      {card.set_name}{card.card_number ? ` · #${card.card_number}` : ''}
+                    </div>
+                    {card.raw_usd ? (
+                      <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--primary)', fontFamily: "'Figtree', sans-serif" }}>
+                        ${(card.raw_usd / 100).toFixed(2)}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 11, color: 'var(--border)', fontFamily: "'Figtree', sans-serif" }}>No price</div>
+                    )}
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── Explore more by set ── */}
+      {setCardCounts.length > 0 && (
+        <div style={{ marginBottom: 40 }}>
+          <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 20, margin: '0 0 14px', color: 'var(--text)' }}>
+            Explore {capitalize(slug)} by Set
+          </h2>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
+            {setCardCounts.map(({ setName, count, topCard }) => (
+              <Link
+                key={setName}
+                href={`/set/${encodeURIComponent(setName)}`}
+                style={{ textDecoration: 'none' }}
+              >
+                <div
+                  style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 14px', transition: 'border-color 0.15s, transform 0.15s' }}
                   onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--primary)'; el.style.transform = 'translateY(-2px)' }}
                   onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--border)'; el.style.transform = 'translateY(0)' }}
                 >
-                  {card.image_url ? (
-                    <img src={card.image_url} alt={card.card_name} style={{ width: 90, borderRadius: 6, marginBottom: 8 }} loading="lazy" />
-                  ) : (
-                    <div style={{ width: 90, height: 126, background: 'var(--bg-light)', borderRadius: 6, margin: '0 auto 8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>🃏</div>
+                  {topCard?.image_url && (
+                    <img
+                      src={topCard.image_url}
+                      alt={topCard.card_name}
+                      style={{ width: 50, height: 70, objectFit: 'contain', display: 'block', margin: '0 auto 10px', borderRadius: 4 }}
+                      loading="lazy"
+                      onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                    />
                   )}
-                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", marginBottom: 2, lineHeight: 1.3 }}>
-                    {card.card_name}
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>
-                    {card.set_name}{card.card_number ? ` · #${card.card_number}` : ''}
-                  </div>
-                  {card.raw_usd ? (
-                    <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--primary)', fontFamily: "'Figtree', sans-serif" }}>
-                      ${(card.raw_usd / 100).toFixed(2)}
-                    </div>
-                  ) : (
-                    <div style={{ fontSize: 11, color: 'var(--border)', fontFamily: "'Figtree', sans-serif" }}>No price</div>
-                  )}
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.3, marginBottom: 4 }}>{setName}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>{count} card{count !== 1 ? 's' : ''}</div>
                 </div>
               </Link>
             ))}
           </div>
-        )}
+        </div>
+      )}
+
+      {/* ── Explore more Pokémon ── */}
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: '20px 24px' }}>
+        <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, margin: '0 0 14px', color: 'var(--text)' }}>
+          Explore More Pokémon
+        </h2>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {[
+            'charizard', 'pikachu', 'mewtwo', 'umbreon', 'eevee', 'gengar',
+            'rayquaza', 'lugia', 'blastoise', 'venusaur', 'snorlax', 'dragonite',
+            'mew', 'espeon', 'vaporeon', 'alakazam', 'gyarados', 'lapras',
+          ].filter(p => p !== slug).slice(0, 12).map(pokemon => (
+            <Link
+              key={pokemon}
+              href={`/pokemon/${pokemon}`}
+              style={{
+                padding: '6px 14px', borderRadius: 20, textDecoration: 'none',
+                background: 'var(--bg-light)', border: '1px solid var(--border)',
+                fontSize: 13, fontWeight: 600, color: 'var(--text)',
+                fontFamily: "'Figtree', sans-serif", transition: 'border-color 0.15s',
+              }}
+              onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--primary)'}
+              onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)'}
+            >
+              {pokemon.charAt(0).toUpperCase() + pokemon.slice(1)}
+            </Link>
+          ))}
+          <Link href="/pokemon" style={{ padding: '6px 14px', borderRadius: 20, textDecoration: 'none', background: 'var(--primary)', fontSize: 13, fontWeight: 700, color: '#fff', fontFamily: "'Figtree', sans-serif" }}>
+            All Pokémon →
+          </Link>
+        </div>
       </div>
+
     </div>
   )
 }
