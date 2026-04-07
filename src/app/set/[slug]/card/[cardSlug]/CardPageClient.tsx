@@ -482,7 +482,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
 
   if (!card) return (
     <div style={{ maxWidth: 800, margin: '0 auto', padding: '60px 24px', textAlign: 'center' }}>
-      <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, marginBottom: 12 }}>Card not found</h1>
+      <h1 style={{ fontFamily: "'Outfit', serif", fontSize: 28, marginBottom: 12 }}>Card not found</h1>
       <p style={{ color: 'var(--text-muted)' }}>This card doesn&apos;t exist in our database.</p>
       <Link href="/browse" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>Browse sets →</Link>
     </div>
@@ -699,7 +699,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
 
         <div style={{ flex: 1, minWidth: 280 }}>
           <h1 style={{
-            fontFamily: "'Playfair Display', serif", fontSize: 26,
+            fontFamily: "'Outfit', serif", fontSize: 26,
             margin: '0 0 4px', color: 'var(--text)', letterSpacing: '-0.3px',
           }}>{card.card_name}</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 16px', fontFamily: "'Figtree', sans-serif" }}>
