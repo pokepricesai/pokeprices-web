@@ -23,7 +23,7 @@ export default function ContactPageClient() {
   return (
     <div style={{ maxWidth: 560, margin: '0 auto', padding: '48px 24px' }}>
       <h1 style={{
-        fontFamily: "'Playfair Display', serif", fontSize: 32,
+        fontFamily: "'Outfit', serif", fontSize: 32,
         margin: '0 0 8px', color: 'var(--text)',
       }}>Get in touch</h1>
       <p style={{ color: 'var(--text-muted)', fontSize: 15, margin: '0 0 32px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif" }}>
