@@ -1,5 +1,4 @@
-// Add this to your existing middleware.ts or create it at src/middleware.ts
-// Protects /intel with a simple password check via cookie
+// src/middleware.ts
 
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -8,13 +7,11 @@ const INTEL_PASSWORD = process.env.INTEL_PASSWORD || process.env.NEXT_PUBLIC_ADM
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Protect /intel routes
-  if (pathname.startsWith('/intel')) {
+  // Protect /intel routes — but NOT the login page itself
+  if (pathname.startsWith('/intel') && !pathname.startsWith('/intel/login')) {
     const authCookie = request.cookies.get('intel_auth')?.value
     if (authCookie !== INTEL_PASSWORD) {
-      // Redirect to login with return URL
-      const loginUrl = new URL('/intel/login', request.url)
-      return NextResponse.redirect(loginUrl)
+      return NextResponse.redirect(new URL('/intel/login', request.url))
     }
   }
 
