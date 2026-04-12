@@ -8,10 +8,10 @@ const supabaseServer = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
-  const setName = decodeURIComponent(params.slug)
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params
+  const setName = decodeURIComponent(slug)
 
-  // Fetch set stats for richer titles
   const { data: setData } = await supabaseServer
     .from('cards')
     .select('set_release_date')
@@ -25,7 +25,6 @@ export async function generateMetadata({ params }: { params: { slug: string } })
     : null
 
   const titleYear = year ? ` (${year})` : ''
-
   const title = `${setName}${titleYear} Card Prices — Complete Price Guide | PokePrices`
   const description = `All ${setName} Pokémon card prices — raw, PSA 9 and PSA 10 values, grading calculator, PSA population data and 30-day price trends. Updated daily.`
 
@@ -35,21 +34,16 @@ export async function generateMetadata({ params }: { params: { slug: string } })
     openGraph: {
       title,
       description,
-      url: `https://pokeprices.io/set/${params.slug}`,
+      url: `https://pokeprices.io/set/${slug}`,
       siteName: 'PokePrices',
       type: 'website',
     },
-    twitter: {
-      card: 'summary',
-      title,
-      description,
-    },
-    alternates: {
-      canonical: `https://pokeprices.io/set/${params.slug}`,
-    },
+    twitter: { card: 'summary', title, description },
+    alternates: { canonical: `https://pokeprices.io/set/${slug}` },
   }
 }
 
-export default function SetPage({ params }: { params: { slug: string } }) {
-  return <SetPageClient slug={params.slug} />
+export default async function SetPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
+  return <SetPageClient slug={slug} />
 }

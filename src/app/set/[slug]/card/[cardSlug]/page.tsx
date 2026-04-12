@@ -8,35 +8,28 @@ const supabaseServer = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-type Props = {
-  params: { slug: string; cardSlug: string }
-}
-
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const setName = decodeURIComponent(params.slug)
+export async function generateMetadata({ params }: { params: Promise<{ slug: string; cardSlug: string }> }): Promise<Metadata> {
+  const { slug, cardSlug } = await params
+  const setName = decodeURIComponent(slug)
 
   const { data: card } = await supabaseServer.rpc('get_card_detail_by_url_slug', {
     p_set_name: setName,
-    p_card_url_slug: params.cardSlug,
+    p_card_url_slug: cardSlug,
   })
 
   if (!card) return { title: 'Card Not Found | PokePrices' }
 
-  // Format prices for title — e.g. "Raw $1,755 · PSA 10 $3,807"
-  const rawFmt    = card.raw_usd    ? `$${(card.raw_usd / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : null
-  const psa10Fmt  = card.psa10_usd  ? `$${(card.psa10_usd / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : null
-  const psa9Fmt   = card.psa9_usd   ? `$${(card.psa9_usd / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : null
+  const rawFmt   = card.raw_usd   ? `$${(card.raw_usd / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : null
+  const psa10Fmt = card.psa10_usd ? `$${(card.psa10_usd / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : null
+  const psa9Fmt  = card.psa9_usd  ? `$${(card.psa9_usd / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : null
 
-  // Build price string for title: "Raw $1,755 · PSA 10 $3,807"
   const priceParts: string[] = []
   if (rawFmt)   priceParts.push(`Raw ${rawFmt}`)
   if (psa10Fmt) priceParts.push(`PSA 10 ${psa10Fmt}`)
   const priceStr = priceParts.length > 0 ? ` — ${priceParts.join(' · ')}` : ''
 
-  // Title format: "Umbreon VMAX #215 Price — Raw $1,755 · PSA 10 $3,807 | PokePrices"
   const title = `${card.card_name} Price${priceStr} | PokePrices`
 
-  // Rich description with all available price points
   const descParts: string[] = []
   if (rawFmt)   descParts.push(`Raw: ${rawFmt}`)
   if (psa9Fmt)  descParts.push(`PSA 9: ${psa9Fmt}`)
@@ -52,7 +45,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       title,
       description,
       images: card.image_url ? [{ url: card.image_url, width: 245, height: 342, alt: card.card_name }] : [],
-      url: `https://pokeprices.io/set/${params.slug}/card/${params.cardSlug}`,
+      url: `https://pokeprices.io/set/${slug}/card/${cardSlug}`,
       siteName: 'PokePrices',
       type: 'website',
     },
@@ -62,13 +55,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       description,
       images: card.image_url ? [card.image_url] : [],
     },
-    alternates: {
-      canonical: `https://pokeprices.io/set/${params.slug}/card/${params.cardSlug}`,
-    },
+    alternates: { canonical: `https://pokeprices.io/set/${slug}/card/${cardSlug}` },
   }
 }
 
-export default function CardPage({ params }: Props) {
-  const setName = decodeURIComponent(params.slug)
-  return <CardPageClient setName={setName} cardUrlSlug={params.cardSlug} />
+export default async function CardPage({ params }: { params: Promise<{ slug: string; cardSlug: string }> }) {
+  const { slug, cardSlug } = await params
+  const setName = decodeURIComponent(slug)
+  return <CardPageClient setName={setName} cardUrlSlug={cardSlug} />
 }
