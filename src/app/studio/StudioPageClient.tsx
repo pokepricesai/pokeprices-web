@@ -112,7 +112,7 @@ async function fetchCard(slug: string): Promise<CardData | null> {
   return { ...trend, card_url_slug: meta?.card_url_slug || null, image_url: meta?.image_url || null }
 }
 
-async function fetchMovers(period: MoversPeriod, direction: MoversDirection, limit = 20): Promise<Mover[]> {
+async function fetchMovers(period: MoversPeriod, direction: MoversDirection, limit = 10): Promise<Mover[]> {
   const { data: rawData } = await supabase.rpc('get_market_movers', {
     p_period: period,
     p_direction: direction,
@@ -194,12 +194,12 @@ function Watermark({ color }: { color: string }) {
 // Footer branding bar for PNGs
 function BrandingBar({ v }: { v: ReturnType<typeof getThemeVars> }) {
   return (
-    <div style={{ padding: '8px 18px', borderTop: `1px solid ${v.br}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-        <img src="/favicon.ico" alt="" style={{ width: 14, height: 14 }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
-        <span style={{ fontSize: 10, fontWeight: 900, color: v.mu, letterSpacing: 0.5 }}>Powered by PokePrices.io</span>
+    <div style={{ padding: '10px 18px', borderTop: `1px solid ${v.br}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 36 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <img src="/favicon.ico" alt="" style={{ width: 16, height: 16, display: 'block' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+        <span style={{ fontSize: 11, fontWeight: 800, color: v.mu, letterSpacing: 0.3, lineHeight: 1 }}>Powered by PokePrices.io</span>
       </div>
-      <span style={{ fontSize: 9, color: v.mu, fontWeight: 600 }}>Not financial advice</span>
+      <span style={{ fontSize: 10, color: v.mu, fontWeight: 600, lineHeight: 1 }}>Not financial advice</span>
     </div>
   )
 }
@@ -331,11 +331,11 @@ function PsaGauge({ card, theme }: { card: CardData; theme: Theme }) {
           {multiple != null && <path d={arc(-180, needleAngle)} fill="none" stroke={info.col} strokeWidth={14} strokeLinecap="round" opacity={0.95} />}
           <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={v.tx} strokeWidth={3} strokeLinecap="round" opacity={0.5} />
           <circle cx={cx} cy={cy} r={6} fill={info.col} />
-          {/* Labels with more breathing room */}
-          <text x={20}  y={125} fontSize={9} fill={v.mu} fontFamily="Figtree,sans-serif" fontWeight="700">LOW</text>
-          <text x={88}  y={24}  fontSize={9} fill={v.mu} fontFamily="Figtree,sans-serif" fontWeight="700">HEALTHY</text>
-          <text x={158} y={24}  fontSize={9} fill={v.mu} fontFamily="Figtree,sans-serif" fontWeight="700">STRONG</text>
-          <text x={230} y={125} fontSize={9} fill={v.mu} fontFamily="Figtree,sans-serif" fontWeight="700">EXTREME</text>
+          {/* Labels with clear separation from arc */}
+          <text x={20}  y={128} fontSize={9} fill={v.mu} fontFamily="Figtree,sans-serif" fontWeight="700">LOW</text>
+          <text x={95}  y={16}  fontSize={9} fill={v.mu} fontFamily="Figtree,sans-serif" fontWeight="700">HEALTHY</text>
+          <text x={162} y={16}  fontSize={9} fill={v.mu} fontFamily="Figtree,sans-serif" fontWeight="700">STRONG</text>
+          <text x={224} y={128} fontSize={9} fill={v.mu} fontFamily="Figtree,sans-serif" fontWeight="700">EXTREME</text>
         </svg>
       </div>
 
@@ -582,7 +582,7 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
           <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.4)' }}>{today}</span>
         </div>
         <div style={{ fontSize: 24, fontWeight: 900, color: '#fff', letterSpacing: -0.5, fontFamily: "'Outfit', sans-serif" }}>
-          {arrow} Top {movers.length} {direction === 'rising' ? 'Risers' : 'Fallers'}
+          {arrow} Top 10 {direction === 'rising' ? 'Risers' : 'Fallers'}
         </div>
         <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 4, fontWeight: 600 }}>
           Past {periodLabel} · Min 3 sales · Volume verified
@@ -599,7 +599,7 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
         {movers.map((m, i) => (
           <div key={i} style={{
             display: 'grid', gridTemplateColumns: '32px 1fr 80px 70px', gap: 8,
-            padding: '9px 20px',
+            padding: '13px 20px',
             borderBottom: i < movers.length - 1 ? `1px solid ${v.br}` : 'none',
             background: i % 2 === 0 ? 'transparent' : v.dk ? 'rgba(255,255,255,0.015)' : 'rgba(0,0,0,0.015)',
           }}>
@@ -667,7 +667,7 @@ function SetReport({ setData, theme }: { setData: SetData; theme: Theme }) {
           const sharePct = setData.total_value > 0 ? (c.current_raw / setData.total_value) * 100 : 0
           const barW = Math.min(100, sharePct * 3)
           return (
-            <div key={i} style={{ padding: '8px 20px', borderBottom: i < setData.top_cards.length - 1 ? `1px solid ${v.br}` : 'none' }}>
+            <div key={i} style={{ padding: '12px 20px', borderBottom: i < setData.top_cards.length - 1 ? `1px solid ${v.br}` : 'none' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
