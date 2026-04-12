@@ -8,11 +8,6 @@ import { createClient } from '@supabase/supabase-js'
 
 export const runtime = 'edge'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-)
-
 const USD_TO_GBP = 0.79
 
 function fmt(cents: number | null | undefined): string {
@@ -43,7 +38,7 @@ function pctColor(n: number | null | undefined): string {
 
 // ── Fetch data ────────────────────────────────────────────────────────────────
 
-async function getCardData(slug: string) {
+async function getCardData(supabase: any, slug: string) {
   const [{ data: trend }, { data: meta }] = await Promise.all([
     supabase.from('card_trends')
       .select('card_slug,card_name,set_name,current_raw,current_psa9,current_psa10,raw_pct_7d,raw_pct_30d,raw_pct_90d,raw_30d_ago,raw_90d_ago,raw_180d_ago')
@@ -54,7 +49,7 @@ async function getCardData(slug: string) {
   return { ...trend, image_url: meta?.image_url || null }
 }
 
-async function getMovers(period: string, direction: string) {
+async function getMovers(supabase: any, period: string, direction: string) {
   const col = `raw_pct_${period}`
   const { data } = await supabase.from('card_trends')
     .select(`card_slug,card_name,set_name,current_raw,${col}`)
@@ -66,7 +61,7 @@ async function getMovers(period: string, direction: string) {
   return data || []
 }
 
-async function getSetData(setName: string) {
+async function getSetData(supabase: any, setName: string) {
   const { data } = await supabase.from('card_trends')
     .select('card_slug,card_name,set_name,current_raw,raw_pct_30d,raw_pct_90d')
     .ilike('set_name', `%${setName}%`)
@@ -271,6 +266,10 @@ function renderSetReport(cards: any[], setName: string, v: ReturnType<typeof get
 // ── Route handler ─────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  )
   const { searchParams } = new URL(req.url)
   const type      = searchParams.get('type') || 'insight'
   const themeStr  = searchParams.get('theme') || 'dark'
@@ -286,15 +285,15 @@ export async function GET(req: NextRequest) {
     let content: React.ReactNode = null
 
     if (type === 'movers') {
-      const movers = await getMovers(period, direction)
+      const movers = await getMovers(supabase, period, direction)
       content = renderMovers(movers, period, direction, v)
 
     } else if (type === 'set-report' && setName) {
-      const cards = await getSetData(setName)
+      const cards = await getSetData(supabase, setName)
       content = renderSetReport(cards, setName, v)
 
     } else if (cardSlug) {
-      const card = await getCardData(cardSlug)
+      const card = await getCardData(supabase, cardSlug)
       if (!card) return new Response('Card not found', { status: 404 })
 
       switch (type) {
