@@ -184,9 +184,9 @@ function CardImg({ src, w, h, radius = 6 }: { src: string | null; w: number; h: 
 // Watermark with favicon + branding
 function Watermark({ color }: { color: string }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-      <img src="/favicon.ico" alt="" style={{ width: 12, height: 12, opacity: 0.5 }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
-      <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.2, color, textTransform: 'uppercase', opacity: 0.6 }}>PokePrices.io</span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, lineHeight: 1 }}>
+      <img src="/favicon.ico" alt="" style={{ width: 12, height: 12, display: 'block', opacity: 0.6 }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+      <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.2, color, textTransform: 'uppercase', opacity: 0.8, display: 'block' }}>PokePrices.io</span>
     </div>
   )
 }
@@ -331,10 +331,9 @@ function PsaGauge({ card, theme }: { card: CardData; theme: Theme }) {
           {multiple != null && <path d={arc(-180, needleAngle)} fill="none" stroke={info.col} strokeWidth={14} strokeLinecap="round" opacity={0.95} />}
           <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={v.tx} strokeWidth={3} strokeLinecap="round" opacity={0.5} />
           <circle cx={cx} cy={cy} r={6} fill={info.col} />
-          {/* Labels with clear separation from arc */}
           <text x={20}  y={128} fontSize={9} fill={v.mu} fontFamily="Figtree,sans-serif" fontWeight="700">LOW</text>
-          <text x={95}  y={16}  fontSize={9} fill={v.mu} fontFamily="Figtree,sans-serif" fontWeight="700">HEALTHY</text>
-          <text x={162} y={16}  fontSize={9} fill={v.mu} fontFamily="Figtree,sans-serif" fontWeight="700">STRONG</text>
+          <text x={82}  y={8}   fontSize={9} fill={v.mu} fontFamily="Figtree,sans-serif" fontWeight="700">HEALTHY</text>
+          <text x={168} y={8}   fontSize={9} fill={v.mu} fontFamily="Figtree,sans-serif" fontWeight="700">STRONG</text>
           <text x={224} y={128} fontSize={9} fill={v.mu} fontFamily="Figtree,sans-serif" fontWeight="700">EXTREME</text>
         </svg>
       </div>
@@ -514,16 +513,16 @@ function GradeCompare({ card, theme }: { card: CardData; theme: Theme }) {
         <Watermark color={v.mu} />
       </div>
 
-      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 22, height: 130 }}>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 22, height: 150, padding: '0 4px' }}>
         {grades.map(g => {
-          const barPct = maxPrice > 0 ? ((g.price || 0) / maxPrice) * 100 : 0
-          const barH = Math.max(16, (barPct / 100) * 110)
+          const barPct = maxPrice > 0 ? ((g.price || 0) / maxPrice) : 0
+          const barH = Math.max(8, barPct * 140)
           return (
-            <div key={g.label} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
-              <div style={{ fontSize: 11, fontWeight: 900, color: g.color }}>{fmt(g.price)}</div>
-              <div style={{ width: '100%', height: barH, borderRadius: '8px 8px 4px 4px', background: `linear-gradient(to top, ${g.color}, ${g.color}88)`, minHeight: 16 }} />
+            <div key={g.label} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, justifyContent: 'flex-end', height: '100%' }}>
+              <div style={{ fontSize: 12, fontWeight: 900, color: g.color }}>{fmt(g.price)}</div>
+              <div style={{ width: '100%', height: barH, borderRadius: '6px 6px 3px 3px', background: `linear-gradient(to top, ${g.color}, ${g.color}88)` }} />
               <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 11, fontWeight: 800, color: v.tx }}>{g.label}</div>
+                <div style={{ fontSize: 12, fontWeight: 800, color: v.tx }}>{g.label}</div>
                 <div style={{ fontSize: 9, color: v.mu, fontWeight: 600 }}>{g.desc}</div>
               </div>
             </div>
@@ -589,8 +588,8 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
         </div>
       </div>
 
-      <div style={{ padding: '8px 0' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr 80px 70px', gap: 8, padding: '6px 20px', borderBottom: `1px solid ${v.br}` }}>
+      <div style={{ padding: '4px 0 8px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 90px 76px', gap: 8, padding: '8px 20px 6px', borderBottom: `1px solid ${v.br}` }}>
           {['#', 'Card', 'Price', 'Change'].map(h => (
             <div key={h} style={{ fontSize: 9, fontWeight: 800, color: v.mu, textTransform: 'uppercase', letterSpacing: 1, textAlign: h === '#' ? 'center' : h === 'Change' ? 'right' : 'left' }}>{h}</div>
           ))}
@@ -598,23 +597,23 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
 
         {movers.map((m, i) => (
           <div key={i} style={{
-            display: 'grid', gridTemplateColumns: '32px 1fr 80px 70px', gap: 8,
-            padding: '13px 20px',
+            display: 'grid', gridTemplateColumns: '28px 1fr 90px 76px', gap: 8,
+            padding: '14px 20px',
             borderBottom: i < movers.length - 1 ? `1px solid ${v.br}` : 'none',
             background: i % 2 === 0 ? 'transparent' : v.dk ? 'rgba(255,255,255,0.015)' : 'rgba(0,0,0,0.015)',
           }}>
             <div style={{ fontSize: 12, fontWeight: 900, color: v.mu, textAlign: 'center', alignSelf: 'center' }}>{i + 1}</div>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 800, color: v.tx, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.card_name}</div>
-              <div style={{ fontSize: 10, color: v.mu, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.set_name}</div>
-              {(m as any).volume_label && <div style={{ fontSize: 9, color: v.green, fontWeight: 700 }}>{(m as any).volume_label}</div>}
+              <div style={{ fontSize: 13, fontWeight: 800, color: v.tx, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.card_name}</div>
+              <div style={{ fontSize: 11, color: v.mu, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>{m.set_name}</div>
+              {m.volume_label && <div style={{ fontSize: 10, color: v.green, fontWeight: 700, marginTop: 3 }}>{m.volume_label}</div>}
             </div>
             <div style={{ alignSelf: 'center' }}>
-              <div style={{ fontSize: 12, fontWeight: 800, color: v.tx }}>{fmt(m.current_price)}</div>
-              <div style={{ fontSize: 10, color: v.mu }}>{fmtGbp(m.current_price)}</div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: v.tx }}>{fmt(m.current_price)}</div>
+              <div style={{ fontSize: 11, color: v.mu, marginTop: 2 }}>{fmtGbp(m.current_price)}</div>
             </div>
             <div style={{ textAlign: 'right', alignSelf: 'center' }}>
-              <div style={{ fontSize: 14, fontWeight: 900, color: accentCol, letterSpacing: -0.3 }}>
+              <div style={{ fontSize: 15, fontWeight: 900, color: accentCol, letterSpacing: -0.3 }}>
                 {pct(m.pct_change)}
               </div>
             </div>
@@ -667,22 +666,22 @@ function SetReport({ setData, theme }: { setData: SetData; theme: Theme }) {
           const sharePct = setData.total_value > 0 ? (c.current_raw / setData.total_value) * 100 : 0
           const barW = Math.min(100, sharePct * 3)
           return (
-            <div key={i} style={{ padding: '12px 20px', borderBottom: i < setData.top_cards.length - 1 ? `1px solid ${v.br}` : 'none' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <div key={i} style={{ padding: '14px 20px', borderBottom: i < setData.top_cards.length - 1 ? `1px solid ${v.br}` : 'none' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 9, color: v.mu, fontWeight: 800, width: 14, flexShrink: 0 }}>{i + 1}</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: v.tx, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.card_name}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 10, color: v.mu, fontWeight: 800, width: 16, flexShrink: 0 }}>{i + 1}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: v.tx, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.card_name}</span>
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-                  <span style={{ fontSize: 12, fontWeight: 800, color: v.tx }}>{fmt(c.current_raw)}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0, marginLeft: 12 }}>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: v.tx }}>{fmt(c.current_raw)}</span>
                   {c.pct_30d != null && (
-                    <span style={{ fontSize: 11, fontWeight: 800, color: pctCol(c.pct_30d), minWidth: 50, textAlign: 'right' }}>{pct(c.pct_30d)}</span>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: pctCol(c.pct_30d), minWidth: 54, textAlign: 'right' }}>{pct(c.pct_30d)}</span>
                   )}
                 </div>
               </div>
-              <div style={{ marginLeft: 22 }}>
+              <div style={{ marginLeft: 26 }}>
                 <div style={{ height: 3, borderRadius: 2, background: v.br, overflow: 'hidden' }}>
                   <div style={{ height: '100%', width: `${barW}%`, background: 'linear-gradient(to right, #1a5fad, #2874c8)', borderRadius: 2 }} />
                 </div>
