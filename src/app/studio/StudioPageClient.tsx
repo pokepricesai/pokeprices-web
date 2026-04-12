@@ -29,6 +29,8 @@ interface Mover {
   card_url_slug?: string
   image_url?: string
   card_slug?: string
+  volume_label?: string
+  confidence?: string
 }
 
 interface SetData {
@@ -111,32 +113,26 @@ async function fetchCard(slug: string): Promise<CardData | null> {
 }
 
 async function fetchMovers(period: MoversPeriod, direction: MoversDirection, limit = 20): Promise<Mover[]> {
-  const col = `raw_pct_${period}`
-  const { data: rawData } = await supabase
-    .from('card_trends')
-    .select(`card_slug,card_name,set_name,current_raw,raw_pct_7d,raw_pct_30d,raw_pct_90d`)
-    .not('current_raw', 'is', null)
-    .not(col, 'is', null)
-    .gt('current_raw', 5000)       // min $50 — filters junk cards
-    .lt(col, 500)                   // max 500% — removes data anomalies
-    .gt(col, direction === 'falling' ? -100 : 5) // min 5% rise or any fall
-    .order(col, { ascending: direction === 'falling' })
-    .limit(limit * 2)               // fetch extra to filter after
+  const { data: rawData } = await supabase.rpc('get_market_movers', {
+    p_period: period,
+    p_direction: direction,
+    p_limit: limit,
+  })
   const data = rawData as any[] | null
-  if (!data) return []
+  if (!data || !data.length) return []
   const slugs = data.map((d: any) => d.card_slug)
   const { data: imgs } = await supabase.from('cards').select('card_slug,image_url,card_url_slug').in('card_slug', slugs)
-  return data
-    .map((d: any) => ({
-      card_name: d.card_name,
-      set_name: d.set_name,
-      current_price: d.current_raw,
-      pct_change: d[col] as number,
-      card_slug: d.card_slug,
-      image_url: imgs?.find((i: any) => i.card_slug === d.card_slug)?.image_url || null,
-      card_url_slug: imgs?.find((i: any) => i.card_slug === d.card_slug)?.card_url_slug || null,
-    }))
-    .slice(0, limit)
+  return data.map((d: any) => ({
+    card_name: d.card_name,
+    set_name: d.set_name,
+    current_price: d.current_raw,
+    pct_change: d.pct_change,
+    card_slug: d.card_slug,
+    volume_label: d.volume_label,
+    confidence: d.confidence,
+    image_url: imgs?.find((i: any) => i.card_slug === d.card_slug)?.image_url || null,
+    card_url_slug: imgs?.find((i: any) => i.card_slug === d.card_slug)?.card_url_slug || null,
+  }))
 }
 
 async function fetchSetData(setName: string): Promise<SetData | null> {
@@ -589,7 +585,7 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
           {arrow} Top {movers.length} {direction === 'rising' ? 'Risers' : 'Fallers'}
         </div>
         <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 4, fontWeight: 600 }}>
-          Past {periodLabel} · Min $50 raw · Max 500% filtered
+          Past {periodLabel} · Min 3 sales · Volume verified
         </div>
       </div>
 
@@ -611,6 +607,7 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 12, fontWeight: 800, color: v.tx, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.card_name}</div>
               <div style={{ fontSize: 10, color: v.mu, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.set_name}</div>
+              {(m as any).volume_label && <div style={{ fontSize: 9, color: v.green, fontWeight: 700 }}>{(m as any).volume_label}</div>}
             </div>
             <div style={{ alignSelf: 'center' }}>
               <div style={{ fontSize: 12, fontWeight: 800, color: v.tx }}>{fmt(m.current_price)}</div>
@@ -866,42 +863,55 @@ export default function StudioPageClient({ initialCardSlug, initialVisual }: { i
   async function exportPng() {
     if (exporting) return
     setExporting(true)
+    const el = document.getElementById('studio-preview')
+    if (!el) { setExporting(false); return }
     try {
-      let url = `/api/studio/render?type=${visualType}&theme=${theme}&grade=${gradeView}`
-      if (card && ['insight','psa-gauge','peak-distance','temperature','grade-compare'].includes(visualType)) {
-        url += `&card=${card.card_slug}`
-      } else if (visualType === 'movers') {
-        url += `&period=${moversPeriod}&direction=${moversDir}`
-      } else if (visualType === 'set-report' && setData) {
-        url += `&set=${encodeURIComponent(setData.set_name)}`
-      }
-      const resp = await fetch(url)
-      if (!resp.ok) throw new Error('Render failed')
-      const blob = await resp.blob()
-      const link = document.createElement('a')
-      const fileName = card ? `pokeprices-${card.card_name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${visualType}.png`
-        : `pokeprices-${visualType}-${moversPeriod}.png`
-      link.download = fileName
-      link.href = URL.createObjectURL(blob)
-      link.click()
-      URL.revokeObjectURL(link.href)
-    } catch {
-      // Fallback to html2canvas
-      const el = document.getElementById('studio-preview')
-      if (!el) return
-      try {
-        if (!(window as any).html2canvas) {
+      // Load html2canvas if not already loaded
+      if (!(window as any).html2canvas) {
+        await new Promise<void>((res, rej) => {
           const s = document.createElement('script')
           s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'
+          s.onload = () => res()
+          s.onerror = () => rej(new Error('Failed to load html2canvas'))
           document.head.appendChild(s)
-          await new Promise((res, rej) => { s.onload = res; s.onerror = rej })
+        })
+      }
+
+      // Proxy card images through our server to avoid CORS
+      const imgs = Array.from(el.querySelectorAll('img')) as HTMLImageElement[]
+      const origSrcs = imgs.map(img => img.src)
+      for (const img of imgs) {
+        if (img.src && !img.src.startsWith(window.location.origin) && !img.src.includes('favicon')) {
+          img.src = `/api/imgproxy?url=${encodeURIComponent(img.src.split('?')[0])}`
         }
-        const canvas = await (window as any).html2canvas(el, { scale: 2, useCORS: true, backgroundColor: null })
-        const link = document.createElement('a')
-        link.download = `pokeprices-export.png`
-        link.href = canvas.toDataURL('image/png')
-        link.click()
-      } catch {}
+      }
+      // Wait for images to reload
+      await Promise.all(imgs.map(img =>
+        img.complete ? Promise.resolve() : new Promise<void>(r => { img.onload = () => r(); img.onerror = () => r() })
+      ))
+
+      const canvas = await (window as any).html2canvas(el, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: false,
+        backgroundColor: null,
+        logging: false,
+        imageTimeout: 8000,
+      })
+
+      // Restore original srcs
+      imgs.forEach((img, i) => { img.src = origSrcs[i] })
+
+      const link = document.createElement('a')
+      const fileName = card
+        ? `pokeprices-${card.card_name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${visualType}.png`
+        : `pokeprices-${visualType}-${moversPeriod}.png`
+      link.download = fileName
+      link.href = canvas.toDataURL('image/png')
+      link.click()
+    } catch (e) {
+      console.error('Export failed:', e)
+      alert('Export failed — try right-clicking the preview and saving the image.')
     }
     setExporting(false)
   }
