@@ -144,7 +144,6 @@ export async function POST(req: NextRequest) {
         : card.raw_pct_30d < -15 ? { label: '▼ Cooling',     col: '#ef4444' }
         : { label: '— Stable', col: '#f59e0b' }
         : { label: '— Stable', col: '#f59e0b' }
-        : { label: '— Stable', col: '#f59e0b' }
 
       // ── SHOWCASE layout ──
       if (cardLayout === 'showcase') {
