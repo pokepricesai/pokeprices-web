@@ -1,4 +1,3 @@
-// app/HomeClient.tsx
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
@@ -7,25 +6,24 @@ import InlineChat from '@/components/InlineChat'
 import NewsletterSignup from '@/components/NewsletterSignup'
 
 const upcomingReleases = [
-  { name: 'Perfect Order', date: 'Mar 27, 2026', confirmed: true, type: 'Main Set' },
-  { name: 'Chaos Rising', date: 'May 22, 2026', confirmed: true, type: 'Main Set' },
-  { name: 'Abyss Eye', date: 'Jul 2026 (est)', confirmed: false, type: 'Main Set' },
-  { name: 'Celebration Collection', date: 'Nov 2026 (est)', confirmed: false, type: 'Special Set' },
+  { name: 'Chaos Rising',          date: 'May 22, 2026',    confirmed: true,  type: 'Main Set'     },
+  { name: 'Abyss Eye',             date: 'Jul 2026 (est)',  confirmed: false, type: 'Main Set'     },
+  { name: 'Celebration Collection',date: 'Nov 2026 (est)',  confirmed: false, type: 'Special Set'  },
 ]
 
 const features = [
-  { icon: '◈', title: 'Real Sales Data', desc: 'Daily prices from actual completed sales. No estimates, no guesswork.' },
-  { icon: '◈', title: 'True Landed Cost', desc: 'VAT, shipping, customs, handling — the real cost of buying a card, not just the sticker price.' },
-  { icon: '◈', title: 'Trend Analysis', desc: '7 days to 5 years of price history. Spot movement before it happens.' },
-  { icon: '◈', title: 'Grading Intelligence', desc: 'PSA population data, grade premiums, and honest grading advice.' },
+  { icon: '◈', title: 'Real Sales Data',       desc: 'Daily prices from actual completed sales. No estimates, no guesswork.' },
+  { icon: '◈', title: 'True Landed Cost',       desc: 'VAT, shipping, customs, handling — the real cost of buying a card, not just the sticker price.' },
+  { icon: '◈', title: 'Trend Analysis',         desc: '7 days to 5 years of price history. Spot movement before it happens.' },
+  { icon: '◈', title: 'Grading Intelligence',   desc: 'PSA population data, grade premiums, and honest grading advice.' },
 ]
 
 const faqs = [
-  { q: 'Where does the pricing data come from?', a: 'All prices are sourced from actual completed sales, updated every night. We track last sold prices and historical data so you always have current market values.' },
-  { q: 'Is this really free?', a: "Genuinely free. No login, no email capture, no premium tier. Revenue comes from optional affiliate links when you're ready to buy." },
-  { q: 'Do you cover import costs?', a: 'Yes. The true landed cost tool factors in VAT, handling fees, shipping, and customs so you see what a card actually costs to get in hand — not just the listed price.' },
-  { q: 'What grading companies do you track?', a: 'PSA and CGC prices and population data across 32,000+ entries. Grading advice covers PSA, CGC, BGS, SGC, and ACE.' },
-  { q: 'Can I find a card shop near me?', a: 'Yes — check the Vendor Directory. You can search by postcode or town to find physical shops, retailers, and grading services near you.' },
+  { q: 'Where does the pricing data come from?',  a: 'All prices are sourced from actual completed sales, updated every night. We track last sold prices and historical data so you always have current market values.' },
+  { q: 'Is this really free?',                    a: "Genuinely free. No login, no email capture, no premium tier. Revenue comes from optional affiliate links when you're ready to buy." },
+  { q: 'Do you cover import costs?',              a: 'Yes. The true landed cost tool factors in VAT, handling fees, shipping, and customs so you see what a card actually costs to get in hand — not just the listed price.' },
+  { q: 'What grading companies do you track?',    a: 'PSA and CGC prices and population data across 32,000+ entries. Grading advice covers PSA, CGC, BGS, SGC, and ACE.' },
+  { q: 'Can I find a card shop near me?',         a: 'Yes — check the Vendor Directory. You can search by postcode or town to find physical shops, retailers, and grading services near you.' },
 ]
 
 interface MarketIndexRow {
@@ -77,43 +75,29 @@ interface MarketTotal {
   cards_tracked: number
 }
 
-// ── Pokémon silhouettes using PokeAPI sprites ────────────────────────────────
-// Iconic Pokémon that everyone recognises as silhouettes
 const HERO_POKEMON = [
-  { id: 6,   x: '4%',  y: '10%', size: 90,  opacity: 0.07, delay: '0s'    }, // Charizard
-  { id: 249, x: '88%', y: '5%',  size: 110, opacity: 0.06, delay: '0.5s'  }, // Lugia
-  { id: 384, x: '78%', y: '55%', size: 80,  opacity: 0.07, delay: '1s'    }, // Rayquaza
-  { id: 150, x: '12%', y: '60%', size: 70,  opacity: 0.06, delay: '1.5s'  }, // Mewtwo
-  { id: 25,  x: '50%', y: '5%',  size: 55,  opacity: 0.08, delay: '0.8s'  }, // Pikachu
-  { id: 197, x: '65%', y: '20%', size: 65,  opacity: 0.06, delay: '2s'    }, // Umbreon
-  { id: 130, x: '30%', y: '70%', size: 75,  opacity: 0.05, delay: '1.2s'  }, // Gyarados
+  { id: 6,   x: '4%',  y: '10%', size: 90,  opacity: 0.07, delay: '0s'   },
+  { id: 249, x: '88%', y: '5%',  size: 110, opacity: 0.06, delay: '0.5s' },
+  { id: 384, x: '78%', y: '55%', size: 80,  opacity: 0.07, delay: '1s'   },
+  { id: 150, x: '12%', y: '60%', size: 70,  opacity: 0.06, delay: '1.5s' },
+  { id: 25,  x: '50%', y: '5%',  size: 55,  opacity: 0.08, delay: '0.8s' },
+  { id: 197, x: '65%', y: '20%', size: 65,  opacity: 0.06, delay: '2s'   },
+  { id: 130, x: '30%', y: '70%', size: 75,  opacity: 0.05, delay: '1.2s' },
 ]
 
 function PokemonSilhouettes() {
   return (
     <>
       {HERO_POKEMON.map((p, i) => (
-        <div
-          key={i}
-          style={{
-            position: 'absolute',
-            left: p.x,
-            top: p.y,
-            width: p.size,
-            height: p.size,
-            opacity: p.opacity,
-            pointerEvents: 'none',
-            animation: `float 6s ease-in-out ${p.delay} infinite`,
-            filter: 'brightness(0) invert(1)',
-          }}
-        >
-          <img
-            src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.id}.png`}
-            alt=""
-            width={p.size}
-            height={p.size}
-            style={{ objectFit: 'contain', width: '100%', height: '100%' }}
-          />
+        <div key={i} style={{
+          position: 'absolute', left: p.x, top: p.y, width: p.size, height: p.size,
+          opacity: p.opacity, pointerEvents: 'none',
+          animation: `float 6s ease-in-out ${p.delay} infinite`,
+          filter: 'brightness(0) invert(1)',
+        }}>
+          <img src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.id}.png`}
+            alt="" width={p.size} height={p.size}
+            style={{ objectFit: 'contain', width: '100%', height: '100%' }} />
         </div>
       ))}
     </>
@@ -167,11 +151,11 @@ function Sparkline({ data, color = '#22c55e', height = 48 }: { data: number[], c
 
 function heatColor(band: string) {
   switch (band) {
-    case 'strong_up':   return { bg: 'rgba(34,197,94,0.15)',    border: 'rgba(34,197,94,0.3)',    text: '#16a34a' }
-    case 'up':          return { bg: 'rgba(34,197,94,0.07)',    border: 'rgba(34,197,94,0.18)',   text: '#22c55e' }
-    case 'strong_down': return { bg: 'rgba(239,68,68,0.15)',    border: 'rgba(239,68,68,0.3)',    text: '#dc2626' }
-    case 'down':        return { bg: 'rgba(239,68,68,0.07)',    border: 'rgba(239,68,68,0.18)',   text: '#ef4444' }
-    default:            return { bg: 'rgba(148,163,184,0.06)',  border: 'rgba(148,163,184,0.18)', text: '#94a3b8' }
+    case 'strong_up':   return { bg: 'rgba(34,197,94,0.15)',   border: 'rgba(34,197,94,0.3)',   text: '#16a34a' }
+    case 'up':          return { bg: 'rgba(34,197,94,0.07)',   border: 'rgba(34,197,94,0.18)',  text: '#22c55e' }
+    case 'strong_down': return { bg: 'rgba(239,68,68,0.15)',   border: 'rgba(239,68,68,0.3)',   text: '#dc2626' }
+    case 'down':        return { bg: 'rgba(239,68,68,0.07)',   border: 'rgba(239,68,68,0.18)',  text: '#ef4444' }
+    default:            return { bg: 'rgba(148,163,184,0.06)', border: 'rgba(148,163,184,0.18)',text: '#94a3b8' }
   }
 }
 
@@ -181,7 +165,7 @@ function categoryMeta(cat: string) {
     case 'top_faller':    return { label: 'Top Faller (30d)', color: '#ef4444' }
     case 'most_volatile': return { label: 'Most Volatile',    color: '#f59e0b' }
     case 'new_ath':       return { label: 'New High',         color: '#a78bfa' }
-    case 'most_traded':   return { label: 'Most Traded',      color: '#3b82f6' }
+    case 'most_traded':   return { label: 'Most Active',      color: '#3b82f6' }
     default:              return { label: cat,                 color: '#94a3b8' }
   }
 }
@@ -276,23 +260,19 @@ export default function HomeClient() {
 
   return (
     <>
-      {/* ── HERO ──────────────────────────────────────────────── */}
+      {/* ── HERO ── */}
       <section style={{
         background: 'linear-gradient(170deg, #1a5fad 0%, #3b8fe8 35%, #6ab0f5 60%, #9dcbfa 80%, var(--bg) 100%)',
         padding: '40px 24px 70px', position: 'relative', overflow: 'hidden',
       }}>
-        {/* Pokémon silhouettes — subtle background decoration */}
         <PokemonSilhouettes />
         <Sparkles />
-
         <div style={{ maxWidth: 720, margin: '0 auto', textAlign: 'center', position: 'relative', zIndex: 1 }}>
           <img src="/logo.png" alt="PokePrices" style={{
             height: 120, margin: '0 auto 16px', display: 'block',
             filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.2))',
             animation: 'float 4s ease-in-out infinite',
           }} />
-
-          {/* Trust pills */}
           <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
             {['100% Free', 'No Login', 'No Data Collection'].map(pill => (
               <span key={pill} style={{
@@ -302,30 +282,26 @@ export default function HomeClient() {
               }}>{pill}</span>
             ))}
           </div>
-
           <h1 style={{
             fontSize: 38, color: '#fff', margin: '0 0 10px', lineHeight: 1.15,
             textShadow: '0 2px 10px rgba(0,0,0,0.15)', fontFamily: "'Outfit', sans-serif",
           }}>
             Know what your cards<br />are <span style={{ color: 'var(--accent)' }}>really</span> worth
           </h1>
-
           <p style={{ color: 'rgba(255,255,255,0.85)', fontSize: 16, margin: '0 0 8px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif", fontWeight: 600 }}>
             Pokémon TCG prices · PSA 10 values · Grading calculator · Market trends
           </p>
           <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, margin: '0 0 24px', lineHeight: 1.5, fontFamily: "'Figtree', sans-serif" }}>
             40,000+ cards · 156+ sets · Updated nightly from real sold listings
           </p>
-
           <InlineChat />
-
           <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, marginTop: 12, fontFamily: "'Figtree', sans-serif" }}>
             Updated nightly from actual sold listings
           </p>
         </div>
       </section>
 
-      {/* ── MARKET INDEX BANNER ───────────────────────────────── */}
+      {/* ── MARKET INDEX BANNER ── */}
       {totalMarket && (
         <section style={{ padding: '0 24px', maxWidth: 960, margin: '-28px auto 0', position: 'relative', zIndex: 10 }}>
           <div style={{
@@ -365,7 +341,7 @@ export default function HomeClient() {
         </section>
       )}
 
-      {/* ── WEEKLY MARKET REPORT ──────────────────────────────── */}
+      {/* ── WEEKLY MARKET REPORT ── */}
       {weeklyReport.length > 0 && (
         <section style={{ padding: '32px 24px 12px', maxWidth: 960, margin: '0 auto' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
@@ -379,7 +355,7 @@ export default function HomeClient() {
             )}
           </div>
           <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '0 0 14px', fontFamily: "'Figtree', sans-serif" }}>
-            Auto-generated daily from price data — no editorial, just numbers
+            Volume-verified signals from the market — min 3 confirmed sales
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
             {weeklyReport.map(row => {
@@ -426,13 +402,13 @@ export default function HomeClient() {
         </section>
       )}
 
-      {/* ── MARKET HEATMAP ────────────────────────────────────── */}
+      {/* ── MARKET HEATMAP ── */}
       <section style={{ padding: '8px 24px 40px', maxWidth: 960, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
           <div>
             <h2 style={{ fontSize: 24, margin: '0 0 4px', fontFamily: "'Outfit', sans-serif" }}>Market Heatmap</h2>
             <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0, fontFamily: "'Figtree', sans-serif" }}>
-              The most valuable actively-traded cards right now — colour shows 30-day price movement
+              High-value actively-traded cards — colour shows 30-day price movement · min 3 confirmed sales
             </p>
           </div>
           {heatmapUpdated && (
@@ -484,11 +460,11 @@ export default function HomeClient() {
             </div>
             <div style={{ display: 'flex', gap: 16, marginTop: 14, justifyContent: 'center', flexWrap: 'wrap' }}>
               {[
-                { band: 'strong_up',   label: '+10% or more'   },
-                { band: 'up',          label: '+2% to +10%'    },
-                { band: 'flat',        label: 'Flat (±2%)'     },
-                { band: 'down',        label: '-2% to -10%'    },
-                { band: 'strong_down', label: '-10% or more'   },
+                { band: 'strong_up',   label: '+10% or more' },
+                { band: 'up',          label: '+2% to +10%'  },
+                { band: 'flat',        label: 'Flat (±2%)'   },
+                { band: 'down',        label: '-2% to -10%'  },
+                { band: 'strong_down', label: '-10% or more' },
               ].map(({ band, label }) => {
                 const { bg, border } = heatColor(band)
                 return (
@@ -507,7 +483,7 @@ export default function HomeClient() {
         )}
       </section>
 
-      {/* ── HIDDEN GEMS ───────────────────────────────────────── */}
+      {/* ── HIDDEN GEMS ── */}
       {hiddenGems.length > 0 && (
         <section style={{ padding: '0 24px 44px', maxWidth: 960, margin: '0 auto' }}>
           <div style={{
@@ -516,7 +492,7 @@ export default function HomeClient() {
           }}>
             <h2 style={{ fontSize: 20, margin: '0 0 4px', fontFamily: "'Outfit', sans-serif" }}>Hidden Gems</h2>
             <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '0 0 16px', fontFamily: "'Figtree', sans-serif" }}>
-              Rising price · low pop · under the radar — cards worth a closer look
+              Rising price · low pop · under the radar — volume-verified cards worth a closer look
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
               {hiddenGems.map(gem => {
@@ -567,7 +543,7 @@ export default function HomeClient() {
         </section>
       )}
 
-      {/* ── NEXT RELEASE ──────────────────────────────────────── */}
+      {/* ── NEXT RELEASE ── */}
       <section style={{ padding: '0 24px 40px', maxWidth: 900, margin: '0 auto' }}>
         <div style={{ background: 'var(--card)', borderRadius: 18, border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 2px 15px rgba(37,99,168,0.06)' }}>
           <div style={{ background: 'linear-gradient(135deg, #1a5fad, #2874c8)', padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14 }}>
@@ -601,7 +577,7 @@ export default function HomeClient() {
         </div>
       </section>
 
-      {/* ── BUILT DIFFERENT ───────────────────────────────────── */}
+      {/* ── BUILT DIFFERENT ── */}
       <section style={{ padding: '16px 24px 44px', maxWidth: 900, margin: '0 auto' }}>
         <h2 style={{ fontSize: 24, textAlign: 'center', margin: '0 0 6px', fontFamily: "'Outfit', sans-serif" }}>Built for collectors, not investors</h2>
         <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: 14, margin: '0 0 28px', fontFamily: "'Figtree', sans-serif" }}>No login. No paywall. No data collection. Ever.</p>
@@ -616,7 +592,7 @@ export default function HomeClient() {
         </div>
       </section>
 
-      {/* ── STATS BAR ─────────────────────────────────────────── */}
+      {/* ── STATS BAR ── */}
       <section style={{ background: 'linear-gradient(135deg, #1a5fad, #2874c8)', padding: '30px 24px' }}>
         <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', justifyContent: 'space-around', flexWrap: 'wrap', gap: 20 }}>
           {[
@@ -633,40 +609,28 @@ export default function HomeClient() {
           ))}
         </div>
       </section>
-      
-    {/* ── NEWSLETTER ────────────────────────────────────────── */}
+
+      {/* ── NEWSLETTER ── */}
       <section style={{ padding: '0 24px 44px', maxWidth: 680, margin: '0 auto' }}>
         <div style={{
           background: 'linear-gradient(135deg, rgba(26,95,173,0.06), rgba(59,130,246,0.04))',
-          border: '1px solid rgba(26,95,173,0.2)',
-          borderRadius: 20,
-          padding: '32px 28px',
-          textAlign: 'center',
+          border: '1px solid rgba(26,95,173,0.2)', borderRadius: 20, padding: '32px 28px', textAlign: 'center',
         }}>
           <div style={{ fontSize: 32, marginBottom: 10 }}>📬</div>
-          <h2 style={{
-            fontSize: 22, margin: '0 0 8px',
-            fontFamily: "'Outfit', sans-serif", color: 'var(--text)',
-          }}>
+          <h2 style={{ fontSize: 22, margin: '0 0 8px', fontFamily: "'Outfit', sans-serif", color: 'var(--text)' }}>
             Monthly collector digest
           </h2>
-          <p style={{
-            color: 'var(--text-muted)', fontSize: 14, margin: '0 0 20px',
-            lineHeight: 1.6, fontFamily: "'Figtree', sans-serif", maxWidth: 420, marginLeft: 'auto', marginRight: 'auto',
-          }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 20px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif", maxWidth: 420, marginLeft: 'auto', marginRight: 'auto' }}>
             Market moves, biggest risers and fallers, grading tips, hidden gems and upcoming set previews — once a month, no spam, no paywall.
           </p>
           <NewsletterSignup source="homepage" />
-          <p style={{
-            color: 'var(--text-muted)', fontSize: 11, margin: '12px 0 0',
-            fontFamily: "'Figtree', sans-serif",
-          }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: 11, margin: '12px 0 0', fontFamily: "'Figtree', sans-serif" }}>
             No login required. Unsubscribe any time.
           </p>
         </div>
       </section>
-      
-      {/* ── FAQ ───────────────────────────────────────────────── */}
+
+      {/* ── FAQ ── */}
       <section style={{ padding: '44px 24px', maxWidth: 680, margin: '0 auto' }}>
         <h2 style={{ fontSize: 24, textAlign: 'center', margin: '0 0 24px', fontFamily: "'Outfit', sans-serif" }}>Questions collectors ask</h2>
         {faqs.map((faq, i) => (
