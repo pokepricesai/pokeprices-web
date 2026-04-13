@@ -133,6 +133,25 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // SVG triangle badge — avoids Unicode glyph issues in Satori
+    function SigBadge({ label, dir, col }: { label: string; dir: string; col: string }) {
+      const triUp   = 'M5,10 L10,2 L15,10 Z'
+      const triDown = 'M5,2 L10,10 L15,2 Z'
+      const triFlat = 'M2,6 L14,6 M8,2 L14,6 L8,10'
+      const path = dir === 'up' ? triUp : dir === 'down' ? triDown : triFlat
+      const isLine = dir === 'flat'
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(0,0,0,0.35)', padding: '4px 12px', borderRadius: 20, border: `1px solid ${col}50` }}>
+          <svg width="12" height="12" viewBox="0 0 16 12" style={{ flexShrink: 0 }}>
+            {isLine
+              ? <path d={path} fill="none" stroke={col} strokeWidth="2" strokeLinecap="round" />
+              : <path d={path} fill={col} />}
+          </svg>
+          <span style={{ fontSize: 10, fontWeight: 800, color: col, fontFamily: 'Figtree' }}>{label}</span>
+        </div>
+      )
+    }
+
     // ── CARD VISUALS ───────────────────────────────────────────────────────────
 
     if (card && visualType === 'insight') {
@@ -140,10 +159,10 @@ export async function POST(req: NextRequest) {
       const focusLabel = gradeView === 'psa10' ? 'PSA 10' : gradeView === 'psa9' ? 'PSA 9' : 'Raw'
       const psa10x = card.current_raw && card.current_psa10 ? (card.current_psa10 / card.current_raw).toFixed(1) : null
       const sig = card.raw_pct_30d != null
-        ? card.raw_pct_30d > 15  ? { label: '▲ Trending Up', col: '#22c55e' }
-        : card.raw_pct_30d < -15 ? { label: '▼ Cooling',     col: '#ef4444' }
-        : { label: '— Stable', col: '#f59e0b' }
-        : { label: '— Stable', col: '#f59e0b' }
+        ? card.raw_pct_30d > 15  ? { label: 'Trending Up', dir: 'up',   col: '#22c55e' }
+        : card.raw_pct_30d < -15 ? { label: 'Cooling',     dir: 'down', col: '#ef4444' }
+        : { label: 'Stable', dir: 'flat', col: '#f59e0b' }
+        : { label: 'Stable', dir: 'flat', col: '#f59e0b' }
 
       // ── SHOWCASE layout ──
       if (cardLayout === 'showcase') {
@@ -152,9 +171,7 @@ export async function POST(req: NextRequest) {
             {/* Top bar */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: hdGrad, padding: '14px 22px' }}>
               <Watermark />
-              <div style={{ display: 'flex', alignItems: 'center', background: 'rgba(0,0,0,0.35)', padding: '4px 12px', borderRadius: 20, border: `1px solid ${sig.col}50` }}>
-                <span style={{ fontSize: 10, fontWeight: 800, color: sig.col, fontFamily: 'Figtree' }}>{sig.label}</span>
-              </div>
+              <SigBadge label={sig.label} dir={(sig as any).dir || 'flat'} col={sig.col} />
             </div>
             {/* Hero */}
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 20, background: hdGrad, padding: '0 22px 24px' }}>
@@ -244,9 +261,7 @@ export async function POST(req: NextRequest) {
             {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: hdGrad, padding: '14px 22px' }}>
               <Watermark />
-              <div style={{ display: 'flex', alignItems: 'center', background: 'rgba(0,0,0,0.35)', padding: '4px 12px', borderRadius: 20, border: `1px solid ${sig.col}50` }}>
-                <span style={{ fontSize: 10, fontWeight: 800, color: sig.col, fontFamily: 'Figtree' }}>{sig.label}</span>
-              </div>
+              <SigBadge label={sig.label} dir={(sig as any).dir || 'flat'} col={sig.col} />
             </div>
             {/* Card name + large centered image */}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', background: hdGrad, padding: '16px 22px 60px' }}>
@@ -292,9 +307,7 @@ export async function POST(req: NextRequest) {
           <div style={{ display: 'flex', flexDirection: 'column', background: hdGrad, padding: '20px 22px 18px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
               <Watermark />
-              <div style={{ display: 'flex', alignItems: 'center', background: 'rgba(0,0,0,0.35)', padding: '4px 12px', borderRadius: 20, border: `1px solid ${sig.col}50` }}>
-                <span style={{ fontSize: 10, fontWeight: 800, color: sig.col, fontFamily: 'Figtree' }}>{sig.label}</span>
-              </div>
+              <SigBadge label={sig.label} dir={(sig as any).dir || 'flat'} col={sig.col} />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
               {imgSrc && <img src={imgSrc} width={58} height={80} style={{ objectFit: 'contain', borderRadius: 8 }} />}
@@ -464,7 +477,7 @@ export async function POST(req: NextRequest) {
     if (visualType === 'temperature' && card) {
       const p30 = card.raw_pct_30d
       const temp = p30 == null ? 50 : Math.min(100, Math.max(0, 50 + p30 * 2))
-      const label = p30 == null ? 'Neutral' : p30 > 30 ? '🔥 Very Hot' : p30 > 10 ? '📈 Heating Up' : p30 < -30 ? '🧊 Very Cold' : p30 < -10 ? '📉 Cooling Down' : '➡ Neutral'
+      const label = p30 == null ? 'Neutral' : p30 > 30 ? 'Very Hot' : p30 > 10 ? 'Heating Up' : p30 < -30 ? 'Very Cold' : p30 < -10 ? 'Cooling Down' : 'Neutral'
       const col = p30 == null ? '#f59e0b' : p30 > 10 ? '#f97316' : p30 < -10 ? '#60a5fa' : '#f59e0b'
 
       return new ImageResponse((
@@ -581,7 +594,7 @@ export async function POST(req: NextRequest) {
               <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.35)', fontFamily: 'Figtree' }}>{today}</span>
             </div>
             <span style={{ fontSize: 26, fontWeight: 900, color: '#fff', fontFamily: 'Outfit', letterSpacing: -0.5 }}>
-              {direction === 'rising' ? '▲' : '▼'} Top {Math.min(movers.length, 10)} {direction === 'rising' ? 'Risers' : 'Fallers'}
+              {direction === 'rising' ? 'Top' : 'Top'} {Math.min(movers.length, 10)} {direction === 'rising' ? 'Risers' : 'Fallers'}
             </span>
             <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', marginTop: 4, fontWeight: 700, fontFamily: 'Figtree' }}>
               Past {periodLabel} · Volume-verified signals
