@@ -960,6 +960,13 @@ export default function StudioPageClient() {
         throw new Error(err.error || `Export failed: ${res.status}`)
       }
 
+      // Verify we got an image back, not a JSON error
+      const ct = res.headers.get('content-type') || ''
+      if (!ct.includes('image') && !ct.includes('octet')) {
+        const text = await res.text()
+        throw new Error(`Server error: ${text.slice(0, 300)}`)
+      }
+
       const blob = await res.blob()
       const url  = URL.createObjectURL(blob)
       const link = document.createElement('a')

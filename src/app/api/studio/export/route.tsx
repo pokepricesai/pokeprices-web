@@ -88,29 +88,57 @@ function tv(theme: Theme) {
 
 // ── Font loader ───────────────────────────────────────────────────────────────
 
-async function loadFonts() {
-  const [outfitBold, outfitBlack, figtreeBold, figtreeExtraBold] = await Promise.all([
-    fetch('https://fonts.gstatic.com/s/outfit/v11/QGYyz_MVcBeNP4NjuGObqx1XmO1I4TC1C4G-EiAou6Y.woff').then(r => r.arrayBuffer()),
-    fetch('https://fonts.gstatic.com/s/outfit/v11/QGYyz_MVcBeNP4NjuGObqx1XmO1I4TC1N4S-EiAou6Y.woff').then(r => r.arrayBuffer()),
-    fetch('https://fonts.gstatic.com/s/figtree/v6/_Xmz-HUzqDCFdgfMm4S9DaRvzig.woff').then(r => r.arrayBuffer()),
-    fetch('https://fonts.gstatic.com/s/figtree/v6/_Xmz-HUzqDCFdgfMm4S9DaRvzig.woff').then(r => r.arrayBuffer()),
-  ])
-  return [
-    { name: 'Outfit', data: outfitBold,       weight: 700 as const, style: 'normal' as const },
-    { name: 'Outfit', data: outfitBlack,      weight: 900 as const, style: 'normal' as const },
-    { name: 'Figtree', data: figtreeBold,     weight: 700 as const, style: 'normal' as const },
-    { name: 'Figtree', data: figtreeExtraBold,weight: 800 as const, style: 'normal' as const },
-  ]
+// Fetch a font file URL from the Google Fonts CSS API
+// This is more reliable than hardcoding gstatic URLs which change
+async function fetchGoogleFontBuffer(family: string, weight: number): Promise<ArrayBuffer | null> {
+  try {
+    const cssUrl = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family)}:wght@${weight}&display=swap`
+    const css = await fetch(cssUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)' },
+    }).then(r => r.text())
+    // Extract the woff2 URL from the CSS
+    const match = css.match(/src: url\(([^)]+)\) format\('woff2'\)/)
+    if (!match) return null
+    const fontUrl = match[1]
+    return await fetch(fontUrl).then(r => r.arrayBuffer())
+  } catch {
+    return null
+  }
 }
 
-// Fetch image as data URL to avoid CORS
+async function loadFonts() {
+  const [outfitBold, outfitBlack, figtreeBold, figtreeExtraBold] = await Promise.all([
+    fetchGoogleFontBuffer('Outfit', 700),
+    fetchGoogleFontBuffer('Outfit', 900),
+    fetchGoogleFontBuffer('Figtree', 700),
+    fetchGoogleFontBuffer('Figtree', 800),
+  ])
+
+  const fonts: { name: string; data: ArrayBuffer; weight: 100|200|300|400|500|600|700|800|900; style: 'normal' }[] = []
+  if (outfitBold)       fonts.push({ name: 'Outfit',  data: outfitBold,       weight: 700, style: 'normal' })
+  if (outfitBlack)      fonts.push({ name: 'Outfit',  data: outfitBlack,      weight: 900, style: 'normal' })
+  if (figtreeBold)      fonts.push({ name: 'Figtree', data: figtreeBold,      weight: 700, style: 'normal' })
+  if (figtreeExtraBold) fonts.push({ name: 'Figtree', data: figtreeExtraBold, weight: 800, style: 'normal' })
+  return fonts
+}
+
+// Fetch image as data URL — Edge runtime compatible (no Buffer)
 async function fetchImageAsDataUrl(url: string): Promise<string | null> {
   try {
-    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(6000),
+    })
     if (!res.ok) return null
     const buf = await res.arrayBuffer()
-    const base64 = Buffer.from(buf).toString('base64')
     const ct = res.headers.get('content-type') || 'image/jpeg'
+    // Edge-compatible base64 encoding
+    const bytes = new Uint8Array(buf)
+    let binary = ''
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i])
+    }
+    const base64 = btoa(binary)
     return `data:${ct};base64,${base64}`
   } catch {
     return null
@@ -487,13 +515,17 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const { visualType, theme = 'dark', gradeView = 'raw', cardLayout = 'compact', period = '30d', direction = 'rising', card, movers, setData } = body
 
-    const fonts = await loadFonts()
+    // Load fonts with a timeout — if fonts fail, Satori uses system fallback
+    const fonts = await Promise.race([
+      loadFonts(),
+      new Promise<[]>(r => setTimeout(() => r([]), 8000)),
+    ])
 
     // Determine canvas size
     const width  = (visualType === 'movers') ? 680 : 520
     const height = (visualType === 'movers') ? 800 : 600
 
-    // Pre-fetch card image server-side
+    // Pre-fetch card image server-side (no CORS issues)
     let imageDataUrl: string | null = null
     if (card?.image_url) {
       imageDataUrl = await fetchImageAsDataUrl(card.image_url)
@@ -515,23 +547,22 @@ export async function POST(req: NextRequest) {
           element = renderInsightCompact(card, theme, gradeView, imageDataUrl)
         }
       } else {
-        // Default fallback to compact for other card visuals
         element = renderInsightCompact(card, theme, gradeView, imageDataUrl)
       }
     } else {
-      return new Response(JSON.stringify({ error: 'No data provided' }), { status: 400 })
+      return new Response(JSON.stringify({ error: 'No data provided' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      })
     }
 
-    const imageResponse = new ImageResponse(element, {
-      width,
-      height,
-      fonts,
-    })
-
-    return imageResponse
+    return new ImageResponse(element, { width, height, fonts })
 
   } catch (err: any) {
     console.error('Studio export error:', err)
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+    return new Response(
+      JSON.stringify({ error: err.message || 'Unknown error', stack: err.stack }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } },
+    )
   }
 }
