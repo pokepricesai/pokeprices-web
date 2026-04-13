@@ -419,10 +419,16 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
     : null
 
   const salesMonthly  = raw.sales_30d ?? raw.volume_30d ?? null
-  const liquidityScore = salesMonthly != null ? Math.min(100, Math.round((salesMonthly / 20) * 100)) : null
-  const liquidityLabel = liquidityScore == null ? null
-    : liquidityScore >= 70 ? 'High — sells quickly'
-    : liquidityScore >= 35 ? 'Medium — may take a few weeks'
+  // Volume label from card_volume is more reliable than raw count for liquidity
+  // 4 sales/week = ~17/mo = high liquidity
+  const liquidityLabel = volumeLabel
+    ? volumeLabel.includes('per day') ? 'High — very active market'
+    : volumeLabel.includes('per week') ? 'High — sells regularly'
+    : volumeLabel.includes('per month') ? 'Moderate — steady market'
+    : 'Low — patient seller needed'
+    : salesMonthly == null ? null
+    : salesMonthly >= 8  ? 'High — sells regularly'
+    : salesMonthly >= 3  ? 'Moderate — steady market'
     : 'Low — patient seller needed'
 
   const gemRate = psaPop?.gem_rate ? parseFloat(psaPop.gem_rate) : null
@@ -482,8 +488,9 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
     sub: psaPop.psa_10 ? `${psaPop.psa_10.toLocaleString()} PSA 10s` : undefined,
   })
   if (drawdown != null) tiles.push({
-    label: 'vs All-Time High', value: `${drawdown.toFixed(0)}%`,
-    sub: athUsd ? `ATH ~$${athUsd}` : 'from peak',
+    label: 'vs All-Time High',
+    value: drawdown >= -2 ? 'At Peak' : `${drawdown.toFixed(0)}%`,
+    sub: drawdown >= -2 ? `Current ~$${card.raw_usd ? Math.round(card.raw_usd / 100) : '—'}` : athUsd ? `ATH ~$${athUsd}` : 'from peak',
     highlight: drawdown < -30,
   })
   // Volume — use volume_label phrase if available, else fall back to raw count
@@ -495,7 +502,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   } else if (salesMonthly != null) {
     tiles.push({
       label: 'Market Activity', value: `~${salesMonthly}/mo`,
-      sub: salesMonthly >= 10 ? 'Liquid market' : salesMonthly >= 3 ? 'Moderate volume' : 'Thin market',
+      sub: liquidityLabel ?? undefined,
     })
   }
   if (highConfidenceListingCount != null && highConfidenceListingCount > 0) tiles.push({
@@ -508,12 +515,13 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
     sub: trend.raw_pct_30d > 0 ? 'Rising' : 'Falling',
     color: trend.raw_pct_30d > 0 ? 'var(--green)' : '#ef4444',
   })
-  if (raw.volatility_30d != null) {
-    const v = parseFloat(raw.volatility_30d)
+  // Price stability — use 7d price swing for meaningful short-term signal
+  if (trend?.raw_pct_7d != null && pctQuality(trend.raw_pct_7d, '7d') !== 'suppress') {
+    const swing7d = Math.abs(trend.raw_pct_7d)
     tiles.push({
       label: 'Price Stability',
-      value: v < 5 ? 'Steady' : v < 15 ? 'Moderate' : 'Volatile',
-      sub: `${v.toFixed(1)}% daily swing`,
+      value: swing7d < 5 ? 'Steady' : swing7d < 15 ? 'Moderate' : 'Volatile',
+      sub: `${swing7d.toFixed(1)}% swing this week`,
     })
   }
   if (expectedValueCents != null) tiles.push({
