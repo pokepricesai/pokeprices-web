@@ -935,59 +935,44 @@ export default function StudioPageClient() {
   async function exportPng() {
     if (exporting) return
     setExporting(true)
-    const el = document.getElementById('studio-preview')
-    if (!el) { setExporting(false); return }
     try {
-      if (!(window as any).html2canvas) {
-        await new Promise<void>((res, rej) => {
-          const s = document.createElement('script')
-          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'
-          s.onload = () => res()
-          s.onerror = () => rej(new Error('Failed to load html2canvas'))
-          document.head.appendChild(s)
-        })
+      // Build payload for server-side Satori rendering
+      const payload: any = {
+        visualType,
+        theme,
+        gradeView,
+        cardLayout,
+        period: moversPeriod,
+        direction: moversDir,
       }
+      if (card)     payload.card     = card
+      if (movers.length) payload.movers  = movers
+      if (setData)  payload.setData  = setData
 
-      // Proxy external images to avoid CORS
-      const imgs = Array.from(el.querySelectorAll('img')) as HTMLImageElement[]
-      const origSrcs = imgs.map(img => img.src)
-      for (const img of imgs) {
-        if (img.src && !img.src.startsWith(window.location.origin)) {
-          img.src = `/api/imgproxy?url=${encodeURIComponent(img.src.split('?')[0])}`
-        }
-      }
-      await Promise.all(imgs.map(img =>
-        img.complete ? Promise.resolve() : new Promise<void>(r => { img.onload = () => r(); img.onerror = () => r() })
-      ))
-
-      const canvas = await (window as any).html2canvas(el, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: false,
-        backgroundColor: null,
-        logging: false,
-        imageTimeout: 10000,
-        onclone: (doc: Document) => {
-          // Ensure fonts are loaded in clone
-          const link = doc.createElement('link')
-          link.rel = 'stylesheet'
-          link.href = 'https://fonts.googleapis.com/css2?family=Outfit:wght@700;800;900&family=Figtree:wght@400;600;700;800;900&display=swap'
-          doc.head.appendChild(link)
-        },
+      const res = await fetch('/api/studio/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       })
 
-      imgs.forEach((img, i) => { img.src = origSrcs[i] })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error || `Export failed: ${res.status}`)
+      }
 
+      const blob = await res.blob()
+      const url  = URL.createObjectURL(blob)
       const link = document.createElement('a')
       const fileName = card
-        ? `pokeprices-${card.card_name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${visualType}.png`
+        ? `pokeprices-${card.card_name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${visualType}-${cardLayout}.png`
         : `pokeprices-${visualType}-${moversPeriod}.png`
       link.download = fileName
-      link.href = canvas.toDataURL('image/png')
+      link.href = url
       link.click()
-    } catch (e) {
+      URL.revokeObjectURL(url)
+    } catch (e: any) {
       console.error('Export failed:', e)
-      alert('Export failed — try right-clicking the preview and saving the image.')
+      alert(`Export failed — ${e.message || 'please try again'}`)
     }
     setExporting(false)
   }
@@ -1202,7 +1187,7 @@ export default function StudioPageClient() {
 
         {/* ── CENTRE: Preview ── */}
         <div>
-          <div id="studio-preview" style={{ maxWidth: needsMovers ? 680 : 520 }}>
+          <div style={{ maxWidth: needsMovers ? 680 : 520 }}>
             {renderVisual()}
           </div>
         </div>
