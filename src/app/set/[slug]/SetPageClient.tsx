@@ -5,6 +5,8 @@ import { supabase, formatPrice } from '@/lib/supabase'
 import InlineChat from '@/components/InlineChat'
 import PriceChart from '@/components/PriceChart'
 import { getSetAssets } from '@/lib/setAssets'
+import SetStructuredData from '@/components/SetStructuredData'
+import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 interface Card {
   card_slug: string
@@ -330,6 +332,8 @@ export default function SetPageClient({ slug }: { slug: string }) {
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 24px' }}>
+      <SetStructuredData setName={setName} slug={encodeURIComponent(setName)} cards={regularCards} />
+      <BreadcrumbSchema items={[{ name: 'Sets', url: '/browse' }, { name: setName }]} />
       <SetHeader setName={setName} releaseDate={releaseDate} />
 
       {/* ── Section jump links ── */}

@@ -5,6 +5,8 @@ import { supabase, formatPrice, formatPct } from '@/lib/supabase'
 import InlineChat from '@/components/InlineChat'
 import PriceChart from '@/components/PriceChart'
 import CardStructuredData from '@/components/CardStructuredData'
+import CardFaqSchema from '@/components/CardFaqSchema'
+import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import { getSetAssets } from '@/lib/setAssets'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -536,6 +538,17 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 24px' }}>
       <CardStructuredData card={card} />
+      <CardFaqSchema
+        card={card}
+        gemRate={gemRate}
+        psa10Multiple={psa10Multiple ?? undefined}
+        gradingProfitCents={gradingProfitCents ?? undefined}
+      />
+      <BreadcrumbSchema items={[
+        { name: 'Sets', url: '/browse' },
+        { name: card.set_name, url: `/set/${encodeURIComponent(card.set_name)}` },
+        { name: card.card_name },
+      ]} />
 
       {/* Breadcrumb */}
       <div style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>

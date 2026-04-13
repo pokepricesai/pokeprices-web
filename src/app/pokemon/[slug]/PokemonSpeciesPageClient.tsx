@@ -2,6 +2,8 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { supabase, formatPrice } from '@/lib/supabase'
+import PokemonStructuredData from '@/components/PokemonStructuredData'
+import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 const TYPE_COLORS: Record<string, { bg: string; text: string; light: string }> = {
   fire:     { bg: '#FF6B35', text: '#fff', light: 'rgba(255,107,53,0.1)' },
@@ -37,11 +39,7 @@ const STAT_COLORS: Record<string, string> = {
 function TypeBadge({ type }: { type: string }) {
   const c = TYPE_COLORS[type] ?? { bg: 'var(--bg-light)', text: 'var(--text)', light: 'transparent' }
   return (
-    <span style={{
-      display: 'inline-block', padding: '4px 12px', borderRadius: 20,
-      fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1,
-      background: c.bg, color: c.text, fontFamily: "'Figtree', sans-serif",
-    }}>{type}</span>
+    <span style={{ display: 'inline-block', padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, background: c.bg, color: c.text, fontFamily: "'Figtree', sans-serif" }}>{type}</span>
   )
 }
 
@@ -50,12 +48,8 @@ function StatBar({ name, value }: { name: string; value: number }) {
   const pct = Math.min(100, (value / 255) * 100)
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '70px 36px 1fr', alignItems: 'center', gap: 10 }}>
-      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase', letterSpacing: 0.8 }}>
-        {STAT_LABELS[name] ?? name}
-      </span>
-      <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", textAlign: 'right' }}>
-        {value}
-      </span>
+      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase', letterSpacing: 0.8 }}>{STAT_LABELS[name] ?? name}</span>
+      <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", textAlign: 'right' }}>{value}</span>
       <div style={{ height: 8, background: 'var(--bg-light)', borderRadius: 99, overflow: 'hidden' }}>
         <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 99, transition: 'width 0.8s ease' }} />
       </div>
@@ -76,20 +70,15 @@ interface Card {
 
 function safeImageUrl(url: string | null): string | null {
   if (!url) return null
-  try {
-    // Already encoded — return as-is
-    return url
-  } catch {
-    return null
-  }
+  try { return url } catch { return null }
 }
 
 export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
-  const [pokeData, setPokeData]     = useState<any>(null)
+  const [pokeData,    setPokeData]    = useState<any>(null)
   const [speciesData, setSpeciesData] = useState<any>(null)
-  const [cards, setCards]           = useState<Card[]>([])
-  const [loading, setLoading]       = useState(true)
-  const [cardSort, setCardSort]     = useState<'set' | 'price_desc' | 'price_asc' | 'name'>('price_desc')
+  const [cards,       setCards]       = useState<Card[]>([])
+  const [loading,     setLoading]     = useState(true)
+  const [cardSort,    setCardSort]    = useState<'set' | 'price_desc' | 'price_asc' | 'name'>('price_desc')
 
   useEffect(() => {
     async function load() {
@@ -102,31 +91,20 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
       setPokeData(poke)
       setSpeciesData(species)
 
-      // Build the display name — capitalised slug
       const displayName = slug.split('-').map((w: string) => w[0].toUpperCase() + w.slice(1)).join(' ')
-
-      // ── FIX: Match exact species name to prevent e.g. Kabuto matching Kabutops ──
-      // We match cards whose name:
-      //   - equals the display name exactly (e.g. "Kabuto")
-      //   - starts with "displayName " (e.g. "Kabuto #44", "Kabuto ex")
-      //   - starts with "displayName [" (e.g. "Kabuto [Reverse Holo]")
-      //   - starts with "Lt. Surge's displayName", "Misty's displayName" etc (trainer prefix)
-      //   - starts with "Dark displayName", "Light displayName", "Shining displayName" etc
-      // We achieve this with multiple ilike patterns ORed together:
       const namePatterns = [
         `card_name.eq.${displayName}`,
         `card_name.ilike.${displayName} %`,
         `card_name.ilike.${displayName} [%`,
         `card_name.ilike.${displayName}#%`,
-        `card_name.ilike.% ${displayName}`,        // trainer prefix e.g. "Lt. Surge's Kabuto"
-        `card_name.ilike.% ${displayName} %`,      // trainer prefix + suffix e.g. "Dark Kabuto ex"
+        `card_name.ilike.% ${displayName}`,
+        `card_name.ilike.% ${displayName} %`,
         `card_name.ilike.% ${displayName}[%`,
         `card_name.ilike.% ${displayName}#%`,
       ].join(',')
 
       let allCardData: any[] = []
-      let page = 0
-      let done = false
+      let page = 0, done = false
       while (!done) {
         const { data, error } = await supabase
           .from('cards')
@@ -153,13 +131,9 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
           if (priceData) allPrices = [...allPrices, ...priceData]
         }
         const priceMap: Record<string, any> = {}
-        allPrices.forEach((p: any) => {
-          const key = `${p.card_name}|||${p.set_name}`
-          priceMap[key] = p
-        })
+        allPrices.forEach((p: any) => { priceMap[`${p.card_name}|||${p.set_name}`] = p })
         const enriched: Card[] = allCardData.map((c: any) => {
-          const key = `${c.card_name}|||${c.set_name}`
-          const price = priceMap[key]
+          const price = priceMap[`${c.card_name}|||${c.set_name}`]
           return { ...c, raw_usd: price?.current_raw ?? null, psa10_usd: price?.current_psa10 ?? null }
         })
         setCards(enriched)
@@ -170,6 +144,7 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
   }, [slug])
 
   const capitalize = (s: string) => s.split('-').map((w: string) => w[0].toUpperCase() + w.slice(1)).join(' ')
+  const displayName = capitalize(slug)
 
   const sortedCards = [...cards].sort((a, b) => {
     if (cardSort === 'price_desc') return (b.raw_usd ?? 0) - (a.raw_usd ?? 0)
@@ -198,32 +173,27 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
     </div>
   )
 
-  const types: string[]         = pokeData.types.map((t: any) => t.type.name)
-  const primaryType             = types[0]
-  const typeColor               = TYPE_COLORS[primaryType] ?? { bg: 'var(--primary)', text: '#fff', light: 'rgba(26,95,173,0.08)' }
-  const stats: { name: string; value: number }[] = pokeData.stats.map((s: any) => ({ name: s.stat.name, value: s.base_stat }))
-  const totalStats              = stats.reduce((sum, s) => sum + s.value, 0)
-  const abilities: string[]     = pokeData.abilities.map((a: any) => a.ability.name.split('-').map((w: string) => w[0].toUpperCase() + w.slice(1)).join(' '))
-  const artworkUrl              = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${pokeData.id}.png`
-  const flavorText              = speciesData?.flavor_text_entries?.filter((f: any) => f.language.name === 'en')?.slice(-1)[0]?.flavor_text?.replace(/\f/g, ' ')?.replace(/\u00ad/g, '') ?? null
-  const genus                   = speciesData?.genera?.find((g: any) => g.language.name === 'en')?.genus ?? null
-  const isLegendary             = speciesData?.is_legendary
-  const isMythical              = speciesData?.is_mythical
-  const heightM                 = (pokeData.height / 10).toFixed(1)
-  const weightKg                = (pokeData.weight / 10).toFixed(1)
+  const types: string[]     = pokeData.types.map((t: any) => t.type.name)
+  const primaryType         = types[0]
+  const typeColor           = TYPE_COLORS[primaryType] ?? { bg: 'var(--primary)', text: '#fff', light: 'rgba(26,95,173,0.08)' }
+  const stats               = pokeData.stats.map((s: any) => ({ name: s.stat.name, value: s.base_stat }))
+  const totalStats          = stats.reduce((sum: number, s: any) => sum + s.value, 0)
+  const abilities: string[] = pokeData.abilities.map((a: any) => a.ability.name.split('-').map((w: string) => w[0].toUpperCase() + w.slice(1)).join(' '))
+  const artworkUrl          = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${pokeData.id}.png`
+  const flavorText          = speciesData?.flavor_text_entries?.filter((f: any) => f.language.name === 'en')?.slice(-1)[0]?.flavor_text?.replace(/\f/g, ' ')?.replace(/\u00ad/g, '') ?? null
+  const genus               = speciesData?.genera?.find((g: any) => g.language.name === 'en')?.genus ?? null
+  const isLegendary         = speciesData?.is_legendary
+  const isMythical          = speciesData?.is_mythical
+  const heightM             = (pokeData.height / 10).toFixed(1)
+  const weightKg            = (pokeData.weight / 10).toFixed(1)
 
-  const regularCards            = cards.filter(c => !c.is_sealed)
-  const uniqueSets              = Array.from(new Set(regularCards.map(c => c.set_name)))
-  const mostExpensiveCard       = [...regularCards].sort((a, b) => (b.raw_usd ?? 0) - (a.raw_usd ?? 0))[0]
-  const mostExpensivePsa10      = [...regularCards].sort((a, b) => (b.psa10_usd ?? 0) - (a.psa10_usd ?? 0))[0]
-  const priceRange              = regularCards.filter(c => c.raw_usd)
-  const avgPrice                = priceRange.length ? priceRange.reduce((s, c) => s + (c.raw_usd ?? 0), 0) / priceRange.length : null
+  const regularCards        = cards.filter(c => !c.is_sealed)
+  const uniqueSets          = Array.from(new Set(regularCards.map(c => c.set_name)))
+  const mostExpensiveCard   = [...regularCards].sort((a, b) => (b.raw_usd ?? 0) - (a.raw_usd ?? 0))[0]
+  const mostExpensivePsa10  = [...regularCards].sort((a, b) => (b.psa10_usd ?? 0) - (a.psa10_usd ?? 0))[0]
+  const priceRange          = regularCards.filter(c => c.raw_usd)
+  const avgPrice            = priceRange.length ? priceRange.reduce((s, c) => s + (c.raw_usd ?? 0), 0) / priceRange.length : null
 
-  // Related Pokémon for "Explore more" — evolution family from species data
-  const evolutionSlugs: string[] = []
-  if (speciesData?.evolves_from_species?.name) evolutionSlugs.push(speciesData.evolves_from_species.name)
-
-  // Top sets by card count for "Explore by set" section
   const setCardCounts = uniqueSets.map(setName => ({
     setName,
     count: regularCards.filter(c => c.set_name === setName).length,
@@ -233,6 +203,10 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
   return (
     <div style={{ maxWidth: 1000, margin: '0 auto', padding: '32px 24px' }}>
 
+      {/* Schema */}
+      <PokemonStructuredData name={displayName} slug={slug} cards={regularCards.slice(0, 10)} />
+      <BreadcrumbSchema items={[{ name: 'Pokémon', url: '/pokemon' }, { name: displayName }]} />
+
       {/* Breadcrumb */}
       <div style={{ marginBottom: 20 }}>
         <Link href="/pokemon" style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textDecoration: 'none' }}>
@@ -241,13 +215,9 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
       </div>
 
       {/* Hero */}
-      <div style={{
-        background: typeColor.light, border: '1px solid var(--border)', borderRadius: 20,
-        padding: '28px 32px', marginBottom: 24,
-        display: 'flex', gap: 32, flexWrap: 'wrap', alignItems: 'center',
-      }}>
+      <div style={{ background: typeColor.light, border: '1px solid var(--border)', borderRadius: 20, padding: '28px 32px', marginBottom: 24, display: 'flex', gap: 32, flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ flex: '0 0 auto', textAlign: 'center' }}>
-          <img src={artworkUrl} alt={capitalize(slug)} style={{ width: 180, height: 180, objectFit: 'contain', filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.15))' }} />
+          <img src={artworkUrl} alt={displayName} style={{ width: 180, height: 180, objectFit: 'contain', filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.15))' }} />
         </div>
         <div style={{ flex: 1, minWidth: 260 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
@@ -255,10 +225,10 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
             {isLegendary && <span style={{ fontSize: 10, fontWeight: 800, background: '#FFD166', color: '#1a1a1a', padding: '2px 8px', borderRadius: 20, fontFamily: "'Figtree', sans-serif", letterSpacing: 0.8, textTransform: 'uppercase' }}>Legendary</span>}
             {isMythical  && <span style={{ fontSize: 10, fontWeight: 800, background: '#C77DFF', color: '#fff',    padding: '2px 8px', borderRadius: 20, fontFamily: "'Figtree', sans-serif", letterSpacing: 0.8, textTransform: 'uppercase' }}>Mythical</span>}
           </div>
-          <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 36, margin: '0 0 4px', color: 'var(--text)', lineHeight: 1 }}>{capitalize(slug)}</h1>
+          <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 36, margin: '0 0 4px', color: 'var(--text)', lineHeight: 1 }}>{displayName}</h1>
           {genus && <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 12px' }}>The {genus}</p>}
           <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-            {types.map(t => <TypeBadge key={t} type={t} />)}
+            {types.map((t: string) => <TypeBadge key={t} type={t} />)}
           </div>
           {flavorText && (
             <p style={{ fontSize: 14, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.7, margin: '0 0 16px', fontStyle: 'italic', maxWidth: 420 }}>
@@ -279,7 +249,7 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
             Base Stats · {totalStats} total
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {stats.map(s => <StatBar key={s.name} name={s.name} value={s.value} />)}
+            {stats.map((s: any) => <StatBar key={s.name} name={s.name} value={s.value} />)}
           </div>
         </div>
       </div>
@@ -326,7 +296,7 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
           <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, padding: '40px 24px', textAlign: 'center' }}>
             <div style={{ fontSize: 32, marginBottom: 12 }}>🃏</div>
             <p style={{ color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0 }}>
-              {capitalize(slug)} hasn&apos;t appeared on any Pokémon TCG cards in our database yet.
+              {displayName} hasn&apos;t appeared on any Pokémon TCG cards in our database yet.
             </p>
           </div>
         ) : (
@@ -340,21 +310,13 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
                     onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--primary)'; el.style.transform = 'translateY(-2px)' }}
                     onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--border)'; el.style.transform = 'translateY(0)' }}
                   >
-                    {/* FIX: display block + margin auto to properly center the image */}
                     {imgSrc ? (
-                      <img
-                        src={imgSrc}
-                        alt={card.card_name}
-                        style={{ width: 90, height: 126, objectFit: 'contain', borderRadius: 6, marginBottom: 8, display: 'block', margin: '0 auto 8px' }}
-                        loading="lazy"
-                        onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-                      />
+                      <img src={imgSrc} alt={card.card_name} style={{ width: 90, height: 126, objectFit: 'contain', borderRadius: 6, marginBottom: 8, display: 'block', margin: '0 auto 8px' }} loading="lazy"
+                        onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
                     ) : (
                       <div style={{ width: 90, height: 126, background: 'var(--bg-light)', borderRadius: 6, margin: '0 auto 8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>🃏</div>
                     )}
-                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", marginBottom: 2, lineHeight: 1.3 }}>
-                      {card.card_name}
-                    </div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", marginBottom: 2, lineHeight: 1.3 }}>{card.card_name}</div>
                     <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>
                       {card.set_name}{card.card_number ? ` · #${card.card_number}` : ''}
                     </div>
@@ -373,32 +335,22 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
         )}
       </div>
 
-      {/* ── Explore more by set ── */}
+      {/* Explore by set */}
       {setCardCounts.length > 0 && (
         <div style={{ marginBottom: 40 }}>
           <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, margin: '0 0 14px', color: 'var(--text)' }}>
-            Explore {capitalize(slug)} by Set
+            Explore {displayName} by Set
           </h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
             {setCardCounts.map(({ setName, count, topCard }) => (
-              <Link
-                key={setName}
-                href={`/set/${encodeURIComponent(setName)}`}
-                style={{ textDecoration: 'none' }}
-              >
-                <div
-                  style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 14px', transition: 'border-color 0.15s, transform 0.15s' }}
+              <Link key={setName} href={`/set/${encodeURIComponent(setName)}`} style={{ textDecoration: 'none' }}>
+                <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 14px', transition: 'border-color 0.15s, transform 0.15s' }}
                   onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--primary)'; el.style.transform = 'translateY(-2px)' }}
                   onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--border)'; el.style.transform = 'translateY(0)' }}
                 >
                   {topCard?.image_url && (
-                    <img
-                      src={topCard.image_url}
-                      alt={topCard.card_name}
-                      style={{ width: 50, height: 70, objectFit: 'contain', display: 'block', margin: '0 auto 10px', borderRadius: 4 }}
-                      loading="lazy"
-                      onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-                    />
+                    <img src={topCard.image_url} alt={topCard.card_name} style={{ width: 50, height: 70, objectFit: 'contain', display: 'block', margin: '0 auto 10px', borderRadius: 4 }} loading="lazy"
+                      onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
                   )}
                   <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.3, marginBottom: 4 }}>{setName}</div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>{count} card{count !== 1 ? 's' : ''}</div>
@@ -409,7 +361,7 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
         </div>
       )}
 
-      {/* ── Explore more Pokémon ── */}
+      {/* Explore more Pokémon */}
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: '20px 24px' }}>
         <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 18, margin: '0 0 14px', color: 'var(--text)' }}>
           Explore More Pokémon
@@ -420,15 +372,8 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
             'rayquaza', 'lugia', 'blastoise', 'venusaur', 'snorlax', 'dragonite',
             'mew', 'espeon', 'vaporeon', 'alakazam', 'gyarados', 'lapras',
           ].filter(p => p !== slug).slice(0, 12).map(pokemon => (
-            <Link
-              key={pokemon}
-              href={`/pokemon/${pokemon}`}
-              style={{
-                padding: '6px 14px', borderRadius: 20, textDecoration: 'none',
-                background: 'var(--bg-light)', border: '1px solid var(--border)',
-                fontSize: 13, fontWeight: 600, color: 'var(--text)',
-                fontFamily: "'Figtree', sans-serif", transition: 'border-color 0.15s',
-              }}
+            <Link key={pokemon} href={`/pokemon/${pokemon}`}
+              style={{ padding: '6px 14px', borderRadius: 20, textDecoration: 'none', background: 'var(--bg-light)', border: '1px solid var(--border)', fontSize: 13, fontWeight: 600, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", transition: 'border-color 0.15s' }}
               onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--primary)'}
               onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)'}
             >
