@@ -12,34 +12,22 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const { slug } = await params
   const setName = decodeURIComponent(slug)
 
-  const { data: setData } = await supabaseServer
-    .from('cards')
-    .select('set_release_date')
-    .eq('set_name', setName)
-    .not('set_release_date', 'is', null)
-    .limit(1)
-    .single()
-
-  const year = setData?.set_release_date
-    ? new Date(setData.set_release_date).getFullYear()
-    : null
-
-  const titleYear = year ? ` (${year})` : ''
-  const title = `${setName}${titleYear} Card Prices — Complete Price Guide | PokePrices`
-  const description = `All ${setName} Pokémon card prices — raw, PSA 9 and PSA 10 values, grading calculator, PSA population data and 30-day price trends. Updated daily.`
+  const title       = `${setName} Price Guide: Best Cards, Raw Prices, PSA 10 Values`
+  const description = `Explore ${setName} card prices, chase cards, raw vs PSA 10 spreads and the cards collectors are grading most aggressively. Updated daily.`
+  const canonical   = `https://pokeprices.io/set/${slug}`
 
   return {
-    title,
+    title: `${title} | PokePrices`,
     description,
     openGraph: {
       title,
       description,
-      url: `https://pokeprices.io/set/${slug}`,
+      url: canonical,
       siteName: 'PokePrices',
       type: 'website',
     },
     twitter: { card: 'summary', title, description },
-    alternates: { canonical: `https://pokeprices.io/set/${slug}` },
+    alternates: { canonical },
   }
 }
 
