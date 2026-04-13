@@ -1,4 +1,3 @@
-// app/set/[slug]/SetPageClient.tsx
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
@@ -26,6 +25,7 @@ interface TrendCard {
   raw_usd: number
   raw_pct_30d: number | null
   image_url: string | null
+  volume_label?: string | null
 }
 
 interface PopStats {
@@ -86,7 +86,12 @@ function MoverRow({ card, setName, positive }: { card: TrendCard; setName: strin
           : <div style={{ width: 26, height: 36, background: 'var(--bg)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, flexShrink: 0, color: 'var(--border)' }}>🃏</div>}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.card_name}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>${card.raw_usd.toFixed(2)}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>${card.raw_usd.toFixed(2)}</span>
+            {card.volume_label && (
+              <span style={{ fontSize: 10, color: '#3b82f6', fontWeight: 600, fontFamily: "'Figtree', sans-serif" }}>{card.volume_label}</span>
+            )}
+          </div>
         </div>
         {card.raw_pct_30d != null && (
           <span style={{ fontSize: 12, fontWeight: 800, flexShrink: 0, color: positive ? 'var(--green)' : '#ef4444', fontFamily: "'Figtree', sans-serif" }}>
@@ -147,7 +152,6 @@ function SealedSection({ sealedCards, setName }: { sealedCards: Card[]; setName:
   )
 }
 
-// ── Set Header with era/logo/symbol ──────────────────────────────────────────
 function SetHeader({ setName, releaseDate }: { setName: string; releaseDate: string | null }) {
   const { logoUrl, symbolUrl, eraUrl, eraDisplay } = getSetAssets(setName)
 
@@ -163,21 +167,12 @@ function SetHeader({ setName, releaseDate }: { setName: string; releaseDate: str
           background: 'var(--card)', border: '1px solid var(--border)',
           borderRadius: 20, transition: 'all 0.15s',
         }}
-        onMouseEnter={e => {
-          const el = e.currentTarget as HTMLAnchorElement
-          el.style.borderColor = 'var(--primary)'
-          el.style.color = 'var(--primary)'
-        }}
-        onMouseLeave={e => {
-          const el = e.currentTarget as HTMLAnchorElement
-          el.style.borderColor = 'var(--border)'
-          el.style.color = 'var(--text)'
-        }}
+        onMouseEnter={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.borderColor = 'var(--primary)'; el.style.color = 'var(--primary)' }}
+        onMouseLeave={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.borderColor = 'var(--border)'; el.style.color = 'var(--text)' }}
       >
         <span style={{ fontSize: 11, opacity: 0.5 }}>←</span> Browse all sets
       </Link>
 
-      {/* Era row */}
       {eraUrl && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <img src={eraUrl} alt={eraDisplay ?? ''} style={{ height: 22, width: 'auto', objectFit: 'contain' }} loading="lazy" />
@@ -189,20 +184,14 @@ function SetHeader({ setName, releaseDate }: { setName: string; releaseDate: str
         </div>
       )}
 
-      {/* Set logo + symbol + name */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-        {logoUrl && (
-          <img src={logoUrl} alt={setName} style={{ height: 56, width: 'auto', objectFit: 'contain', maxWidth: 240 }} loading="eager" />
-        )}
-        {symbolUrl && (
-          <img src={symbolUrl} alt="" style={{ width: 28, height: 28, objectFit: 'contain' }} loading="lazy" />
-        )}
+        {logoUrl && <img src={logoUrl} alt={setName} style={{ height: 56, width: 'auto', objectFit: 'contain', maxWidth: 240 }} loading="eager" />}
+        {symbolUrl && <img src={symbolUrl} alt="" style={{ width: 28, height: 28, objectFit: 'contain' }} loading="lazy" />}
         <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: logoUrl ? 26 : 34, fontWeight: 700, margin: 0, color: 'var(--text)', letterSpacing: '-0.5px', lineHeight: 1.2 }}>
           {setName}
         </h1>
       </div>
 
-      {/* Release date + age */}
       {releaseDate && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
@@ -211,8 +200,7 @@ function SetHeader({ setName, releaseDate }: { setName: string; releaseDate: str
           <span style={{
             fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
             background: 'var(--bg-light)', border: '1px solid var(--border)',
-            borderRadius: 20, padding: '2px 10px',
-            fontFamily: "'Figtree', sans-serif",
+            borderRadius: 20, padding: '2px 10px', fontFamily: "'Figtree', sans-serif",
           }}>
             {formatSetAge(releaseDate)}
           </span>
@@ -243,7 +231,6 @@ export default function SetPageClient({ slug }: { slug: string }) {
       const { data, error: err } = await supabase.rpc('get_set_cards_sortable', { set_text: setName, sort_col: sort })
       if (err || !data) setError(true)
       else {
-        // ── Coerce is_sealed to boolean — RPC can return string "true"/"false" ──
         const normalised = data.map((c: any) => ({
           ...c,
           is_sealed: c.is_sealed === true || c.is_sealed === 'true',
@@ -253,15 +240,11 @@ export default function SetPageClient({ slug }: { slug: string }) {
         if (dateCard?.set_release_date) setReleaseDate(dateCard.set_release_date)
       }
 
-      // Fallback: fetch release date directly if not in RPC response
       if (!releaseDate) {
         const { data: rdData } = await supabase
-          .from('cards')
-          .select('set_release_date')
-          .eq('set_name', setName)
-          .not('set_release_date', 'is', null)
-          .limit(1)
-          .single()
+          .from('cards').select('set_release_date')
+          .eq('set_name', setName).not('set_release_date', 'is', null)
+          .limit(1).single()
         if (rdData?.set_release_date) setReleaseDate(rdData.set_release_date)
       }
 
@@ -280,33 +263,55 @@ export default function SetPageClient({ slug }: { slug: string }) {
         setPopStats({ total_graded: pop.total_graded || 0, gem_rate: pop.gem_rate || 0, total_psa10: pop.total_psa_10 || 0 })
       }
 
+      // Fetch trends — join with card_volume to ensure min 1 sale/month
       const { data: trendData } = await supabase
         .from('card_trends').select('card_name, card_slug, current_raw, raw_pct_30d')
         .eq('set_name', setName).not('raw_pct_30d', 'is', null).gt('current_raw', 500)
-        .order('raw_pct_30d', { ascending: false }).limit(80)
+        .order('raw_pct_30d', { ascending: false }).limit(200)
 
       if (trendData && trendData.length > 0) {
         const slugs = trendData.map((t: any) => t.card_slug)
-        const { data: imgData } = await supabase.from('cards').select('card_slug, image_url, card_url_slug, is_sealed').in('card_slug', slugs)
-        const imgMap: Record<string, any> = {}
-        ;(imgData || []).forEach((c: any) => { imgMap[c.card_slug] = c })
 
-        const allEnriched = trendData.map((t: any) => ({
-          card_name: t.card_name,
-          card_url_slug: imgMap[t.card_slug]?.card_url_slug ?? null,
-          raw_usd: t.current_raw / 100,
-          raw_pct_30d: t.raw_pct_30d,
-          image_url: imgMap[t.card_slug]?.image_url ?? null,
-          is_sealed: imgMap[t.card_slug]?.is_sealed === true || imgMap[t.card_slug]?.is_sealed === 'true',
-        }))
+        // Fetch images + sealed status + volume in parallel
+        const [imgRes, volRes] = await Promise.all([
+          supabase.from('cards').select('card_slug, image_url, card_url_slug, is_sealed').in('card_slug', slugs),
+          supabase.from('card_volume').select('card_slug, sales_30d, volume_label').in('card_slug', slugs).eq('grade', 'Ungraded'),
+        ])
+
+        const imgMap: Record<string, any> = {}
+        ;(imgRes.data || []).forEach((c: any) => { imgMap[c.card_slug] = c })
+
+        const volMap: Record<string, any> = {}
+        ;(volRes.data || []).forEach((v: any) => { volMap[v.card_slug] = v })
+
+        const allEnriched = trendData
+          .filter((t: any) => {
+            // Must have at least 1 sale per month
+            const vol = volMap[t.card_slug]
+            return vol && vol.sales_30d >= 1
+          })
+          .map((t: any) => ({
+            card_name: t.card_name,
+            card_url_slug: imgMap[t.card_slug]?.card_url_slug ?? null,
+            raw_usd: t.current_raw / 100,
+            raw_pct_30d: t.raw_pct_30d,
+            image_url: imgMap[t.card_slug]?.image_url ?? null,
+            is_sealed: imgMap[t.card_slug]?.is_sealed === true || imgMap[t.card_slug]?.is_sealed === 'true',
+            volume_label: volMap[t.card_slug]?.volume_label ?? null,
+          }))
 
         const isReliable = (t: any) => Math.abs(t.raw_pct_30d ?? 0) <= 300
-        const cardEnriched = allEnriched.filter(t => !t.is_sealed)
-        const sealedEnriched = allEnriched.filter(t => t.is_sealed)
+        const cardEnriched = allEnriched.filter((t: any) => !t.is_sealed)
+        const sealedEnriched = allEnriched.filter((t: any) => t.is_sealed)
 
-        setTopMovers(cardEnriched.filter(t => (t.raw_pct_30d ?? 0) > 0 && isReliable(t)).slice(0, 5))
-        setTopFallers(cardEnriched.filter(t => (t.raw_pct_30d ?? 0) < 0 && isReliable(t)).sort((a, b) => (a.raw_pct_30d ?? 0) - (b.raw_pct_30d ?? 0)).slice(0, 5))
-        setTopSealedMovers(sealedEnriched.filter(t => (t.raw_pct_30d ?? 0) > 0 && isReliable(t)).slice(0, 5))
+        setTopMovers(cardEnriched.filter((t: any) => (t.raw_pct_30d ?? 0) > 0 && isReliable(t)).slice(0, 5))
+        setTopFallers(
+          cardEnriched
+            .filter((t: any) => (t.raw_pct_30d ?? 0) < 0 && isReliable(t))
+            .sort((a: any, b: any) => (a.raw_pct_30d ?? 0) - (b.raw_pct_30d ?? 0))
+            .slice(0, 5)
+        )
+        setTopSealedMovers(sealedEnriched.filter((t: any) => (t.raw_pct_30d ?? 0) > 0 && isReliable(t)).slice(0, 5))
       }
 
       setLoading(false)
