@@ -2,6 +2,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 
+function useDebounce<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay)
+    return () => clearTimeout(t)
+  }, [value, delay])
+  return debounced
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface CardData {
@@ -954,9 +963,15 @@ export default function StudioPageClient() {
   const [moversDir,    setMoversDir]    = useState<MoversDirection>('rising')
   const [setInput,     setSetInput]     = useState('')
   const [cardSearch,   setCardSearch]   = useState('')
-  const [suggestions,  setSuggestions]  = useState<{card_slug: string; card_name: string; set_name: string; card_number?: string | null; image_url?: string | null}[]>([])
+  const [suggestions,  setSuggestions]  = useState<{card_slug: string; card_name: string; set_name: string; card_number?: string | null; image_url?: string | null; needs_slug_lookup?: boolean; card_url_slug?: string}[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
+  const debouncedSearch = useDebounce(cardSearch, 200)
+
+  useEffect(() => {
+    if (debouncedSearch.length >= 2) fetchSuggestions(debouncedSearch)
+    else { setSuggestions([]); setShowSuggestions(false) }
+  }, [debouncedSearch])
   const [loading,      setLoading]      = useState(false)
   const [exporting,    setExporting]    = useState(false)
   const [isMobile,     setIsMobile]     = useState(false)
@@ -982,108 +997,121 @@ export default function StudioPageClient() {
     }
   }, [visualType, moversDir, moversPeriod])
 
-  // ── Smart search — parses any combination of name, number, set ───────────────
-  // Handles: "Charizard", "Charizard 4", "Charizard #4", "4/102", "6/102 Base Set",
-  //          "Umbreon VMAX 215", "Base Set Charizard", "Evolving Skies Umbreon"
-  function parseSearchQuery(raw: string): { namePart: string; numberPart: string | null; setPart: string | null } {
+  // ── Search — mirrors main site SearchBar logic ────────────────────────────
+  function parseSearchQuery(raw: string): { namePart: string; numberPart: string | null } {
     let q = raw.trim()
-
-    // Extract card number patterns: 4/102, #4, #215, 086/123, 143/142
-    const numberFull = q.match(/\b(\d{1,3})\/(\d{1,3})\b/)  // e.g. 6/102
-    const numberHash = q.match(/#(\d{1,3})\b/)               // e.g. #4
-    const numberTrail = q.match(/\b(\d{1,3})\s*$/)           // trailing number e.g. "Charizard 4"
+    const numberFull  = q.match(/\b(\d{1,3})\/\d+\b/)   // 6/102, 086/123
+    const numberHash  = q.match(/#(\d{1,3})\b/)           // #4, #215
+    const numberTrail = q.split(/\s+/).length > 1 ? q.match(/\b(\d{1,3})\s*$/) : null
 
     let numberPart: string | null = null
-    if (numberFull) {
-      numberPart = numberFull[1]  // just the card number, not the set total
-      q = q.replace(numberFull[0], '').trim()
-    } else if (numberHash) {
-      numberPart = numberHash[1]
-      q = q.replace(numberHash[0], '').trim()
-    } else if (numberTrail && q.split(' ').length > 1) {
-      // Only treat trailing number as card number if there's a name before it
-      numberPart = numberTrail[1]
-      q = q.replace(/\s+\d{1,3}\s*$/, '').trim()
-    }
+    if (numberFull)        { numberPart = numberFull[1];  q = q.replace(numberFull[0],  '').trim() }
+    else if (numberHash)   { numberPart = numberHash[1];  q = q.replace(numberHash[0],  '').trim() }
+    else if (numberTrail)  { numberPart = numberTrail[1]; q = q.replace(/\s+\d{1,3}\s*$/, '').trim() }
 
-    // Known set keywords — if query contains a known set fragment, split it out
-    // This is a heuristic: if the remaining query has 2+ words and the last word(s)
-    // look like a set name, we try to use them as set filter
-    // Simpler: just use the whole remaining string as name search — the DB query
-    // does OR across name + set so it finds both directions
-    return { namePart: q, numberPart, setPart: null }
+    return { namePart: q, numberPart }
   }
 
   async function buildSuggestionQuery(raw: string) {
-    const { namePart, numberPart } = parseSearchQuery(raw)
-    if (!namePart && !numberPart) return []
+    const q = raw.trim()
+    if (q.length < 2) return []
 
-    // Build OR conditions: match on card_name OR set_name
-    // This handles "Base Set Charizard", "Evolving Skies Umbreon", "Charizard Base Set"
-    let query = supabase
-      .from('cards')
-      .select('card_slug, card_name, set_name, card_number, image_url')
-      .not('card_slug', 'is', null)
-
-    if (numberPart && namePart) {
-      // Both name and number — filter by number exactly, name loosely
-      query = query
-        .eq('card_number', numberPart)
-        .or(`card_name.ilike.%${namePart}%,set_name.ilike.%${namePart}%`)
-    } else if (numberPart && !namePart) {
-      // Just a number — show all cards with that number
-      query = query.eq('card_number', numberPart)
-    } else {
-      // Just text — match card name OR set name
-      // Split into words and require each word to appear somewhere
-      const words = namePart.split(/\s+/).filter(w => w.length > 1)
-      if (words.length === 1) {
-        query = query.or(`card_name.ilike.%${words[0]}%,set_name.ilike.%${words[0]}%`)
-      } else {
-        // Multi-word: try exact phrase on card_name first, then set_name
-        query = query.or(`card_name.ilike.%${namePart}%,set_name.ilike.%${namePart}%`)
-      }
+    // Strategy 1: search_global RPC (same as main search bar)
+    const { data: rpcData } = await supabase.rpc('search_global', { query: q })
+    if (rpcData && rpcData.length > 0) {
+      return rpcData
+        .filter((r: any) => r.result_type === 'card' && r.url_slug)
+        .map((r: any) => ({
+          card_slug: r.url_slug,  // card_url_slug in this context
+          card_name: r.name,
+          set_name: r.subtitle || '',
+          card_number: r.card_number_display || null,
+          image_url: r.image_url || null,
+          needs_slug_lookup: true,  // flag: url_slug here is card_url_slug not card_slug
+          card_url_slug: r.url_slug,
+        }))
+        .slice(0, 8)
     }
 
-    // Join with card_trends to filter to cards with prices, sort by value
-    const { data: cardData } = await query.limit(40)
-    if (!cardData?.length) return []
+    // Strategy 2: fallback direct search
+    const { namePart, numberPart } = parseSearchQuery(q)
+    const results: any[] = []
 
-    const slugs = cardData.map((c: any) => c.card_slug)
-    const { data: trendData } = await supabase
-      .from('card_trends')
-      .select('card_slug, current_raw')
-      .in('card_slug', slugs)
-      .not('current_raw', 'is', null)
-      .order('current_raw', { ascending: false })
+    if (numberPart && namePart) {
+      const num = parseInt(numberPart, 10).toString()
+      const { data } = await supabase.from('cards')
+        .select('card_slug, card_name, set_name, card_number, image_url')
+        .ilike('set_name', `%${namePart}%`)
+        .in('card_number', [num, num.padStart(3, '0')])
+        .not('card_slug', 'is', null).limit(8)
+      if (data?.length) return data
+    }
 
-    if (!trendData?.length) return []
+    if (numberPart && !namePart) {
+      const num = parseInt(numberPart, 10).toString()
+      const { data } = await supabase.from('cards')
+        .select('card_slug, card_name, set_name, card_number, image_url')
+        .in('card_number', [num, num.padStart(3, '0')])
+        .not('card_slug', 'is', null).limit(8)
+      if (data?.length) return data
+    }
 
-    // Merge and sort by price
-    const trendMap: Record<string, number> = {}
-    trendData.forEach((t: any) => { trendMap[t.card_slug] = t.current_raw })
+    // Name search — try full query OR name tokens against card_name OR set_name
+    const [byName, bySet, byFullQ] = await Promise.all([
+      supabase.from('cards').select('card_slug, card_name, set_name, card_number, image_url')
+        .ilike('card_name', `%${namePart || q}%`).not('card_slug', 'is', null).limit(6),
+      supabase.from('cards').select('card_slug, card_name, set_name, card_number, image_url')
+        .ilike('set_name', `%${namePart || q}%`).not('card_slug', 'is', null).limit(4),
+      namePart !== q ? supabase.from('cards').select('card_slug, card_name, set_name, card_number, image_url')
+        .ilike('card_name', `%${q}%`).not('card_slug', 'is', null).limit(4)
+        : Promise.resolve({ data: [] }),
+    ])
 
-    return cardData
-      .filter((c: any) => trendMap[c.card_slug])
-      .sort((a: any, b: any) => (trendMap[b.card_slug] || 0) - (trendMap[a.card_slug] || 0))
-      .slice(0, 8)
+    const seen = new Set<string>()
+    for (const row of [...(byName.data || []), ...(byFullQ.data || []), ...(bySet.data || [])]) {
+      if (!seen.has(row.card_slug)) { seen.add(row.card_slug); results.push(row) }
+      if (results.length >= 8) break
+    }
+
+    // Sort by price descending using card_trends
+    if (results.length > 1) {
+      const slugs = results.map((r: any) => r.card_slug)
+      const { data: trendData } = await supabase.from('card_trends')
+        .select('card_slug, current_raw').in('card_slug', slugs).not('current_raw', 'is', null)
+      const priceMap: Record<string, number> = {}
+      ;(trendData || []).forEach((t: any) => { priceMap[t.card_slug] = t.current_raw })
+      results.sort((a, b) => (priceMap[b.card_slug] || 0) - (priceMap[a.card_slug] || 0))
+    }
+
+    return results.slice(0, 8)
+  }
+
+  async function selectSuggestion(s: any) {
+    setShowSuggestions(false)
+    setCardSearch(`${s.card_name}${s.card_number ? ` #${s.card_number}` : ''} — ${s.set_name}`)
+    setLoading(true)
+
+    let cardSlug = s.card_slug
+    // If result came from search_global, card_slug is actually a card_url_slug — look up real slug
+    if (s.needs_slug_lookup) {
+      const { data } = await supabase.from('cards')
+        .select('card_slug').eq('card_url_slug', s.card_url_slug)
+        .eq('set_name', s.set_name).single()
+      if (data?.card_slug) cardSlug = data.card_slug
+    }
+
+    const result = await fetchCard(cardSlug)
+    if (result) {
+      setCard(result)
+      if (['movers', 'set-report'].includes(visualType)) setVisualType('insight')
+    }
+    setLoading(false)
   }
 
   async function searchCard(query: string) {
     if (!query.trim()) return
-    setLoading(true)
-    setSuggestions([])
-    setShowSuggestions(false)
-    const results = await buildSuggestionQuery(query)
-    if (results.length) {
-      const result = await fetchCard(results[0].card_slug)
-      if (result) {
-        setCard(result)
-        setCardSearch(`${results[0].card_name} — ${results[0].set_name}`)
-        if (['movers', 'set-report'].includes(visualType)) setVisualType('insight')
-      }
-    }
-    setLoading(false)
+    const suggestions = await buildSuggestionQuery(query)
+    if (suggestions.length) await selectSuggestion(suggestions[0])
   }
 
   async function fetchSuggestions(query: string) {
@@ -1093,24 +1121,9 @@ export default function StudioPageClient() {
     else { setSuggestions([]); setShowSuggestions(false) }
   }
 
-  async function selectSuggestion(s: {card_slug: string; card_name: string; set_name: string}) {
-    setShowSuggestions(false)
-    setCardSearch(`${s.card_name} — ${s.set_name}`)
-    setLoading(true)
-    const result = await fetchCard(s.card_slug)
-    if (result) {
-      setCard(result)
-      if (['movers', 'set-report'].includes(visualType)) setVisualType('insight')
-    }
-    setLoading(false)
-  }
-
-  // Close suggestions when clicking outside
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
-        setShowSuggestions(false)
-      }
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) setShowSuggestions(false)
     }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
@@ -1278,7 +1291,7 @@ export default function StudioPageClient() {
                   style={inputStyle}
                   placeholder="e.g. Charizard, 6/102, Umbreon VMAX, Base Set..."
                   value={cardSearch}
-                  onChange={e => { setCardSearch(e.target.value); fetchSuggestions(e.target.value) }}
+                  onChange={e => setCardSearch(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') { searchCard(cardSearch) } if (e.key === 'Escape') setShowSuggestions(false) }}
                   onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true) }}
                 />

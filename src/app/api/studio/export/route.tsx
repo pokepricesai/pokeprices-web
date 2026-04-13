@@ -135,13 +135,14 @@ export async function POST(req: NextRequest) {
 
     // ── CARD VISUALS ───────────────────────────────────────────────────────────
 
-    if (card && (visualType === 'insight' || visualType === 'psa-gauge' || visualType === 'peak-distance' || visualType === 'temperature' || visualType === 'grade-compare')) {
+    if (card && visualType === 'insight') {
       const focusPrice = gradeView === 'psa10' ? card.current_psa10 : gradeView === 'psa9' ? card.current_psa9 : card.current_raw
       const focusLabel = gradeView === 'psa10' ? 'PSA 10' : gradeView === 'psa9' ? 'PSA 9' : 'Raw'
       const psa10x = card.current_raw && card.current_psa10 ? (card.current_psa10 / card.current_raw).toFixed(1) : null
       const sig = card.raw_pct_30d != null
         ? card.raw_pct_30d > 15  ? { label: '▲ Trending Up', col: '#22c55e' }
         : card.raw_pct_30d < -15 ? { label: '▼ Cooling',     col: '#ef4444' }
+        : { label: '— Stable', col: '#f59e0b' }
         : { label: '— Stable', col: '#f59e0b' }
         : { label: '— Stable', col: '#f59e0b' }
 
@@ -342,24 +343,28 @@ export async function POST(req: NextRequest) {
       const gaugeCol = !multiple ? mu : multiple < 3 ? '#22c55e' : multiple < 8 ? '#f59e0b' : '#ef4444'
       const gaugeLabel = !multiple ? 'No data' : multiple < 3 ? 'Low premium — consider grading' : multiple < 8 ? 'Meaningful premium' : 'Very high premium — high risk'
 
-      // SVG arc: semicircle from left (-180deg) to right (0deg)
-      // fillPct 0-100 maps to 0-180 degrees of arc
-      const r = 90, cx = 150, cy = 130
-      const startAngle = Math.PI        // left side = 180deg in radians
-      const sweepAngle = Math.PI * (fillPct / 100)  // 0 to PI
-      const endAngle = startAngle - sweepAngle       // goes counter-clockwise left to right across top
+      // SVG semicircle arc
+      // Coordinate system: cx=150, cy=130, r=90
+      // Left point (0×):  (60, 130)  = cx - r, cy
+      // Right point (20×): (240, 130) = cx + r, cy
+      // Top of arc:        (150, 40)  = cx, cy - r
+      // Track: full semicircle from left to right going OVER the top
+      //   sweep-flag=0 (counter-clockwise), large-arc=1
+      // Fill: partial arc from left, same direction
+      const r2 = 90, cx2 = 150, cy2 = 130
+      const lx = cx2 - r2, ly = cy2   // left point
+      const rx2 = cx2 + r2, ry2 = cy2  // right point
 
-      const sx = cx + r * Math.cos(startAngle)
-      const sy = cy + r * Math.sin(startAngle)
-      const ex = cx + r * Math.cos(endAngle)
-      const ey = cy + r * Math.sin(endAngle)
-      const largeArc = sweepAngle > Math.PI ? 1 : 0
+      // End point of fill arc
+      const fillAngle = Math.PI - (Math.PI * fillPct / 100)  // from left, going counter-clockwise over top
+      const fex = cx2 + r2 * Math.cos(fillAngle)
+      const fey = cy2 + r2 * Math.sin(fillAngle)
+      const fillLarge = fillPct > 50 ? 1 : 0
 
-      // Track (full semicircle)
-      const trackEx = cx + r * Math.cos(0)
-      const trackEy = cy + r * Math.sin(0)
-      const trackPath = `M ${sx} ${sy} A ${r} ${r} 0 1 1 ${trackEx} ${trackEy}`
-      const fillPath = fillPct > 0 ? `M ${sx} ${sy} A ${r} ${r} 0 ${largeArc} 1 ${ex} ${ey}` : ''
+      const trackPath = `M ${lx} ${ly} A ${r2} ${r2} 0 1 1 ${rx2} ${ry2}`
+      const fillPath  = fillPct > 0
+        ? `M ${lx} ${ly} A ${r2} ${r2} 0 ${fillLarge} 1 ${fex.toFixed(1)} ${fey.toFixed(1)}`
+        : ''
 
       return new ImageResponse((
         <div style={{ display: 'flex', flexDirection: 'column', background: bg, width: 520, borderRadius: 22, border: `1px solid ${br}`, overflow: 'hidden', fontFamily: 'Figtree' }}>
