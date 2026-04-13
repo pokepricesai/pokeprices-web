@@ -249,9 +249,9 @@ export async function POST(req: NextRequest) {
               </div>
             </div>
             {/* Card name + large centered image */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', background: hdGrad, padding: '0 22px 60px' }}>
-              <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.55)', fontWeight: 700, marginBottom: 4, fontFamily: 'Figtree' }}>{card.set_name}</span>
-              <span style={{ fontSize: 26, fontWeight: 900, color: '#fff', fontFamily: 'Outfit', letterSpacing: -0.5, lineHeight: 1.1, marginBottom: 22, textAlign: 'center' }}>{card.card_name}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', background: hdGrad, padding: '16px 22px 60px' }}>
+              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', fontWeight: 700, marginBottom: 6, fontFamily: 'Figtree' }}>{card.set_name}</span>
+              <span style={{ fontSize: 28, fontWeight: 900, color: '#fff', fontFamily: 'Outfit', letterSpacing: -0.5, lineHeight: 1.1, marginBottom: 24, textAlign: 'center' }}>{card.card_name}</span>
               {imgSrc && <img src={imgSrc} width={200} height={280} style={{ objectFit: 'contain', borderRadius: 14 }} />}
             </div>
             {/* Data section */}

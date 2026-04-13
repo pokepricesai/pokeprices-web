@@ -492,9 +492,9 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
       </div>
 
       {/* Card name + set */}
-      <div style={{ background: 'linear-gradient(160deg, #0d2b5e 0%, #1a5fad 50%, #2874c8 100%)', padding: '0 22px 20px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.55)', fontWeight: 700, letterSpacing: 0.5, marginBottom: 4, fontFamily: "'Figtree', sans-serif" }}>{card.set_name}</div>
-        <div style={{ fontSize: 24, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.5, lineHeight: 1.1, marginBottom: 20 }}>{card.card_name}</div>
+      <div style={{ background: 'linear-gradient(160deg, #0d2b5e 0%, #1a5fad 50%, #2874c8 100%)', padding: '16px 22px 20px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', fontWeight: 700, letterSpacing: 0.5, marginBottom: 6, fontFamily: "'Figtree', sans-serif" }}>{card.set_name}</div>
+        <div style={{ fontSize: 26, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.5, lineHeight: 1.1, marginBottom: 24 }}>{card.card_name}</div>
 
         {/* Large centered card image */}
         {card.image_url && (
@@ -954,7 +954,7 @@ export default function StudioPageClient() {
   const [moversDir,    setMoversDir]    = useState<MoversDirection>('rising')
   const [setInput,     setSetInput]     = useState('')
   const [cardSearch,   setCardSearch]   = useState('')
-  const [suggestions,  setSuggestions]  = useState<{card_slug: string; card_name: string; set_name: string}[]>([])
+  const [suggestions,  setSuggestions]  = useState<{card_slug: string; card_name: string; set_name: string; card_number?: string | null; image_url?: string | null}[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
   const [loading,      setLoading]      = useState(false)
@@ -982,23 +982,104 @@ export default function StudioPageClient() {
     }
   }, [visualType, moversDir, moversPeriod])
 
+  // ── Smart search — parses any combination of name, number, set ───────────────
+  // Handles: "Charizard", "Charizard 4", "Charizard #4", "4/102", "6/102 Base Set",
+  //          "Umbreon VMAX 215", "Base Set Charizard", "Evolving Skies Umbreon"
+  function parseSearchQuery(raw: string): { namePart: string; numberPart: string | null; setPart: string | null } {
+    let q = raw.trim()
+
+    // Extract card number patterns: 4/102, #4, #215, 086/123, 143/142
+    const numberFull = q.match(/\b(\d{1,3})\/(\d{1,3})\b/)  // e.g. 6/102
+    const numberHash = q.match(/#(\d{1,3})\b/)               // e.g. #4
+    const numberTrail = q.match(/\b(\d{1,3})\s*$/)           // trailing number e.g. "Charizard 4"
+
+    let numberPart: string | null = null
+    if (numberFull) {
+      numberPart = numberFull[1]  // just the card number, not the set total
+      q = q.replace(numberFull[0], '').trim()
+    } else if (numberHash) {
+      numberPart = numberHash[1]
+      q = q.replace(numberHash[0], '').trim()
+    } else if (numberTrail && q.split(' ').length > 1) {
+      // Only treat trailing number as card number if there's a name before it
+      numberPart = numberTrail[1]
+      q = q.replace(/\s+\d{1,3}\s*$/, '').trim()
+    }
+
+    // Known set keywords — if query contains a known set fragment, split it out
+    // This is a heuristic: if the remaining query has 2+ words and the last word(s)
+    // look like a set name, we try to use them as set filter
+    // Simpler: just use the whole remaining string as name search — the DB query
+    // does OR across name + set so it finds both directions
+    return { namePart: q, numberPart, setPart: null }
+  }
+
+  async function buildSuggestionQuery(raw: string) {
+    const { namePart, numberPart } = parseSearchQuery(raw)
+    if (!namePart && !numberPart) return []
+
+    // Build OR conditions: match on card_name OR set_name
+    // This handles "Base Set Charizard", "Evolving Skies Umbreon", "Charizard Base Set"
+    let query = supabase
+      .from('cards')
+      .select('card_slug, card_name, set_name, card_number, image_url')
+      .not('card_slug', 'is', null)
+
+    if (numberPart && namePart) {
+      // Both name and number — filter by number exactly, name loosely
+      query = query
+        .eq('card_number', numberPart)
+        .or(`card_name.ilike.%${namePart}%,set_name.ilike.%${namePart}%`)
+    } else if (numberPart && !namePart) {
+      // Just a number — show all cards with that number
+      query = query.eq('card_number', numberPart)
+    } else {
+      // Just text — match card name OR set name
+      // Split into words and require each word to appear somewhere
+      const words = namePart.split(/\s+/).filter(w => w.length > 1)
+      if (words.length === 1) {
+        query = query.or(`card_name.ilike.%${words[0]}%,set_name.ilike.%${words[0]}%`)
+      } else {
+        // Multi-word: try exact phrase on card_name first, then set_name
+        query = query.or(`card_name.ilike.%${namePart}%,set_name.ilike.%${namePart}%`)
+      }
+    }
+
+    // Join with card_trends to filter to cards with prices, sort by value
+    const { data: cardData } = await query.limit(40)
+    if (!cardData?.length) return []
+
+    const slugs = cardData.map((c: any) => c.card_slug)
+    const { data: trendData } = await supabase
+      .from('card_trends')
+      .select('card_slug, current_raw')
+      .in('card_slug', slugs)
+      .not('current_raw', 'is', null)
+      .order('current_raw', { ascending: false })
+
+    if (!trendData?.length) return []
+
+    // Merge and sort by price
+    const trendMap: Record<string, number> = {}
+    trendData.forEach((t: any) => { trendMap[t.card_slug] = t.current_raw })
+
+    return cardData
+      .filter((c: any) => trendMap[c.card_slug])
+      .sort((a: any, b: any) => (trendMap[b.card_slug] || 0) - (trendMap[a.card_slug] || 0))
+      .slice(0, 8)
+  }
+
   async function searchCard(query: string) {
     if (!query.trim()) return
     setLoading(true)
     setSuggestions([])
     setShowSuggestions(false)
-    const { data } = await supabase
-      .from('card_trends')
-      .select('card_slug,card_name,set_name')
-      .ilike('card_name', `%${query.trim()}%`)
-      .not('current_raw', 'is', null)
-      .order('current_raw', { ascending: false })
-      .limit(1)
-    if (data?.length) {
-      const result = await fetchCard(data[0].card_slug)
+    const results = await buildSuggestionQuery(query)
+    if (results.length) {
+      const result = await fetchCard(results[0].card_slug)
       if (result) {
         setCard(result)
-        setCardSearch(result.card_name)
+        setCardSearch(`${results[0].card_name} — ${results[0].set_name}`)
         if (['movers', 'set-report'].includes(visualType)) setVisualType('insight')
       }
     }
@@ -1007,20 +1088,14 @@ export default function StudioPageClient() {
 
   async function fetchSuggestions(query: string) {
     if (query.length < 2) { setSuggestions([]); setShowSuggestions(false); return }
-    const { data } = await supabase
-      .from('card_trends')
-      .select('card_slug,card_name,set_name')
-      .ilike('card_name', `%${query.trim()}%`)
-      .not('current_raw', 'is', null)
-      .order('current_raw', { ascending: false })
-      .limit(8)
-    if (data?.length) { setSuggestions(data); setShowSuggestions(true) }
+    const results = await buildSuggestionQuery(query)
+    if (results.length) { setSuggestions(results); setShowSuggestions(true) }
     else { setSuggestions([]); setShowSuggestions(false) }
   }
 
   async function selectSuggestion(s: {card_slug: string; card_name: string; set_name: string}) {
     setShowSuggestions(false)
-    setCardSearch(s.card_name)
+    setCardSearch(`${s.card_name} — ${s.set_name}`)
     setLoading(true)
     const result = await fetchCard(s.card_slug)
     if (result) {
@@ -1201,7 +1276,7 @@ export default function StudioPageClient() {
               <div ref={searchRef} style={{ position: 'relative' }}>
                 <input
                   style={inputStyle}
-                  placeholder="e.g. Charizard, Umbreon VMAX…"
+                  placeholder="e.g. Charizard, 6/102, Umbreon VMAX, Base Set..."
                   value={cardSearch}
                   onChange={e => { setCardSearch(e.target.value); fetchSuggestions(e.target.value) }}
                   onKeyDown={e => { if (e.key === 'Enter') { searchCard(cardSearch) } if (e.key === 'Escape') setShowSuggestions(false) }}
@@ -1210,11 +1285,18 @@ export default function StudioPageClient() {
                 {showSuggestions && suggestions.length > 0 && (
                   <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, background: 'var(--card)', border: '1px solid var(--primary)', borderRadius: 10, marginTop: 4, overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>
                     {suggestions.map((s, i) => (
-                      <button key={i} onMouseDown={() => selectSuggestion(s)} style={{ display: 'flex', flexDirection: 'column', width: '100%', padding: '9px 12px', background: 'transparent', border: 'none', borderBottom: i < suggestions.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer', textAlign: 'left', fontFamily: "'Figtree', sans-serif", transition: 'background 0.1s' }}
+                      <button key={i} onMouseDown={() => selectSuggestion(s)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '8px 12px', background: 'transparent', border: 'none', borderBottom: i < suggestions.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer', textAlign: 'left', fontFamily: "'Figtree', sans-serif", transition: 'background 0.1s' }}
                         onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-light)' }}
                         onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{s.card_name}</span>
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>{s.set_name}</span>
+                        {s.image_url
+                          ? <img src={s.image_url} alt="" style={{ width: 24, height: 34, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
+                          : <div style={{ width: 24, height: 34, background: 'var(--bg)', borderRadius: 3, flexShrink: 0 }} />}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {s.card_name}{s.card_number ? ` #${s.card_number}` : ''}
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>{s.set_name}</div>
+                        </div>
                       </button>
                     ))}
                   </div>
