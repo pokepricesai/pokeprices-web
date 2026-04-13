@@ -52,18 +52,14 @@ async function toDataUrl(url: string): Promise<string | null> {
   }
 }
 
-// Load a single font weight from Google Fonts CSS API
-async function loadFont(family: string, weight: number): Promise<ArrayBuffer | null> {
+// Load fonts from files bundled alongside this route
+// import.meta.url points to the route file, so relative paths resolve correctly
+async function loadFont(filename: string): Promise<ArrayBuffer | null> {
   try {
-    const url = `https://fonts.googleapis.com/css2?family=${family.replace(' ', '+')}:wght@${weight}&display=swap`
-    const css = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' },
-      signal: AbortSignal.timeout(5000),
-    }).then(r => r.text())
-    // Extract first woff2 src URL
-    const match = css.match(/src:\s*url\(([^)]+)\)\s*format\('woff2'\)/)
-    if (!match?.[1]) return null
-    return await fetch(match[1], { signal: AbortSignal.timeout(5000) }).then(r => r.arrayBuffer())
+    const fontUrl = new URL(`./${filename}`, import.meta.url)
+    const res = await fetch(fontUrl)
+    if (!res.ok) return null
+    return await res.arrayBuffer()
   } catch {
     return null
   }
@@ -91,13 +87,15 @@ export async function POST(req: NextRequest) {
     const br   = dk ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.08)'
     const hdGrad = 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)'
 
-    // Load fonts in parallel — gracefully degrade if they fail
-    const [outfitHeavy, figtreeReg] = await Promise.all([
-      loadFont('Outfit', 900),
-      loadFont('Figtree', 700),
+    // Load fonts from bundled files
+    const [outfitHeavy, outfitBold, figtreeReg] = await Promise.all([
+      loadFont('outfit-900.ttf'),
+      loadFont('outfit-700.ttf'),
+      loadFont('figtree-700.ttf'),
     ])
     const fonts: any[] = []
     if (outfitHeavy) fonts.push({ name: 'Outfit',  data: outfitHeavy, weight: 900, style: 'normal' })
+    if (outfitBold)  fonts.push({ name: 'Outfit',  data: outfitBold,  weight: 700, style: 'normal' })
     if (figtreeReg)  fonts.push({ name: 'Figtree', data: figtreeReg,  weight: 700, style: 'normal' })
 
     // Canvas dimensions
