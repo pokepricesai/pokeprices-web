@@ -47,91 +47,92 @@ type Theme = 'dark' | 'light'
 type MoversPeriod = '7d' | '30d' | '90d'
 type MoversDirection = 'rising' | 'falling'
 type GradeView = 'raw' | 'psa9' | 'psa10'
+// Layout variants for the Insight Card
+type CardLayout = 'compact' | 'showcase' | 'minimal'
 
 const VISUAL_TYPES: { id: VisualType; label: string; icon: string; desc: string; category: string }[] = [
-  { id: 'insight',       label: 'Insight Card',      icon: '◈', desc: 'Prices, trend & grade premium',        category: 'Card' },
-  { id: 'psa-gauge',     label: 'PSA Gauge',          icon: '◎', desc: 'How extreme is the grading premium?', category: 'Card' },
-  { id: 'peak-distance', label: 'Peak Distance',      icon: '△', desc: 'Price vs its recent high',            category: 'Card' },
-  { id: 'temperature',   label: 'Temperature',        icon: '◉', desc: 'Is this card hot or cooling?',        category: 'Card' },
-  { id: 'grade-compare', label: 'Grade Breakdown',    icon: '▤', desc: 'Raw vs PSA 9 vs PSA 10 side by side', category: 'Card' },
-  { id: 'movers',        label: 'Market Movers',      icon: '▲', desc: 'Top risers & fallers leaderboard',    category: 'Market' },
-  { id: 'set-report',    label: 'Set Report',         icon: '◫', desc: 'Full set performance card',           category: 'Set' },
+  { id: 'insight',       label: 'Insight Card',   icon: '◈', desc: 'Prices, trend & grade premium',        category: 'Card'   },
+  { id: 'psa-gauge',     label: 'PSA Gauge',       icon: '◎', desc: 'How extreme is the grading premium?', category: 'Card'   },
+  { id: 'peak-distance', label: 'Peak Distance',   icon: '△', desc: 'Price vs its recent high',            category: 'Card'   },
+  { id: 'temperature',   label: 'Temperature',     icon: '◉', desc: 'Is this card hot or cooling?',        category: 'Card'   },
+  { id: 'grade-compare', label: 'Grade Compare',   icon: '⬡', desc: 'Raw vs PSA 9 vs PSA 10 bars',        category: 'Card'   },
+  { id: 'movers',        label: 'Market Movers',   icon: '↑↓', desc: 'Top risers or fallers',              category: 'Market' },
+  { id: 'set-report',    label: 'Set Report',      icon: '▦', desc: '30-day performance snapshot',         category: 'Set'    },
 ]
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Data fetching ─────────────────────────────────────────────────────────────
 
-const USD_TO_GBP = 0.79
+const GBP = 0.79
 
-function fmt(cents: number | null | undefined): string {
-  if (cents == null || cents <= 0) return '—'
+function fmt(cents: number | null): string {
+  if (!cents || cents <= 0) return '—'
   const v = cents / 100
-  if (v >= 10000) return '$' + (v / 1000).toFixed(1) + 'k'
-  if (v >= 1000) return '$' + v.toLocaleString('en-US', { maximumFractionDigits: 0 })
-  return '$' + v.toFixed(2)
+  if (v >= 1000) return `$${v.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+  return `$${v.toFixed(2)}`
 }
-
-function fmtGbp(cents: number | null | undefined): string {
-  if (cents == null || cents <= 0) return '—'
-  const v = (cents / 100) * USD_TO_GBP
-  if (v >= 10000) return '£' + (v / 1000).toFixed(1) + 'k'
-  if (v >= 1000) return '£' + v.toLocaleString('en-GB', { maximumFractionDigits: 0 })
-  return '£' + v.toFixed(2)
+function fmtGbp(cents: number | null): string {
+  if (!cents || cents <= 0) return '—'
+  const v = (cents / 100) * GBP
+  if (v >= 1000) return `£${v.toLocaleString('en-GB', { maximumFractionDigits: 0 })}`
+  return `£${v.toFixed(2)}`
 }
-
-function pct(n: number | null | undefined): string {
-  if (n == null) return '—'
-  return (n > 0 ? '+' : '') + n.toFixed(1) + '%'
+function pct(v: number | null): string {
+  if (v == null) return '—'
+  return `${v > 0 ? '+' : ''}${v.toFixed(1)}%`
 }
-
-function pctCol(n: number | null | undefined): string {
-  if (n == null) return '#94a3b8'
-  return n > 0 ? '#22c55e' : n < 0 ? '#ef4444' : '#94a3b8'
+function pctCol(v: number | null, v2 = getThemeVars('dark')) {
+  if (v == null) return v2.mu
+  return v > 0 ? v2.green : v2.red
 }
-
-function useIsMobile() {
-  const [mobile, setMobile] = useState(false)
-  useEffect(() => {
-    const check = () => setMobile(window.innerWidth < 900)
-    check()
-    window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
-  }, [])
-  return mobile
-}
-
-// ── Data ──────────────────────────────────────────────────────────────────────
 
 async function fetchCard(slug: string): Promise<CardData | null> {
-  const [{ data: trend }, { data: meta }] = await Promise.all([
-    supabase.from('card_trends')
-      .select('card_slug,card_name,set_name,current_raw,current_psa9,current_psa10,raw_pct_7d,raw_pct_30d,raw_pct_90d,raw_30d_ago,raw_90d_ago,raw_180d_ago')
-      .eq('card_slug', slug).single(),
-    supabase.from('cards').select('card_url_slug,image_url').eq('card_slug', slug).single(),
-  ])
-  if (!trend) return null
-  return { ...trend, card_url_slug: meta?.card_url_slug || null, image_url: meta?.image_url || null }
+  const { data } = await supabase
+    .from('card_trends')
+    .select('card_slug,card_name,set_name,current_raw,current_psa9,current_psa10,raw_pct_7d,raw_pct_30d,raw_pct_90d,raw_30d_ago,raw_90d_ago,raw_180d_ago')
+    .eq('card_slug', slug)
+    .single()
+  if (!data) return null
+  const { data: cardRow } = await supabase
+    .from('cards')
+    .select('card_url_slug,image_url')
+    .eq('card_slug', slug)
+    .single()
+  return { ...data, card_url_slug: cardRow?.card_url_slug ?? null, image_url: cardRow?.image_url ?? null }
 }
 
-async function fetchMovers(period: MoversPeriod, direction: MoversDirection, limit = 10): Promise<Mover[]> {
-  const { data: rawData } = await supabase.rpc('get_market_movers', {
-    p_period: period,
-    p_direction: direction,
-    p_limit: limit,
-  })
-  const data = rawData as any[] | null
-  if (!data || !data.length) return []
-  const slugs = data.map((d: any) => d.card_slug)
-  const { data: imgs } = await supabase.from('cards').select('card_slug,image_url,card_url_slug').in('card_slug', slugs)
-  return data.map((d: any) => ({
-    card_name: d.card_name,
-    set_name: d.set_name,
-    current_price: d.current_raw,
-    pct_change: d.pct_change,
-    card_slug: d.card_slug,
-    volume_label: d.volume_label,
-    confidence: d.confidence,
-    image_url: imgs?.find((i: any) => i.card_slug === d.card_slug)?.image_url || null,
-    card_url_slug: imgs?.find((i: any) => i.card_slug === d.card_slug)?.card_url_slug || null,
+async function fetchMovers(direction: MoversDirection, period: MoversPeriod): Promise<Mover[]> {
+  const fnName = direction === 'rising' ? 'get_top_risers_filtered' : 'get_top_fallers'
+  const { data } = await supabase.rpc(fnName, { time_period: period, min_price: 3000 })
+  if (!data) return []
+  const parsed = typeof data === 'string' ? JSON.parse(data) : data
+  const results: any[] = parsed?.results || []
+
+  // Exclude sealed product noise
+  const SEALED = [/booster box/i, /booster pack/i, /elite trainer/i, /\betb\b/i, /collection box/i, /\btin\b/i, /topps/i, /display box/i, /stadium/i, /build.*battle/i]
+  const filtered = results
+    .filter(r => !SEALED.some(p => p.test(r.card_name || '') || p.test(r.set_name || '')))
+    .slice(0, 10)
+
+  const slugs = filtered.map((r: any) => r.card_slug).filter(Boolean)
+  const [{ data: imgData }, { data: volData }] = await Promise.all([
+    supabase.from('cards').select('card_slug,image_url,card_url_slug').in('card_slug', slugs),
+    supabase.from('card_volume').select('card_slug,volume_label,confidence').in('card_slug', slugs).eq('grade', 'Ungraded'),
+  ])
+  const imgMap: Record<string, any> = {}
+  ;(imgData || []).forEach((c: any) => { imgMap[String(c.card_slug)] = c })
+  const volMap: Record<string, any> = {}
+  ;(volData || []).forEach((v: any) => { volMap[String(v.card_slug)] = v })
+
+  return filtered.map((r: any) => ({
+    card_name: r.card_name,
+    set_name: r.set_name,
+    current_price: r.current_price,
+    pct_change: direction === 'rising' ? r.pct_30d ?? r.pct_change : -(Math.abs(r.pct_30d ?? r.pct_change ?? 0)),
+    card_url_slug: imgMap[r.card_slug]?.card_url_slug ?? null,
+    image_url: imgMap[r.card_slug]?.image_url ?? null,
+    card_slug: r.card_slug,
+    volume_label: volMap[r.card_slug]?.volume_label ?? null,
+    confidence: volMap[r.card_slug]?.confidence ?? 'unknown',
   }))
 }
 
@@ -142,100 +143,131 @@ async function fetchSetData(setName: string): Promise<SetData | null> {
     .ilike('set_name', `%${setName}%`)
     .not('current_raw', 'is', null)
     .order('current_raw', { ascending: false })
-    .limit(50)
+    .limit(60)
   if (!data || !data.length) return null
-  const total = data.reduce((s, d) => s + (d.current_raw || 0), 0)
-  const avg30 = data.filter(d => d.raw_pct_30d != null).reduce((s, d) => s + (d.raw_pct_30d || 0), 0) / Math.max(1, data.filter(d => d.raw_pct_30d != null).length)
-  const avg90 = data.filter(d => d.raw_pct_90d != null).reduce((s, d) => s + (d.raw_pct_90d || 0), 0) / Math.max(1, data.filter(d => d.raw_pct_90d != null).length)
+
+  // Exclude sealed products from set report
+  const SEALED = [/booster box/i, /booster pack/i, /elite trainer/i, /\betb\b/i, /collection box/i, /\btin\b/i, /display box/i, /stadium/i, /build.*battle/i, /pokemon center/i]
+  const cards = data.filter(d => !SEALED.some(p => p.test(d.card_name || '')))
+
+  const total = cards.reduce((s, d) => s + (d.current_raw || 0), 0)
+  const withPct30 = cards.filter(d => d.raw_pct_30d != null)
+  const withPct90 = cards.filter(d => d.raw_pct_90d != null)
+  const avg30 = withPct30.length ? withPct30.reduce((s, d) => s + (d.raw_pct_30d || 0), 0) / withPct30.length : null
+  const avg90 = withPct90.length ? withPct90.reduce((s, d) => s + (d.raw_pct_90d || 0), 0) / withPct90.length : null
+
   return {
-    set_name: data[0].set_name,
-    top_cards: data.slice(0, 10).map(d => ({ card_name: d.card_name, current_raw: d.current_raw!, pct_30d: d.raw_pct_30d })),
+    set_name: cards[0].set_name,
+    top_cards: cards.slice(0, 10).map(d => ({ card_name: d.card_name, current_raw: d.current_raw!, pct_30d: d.raw_pct_30d })),
     set_pct_30d: avg30,
     set_pct_90d: avg90,
     total_value: total,
-    card_count: data.length,
+    card_count: cards.length,
   }
 }
 
-// ── Shared visual styles ──────────────────────────────────────────────────────
+// ── Theme ─────────────────────────────────────────────────────────────────────
 
 function getThemeVars(theme: Theme) {
   const dk = theme === 'dark'
   return {
     dk,
-    bg:   dk ? '#0d1520' : '#ffffff',
-    card: dk ? '#131e2e' : '#f8fafc',
-    tx:   dk ? '#f1f5f9' : '#0f172a',
-    mu:   dk ? '#4a5e78' : '#94a3b8',
-    br:   dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.07)',
+    bg:     dk ? '#0d1520' : '#ffffff',
+    card:   dk ? '#131e2e' : '#f8fafc',
+    tx:     dk ? '#f1f5f9' : '#0f172a',
+    mu:     dk ? '#4a5e78' : '#94a3b8',
+    br:     dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.08)',
     shadow: dk ? '0 24px 80px rgba(0,0,0,0.7)' : '0 24px 80px rgba(0,0,0,0.12)',
     accent: '#1a5fad',
-    green: '#22c55e',
-    red: '#ef4444',
+    green:  '#22c55e',
+    red:    '#ef4444',
     yellow: '#f59e0b',
   }
 }
 
+// ── Shared components ─────────────────────────────────────────────────────────
+
 function CardImg({ src, w, h, radius = 6 }: { src: string | null; w: number; h: number; radius?: number }) {
   if (!src) return <div style={{ width: w, height: h, borderRadius: radius, background: 'rgba(255,255,255,0.06)', flexShrink: 0 }} />
-  return <img src={src} alt="" style={{ width: w, height: h, objectFit: 'contain', borderRadius: radius, flexShrink: 0 }} />
+  return <img src={src} alt="" style={{ width: w, height: h, objectFit: 'contain', borderRadius: radius, flexShrink: 0, display: 'block' }} />
 }
 
-// Watermark with favicon + branding
-function Watermark({ color }: { color: string }) {
+function Watermark({ color = 'rgba(255,255,255,0.7)' }: { color?: string }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, lineHeight: 1 }}>
-      <img src="/favicon.ico" alt="" style={{ width: 12, height: 12, display: 'block', opacity: 0.6 }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
-      <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.2, color, textTransform: 'uppercase', opacity: 0.8, display: 'block' }}>PokePrices.io</span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+      <div style={{ width: 14, height: 14, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <div style={{ width: 7, height: 7, borderRadius: '50%', background: color, opacity: 0.8 }} />
+      </div>
+      <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.4, color, textTransform: 'uppercase', opacity: 0.85 }}>PokePrices.io</span>
     </div>
   )
 }
 
-// Footer branding bar for PNGs
+// Footer branding bar — consistent across all visuals
 function BrandingBar({ v }: { v: ReturnType<typeof getThemeVars> }) {
   return (
-    <div style={{ padding: '10px 18px', borderTop: `1px solid ${v.br}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 36 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <img src="/favicon.ico" alt="" style={{ width: 16, height: 16, display: 'block' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
-        <span style={{ fontSize: 11, fontWeight: 800, color: v.mu, letterSpacing: 0.3, lineHeight: 1 }}>Powered by PokePrices.io</span>
+    <div style={{
+      padding: '10px 20px',
+      borderTop: `1px solid ${v.br}`,
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      minHeight: 38,
+      background: v.dk ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.02)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        <div style={{ width: 16, height: 16, borderRadius: '50%', background: 'linear-gradient(135deg, #1a5fad, #2874c8)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'rgba(255,255,255,0.9)' }} />
+        </div>
+        <span style={{ fontSize: 11, fontWeight: 800, color: v.tx, letterSpacing: 0.3, opacity: 0.6 }}>Powered by PokePrices.io</span>
       </div>
-      <span style={{ fontSize: 10, color: v.mu, fontWeight: 600, lineHeight: 1 }}>Not financial advice</span>
+      <span style={{ fontSize: 10, color: v.mu, fontWeight: 600 }}>Not financial advice</span>
     </div>
   )
 }
 
-// ── VISUAL 1: Insight Card ────────────────────────────────────────────────────
+// Signal badge — contained, no overflow
+function SignalBadge({ label, color }: { label: string; color: string }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center',
+      fontSize: 10, fontWeight: 800, color,
+      background: 'rgba(0,0,0,0.35)',
+      padding: '4px 12px', borderRadius: 20,
+      letterSpacing: 0.5, whiteSpace: 'nowrap', flexShrink: 0,
+      border: `1px solid ${color}40`,
+    }}>{label}</span>
+  )
+}
 
-function InsightCard({ card, theme, gradeView }: { card: CardData; theme: Theme; gradeView: GradeView }) {
+// ── VISUAL 1a: Insight Card — Compact (original style, fixed) ─────────────────
+
+function InsightCardCompact({ card, theme, gradeView }: { card: CardData; theme: Theme; gradeView: GradeView }) {
   const v = getThemeVars(theme)
   const psa10x = card.current_raw && card.current_psa10 ? (card.current_psa10 / card.current_raw).toFixed(1) : null
-
-  // Grade-specific price focus
-  const focusPrice = gradeView === 'psa10' ? card.current_psa10
-    : gradeView === 'psa9' ? card.current_psa9
-    : card.current_raw
+  const focusPrice = gradeView === 'psa10' ? card.current_psa10 : gradeView === 'psa9' ? card.current_psa9 : card.current_raw
   const focusLabel = gradeView === 'psa10' ? 'PSA 10' : gradeView === 'psa9' ? 'PSA 9' : 'Raw'
-
   const sig = card.raw_pct_30d != null
-    ? card.raw_pct_30d > 15 ? { label: '▲ Trending Up', col: v.green }
-    : card.raw_pct_30d < -15 ? { label: '▼ Cooling', col: v.red }
+    ? card.raw_pct_30d > 15  ? { label: '▲ Trending Up', col: v.green }
+    : card.raw_pct_30d < -15 ? { label: '▼ Cooling',     col: v.red   }
     : { label: '— Stable', col: v.yellow }
     : { label: '— Stable', col: v.yellow }
 
   return (
-    <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif" }}>
-      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '22px 24px 20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <Watermark color="rgba(255,255,255,0.7)" />
-          <span style={{ fontSize: 10, fontWeight: 800, color: sig.col, background: 'rgba(0,0,0,0.3)', padding: '3px 12px', borderRadius: 20, letterSpacing: 0.5 }}>{sig.label}</span>
+    <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", width: '100%' }}>
+      {/* Header */}
+      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <Watermark />
+          <SignalBadge label={sig.label} color={sig.col} />
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <CardImg src={card.image_url} w={58} h={80} radius={8} />
-          <div>
-            <div style={{ fontSize: 22, fontWeight: 900, color: '#fff', lineHeight: 1.15, fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3 }}>{card.card_name}</div>
-            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)', marginTop: 4, fontWeight: 600 }}>{card.set_name}</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 20, fontWeight: 900, color: '#fff', lineHeight: 1.15, fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3 }}>{card.card_name}</div>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', marginTop: 4, fontWeight: 600 }}>{card.set_name}</div>
             {gradeView !== 'raw' && (
-              <div style={{ marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,0.15)', borderRadius: 8, padding: '3px 10px' }}>
+              <div style={{ marginTop: 8, display: 'inline-flex', background: 'rgba(255,255,255,0.15)', borderRadius: 8, padding: '3px 10px' }}>
                 <span style={{ fontSize: 10, fontWeight: 800, color: '#fff', letterSpacing: 0.5 }}>Viewing: {focusLabel}</span>
               </div>
             )}
@@ -244,37 +276,39 @@ function InsightCard({ card, theme, gradeView }: { card: CardData; theme: Theme;
       </div>
 
       {/* Featured price */}
-      <div style={{ padding: '18px 24px', borderBottom: `1px solid ${v.br}`, background: v.dk ? 'rgba(26,95,173,0.06)' : 'rgba(26,95,173,0.03)' }}>
+      <div style={{ padding: '16px 22px', borderBottom: `1px solid ${v.br}`, background: v.dk ? 'rgba(26,95,173,0.06)' : 'rgba(26,95,173,0.03)' }}>
         <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 4 }}>{focusLabel} Price</div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-          <div style={{ fontSize: 36, fontWeight: 900, color: v.tx, letterSpacing: -1 }}>{fmt(focusPrice)}</div>
-          <div style={{ fontSize: 16, color: v.mu }}>{fmtGbp(focusPrice)}</div>
+          <div style={{ fontSize: 34, fontWeight: 900, color: v.tx, letterSpacing: -1 }}>{fmt(focusPrice)}</div>
+          <div style={{ fontSize: 15, color: v.mu }}>{fmtGbp(focusPrice)}</div>
         </div>
       </div>
 
+      {/* Grade prices grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderBottom: `1px solid ${v.br}` }}>
         {[
           { label: 'Raw',    usd: fmt(card.current_raw),   gbp: fmtGbp(card.current_raw),   active: gradeView === 'raw'   },
           { label: 'PSA 9',  usd: fmt(card.current_psa9),  gbp: fmtGbp(card.current_psa9),  active: gradeView === 'psa9'  },
           { label: 'PSA 10', usd: fmt(card.current_psa10), gbp: fmtGbp(card.current_psa10), active: gradeView === 'psa10' },
         ].map((p, i) => (
-          <div key={p.label} style={{ padding: '14px 16px', borderRight: i < 2 ? `1px solid ${v.br}` : 'none', background: p.active ? (v.dk ? 'rgba(26,95,173,0.08)' : 'rgba(26,95,173,0.04)') : 'transparent' }}>
+          <div key={p.label} style={{ padding: '13px 14px', borderRight: i < 2 ? `1px solid ${v.br}` : 'none', background: p.active ? (v.dk ? 'rgba(26,95,173,0.08)' : 'rgba(26,95,173,0.04)') : 'transparent' }}>
             <div style={{ fontSize: 9, color: p.active ? '#1a5fad' : v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 5 }}>{p.label}</div>
-            <div style={{ fontSize: 15, fontWeight: 900, color: v.tx, letterSpacing: -0.3 }}>{p.usd}</div>
+            <div style={{ fontSize: 14, fontWeight: 900, color: v.tx, letterSpacing: -0.3 }}>{p.usd}</div>
             <div style={{ fontSize: 10, color: v.mu, marginTop: 2 }}>{p.gbp}</div>
           </div>
         ))}
       </div>
 
+      {/* Trend row */}
       <div style={{ display: 'grid', gridTemplateColumns: psa10x ? '1fr 1fr 1fr' : '1fr 1fr', borderBottom: `1px solid ${v.br}` }}>
         {[
-          { label: '7d',  val: pct(card.raw_pct_7d),  col: pctCol(card.raw_pct_7d)  },
-          { label: '30d', val: pct(card.raw_pct_30d), col: pctCol(card.raw_pct_30d) },
+          { label: '7d',      val: pct(card.raw_pct_7d),  col: pctCol(card.raw_pct_7d,  v) },
+          { label: '30d',     val: pct(card.raw_pct_30d), col: pctCol(card.raw_pct_30d, v) },
           ...(psa10x ? [{ label: 'Grade ×', val: psa10x + '×', col: '#a78bfa' }] : []),
         ].map((s, i, arr) => (
-          <div key={s.label} style={{ padding: '12px 16px', borderRight: i < arr.length - 1 ? `1px solid ${v.br}` : 'none' }}>
+          <div key={s.label} style={{ padding: '12px 14px', borderRight: i < arr.length - 1 ? `1px solid ${v.br}` : 'none' }}>
             <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4 }}>{s.label}</div>
-            <div style={{ fontSize: 20, fontWeight: 900, color: s.col, letterSpacing: -0.5 }}>{s.val}</div>
+            <div style={{ fontSize: 19, fontWeight: 900, color: s.col, letterSpacing: -0.5 }}>{s.val}</div>
           </div>
         ))}
       </div>
@@ -284,74 +318,216 @@ function InsightCard({ card, theme, gradeView }: { card: CardData; theme: Theme;
   )
 }
 
+// ── VISUAL 1b: Insight Card — Showcase (Syncd-style, large image) ─────────────
+
+function InsightCardShowcase({ card, theme, gradeView }: { card: CardData; theme: Theme; gradeView: GradeView }) {
+  const v = getThemeVars(theme)
+  const psa10x = card.current_raw && card.current_psa10 ? (card.current_psa10 / card.current_raw).toFixed(1) : null
+  const focusPrice = gradeView === 'psa10' ? card.current_psa10 : gradeView === 'psa9' ? card.current_psa9 : card.current_raw
+  const focusLabel = gradeView === 'psa10' ? 'PSA 10' : gradeView === 'psa9' ? 'PSA 9' : 'Raw'
+  const sig = card.raw_pct_30d != null
+    ? card.raw_pct_30d > 15  ? { label: '▲ Trending Up', col: v.green }
+    : card.raw_pct_30d < -15 ? { label: '▼ Cooling',     col: v.red   }
+    : { label: '— Stable', col: v.yellow }
+    : { label: '— Stable', col: v.yellow }
+
+  const accentGrad = 'linear-gradient(160deg, #0d2b5e 0%, #1a5fad 50%, #2874c8 100%)'
+
+  return (
+    <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", width: '100%' }}>
+      {/* Top header bar */}
+      <div style={{ background: accentGrad, padding: '14px 22px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Watermark />
+          <SignalBadge label={sig.label} color={sig.col} />
+        </div>
+      </div>
+
+      {/* Hero: large card image left, price info right */}
+      <div style={{ background: accentGrad, padding: '0 22px 24px', display: 'flex', gap: 20, alignItems: 'flex-end' }}>
+        {/* Large card image */}
+        <div style={{ flexShrink: 0, position: 'relative', marginTop: -10 }}>
+          <CardImg src={card.image_url} w={130} h={182} radius={12} />
+        </div>
+
+        {/* Name + featured price */}
+        <div style={{ flex: 1, minWidth: 0, paddingBottom: 4 }}>
+          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', fontWeight: 700, letterSpacing: 0.3, marginBottom: 4 }}>{card.set_name}</div>
+          <div style={{ fontSize: 22, fontWeight: 900, color: '#fff', lineHeight: 1.1, fontFamily: "'Outfit', sans-serif", letterSpacing: -0.5, marginBottom: 14 }}>{card.card_name}</div>
+          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 4 }}>{focusLabel} Price</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+            <div style={{ fontSize: 36, fontWeight: 900, color: '#fff', letterSpacing: -1.5, lineHeight: 1 }}>{fmt(focusPrice)}</div>
+            <div style={{ fontSize: 18, color: 'rgba(255,255,255,0.6)', fontWeight: 700 }}>{fmtGbp(focusPrice)}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Grade prices grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderBottom: `1px solid ${v.br}` }}>
+        {[
+          { label: 'Raw',    usd: fmt(card.current_raw),   gbp: fmtGbp(card.current_raw),   active: gradeView === 'raw'   },
+          { label: 'PSA 9',  usd: fmt(card.current_psa9),  gbp: fmtGbp(card.current_psa9),  active: gradeView === 'psa9'  },
+          { label: 'PSA 10', usd: fmt(card.current_psa10), gbp: fmtGbp(card.current_psa10), active: gradeView === 'psa10' },
+        ].map((p, i) => (
+          <div key={p.label} style={{ padding: '14px 16px', borderRight: i < 2 ? `1px solid ${v.br}` : 'none', background: p.active ? (v.dk ? 'rgba(26,95,173,0.1)' : 'rgba(26,95,173,0.05)') : 'transparent' }}>
+            <div style={{ fontSize: 9, color: p.active ? '#3b82f6' : v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 5 }}>{p.label}</div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: v.tx, letterSpacing: -0.3 }}>{p.usd}</div>
+            <div style={{ fontSize: 11, color: v.mu, marginTop: 2 }}>{p.gbp}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Trend + grade multiple */}
+      <div style={{ display: 'grid', gridTemplateColumns: psa10x ? '1fr 1fr 1fr' : '1fr 1fr', borderBottom: `1px solid ${v.br}` }}>
+        {[
+          { label: '7d',      val: pct(card.raw_pct_7d),  col: pctCol(card.raw_pct_7d,  v) },
+          { label: '30d',     val: pct(card.raw_pct_30d), col: pctCol(card.raw_pct_30d, v) },
+          ...(psa10x ? [{ label: 'Grade ×', val: psa10x + '×', col: '#a78bfa' }] : []),
+        ].map((s, i, arr) => (
+          <div key={s.label} style={{ padding: '14px 16px', borderRight: i < arr.length - 1 ? `1px solid ${v.br}` : 'none' }}>
+            <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4 }}>{s.label}</div>
+            <div style={{ fontSize: 22, fontWeight: 900, color: s.col, letterSpacing: -0.5 }}>{s.val}</div>
+          </div>
+        ))}
+      </div>
+
+      <BrandingBar v={v} />
+    </div>
+  )
+}
+
+// ── VISUAL 1c: Insight Card — Minimal (clean, text-forward) ──────────────────
+
+function InsightCardMinimal({ card, theme, gradeView }: { card: CardData; theme: Theme; gradeView: GradeView }) {
+  const v = getThemeVars(theme)
+  const psa10x = card.current_raw && card.current_psa10 ? (card.current_psa10 / card.current_raw).toFixed(1) : null
+  const focusPrice = gradeView === 'psa10' ? card.current_psa10 : gradeView === 'psa9' ? card.current_psa9 : card.current_raw
+  const focusLabel = gradeView === 'psa10' ? 'PSA 10' : gradeView === 'psa9' ? 'PSA 9' : 'Raw'
+  const trend30 = card.raw_pct_30d
+  const trendCol = trend30 != null ? (trend30 > 0 ? v.green : v.red) : v.mu
+
+  return (
+    <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", width: '100%' }}>
+      {/* Clean header */}
+      <div style={{ padding: '20px 24px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <div style={{ fontSize: 10, color: v.mu, fontWeight: 700, letterSpacing: 0.5, marginBottom: 4 }}>{card.set_name}</div>
+          <div style={{ fontSize: 22, fontWeight: 900, color: v.tx, lineHeight: 1.1, fontFamily: "'Outfit', sans-serif", letterSpacing: -0.5 }}>{card.card_name}</div>
+        </div>
+        {card.image_url && (
+          <div style={{ flexShrink: 0, marginLeft: 16 }}>
+            <CardImg src={card.image_url} w={56} h={78} radius={6} />
+          </div>
+        )}
+      </div>
+
+      {/* Huge price */}
+      <div style={{ padding: '20px 24px', borderBottom: `1px solid ${v.br}` }}>
+        <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 6 }}>{focusLabel} Price</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+          <div style={{ fontSize: 44, fontWeight: 900, color: v.tx, letterSpacing: -2, lineHeight: 1 }}>{fmt(focusPrice)}</div>
+          <div style={{ fontSize: 20, color: v.mu, fontWeight: 700 }}>{fmtGbp(focusPrice)}</div>
+        </div>
+        {trend30 != null && (
+          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 14, fontWeight: 800, color: trendCol }}>{pct(trend30)}</span>
+            <span style={{ fontSize: 11, color: v.mu }}>past 30 days</span>
+          </div>
+        )}
+      </div>
+
+      {/* Grade grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderBottom: `1px solid ${v.br}` }}>
+        {[
+          { label: 'Raw',    usd: fmt(card.current_raw),   gbp: fmtGbp(card.current_raw)   },
+          { label: 'PSA 9',  usd: fmt(card.current_psa9),  gbp: fmtGbp(card.current_psa9)  },
+          { label: 'PSA 10', usd: fmt(card.current_psa10), gbp: fmtGbp(card.current_psa10) },
+        ].map((p, i) => (
+          <div key={p.label} style={{ padding: '14px 18px', borderRight: i < 2 ? `1px solid ${v.br}` : 'none' }}>
+            <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 5 }}>{p.label}</div>
+            <div style={{ fontSize: 15, fontWeight: 900, color: v.tx }}>{p.usd}</div>
+            <div style={{ fontSize: 10, color: v.mu, marginTop: 2 }}>{p.gbp}</div>
+          </div>
+        ))}
+      </div>
+
+      {psa10x && (
+        <div style={{ padding: '12px 24px', borderBottom: `1px solid ${v.br}` }}>
+          <span style={{ fontSize: 12, color: v.mu }}>Grade multiple: </span>
+          <span style={{ fontSize: 14, fontWeight: 900, color: '#a78bfa' }}>{psa10x}× raw</span>
+        </div>
+      )}
+
+      <BrandingBar v={v} />
+    </div>
+  )
+}
+
+// ── Route to correct layout ────────────────────────────────────────────────────
+
+function InsightCard({ card, theme, gradeView, layout }: { card: CardData; theme: Theme; gradeView: GradeView; layout: CardLayout }) {
+  if (layout === 'showcase') return <InsightCardShowcase card={card} theme={theme} gradeView={gradeView} />
+  if (layout === 'minimal')  return <InsightCardMinimal  card={card} theme={theme} gradeView={gradeView} />
+  return <InsightCardCompact card={card} theme={theme} gradeView={gradeView} />
+}
+
 // ── VISUAL 2: PSA Gauge ───────────────────────────────────────────────────────
 
 function PsaGauge({ card, theme }: { card: CardData; theme: Theme }) {
   const v = getThemeVars(theme)
   const multiple = card.current_raw && card.current_psa10 ? card.current_psa10 / card.current_raw : null
-  const capped = Math.min(multiple ?? 0, 15)
-  const needleAngle = -180 + (capped / 15) * 180
-  const info = !multiple
-    ? { label: 'No Data',        col: v.mu,       desc: 'No PSA 10 price data yet.' }
-    : multiple < 2  ? { label: 'Low Premium',    col: '#3b82f6', desc: 'Grading adds little value — buy PSA 10 directly or stay raw.' }
-    : multiple < 5  ? { label: 'Healthy',        col: v.green,  desc: 'A fair premium. Market rewards quality sensibly.' }
-    : multiple < 10 ? { label: 'Strong Premium', col: v.yellow, desc: 'High reward, high risk — only near-perfect cards hold full value.' }
-    :                 { label: 'Extreme',         col: v.red,    desc: 'Massive grade premium — condition is everything here.' }
+  const maxMultiple = 20
+  const pct20 = multiple ? Math.min(100, (multiple / maxMultiple) * 100) : 0
+  const gaugeCol = !multiple ? v.mu : multiple < 3 ? v.green : multiple < 8 ? v.yellow : v.red
+  const label = !multiple ? 'No data' : multiple < 3 ? 'Low premium — consider PSA 10' : multiple < 8 ? 'Meaningful premium' : 'Very high premium — high risk'
 
-  // Wider SVG to avoid label overlap
-  const r = 80, cx = 150, cy = 100
-  const toRad = (d: number) => d * Math.PI / 180
-  const arc = (s: number, e: number) => {
-    const sx = cx + r * Math.cos(toRad(s)), sy = cy + r * Math.sin(toRad(s))
-    const ex = cx + r * Math.cos(toRad(e)), ey = cy + r * Math.sin(toRad(e))
-    return `M ${sx} ${sy} A ${r} ${r} 0 0 1 ${ex} ${ey}`
+  const arcPath = (pct: number) => {
+    const r = 90, cx = 150, cy = 130
+    const startAngle = -180
+    const endAngle = startAngle + (pct / 100) * 180
+    const toRad = (d: number) => (d * Math.PI) / 180
+    const x1 = cx + r * Math.cos(toRad(startAngle))
+    const y1 = cy + r * Math.sin(toRad(startAngle))
+    const x2 = cx + r * Math.cos(toRad(endAngle))
+    const y2 = cy + r * Math.sin(toRad(endAngle))
+    return `M ${x1} ${y1} A ${r} ${r} 0 ${pct > 50 ? 1 : 0} 1 ${x2} ${y2}`
   }
-  const nx = cx + (r - 10) * Math.cos(toRad(needleAngle))
-  const ny = cy + (r - 10) * Math.sin(toRad(needleAngle))
 
   return (
-    <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", padding: '24px 26px 0' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 22 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1, minWidth: 0 }}>
-          <CardImg src={card.image_url} w={52} h={72} radius={8} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.5, color: v.mu, textTransform: 'uppercase', marginBottom: 4 }}>PSA Premium Gauge</div>
-            <div style={{ fontSize: 18, fontWeight: 900, color: v.tx, fontFamily: "'Outfit', sans-serif", lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.card_name}</div>
-            <div style={{ fontSize: 11, color: v.mu, marginTop: 3, fontWeight: 600 }}>{card.set_name}</div>
-          </div>
+    <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif" }}>
+      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <Watermark />
+          <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.5 }}>Grade Premium</span>
         </div>
-        <Watermark color={v.mu} />
+        <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3 }}>{card.card_name}</div>
+        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3 }}>{card.set_name}</div>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 4 }}>
-        <svg width={300} height={130} viewBox="0 0 300 130">
-          {[{ s: -180, e: -135, c: '#3b82f6' }, { s: -135, e: -90, c: v.green }, { s: -90, e: -45, c: v.yellow }, { s: -45, e: 0, c: v.red }].map((seg, i) => (
-            <path key={i} d={arc(seg.s, seg.e)} fill="none" stroke={seg.c} strokeWidth={14} opacity={0.15} />
-          ))}
-          {multiple != null && <path d={arc(-180, needleAngle)} fill="none" stroke={info.col} strokeWidth={14} strokeLinecap="round" opacity={0.95} />}
-          <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={v.tx} strokeWidth={3} strokeLinecap="round" opacity={0.5} />
-          <circle cx={cx} cy={cy} r={6} fill={info.col} />
-          <text x={20}  y={128} fontSize={9} fill={v.mu} fontFamily="Figtree,sans-serif" fontWeight="700">LOW</text>
-          <text x={82}  y={8}   fontSize={9} fill={v.mu} fontFamily="Figtree,sans-serif" fontWeight="700">HEALTHY</text>
-          <text x={168} y={8}   fontSize={9} fill={v.mu} fontFamily="Figtree,sans-serif" fontWeight="700">STRONG</text>
-          <text x={224} y={128} fontSize={9} fill={v.mu} fontFamily="Figtree,sans-serif" fontWeight="700">EXTREME</text>
+      <div style={{ padding: '24px 28px' }}>
+        <svg viewBox="0 0 300 145" style={{ width: '100%', maxWidth: 300, margin: '0 auto', display: 'block', overflow: 'visible' }}>
+          <path d={arcPath(100)} fill="none" stroke={v.br} strokeWidth={16} strokeLinecap="round" />
+          {pct20 > 0 && <path d={arcPath(pct20)} fill="none" stroke={gaugeCol} strokeWidth={16} strokeLinecap="round" style={{ filter: `drop-shadow(0 0 6px ${gaugeCol}80)` }} />}
+          <text x="150" y="108" textAnchor="middle" fill={v.tx} fontSize="30" fontWeight="900" fontFamily="Figtree, sans-serif">{multiple ? `${multiple.toFixed(1)}×` : '—'}</text>
+          <text x="150" y="126" textAnchor="middle" fill={v.mu} fontSize="10" fontWeight="700">Raw → PSA 10</text>
+          <text x="60" y="140" textAnchor="middle" fill={v.mu} fontSize="9" fontWeight="700">1×</text>
+          <text x="240" y="140" textAnchor="middle" fill={v.mu} fontSize="9" fontWeight="700">20×</text>
         </svg>
-      </div>
 
-      <div style={{ textAlign: 'center', marginBottom: 22, padding: '0 24px' }}>
-        <div style={{ fontSize: 48, fontWeight: 900, color: info.col, lineHeight: 1, letterSpacing: -2 }}>{multiple ? multiple.toFixed(1) + '×' : '—'}</div>
-        <div style={{ fontSize: 15, fontWeight: 800, color: info.col, marginBottom: 8, marginTop: 4 }}>{info.label}</div>
-        <div style={{ fontSize: 12, color: v.mu, lineHeight: 1.6, maxWidth: 300, margin: '0 auto' }}>{info.desc}</div>
-      </div>
+        <div style={{ textAlign: 'center', marginTop: 8, fontSize: 12, color: gaugeCol, fontWeight: 800 }}>{label}</div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderTop: `1px solid ${v.br}`, paddingTop: 16, paddingBottom: 16, marginBottom: 0 }}>
-        {[{ label: 'Raw', val: fmt(card.current_raw), gbp: fmtGbp(card.current_raw) }, { label: 'PSA 10', val: fmt(card.current_psa10), gbp: fmtGbp(card.current_psa10) }].map((p, i) => (
-          <div key={p.label} style={{ textAlign: 'center', borderRight: i === 0 ? `1px solid ${v.br}` : 'none', padding: '0 8px' }}>
-            <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 5 }}>{p.label}</div>
-            <div style={{ fontSize: 20, fontWeight: 900, color: v.tx }}>{p.val}</div>
-            <div style={{ fontSize: 11, color: v.mu, marginTop: 2 }}>{p.gbp}</div>
-          </div>
-        ))}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 18 }}>
+          {[
+            { label: 'Raw',    val: fmt(card.current_raw),   gbp: fmtGbp(card.current_raw)   },
+            { label: 'PSA 10', val: fmt(card.current_psa10), gbp: fmtGbp(card.current_psa10) },
+          ].map(s => (
+            <div key={s.label} style={{ background: v.dk ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', borderRadius: 10, padding: '12px 14px', border: `1px solid ${v.br}` }}>
+              <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 5 }}>{s.label}</div>
+              <div style={{ fontSize: 16, fontWeight: 900, color: v.tx }}>{s.val}</div>
+              <div style={{ fontSize: 10, color: v.mu, marginTop: 2 }}>{s.gbp}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <BrandingBar v={v} />
@@ -363,121 +539,116 @@ function PsaGauge({ card, theme }: { card: CardData; theme: Theme }) {
 
 function PeakDistance({ card, theme }: { card: CardData; theme: Theme }) {
   const v = getThemeVars(theme)
-  const peak = Math.max(card.raw_30d_ago ?? 0, card.raw_90d_ago ?? 0, card.raw_180d_ago ?? 0, card.current_raw ?? 0) || null
-  const drawdown = peak && card.current_raw && peak > card.current_raw ? ((card.current_raw - peak) / peak) * 100 : 0
-  const recovery = Math.min(100, Math.max(0, 100 + drawdown))
-  const stLabel = drawdown > -10 ? 'Near Peak' : drawdown > -40 ? 'Recovering' : 'Off Highs'
-  const stCol   = drawdown > -10 ? v.red : drawdown > -40 ? v.yellow : '#3b82f6'
-  const stDesc  = drawdown > -10 ? 'Near its recent high — potential exit window for holders.'
-    : drawdown > -40 ? 'Off peak but recovering. A possible entry for patient buyers.'
-    : 'Well below peak — value play if the trend reverses.'
-  const barH = 160, peakY = 20
-  const currY = peakY + barH * (1 - recovery / 100)
+  const rawNow = card.current_raw
+  const peaks = [card.raw_30d_ago, card.raw_90d_ago, card.raw_180d_ago].filter(Boolean) as number[]
+  const peakPrice = peaks.length ? Math.max(...peaks) : null
+  const drawdownPct = rawNow && peakPrice ? ((rawNow - peakPrice) / peakPrice) * 100 : null
+  const isAtPeak = drawdownPct != null && drawdownPct > -5
+  const barFill = drawdownPct != null ? Math.min(100, Math.max(0, 100 + drawdownPct)) : 0
+  const barCol = isAtPeak ? v.red : drawdownPct != null && drawdownPct < -40 ? v.green : v.yellow
 
   return (
-    <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", padding: '24px 26px 0' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 22 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1, minWidth: 0 }}>
-          <CardImg src={card.image_url} w={52} h={72} radius={8} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.5, color: v.mu, textTransform: 'uppercase', marginBottom: 4 }}>Peak vs Current</div>
-            <div style={{ fontSize: 18, fontWeight: 900, color: v.tx, fontFamily: "'Outfit', sans-serif", lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.card_name}</div>
-            <div style={{ fontSize: 11, color: v.mu, marginTop: 3, fontWeight: 600 }}>{card.set_name}</div>
+    <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif" }}>
+      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <Watermark />
+          <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.5 }}>Peak Distance</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <CardImg src={card.image_url} w={50} h={70} radius={6} />
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3 }}>{card.card_name}</div>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3 }}>{card.set_name}</div>
           </div>
         </div>
-        <Watermark color={v.mu} />
       </div>
 
-      <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', marginBottom: 18 }}>
-        <div style={{ position: 'relative', width: 44, height: barH + 32, flexShrink: 0 }}>
-          <div style={{ position: 'absolute', left: 18, top: peakY, width: 8, height: barH, background: v.br, borderRadius: 4 }} />
-          <div style={{ position: 'absolute', left: 18, top: currY, width: 8, height: Math.max(4, barH - (currY - peakY)), borderRadius: 4, background: `linear-gradient(to top, ${stCol}, ${stCol}99)` }} />
-          <div style={{ position: 'absolute', left: 11, top: peakY - 8, width: 22, height: 22, borderRadius: '50%', background: v.red, border: `2px solid ${v.bg}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ fontSize: 8, color: '#fff', fontWeight: 900 }}>▲</span>
+      <div style={{ padding: '20px 24px' }}>
+        <div style={{ textAlign: 'center', marginBottom: 20 }}>
+          <div style={{ fontSize: 46, fontWeight: 900, color: barCol, letterSpacing: -2 }}>
+            {drawdownPct != null ? (isAtPeak ? 'At Peak' : `${drawdownPct.toFixed(0)}%`) : '—'}
           </div>
-          <div style={{ position: 'absolute', left: 11, top: currY - 8, width: 22, height: 22, borderRadius: '50%', background: stCol, border: `2px solid ${v.bg}` }} />
+          <div style={{ fontSize: 12, color: v.mu, marginTop: 4 }}>
+            {isAtPeak ? 'Trading near its recent high' : 'below recent high'}
+          </div>
         </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 9, color: v.red, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>6m High</div>
-            <div style={{ fontSize: 22, fontWeight: 900, color: v.tx, letterSpacing: -0.5 }}>{fmt(peak)}</div>
-            <div style={{ fontSize: 11, color: v.mu }}>{fmtGbp(peak)}</div>
-          </div>
-          <div style={{ padding: '14px 0', borderTop: `1px solid ${v.br}`, borderBottom: `1px solid ${v.br}`, marginBottom: 16 }}>
-            <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Drawdown</div>
-            <div style={{ fontSize: 32, fontWeight: 900, color: stCol, lineHeight: 1, letterSpacing: -1 }}>{drawdown === 0 ? 'At Peak' : pct(drawdown)}</div>
-            <div style={{ fontSize: 13, fontWeight: 800, color: stCol, marginTop: 4 }}>{stLabel}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Current</div>
-            <div style={{ fontSize: 22, fontWeight: 900, color: v.tx, letterSpacing: -0.5 }}>{fmt(card.current_raw)}</div>
-            <div style={{ fontSize: 11, color: v.mu }}>{fmtGbp(card.current_raw)}</div>
-          </div>
+
+        <div style={{ height: 10, background: v.dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', borderRadius: 99, overflow: 'hidden', marginBottom: 20 }}>
+          <div style={{ height: '100%', width: `${barFill}%`, background: `linear-gradient(to right, ${v.green}, ${barCol})`, borderRadius: 99, transition: 'width 0.8s ease' }} />
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          {[
+            { label: 'Current Raw', val: fmt(rawNow),    gbp: fmtGbp(rawNow)    },
+            { label: 'Recent Peak', val: fmt(peakPrice), gbp: fmtGbp(peakPrice) },
+          ].map(s => (
+            <div key={s.label} style={{ background: v.dk ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', borderRadius: 10, padding: '12px 14px', border: `1px solid ${v.br}` }}>
+              <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 5 }}>{s.label}</div>
+              <div style={{ fontSize: 16, fontWeight: 900, color: v.tx }}>{s.val}</div>
+              <div style={{ fontSize: 10, color: v.mu, marginTop: 2 }}>{s.gbp}</div>
+            </div>
+          ))}
         </div>
       </div>
-      <div style={{ padding: '12px 16px', background: v.dk ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', borderRadius: 10, marginBottom: 16 }}>{stDesc}</div>
+
       <BrandingBar v={v} />
     </div>
   )
 }
 
-// ── VISUAL 4: Temperature ─────────────────────────────────────────────────────
+// ── VISUAL 4: Market Temperature ──────────────────────────────────────────────
 
 function MarketTemperature({ card, theme }: { card: CardData; theme: Theme }) {
   const v = getThemeVars(theme)
-  const score = (card.raw_pct_30d ?? 0) * 0.6 + (card.raw_pct_90d ?? 0) * 0.4
-  const { label, col, emoji, desc } =
-    score > 30  ? { label: 'Overheated', col: v.red,    emoji: '🔥', desc: 'Moved hard recently. Price may be extended — risky entry now.' }
-    : score > 10  ? { label: 'Hot',      col: '#f97316', emoji: '♨️', desc: 'Strong momentum. High interest, but watch for a pullback.' }
-    : score > 0   ? { label: 'Warming',  col: v.yellow,  emoji: '↗', desc: 'Mild upward trend. Gradual buying interest building.' }
-    : score > -10 ? { label: 'Cooling',  col: '#3b82f6', emoji: '↘', desc: 'Drifting lower. Patience may reward with a better entry.' }
-    :               { label: 'Cold',     col: '#60a5fa', emoji: '❄', desc: 'Little activity. Potentially undervalued or out of favour.' }
-  const segs    = ['Cold', 'Cooling', 'Warming', 'Hot', 'Overheated']
-  const segCols = ['#60a5fa', '#3b82f6', v.yellow, '#f97316', v.red]
-  const idx     = segs.indexOf(label)
+  const p30 = card.raw_pct_30d
+  const temp = p30 == null ? 50 : Math.min(100, Math.max(0, 50 + p30 * 2))
+  const label = p30 == null ? 'Neutral' : p30 > 30 ? '🔥 Very Hot' : p30 > 10 ? '📈 Heating Up' : p30 < -30 ? '🧊 Very Cold' : p30 < -10 ? '📉 Cooling Down' : '➡ Neutral'
+  const col = p30 == null ? v.yellow : p30 > 10 ? '#f97316' : p30 < -10 ? '#60a5fa' : v.yellow
+  const gradFill = `linear-gradient(to right, #60a5fa 0%, #22c55e 30%, ${v.yellow} 50%, #f97316 70%, #ef4444 100%)`
 
   return (
-    <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", padding: '24px 26px 0' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 26 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1, minWidth: 0 }}>
-          <CardImg src={card.image_url} w={52} h={72} radius={8} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.5, color: v.mu, textTransform: 'uppercase', marginBottom: 4 }}>Market Temperature</div>
-            <div style={{ fontSize: 18, fontWeight: 900, color: v.tx, fontFamily: "'Outfit', sans-serif", lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.card_name}</div>
-            <div style={{ fontSize: 11, color: v.mu, marginTop: 3, fontWeight: 600 }}>{card.set_name}</div>
+    <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif" }}>
+      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <Watermark />
+          <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.5 }}>Market Temperature</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <CardImg src={card.image_url} w={50} h={70} radius={6} />
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3 }}>{card.card_name}</div>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3 }}>{card.set_name}</div>
           </div>
         </div>
-        <Watermark color={v.mu} />
       </div>
 
-      <div style={{ textAlign: 'center', marginBottom: 26 }}>
-        <div style={{ fontSize: 72, lineHeight: 1, marginBottom: 14 }}>{emoji}</div>
-        <div style={{ fontSize: 44, fontWeight: 900, color: col, letterSpacing: -1.5, marginBottom: 8 }}>{label}</div>
-        <div style={{ fontSize: 12, color: v.mu, lineHeight: 1.7, maxWidth: 300, margin: '0 auto' }}>{desc}</div>
-      </div>
+      <div style={{ padding: '24px 28px' }}>
+        <div style={{ textAlign: 'center', marginBottom: 20 }}>
+          <div style={{ fontSize: 36, fontWeight: 900, color: col }}>{label}</div>
+          {p30 != null && <div style={{ fontSize: 14, color: v.mu, marginTop: 6 }}>{pct(p30)} in 30 days</div>}
+        </div>
 
-      <div style={{ marginBottom: 22, padding: '0 4px' }}>
-        <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
-          {segs.map((s, i) => (
-            <div key={s} style={{ flex: 1, height: 6, borderRadius: 3, background: segCols[i], opacity: i === idx ? 1 : 0.12 }} />
+        <div style={{ position: 'relative', height: 14, borderRadius: 99, overflow: 'hidden', marginBottom: 10, background: gradFill }}>
+          <div style={{ position: 'absolute', top: 0, left: `${temp}%`, transform: 'translateX(-50%)', width: 4, height: '100%', background: '#fff', borderRadius: 2, boxShadow: '0 0 6px rgba(0,0,0,0.5)' }} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18 }}>
+          <span style={{ fontSize: 9, color: '#60a5fa', fontWeight: 700 }}>Cold</span>
+          <span style={{ fontSize: 9, color: '#ef4444', fontWeight: 700 }}>Hot</span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          {[
+            { label: '7d',  val: pct(card.raw_pct_7d),  col: pctCol(card.raw_pct_7d,  v) },
+            { label: '30d', val: pct(card.raw_pct_30d), col: pctCol(card.raw_pct_30d, v) },
+            { label: '90d', val: pct(card.raw_pct_90d), col: pctCol(card.raw_pct_90d, v) },
+            { label: 'Raw', val: fmt(card.current_raw), col: v.tx },
+          ].map(s => (
+            <div key={s.label} style={{ background: v.dk ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', borderRadius: 10, padding: '10px 12px', border: `1px solid ${v.br}` }}>
+              <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4 }}>{s.label}</div>
+              <div style={{ fontSize: 16, fontWeight: 900, color: s.col }}>{s.val}</div>
+            </div>
           ))}
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 8, color: v.mu, fontWeight: 800, letterSpacing: 0.5 }}>COLD</span>
-          <span style={{ fontSize: 8, color: v.mu, fontWeight: 800, letterSpacing: 0.5 }}>OVERHEATED</span>
-        </div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderTop: `1px solid ${v.br}`, paddingTop: 18, paddingBottom: 18 }}>
-        {[
-          { label: '30d Move', val: pct(card.raw_pct_30d), col: pctCol(card.raw_pct_30d) },
-          { label: '90d Move', val: pct(card.raw_pct_90d), col: pctCol(card.raw_pct_90d) },
-        ].map((s, i) => (
-          <div key={s.label} style={{ textAlign: 'center', borderRight: i === 0 ? `1px solid ${v.br}` : 'none', padding: '0 8px' }}>
-            <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 5 }}>{s.label}</div>
-            <div style={{ fontSize: 24, fontWeight: 900, color: s.col, letterSpacing: -0.5 }}>{s.val}</div>
-          </div>
-        ))}
       </div>
 
       <BrandingBar v={v} />
@@ -485,78 +656,58 @@ function MarketTemperature({ card, theme }: { card: CardData; theme: Theme }) {
   )
 }
 
-// ── VISUAL 5: Grade Breakdown ─────────────────────────────────────────────────
+// ── VISUAL 5: Grade Compare ───────────────────────────────────────────────────
 
 function GradeCompare({ card, theme }: { card: CardData; theme: Theme }) {
   const v = getThemeVars(theme)
   const grades = [
-    { label: 'Raw', price: card.current_raw, color: '#64748b', desc: 'Ungraded' },
-    { label: 'PSA 9', price: card.current_psa9, color: '#3b82f6', desc: 'Near Mint+' },
-    { label: 'PSA 10', price: card.current_psa10, color: '#f59e0b', desc: 'Gem Mint' },
-  ].filter(g => g.price && g.price > 0)
-
-  const maxPrice = Math.max(...grades.map(g => g.price || 0))
-  const psa10x = card.current_raw && card.current_psa10 ? (card.current_psa10 / card.current_raw) : null
-  const psa9x  = card.current_raw && card.current_psa9  ? (card.current_psa9  / card.current_raw) : null
+    { label: 'Raw',    val: card.current_raw,   col: '#60a5fa' },
+    { label: 'PSA 9',  val: card.current_psa9,  col: '#34d399' },
+    { label: 'PSA 10', val: card.current_psa10, col: '#a78bfa' },
+  ].filter(g => g.val && g.val > 0)
+  const maxVal = Math.max(...grades.map(g => g.val || 0))
 
   return (
-    <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", padding: '24px 26px 0' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1, minWidth: 0 }}>
-          <CardImg src={card.image_url} w={52} h={72} radius={8} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.5, color: v.mu, textTransform: 'uppercase', marginBottom: 4 }}>Grade Breakdown</div>
-            <div style={{ fontSize: 18, fontWeight: 900, color: v.tx, fontFamily: "'Outfit', sans-serif", lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.card_name}</div>
-            <div style={{ fontSize: 11, color: v.mu, marginTop: 3, fontWeight: 600 }}>{card.set_name}</div>
+    <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif" }}>
+      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <Watermark />
+          <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.5 }}>Grade Breakdown</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <CardImg src={card.image_url} w={50} h={70} radius={6} />
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3 }}>{card.card_name}</div>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3 }}>{card.set_name}</div>
           </div>
         </div>
-        <Watermark color={v.mu} />
       </div>
 
-      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 22, height: 150, padding: '0 4px' }}>
-        {grades.map(g => {
-          const barPct = maxPrice > 0 ? ((g.price || 0) / maxPrice) : 0
-          const barH = Math.max(8, barPct * 140)
-          return (
-            <div key={g.label} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, justifyContent: 'flex-end', height: '100%' }}>
-              <div style={{ fontSize: 12, fontWeight: 900, color: g.color }}>{fmt(g.price)}</div>
-              <div style={{ width: '100%', height: barH, borderRadius: '6px 6px 3px 3px', background: `linear-gradient(to top, ${g.color}, ${g.color}88)` }} />
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 12, fontWeight: 800, color: v.tx }}>{g.label}</div>
-                <div style={{ fontSize: 9, color: v.mu, fontWeight: 600 }}>{g.desc}</div>
+      <div style={{ padding: '22px 24px 16px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {grades.map(g => {
+            const barW = maxVal > 0 ? Math.round((g.val! / maxVal) * 100) : 0
+            const multiple = card.current_raw && g.label !== 'Raw' ? (g.val! / card.current_raw).toFixed(1) : null
+            return (
+              <div key={g.label}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: 2, background: g.col, flexShrink: 0 }} />
+                    <span style={{ fontSize: 13, fontWeight: 800, color: v.tx }}>{g.label}</span>
+                    {multiple && <span style={{ fontSize: 11, color: v.mu }}>({multiple}× raw)</span>}
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 16, fontWeight: 900, color: v.tx }}>{fmt(g.val)}</div>
+                    <div style={{ fontSize: 10, color: v.mu }}>{fmtGbp(g.val)}</div>
+                  </div>
+                </div>
+                <div style={{ height: 10, background: v.dk ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', borderRadius: 99, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${barW}%`, background: g.col, borderRadius: 99, transition: 'width 0.8s ease' }} />
+                </div>
               </div>
-            </div>
-          )
-        })}
-      </div>
-
-      {(psa9x || psa10x) && (
-        <div style={{ display: 'grid', gridTemplateColumns: psa9x && psa10x ? '1fr 1fr' : '1fr', gap: 10, marginBottom: 16 }}>
-          {psa9x && (
-            <div style={{ padding: '12px 14px', background: v.dk ? 'rgba(59,130,246,0.08)' : 'rgba(59,130,246,0.06)', borderRadius: 10, border: '1px solid rgba(59,130,246,0.15)', textAlign: 'center' }}>
-              <div style={{ fontSize: 9, color: '#3b82f6', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>PSA 9 vs Raw</div>
-              <div style={{ fontSize: 24, fontWeight: 900, color: '#3b82f6' }}>{psa9x.toFixed(1)}×</div>
-            </div>
-          )}
-          {psa10x && (
-            <div style={{ padding: '12px 14px', background: v.dk ? 'rgba(245,158,11,0.08)' : 'rgba(245,158,11,0.06)', borderRadius: 10, border: '1px solid rgba(245,158,11,0.15)', textAlign: 'center' }}>
-              <div style={{ fontSize: 9, color: '#f59e0b', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>PSA 10 vs Raw</div>
-              <div style={{ fontSize: 24, fontWeight: 900, color: '#f59e0b' }}>{psa10x.toFixed(1)}×</div>
-            </div>
-          )}
+            )
+          })}
         </div>
-      )}
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderTop: `1px solid ${v.br}`, paddingTop: 14, paddingBottom: 14 }}>
-        {[
-          { label: '30d Move', val: pct(card.raw_pct_30d), col: pctCol(card.raw_pct_30d) },
-          { label: '90d Move', val: pct(card.raw_pct_90d), col: pctCol(card.raw_pct_90d) },
-        ].map((s, i) => (
-          <div key={s.label} style={{ textAlign: 'center', borderRight: i === 0 ? `1px solid ${v.br}` : 'none', padding: '0 8px' }}>
-            <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>{s.label}</div>
-            <div style={{ fontSize: 22, fontWeight: 900, color: s.col }}>{s.val}</div>
-          </div>
-        ))}
       </div>
 
       <BrandingBar v={v} />
@@ -575,16 +726,16 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", width: '100%' }}>
-      <div style={{ background: v.dk ? '#0d2040' : '#0d2040', padding: '20px 24px 18px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <Watermark color="rgba(255,255,255,0.5)" />
-          <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.4)' }}>{today}</span>
+      <div style={{ background: '#0d2040', padding: '20px 24px 18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <Watermark color="rgba(255,255,255,0.6)" />
+          <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.35)' }}>{today}</span>
         </div>
         <div style={{ fontSize: 24, fontWeight: 900, color: '#fff', letterSpacing: -0.5, fontFamily: "'Outfit', sans-serif" }}>
           {arrow} Top 10 {direction === 'rising' ? 'Risers' : 'Fallers'}
         </div>
-        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 4, fontWeight: 600 }}>
-          Past {periodLabel} · Min 3 sales · Volume verified
+        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', marginTop: 4, fontWeight: 600 }}>
+          Past {periodLabel} · Volume-verified signals
         </div>
       </div>
 
@@ -598,7 +749,7 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
         {movers.map((m, i) => (
           <div key={i} style={{
             display: 'grid', gridTemplateColumns: '28px 1fr 90px 76px', gap: 8,
-            padding: '14px 20px',
+            padding: '13px 20px',
             borderBottom: i < movers.length - 1 ? `1px solid ${v.br}` : 'none',
             background: i % 2 === 0 ? 'transparent' : v.dk ? 'rgba(255,255,255,0.015)' : 'rgba(0,0,0,0.015)',
           }}>
@@ -606,16 +757,14 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 800, color: v.tx, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.card_name}</div>
               <div style={{ fontSize: 11, color: v.mu, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>{m.set_name}</div>
-              {m.volume_label && <div style={{ fontSize: 10, color: v.green, fontWeight: 700, marginTop: 3 }}>{m.volume_label}</div>}
+              {m.volume_label && <div style={{ fontSize: 10, color: v.green, fontWeight: 700, marginTop: 2 }}>{m.volume_label}</div>}
             </div>
             <div style={{ alignSelf: 'center' }}>
               <div style={{ fontSize: 13, fontWeight: 800, color: v.tx }}>{fmt(m.current_price)}</div>
               <div style={{ fontSize: 11, color: v.mu, marginTop: 2 }}>{fmtGbp(m.current_price)}</div>
             </div>
             <div style={{ textAlign: 'right', alignSelf: 'center' }}>
-              <div style={{ fontSize: 15, fontWeight: 900, color: accentCol, letterSpacing: -0.3 }}>
-                {pct(m.pct_change)}
-              </div>
+              <div style={{ fontSize: 15, fontWeight: 900, color: accentCol, letterSpacing: -0.3 }}>{pct(m.pct_change)}</div>
             </div>
           </div>
         ))}
@@ -630,14 +779,14 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
 
 function SetReport({ setData, theme }: { setData: SetData; theme: Theme }) {
   const v = getThemeVars(theme)
-  const pct30col = pctCol(setData.set_pct_30d)
-  const pct90col = pctCol(setData.set_pct_90d)
+  const pct30col = pctCol(setData.set_pct_30d, v)
+  const pct90col = pctCol(setData.set_pct_90d, v)
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif" }}>
       <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '22px 24px 20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <Watermark color="rgba(255,255,255,0.5)" />
+          <Watermark />
           <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.4)' }}>Set Performance Report</span>
         </div>
         <div style={{ fontSize: 26, fontWeight: 900, color: '#fff', letterSpacing: -0.5, lineHeight: 1.1, fontFamily: "'Outfit', sans-serif" }}>{setData.set_name}</div>
@@ -647,10 +796,10 @@ function SetReport({ setData, theme }: { setData: SetData; theme: Theme }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderBottom: `1px solid ${v.br}` }}>
         {[
           { label: 'Set Value', val: fmtGbp(setData.total_value), sub: fmt(setData.total_value) },
-          { label: 'Avg 30d',   val: pct(setData.set_pct_30d),    sub: 'all cards',   col: pct30col },
-          { label: 'Avg 90d',   val: pct(setData.set_pct_90d),    sub: 'all cards',   col: pct90col },
+          { label: 'Avg 30d',   val: pct(setData.set_pct_30d),    sub: 'all cards', col: pct30col },
+          { label: 'Avg 90d',   val: pct(setData.set_pct_90d),    sub: 'all cards', col: pct90col },
         ].map((s, i) => (
-          <div key={s.label} style={{ padding: '16px 16px', borderRight: i < 2 ? `1px solid ${v.br}` : 'none' }}>
+          <div key={s.label} style={{ padding: '16px', borderRight: i < 2 ? `1px solid ${v.br}` : 'none' }}>
             <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 5 }}>{s.label}</div>
             <div style={{ fontSize: 20, fontWeight: 900, color: (s as any).col || v.tx, letterSpacing: -0.5 }}>{s.val}</div>
             <div style={{ fontSize: 10, color: v.mu, marginTop: 2 }}>{s.sub}</div>
@@ -666,18 +815,16 @@ function SetReport({ setData, theme }: { setData: SetData; theme: Theme }) {
           const sharePct = setData.total_value > 0 ? (c.current_raw / setData.total_value) * 100 : 0
           const barW = Math.min(100, sharePct * 3)
           return (
-            <div key={i} style={{ padding: '14px 20px', borderBottom: i < setData.top_cards.length - 1 ? `1px solid ${v.br}` : 'none' }}>
+            <div key={i} style={{ padding: '13px 20px', borderBottom: i < setData.top_cards.length - 1 ? `1px solid ${v.br}` : 'none' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 10, color: v.mu, fontWeight: 800, width: 16, flexShrink: 0 }}>{i + 1}</span>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: v.tx, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.card_name}</span>
-                  </div>
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 10, color: v.mu, fontWeight: 800, width: 16, flexShrink: 0 }}>{i + 1}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: v.tx, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.card_name}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0, marginLeft: 12 }}>
                   <span style={{ fontSize: 13, fontWeight: 800, color: v.tx }}>{fmt(c.current_raw)}</span>
                   {c.pct_30d != null && (
-                    <span style={{ fontSize: 12, fontWeight: 800, color: pctCol(c.pct_30d), minWidth: 54, textAlign: 'right' }}>{pct(c.pct_30d)}</span>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: pctCol(c.pct_30d, v), minWidth: 54, textAlign: 'right' }}>{pct(c.pct_30d)}</span>
                   )}
                 </div>
               </div>
@@ -698,152 +845,79 @@ function SetReport({ setData, theme }: { setData: SetData; theme: Theme }) {
 
 // ── Placeholder ───────────────────────────────────────────────────────────────
 
-function Placeholder({ message }: { message?: string }) {
+function Placeholder({ message = 'Search for a card above to get started' }: { message?: string }) {
   return (
-    <div style={{ background: 'var(--card)', border: '2px dashed var(--border)', borderRadius: 22, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 320, padding: 40, textAlign: 'center' }}>
-      <div style={{ fontSize: 36, marginBottom: 14, opacity: 0.15 }}>◈</div>
-      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", marginBottom: 8 }}>
-        {message || 'Search for a card to begin'}
-      </div>
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.6, maxWidth: 280 }}>
-        Or pick a card from the Top Risers panel on the right →
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 320, color: 'var(--text-muted)', fontFamily: "'Figtree',sans-serif", gap: 12, padding: 32, textAlign: 'center' }}>
+      <div style={{ fontSize: 40, opacity: 0.3 }}>◈</div>
+      <div style={{ fontSize: 14 }}>{message}</div>
     </div>
   )
 }
 
-// ── Quick Risers Panel ────────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────
 
-function QuickRisers({ onSelect, selectedSlug }: { onSelect: (m: Mover) => void; selectedSlug?: string }) {
-  const [risers, setRisers] = useState<Mover[]>([])
-  const [period, setPeriod] = useState<MoversPeriod>('30d')
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    fetchMovers(period, 'rising', 10).then(data => { setRisers(data); setLoading(false) })
-  }, [period])
-
-  return (
-    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden' }}>
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1.5, color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: "'Figtree',sans-serif" }}>
-          ▲ Top Risers
-        </div>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {(['7d', '30d', '90d'] as MoversPeriod[]).map(p => (
-            <button key={p} onClick={() => setPeriod(p)}
-              style={{ padding: '3px 8px', borderRadius: 6, border: period === p ? '1px solid var(--primary)' : '1px solid var(--border)', background: period === p ? 'rgba(26,95,173,0.1)' : 'transparent', cursor: 'pointer', fontSize: 10, fontWeight: 700, color: period === p ? 'var(--primary)' : 'var(--text-muted)', fontFamily: "'Figtree',sans-serif" }}>
-              {p}
-            </button>
-          ))}
-        </div>
-      </div>
-      {loading ? (
-        <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12, fontFamily: "'Figtree',sans-serif" }}>Loading…</div>
-      ) : (
-        <div>
-          {risers.map((m, i) => {
-            const isSelected = m.card_slug === selectedSlug
-            return (
-              <div key={i}
-                onClick={() => onSelect(m)}
-                title="Click to select for visual"
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px',
-                  borderBottom: i < risers.length - 1 ? '1px solid var(--border)' : 'none',
-                  cursor: 'pointer',
-                  background: isSelected ? 'rgba(26,95,173,0.08)' : 'transparent',
-                  transition: 'background 0.1s',
-                }}
-                onMouseEnter={e => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-light)' }}
-                onMouseLeave={e => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
-              >
-                {m.image_url
-                  ? <img src={m.image_url} alt="" style={{ width: 28, height: 39, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
-                  : <div style={{ width: 28, height: 39, background: 'var(--bg-light)', borderRadius: 3, flexShrink: 0 }} />
-                }
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree',sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.card_name}</div>
-                  <div style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: "'Figtree',sans-serif" }}>{m.set_name}</div>
-                </div>
-                <div style={{ flexShrink: 0, textAlign: 'right' }}>
-                  <div style={{ fontSize: 12, fontWeight: 900, color: '#22c55e' }}>{pct(m.pct_change)}</div>
-                  <div style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: "'Figtree',sans-serif" }}>{fmt(m.current_price)}</div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Main Page ─────────────────────────────────────────────────────────────────
-
-export default function StudioPageClient({ initialCardSlug, initialVisual }: { initialCardSlug?: string; initialVisual?: string }) {
-  const isMobile = useIsMobile()
-  const [search,        setSearch]        = useState('')
-  const [searchResults, setSearchResults] = useState<any[]>([])
-  const [card,          setCard]          = useState<CardData | null>(null)
-  const [movers,        setMovers]        = useState<Mover[]>([])
-  const [setData,       setSetData]       = useState<SetData | null>(null)
-  const [setQuery,      setSetQuery]      = useState('')
-  const [visualType,    setVisualType]    = useState<VisualType>((initialVisual as VisualType) || 'insight')
-  const [theme,         setTheme]         = useState<Theme>('dark')
-  const [moversPeriod,  setMoversPeriod]  = useState<MoversPeriod>('30d')
-  const [moversDir,     setMoversDir]     = useState<MoversDirection>('rising')
-  const [gradeView,     setGradeView]     = useState<GradeView>('raw')
-  const [loading,       setLoading]       = useState(false)
-  const [exporting,     setExporting]     = useState(false)
-  const searchDebounce  = useRef<NodeJS.Timeout>()
-  const setDebounce     = useRef<NodeJS.Timeout>()
+export default function StudioPageClient() {
+  const [visualType,   setVisualType]   = useState<VisualType>('insight')
+  const [theme,        setTheme]        = useState<Theme>('dark')
+  const [gradeView,    setGradeView]    = useState<GradeView>('raw')
+  const [cardLayout,   setCardLayout]   = useState<CardLayout>('compact')
+  const [card,         setCard]         = useState<CardData | null>(null)
+  const [movers,       setMovers]       = useState<Mover[]>([])
+  const [setData,      setSetData]      = useState<SetData | null>(null)
+  const [moversPeriod, setMoversPeriod] = useState<MoversPeriod>('30d')
+  const [moversDir,    setMoversDir]    = useState<MoversDirection>('rising')
+  const [setInput,     setSetInput]     = useState('')
+  const [cardSearch,   setCardSearch]   = useState('')
+  const [loading,      setLoading]      = useState(false)
+  const [exporting,    setExporting]    = useState(false)
+  const [isMobile,     setIsMobile]     = useState(false)
+  const [quickRisers,  setQuickRisers]  = useState<Mover[]>([])
 
   useEffect(() => {
-    if (initialCardSlug) {
-      setLoading(true)
-      fetchCard(initialCardSlug).then(data => { if (data) setCard(data); setLoading(false) })
-    }
-  }, [initialCardSlug])
+    const check = () => setIsMobile(window.innerWidth < 900)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
 
+  // Load quick risers for sidebar
+  useEffect(() => {
+    fetchMovers('rising', '30d').then(setQuickRisers)
+  }, [])
+
+  // Auto-load movers when on movers visual
   useEffect(() => {
     if (visualType === 'movers') {
       setLoading(true)
-      fetchMovers(moversPeriod, moversDir).then(data => { setMovers(data); setLoading(false) })
+      fetchMovers(moversDir, moversPeriod).then(data => { setMovers(data); setLoading(false) })
     }
-  }, [visualType, moversPeriod, moversDir])
+  }, [visualType, moversDir, moversPeriod])
 
-  useEffect(() => {
-    clearTimeout(searchDebounce.current)
-    const q = search.trim()
-    if (q.length < 2) { setSearchResults([]); return }
-    searchDebounce.current = setTimeout(async () => {
-      const { data } = await supabase.rpc('search_global', { query: q })
-      if (data) setSearchResults((data as any[]).filter(r => r.result_type === 'card').slice(0, 8))
-    }, 280)
-  }, [search])
-
-  useEffect(() => {
-    clearTimeout(setDebounce.current)
-    const q = setQuery.trim()
-    if (q.length < 2) return
-    setDebounce.current = setTimeout(async () => {
-      setLoading(true)
-      const data = await fetchSetData(q)
-      setSetData(data)
-      setLoading(false)
-    }, 600)
-  }, [setQuery])
-
-  async function selectCard(result: any) {
-    setSearch(''); setSearchResults([]); setLoading(true)
-    let data = await fetchCard(result.url_slug || result.card_slug)
-    if (!data) {
-      const { data: row } = await supabase.from('cards').select('card_slug').eq('card_url_slug', result.url_slug || result.card_slug).single()
-      if (row) data = await fetchCard(row.card_slug)
+  async function searchCard(query: string) {
+    if (!query.trim()) return
+    setLoading(true)
+    const { data } = await supabase
+      .from('card_trends')
+      .select('card_slug,card_name,set_name')
+      .ilike('card_name', `%${query.trim()}%`)
+      .not('current_raw', 'is', null)
+      .order('current_raw', { ascending: false })
+      .limit(1)
+    if (data?.length) {
+      const result = await fetchCard(data[0].card_slug)
+      if (result) {
+        setCard(result)
+        if (['movers', 'set-report'].includes(visualType)) setVisualType('insight')
+      }
     }
-    if (data) setCard(data)
+    setLoading(false)
+  }
+
+  async function loadSetReport() {
+    if (!setInput.trim()) return
+    setLoading(true)
+    const data = await fetchSetData(setInput.trim())
+    if (data) { setSetData(data); setVisualType('set-report') }
     setLoading(false)
   }
 
@@ -853,7 +927,6 @@ export default function StudioPageClient({ initialCardSlug, initialVisual }: { i
     const data = await fetchCard(m.card_slug)
     if (data) {
       setCard(data)
-      // Switch to a card visual if on movers/set
       if (['movers', 'set-report'].includes(visualType)) setVisualType('insight')
     }
     setLoading(false)
@@ -865,7 +938,6 @@ export default function StudioPageClient({ initialCardSlug, initialVisual }: { i
     const el = document.getElementById('studio-preview')
     if (!el) { setExporting(false); return }
     try {
-      // Load html2canvas if not already loaded
       if (!(window as any).html2canvas) {
         await new Promise<void>((res, rej) => {
           const s = document.createElement('script')
@@ -876,15 +948,14 @@ export default function StudioPageClient({ initialCardSlug, initialVisual }: { i
         })
       }
 
-      // Proxy card images through our server to avoid CORS
+      // Proxy external images to avoid CORS
       const imgs = Array.from(el.querySelectorAll('img')) as HTMLImageElement[]
       const origSrcs = imgs.map(img => img.src)
       for (const img of imgs) {
-        if (img.src && !img.src.startsWith(window.location.origin) && !img.src.includes('favicon')) {
+        if (img.src && !img.src.startsWith(window.location.origin)) {
           img.src = `/api/imgproxy?url=${encodeURIComponent(img.src.split('?')[0])}`
         }
       }
-      // Wait for images to reload
       await Promise.all(imgs.map(img =>
         img.complete ? Promise.resolve() : new Promise<void>(r => { img.onload = () => r(); img.onerror = () => r() })
       ))
@@ -895,10 +966,16 @@ export default function StudioPageClient({ initialCardSlug, initialVisual }: { i
         allowTaint: false,
         backgroundColor: null,
         logging: false,
-        imageTimeout: 8000,
+        imageTimeout: 10000,
+        onclone: (doc: Document) => {
+          // Ensure fonts are loaded in clone
+          const link = doc.createElement('link')
+          link.rel = 'stylesheet'
+          link.href = 'https://fonts.googleapis.com/css2?family=Outfit:wght@700;800;900&family=Figtree:wght@400;600;700;800;900&display=swap'
+          doc.head.appendChild(link)
+        },
       })
 
-      // Restore original srcs
       imgs.forEach((img, i) => { img.src = origSrcs[i] })
 
       const link = document.createElement('a')
@@ -915,11 +992,12 @@ export default function StudioPageClient({ initialCardSlug, initialVisual }: { i
     setExporting(false)
   }
 
-  const needsCard    = ['insight','psa-gauge','peak-distance','temperature','grade-compare'].includes(visualType)
-  const needsMovers  = visualType === 'movers'
-  const needsSet     = visualType === 'set-report'
-  const canExport    = (needsCard && !!card) || (needsMovers && movers.length > 0) || (needsSet && !!setData)
-  const gradeVisuals = ['insight', 'grade-compare']
+  const needsCard   = ['insight', 'psa-gauge', 'peak-distance', 'temperature', 'grade-compare'].includes(visualType)
+  const needsMovers = visualType === 'movers'
+  const needsSet    = visualType === 'set-report'
+  const canExport   = (needsCard && !!card) || (needsMovers && movers.length > 0) || (needsSet && !!setData)
+  const isCardVisual = needsCard
+  const categories  = ['Card', 'Market', 'Set']
 
   function renderVisual() {
     if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 300, color: 'var(--text-muted)', fontFamily: "'Figtree',sans-serif", fontSize: 14 }}>Loading…</div>
@@ -933,7 +1011,7 @@ export default function StudioPageClient({ initialCardSlug, initialVisual }: { i
       return <SetReport setData={setData} theme={theme} />
     }
     switch (visualType) {
-      case 'insight':       return <InsightCard       card={card!} theme={theme} gradeView={gradeView} />
+      case 'insight':       return <InsightCard       card={card!} theme={theme} gradeView={gradeView} layout={cardLayout} />
       case 'psa-gauge':     return <PsaGauge          card={card!} theme={theme} />
       case 'peak-distance': return <PeakDistance      card={card!} theme={theme} />
       case 'temperature':   return <MarketTemperature card={card!} theme={theme} />
@@ -941,10 +1019,16 @@ export default function StudioPageClient({ initialCardSlug, initialVisual }: { i
     }
   }
 
-  const panelStyle: React.CSSProperties = { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: 16 }
-  const labelStyle: React.CSSProperties = { fontSize: 10, fontWeight: 800, letterSpacing: 1.5, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 10, fontFamily: "'Figtree',sans-serif", display: 'block' }
-  const inputStyle: React.CSSProperties = { width: '100%', padding: '10px 14px', fontSize: 13, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-light)', color: 'var(--text)', fontFamily: "'Figtree',sans-serif", outline: 'none', boxSizing: 'border-box' }
-  const categories = ['Card', 'Market', 'Set']
+  const panelStyle:  React.CSSProperties = { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: 16 }
+  const labelStyle:  React.CSSProperties = { fontSize: 10, fontWeight: 800, letterSpacing: 1.5, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 10, fontFamily: "'Figtree',sans-serif", display: 'block' }
+  const inputStyle:  React.CSSProperties = { width: '100%', padding: '10px 14px', fontSize: 13, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-light)', color: 'var(--text)', fontFamily: "'Figtree',sans-serif", outline: 'none', boxSizing: 'border-box' }
+  const btnStyle = (active: boolean): React.CSSProperties => ({
+    padding: '7px 12px', borderRadius: 8, border: '1px solid var(--border)',
+    background: active ? 'var(--primary)' : 'var(--bg-light)',
+    color: active ? '#fff' : 'var(--text)',
+    fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: "'Figtree',sans-serif",
+    transition: 'all 0.15s',
+  })
 
   return (
     <div style={{ maxWidth: 1400, margin: '0 auto', padding: isMobile ? '20px 14px 110px' : '32px 24px' }}>
@@ -956,200 +1040,203 @@ export default function StudioPageClient({ initialCardSlug, initialVisual }: { i
         </p>
       </div>
 
-      {/* Three-column layout: Controls | Preview | Quick Risers */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '280px 1fr 240px', gap: isMobile ? 14 : 24, alignItems: 'start' }}>
 
-        {/* ── CONTROLS ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* ── LEFT: Controls ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
+          {/* Visual type selector */}
           <div style={panelStyle}>
-            <span style={labelStyle}>1. Choose Visual</span>
-            {categories.map(cat => {
-              const catVisuals = VISUAL_TYPES.filter(v => v.category === cat)
-              return (
-                <div key={cat} style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 6, fontFamily: "'Figtree',sans-serif" }}>{cat}</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {catVisuals.map(vt => (
-                      <button key={vt.id} onClick={() => setVisualType(vt.id)}
-                        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, border: visualType === vt.id ? '1px solid var(--primary)' : '1px solid var(--border)', background: visualType === vt.id ? 'rgba(26,95,173,0.07)' : 'transparent', cursor: 'pointer', textAlign: 'left', width: '100%' }}>
-                        <span style={{ fontSize: 14, color: visualType === vt.id ? 'var(--primary)' : 'var(--text-muted)', width: 20, flexShrink: 0 }}>{vt.icon}</span>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree',sans-serif" }}>{vt.label}</div>
-                          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree',sans-serif" }}>{vt.desc}</div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
+            <span style={labelStyle}>Visual Type</span>
+            {categories.map(cat => (
+              <div key={cat} style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 5, fontFamily: "'Figtree',sans-serif" }}>{cat}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {VISUAL_TYPES.filter(v => v.category === cat).map(vt => (
+                    <button key={vt.id} onClick={() => setVisualType(vt.id)} style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '9px 12px', borderRadius: 10,
+                      border: `1px solid ${visualType === vt.id ? 'var(--primary)' : 'var(--border)'}`,
+                      background: visualType === vt.id ? 'rgba(26,95,173,0.08)' : 'transparent',
+                      color: visualType === vt.id ? 'var(--primary)' : 'var(--text)',
+                      cursor: 'pointer', textAlign: 'left', width: '100%',
+                      fontFamily: "'Figtree',sans-serif", transition: 'all 0.15s',
+                    }}>
+                      <span style={{ fontSize: 13 }}>{vt.icon}</span>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 700, lineHeight: 1.2 }}>{vt.label}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>{vt.desc}</div>
+                      </div>
+                    </button>
+                  ))}
                 </div>
-              )
-            })}
+              </div>
+            ))}
           </div>
 
           {/* Card search */}
-          {needsCard && (
+          {(needsCard || (!needsMovers && !needsSet)) && (
             <div style={panelStyle}>
-              <span style={labelStyle}>2. Select Card</span>
-              <div style={{ position: 'relative' }}>
-                <input value={search} onChange={e => setSearch(e.target.value)} onBlur={() => setTimeout(() => setSearchResults([]), 300)}
-                  placeholder="Charizard Base Set…" style={inputStyle} />
-                {searchResults.length > 0 && (
-                  <div onMouseDown={e => e.preventDefault()} style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, marginTop: 4, overflow: 'hidden', boxShadow: '0 12px 40px rgba(0,0,0,0.2)' }}>
-                    {searchResults.map((r, i) => (
-                      <div key={i} onClick={() => selectCard(r)}
-                        style={{ padding: '9px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid var(--border)' }}
-                        onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-light)'}
-                        onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = 'transparent'}>
-                        {r.image_url ? <img src={r.image_url} alt="" style={{ width: 26, height: 36, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} /> : <div style={{ width: 26, height: 36, background: 'var(--bg-light)', borderRadius: 3, flexShrink: 0 }} />}
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree',sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</div>
-                          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree',sans-serif" }}>{r.subtitle}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {card && (
-                <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(26,95,173,0.07)', border: '1px solid rgba(26,95,173,0.2)', borderRadius: 10, padding: '8px 12px' }}>
-                  {card.image_url && <img src={card.image_url} alt="" style={{ width: 24, height: 34, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree',sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.card_name}</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree',sans-serif" }}>{card.set_name}</div>
-                  </div>
-                  <button onClick={() => setCard(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 16 }}>×</button>
-                </div>
-              )}
+              <span style={labelStyle}>Search Card</span>
+              <input
+                style={inputStyle}
+                placeholder="e.g. Charizard Base Set"
+                value={cardSearch}
+                onChange={e => setCardSearch(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && searchCard(cardSearch)}
+              />
+              <button onClick={() => searchCard(cardSearch)} style={{ ...btnStyle(false), width: '100%', marginTop: 8, justifyContent: 'center', display: 'flex' }}>
+                Search
+              </button>
             </div>
           )}
 
-          {/* Grade selector — only for insight & grade-compare */}
-          {needsCard && card && gradeVisuals.includes(visualType) && (
+          {/* Set report search */}
+          {needsSet && (
             <div style={panelStyle}>
-              <span style={labelStyle}>3. Grade Focus</span>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {([
-                  { id: 'raw' as GradeView,   label: 'Raw',    sub: fmt(card.current_raw),   available: !!card.current_raw   },
-                  { id: 'psa9' as GradeView,  label: 'PSA 9',  sub: fmt(card.current_psa9),  available: !!card.current_psa9  },
-                  { id: 'psa10' as GradeView, label: 'PSA 10', sub: fmt(card.current_psa10), available: !!card.current_psa10 },
-                ]).map(g => (
-                  <button key={g.id} onClick={() => g.available && setGradeView(g.id)} disabled={!g.available}
-                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderRadius: 10, border: gradeView === g.id ? '1px solid var(--primary)' : '1px solid var(--border)', background: gradeView === g.id ? 'rgba(26,95,173,0.07)' : 'transparent', cursor: g.available ? 'pointer' : 'not-allowed', opacity: g.available ? 1 : 0.4 }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: gradeView === g.id ? 'var(--primary)' : 'var(--text)', fontFamily: "'Figtree',sans-serif" }}>{g.label}</span>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree',sans-serif" }}>{g.sub}</span>
-                  </button>
-                ))}
-              </div>
+              <span style={labelStyle}>Set Name</span>
+              <input
+                style={inputStyle}
+                placeholder="e.g. Evolving Skies"
+                value={setInput}
+                onChange={e => setSetInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && loadSetReport()}
+              />
+              <button onClick={loadSetReport} style={{ ...btnStyle(false), width: '100%', marginTop: 8, justifyContent: 'center', display: 'flex' }}>
+                Load Set
+              </button>
             </div>
           )}
 
           {/* Movers controls */}
           {needsMovers && (
             <div style={panelStyle}>
-              <span style={labelStyle}>2. Configure</span>
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree',sans-serif", fontWeight: 700, marginBottom: 6 }}>Direction</div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  {([['rising', '▲ Risers'], ['falling', '▼ Fallers']] as const).map(([d, label]) => (
-                    <button key={d} onClick={() => setMoversDir(d)}
-                      style={{ flex: 1, padding: '8px', borderRadius: 8, border: moversDir === d ? '1px solid var(--primary)' : '1px solid var(--border)', background: moversDir === d ? 'rgba(26,95,173,0.07)' : 'transparent', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: moversDir === d ? 'var(--primary)' : 'var(--text-muted)', fontFamily: "'Figtree',sans-serif" }}>
-                      {label}
-                    </button>
-                  ))}
-                </div>
+              <span style={labelStyle}>Direction</span>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+                {(['rising', 'falling'] as MoversDirection[]).map(d => (
+                  <button key={d} onClick={() => setMoversDir(d)} style={btnStyle(moversDir === d)}>
+                    {d === 'rising' ? '▲ Rising' : '▼ Falling'}
+                  </button>
+                ))}
               </div>
-              <div>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree',sans-serif", fontWeight: 700, marginBottom: 6 }}>Period</div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  {(['7d', '30d', '90d'] as MoversPeriod[]).map(p => (
-                    <button key={p} onClick={() => setMoversPeriod(p)}
-                      style={{ flex: 1, padding: '8px', borderRadius: 8, border: moversPeriod === p ? '1px solid var(--primary)' : '1px solid var(--border)', background: moversPeriod === p ? 'rgba(26,95,173,0.07)' : 'transparent', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: moversPeriod === p ? 'var(--primary)' : 'var(--text-muted)', fontFamily: "'Figtree',sans-serif" }}>
-                      {p}
-                    </button>
-                  ))}
-                </div>
+              <span style={labelStyle}>Period</span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {(['7d', '30d', '90d'] as MoversPeriod[]).map(p => (
+                  <button key={p} onClick={() => setMoversPeriod(p)} style={btnStyle(moversPeriod === p)}>{p}</button>
+                ))}
               </div>
             </div>
           )}
 
-          {/* Set search */}
-          {needsSet && (
-            <div style={panelStyle}>
-              <span style={labelStyle}>2. Select Set</span>
-              <input value={setQuery} onChange={e => setSetQuery(e.target.value)} placeholder="Evolving Skies, Base Set…" style={inputStyle} />
-              {setData && (
-                <div style={{ marginTop: 8, fontSize: 11, color: 'var(--primary)', fontFamily: "'Figtree',sans-serif", fontWeight: 700 }}>
-                  ✓ {setData.set_name} · {setData.card_count} cards
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Theme */}
+          {/* Appearance */}
           <div style={panelStyle}>
-            <span style={labelStyle}>Theme</span>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {(['dark', 'light'] as Theme[]).map(t => (
-                <button key={t} onClick={() => setTheme(t)}
-                  style={{ flex: 1, padding: '9px', borderRadius: 10, border: theme === t ? '1px solid var(--primary)' : '1px solid var(--border)', background: theme === t ? 'rgba(26,95,173,0.07)' : 'transparent', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: theme === t ? 'var(--primary)' : 'var(--text-muted)', fontFamily: "'Figtree',sans-serif" }}>
-                  {t === 'dark' ? '🌙 Dark' : '☀️ Light'}
-                </button>
-              ))}
+            <span style={labelStyle}>Appearance</span>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, fontFamily: "'Figtree',sans-serif" }}>Theme</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {(['dark', 'light'] as Theme[]).map(t => (
+                  <button key={t} onClick={() => setTheme(t)} style={btnStyle(theme === t)}>
+                    {t === 'dark' ? '🌙 Dark' : '☀️ Light'}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        </div>
 
-        {/* ── PREVIEW ── */}
-        <div>
-          <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-            <span style={labelStyle}>Preview</span>
-            {canExport && !isMobile && (
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={exportPng} disabled={exporting}
-                  style={{ padding: '8px 20px', borderRadius: 10, border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 13, fontWeight: 700, fontFamily: "'Figtree',sans-serif", cursor: exporting ? 'wait' : 'pointer', opacity: exporting ? 0.7 : 1 }}>
-                  {exporting ? 'Exporting…' : '↓ Download PNG'}
-                </button>
-                {card && (
-                  <a href={`https://x.com/intent/tweet?text=${encodeURIComponent(card.card_name + ' market data via @PokePricesIO')}&url=${encodeURIComponent('https://pokeprices.io/studio?card=' + card.card_slug + '&visual=' + visualType)}`}
-                    target="_blank" rel="noopener noreferrer"
-                    style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-light)', color: 'var(--text-muted)', fontSize: 13, fontWeight: 600, fontFamily: "'Figtree',sans-serif", textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.748l7.73-8.835L1.254 2.25H8.08l4.253 5.622 5.911-5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-                    Share
-                  </a>
-                )}
+            {/* Layout variants — only for insight card */}
+            {visualType === 'insight' && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, fontFamily: "'Figtree',sans-serif" }}>Layout</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  {([
+                    ['compact',  'Compact',  'Classic — prices + trend in one card'],
+                    ['showcase', 'Showcase', 'Large image hero — great for sharing'],
+                    ['minimal',  'Minimal',  'Clean text-forward layout'],
+                  ] as [CardLayout, string, string][]).map(([val, label, desc]) => (
+                    <button key={val} onClick={() => setCardLayout(val)} style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+                      padding: '8px 12px', borderRadius: 8,
+                      border: `1px solid ${cardLayout === val ? 'var(--primary)' : 'var(--border)'}`,
+                      background: cardLayout === val ? 'rgba(26,95,173,0.08)' : 'transparent',
+                      color: cardLayout === val ? 'var(--primary)' : 'var(--text)',
+                      cursor: 'pointer', textAlign: 'left', width: '100%', fontFamily: "'Figtree',sans-serif",
+                    }}>
+                      <span style={{ fontSize: 12, fontWeight: 700 }}>{label}</span>
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>{desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Grade view */}
+            {isCardVisual && (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, fontFamily: "'Figtree',sans-serif" }}>Grade Focus</div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {(['raw', 'psa9', 'psa10'] as GradeView[]).map(g => (
+                    <button key={g} onClick={() => setGradeView(g)} style={btnStyle(gradeView === g)}>
+                      {g === 'raw' ? 'Raw' : g === 'psa9' ? 'PSA 9' : 'PSA 10'}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
 
-          <div id="studio-preview" style={{ maxWidth: needsMovers ? 680 : 560 }}>
+          {/* Export */}
+          <button
+            onClick={exportPng}
+            disabled={!canExport || exporting}
+            style={{
+              padding: '14px 20px', borderRadius: 12,
+              background: canExport ? 'var(--primary)' : 'var(--bg-light)',
+              color: canExport ? '#fff' : 'var(--text-muted)',
+              border: 'none', cursor: canExport ? 'pointer' : 'not-allowed',
+              fontSize: 14, fontWeight: 800, fontFamily: "'Figtree',sans-serif",
+              transition: 'opacity 0.15s', opacity: exporting ? 0.6 : 1,
+            }}
+          >
+            {exporting ? 'Exporting…' : '⬇ Download PNG'}
+          </button>
+        </div>
+
+        {/* ── CENTRE: Preview ── */}
+        <div>
+          <div id="studio-preview" style={{ maxWidth: needsMovers ? 680 : 520 }}>
             {renderVisual()}
           </div>
         </div>
 
-        {/* ── QUICK RISERS ── */}
+        {/* ── RIGHT: Quick Risers ── */}
         {!isMobile && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <span style={labelStyle}>Quick Select</span>
-            <QuickRisers
-              onSelect={selectMoverAsCard}
-              selectedSlug={card?.card_slug}
-            />
-            <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree',sans-serif", lineHeight: 1.5, padding: '0 4px' }}>
-              Click any card to load it into the preview. Switch visual type on the left.
+          <div style={{ ...panelStyle, position: 'sticky', top: 24 }}>
+            <span style={labelStyle}>Quick Risers</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {quickRisers.slice(0, 8).map((m, i) => (
+                <button key={i} onClick={() => selectMoverAsCard(m)} style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+                  borderRadius: 8, border: '1px solid var(--border)',
+                  background: 'transparent', cursor: 'pointer', textAlign: 'left', width: '100%',
+                  fontFamily: "'Figtree',sans-serif", transition: 'background 0.15s',
+                }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-light)' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                >
+                  {m.image_url && (
+                    <img src={m.image_url} alt="" style={{ width: 28, height: 39, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.card_name}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.set_name}</div>
+                    {m.volume_label && <div style={{ fontSize: 9, color: '#22c55e', fontWeight: 700 }}>{m.volume_label}</div>}
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: '#22c55e', flexShrink: 0 }}>{pct(m.pct_change)}</span>
+                </button>
+              ))}
             </div>
           </div>
         )}
       </div>
-
-      {/* Mobile export bar */}
-      {isMobile && canExport && (
-        <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: 'var(--card)', borderTop: '1px solid var(--border)', padding: '10px 14px', display: 'flex', gap: 10, zIndex: 50 }}>
-          <button onClick={exportPng} disabled={exporting}
-            style={{ flex: 2, padding: '13px', borderRadius: 12, border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 15, fontWeight: 800, fontFamily: "'Figtree',sans-serif", cursor: exporting ? 'wait' : 'pointer' }}>
-            {exporting ? 'Exporting…' : '↓ Download PNG'}
-          </button>
-        </div>
-      )}
     </div>
   )
 }
