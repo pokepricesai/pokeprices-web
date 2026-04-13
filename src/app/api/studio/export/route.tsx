@@ -237,6 +237,55 @@ export async function POST(req: NextRequest) {
         ), { width, height: 500, fonts })
       }
 
+      // ── HERO layout ──
+      if (cardLayout === 'hero') {
+        return new ImageResponse((
+          <div style={{ display: 'flex', flexDirection: 'column', background: bg, width: 520, borderRadius: 22, border: `1px solid ${br}`, overflow: 'hidden', fontFamily: 'Figtree' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: hdGrad, padding: '14px 22px' }}>
+              <Watermark />
+              <div style={{ display: 'flex', alignItems: 'center', background: 'rgba(0,0,0,0.35)', padding: '4px 12px', borderRadius: 20, border: `1px solid ${sig.col}50` }}>
+                <span style={{ fontSize: 10, fontWeight: 800, color: sig.col, fontFamily: 'Figtree' }}>{sig.label}</span>
+              </div>
+            </div>
+            {/* Card name + large centered image */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', background: hdGrad, padding: '0 22px 60px' }}>
+              <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.55)', fontWeight: 700, marginBottom: 4, fontFamily: 'Figtree' }}>{card.set_name}</span>
+              <span style={{ fontSize: 26, fontWeight: 900, color: '#fff', fontFamily: 'Outfit', letterSpacing: -0.5, lineHeight: 1.1, marginBottom: 22, textAlign: 'center' }}>{card.card_name}</span>
+              {imgSrc && <img src={imgSrc} width={200} height={280} style={{ objectFit: 'contain', borderRadius: 14 }} />}
+            </div>
+            {/* Data section */}
+            <div style={{ display: 'flex', flexDirection: 'column', marginTop: -50, background: bg }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '16px 24px', borderBottom: `1px solid ${br}` }}>
+                <span style={{ fontSize: 9, color: mu, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 6, fontFamily: 'Figtree' }}>{focusLabel} Price</span>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                  <span style={{ fontSize: 44, fontWeight: 900, color: tx, fontFamily: 'Outfit', letterSpacing: -2, lineHeight: 1 }}>{fmt(focusPrice)}</span>
+                  <span style={{ fontSize: 20, color: mu, fontFamily: 'Figtree' }}>{fmtGbp(focusPrice)}</span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', borderBottom: `1px solid ${br}` }}>
+                {[['Raw', card.current_raw], ['PSA 9', card.current_psa9], ['PSA 10', card.current_psa10]].map(([label, val], i) => (
+                  <div key={String(label)} style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '13px 14px', borderRight: i < 2 ? `1px solid ${br}` : 'none', alignItems: 'center', background: (gradeView==='raw'&&i===0)||(gradeView==='psa9'&&i===1)||(gradeView==='psa10'&&i===2) ? (dk?'rgba(26,95,173,0.1)':'rgba(26,95,173,0.05)') : 'transparent' }}>
+                    <span style={{ fontSize: 9, color: mu, fontWeight: 700, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 5 }}>{String(label)}</span>
+                    <span style={{ fontSize: 15, fontWeight: 900, color: tx, fontFamily: 'Outfit' }}>{fmt(val as number)}</span>
+                    <span style={{ fontSize: 10, color: mu, fontFamily: 'Figtree', marginTop: 2 }}>{fmtGbp(val as number)}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'flex', borderBottom: `1px solid ${br}` }}>
+                {[['7d', card.raw_pct_7d], ['30d', card.raw_pct_30d], ...(psa10x ? [['Grade ×', null]] : [])].map(([label, val], i, arr) => (
+                  <div key={String(label)} style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '12px 14px', borderRight: i < arr.length-1 ? `1px solid ${br}` : 'none', alignItems: 'center' }}>
+                    <span style={{ fontSize: 9, color: mu, fontWeight: 700, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>{String(label)}</span>
+                    <span style={{ fontSize: 20, fontWeight: 900, color: label === 'Grade ×' ? '#a78bfa' : pctColor(val as number), fontFamily: 'Outfit' }}>{label === 'Grade ×' ? `${psa10x}×` : pct(val as number)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <Footer />
+          </div>
+        ), { width, height: 800, fonts })
+      }
+
       // ── COMPACT layout (default) ──
       return new ImageResponse((
         <div style={{ display: 'flex', flexDirection: 'column', background: bg, width: 520, borderRadius: 22, border: `1px solid ${br}`, overflow: 'hidden', fontFamily: 'Figtree' }}>
@@ -282,6 +331,235 @@ export async function POST(req: NextRequest) {
           <Footer />
         </div>
       ), { width, height: 560, fonts })
+    }
+
+    // ── PSA GAUGE ──────────────────────────────────────────────────────────────
+
+    if (visualType === 'psa-gauge' && card) {
+      const multiple = card.current_raw && card.current_psa10 ? card.current_psa10 / card.current_raw : null
+      const maxMultiple = 20
+      const fillPct = multiple ? Math.min(100, (multiple / maxMultiple) * 100) : 0
+      const gaugeCol = !multiple ? mu : multiple < 3 ? '#22c55e' : multiple < 8 ? '#f59e0b' : '#ef4444'
+      const gaugeLabel = !multiple ? 'No data' : multiple < 3 ? 'Low premium — consider grading' : multiple < 8 ? 'Meaningful premium' : 'Very high premium — high risk'
+
+      // SVG arc: semicircle from left (-180deg) to right (0deg)
+      // fillPct 0-100 maps to 0-180 degrees of arc
+      const r = 90, cx = 150, cy = 130
+      const startAngle = Math.PI        // left side = 180deg in radians
+      const sweepAngle = Math.PI * (fillPct / 100)  // 0 to PI
+      const endAngle = startAngle - sweepAngle       // goes counter-clockwise left to right across top
+
+      const sx = cx + r * Math.cos(startAngle)
+      const sy = cy + r * Math.sin(startAngle)
+      const ex = cx + r * Math.cos(endAngle)
+      const ey = cy + r * Math.sin(endAngle)
+      const largeArc = sweepAngle > Math.PI ? 1 : 0
+
+      // Track (full semicircle)
+      const trackEx = cx + r * Math.cos(0)
+      const trackEy = cy + r * Math.sin(0)
+      const trackPath = `M ${sx} ${sy} A ${r} ${r} 0 1 1 ${trackEx} ${trackEy}`
+      const fillPath = fillPct > 0 ? `M ${sx} ${sy} A ${r} ${r} 0 ${largeArc} 1 ${ex} ${ey}` : ''
+
+      return new ImageResponse((
+        <div style={{ display: 'flex', flexDirection: 'column', background: bg, width: 520, borderRadius: 22, border: `1px solid ${br}`, overflow: 'hidden', fontFamily: 'Figtree' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', background: hdGrad, padding: '20px 22px 18px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <Watermark />
+              <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.45)', fontFamily: 'Figtree' }}>Grade Premium</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              {imgSrc && <img src={imgSrc} width={50} height={70} style={{ objectFit: 'contain', borderRadius: 6 }} />}
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: 20, fontWeight: 900, color: '#fff', fontFamily: 'Outfit', letterSpacing: -0.3 }}>{card.card_name}</span>
+                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3, fontFamily: 'Figtree' }}>{card.set_name}</span>
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '28px 28px 16px' }}>
+            {/* SVG Gauge */}
+            <svg width="300" height="150" viewBox="0 0 300 145">
+              <path d={trackPath} fill="none" stroke={dk ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'} strokeWidth="16" strokeLinecap="round" />
+              {fillPath && <path d={fillPath} fill="none" stroke={gaugeCol} strokeWidth="16" strokeLinecap="round" />}
+              <text x="150" y="108" textAnchor="middle" fill={tx} fontSize="30" fontWeight="900" fontFamily="Outfit">{multiple ? `${multiple.toFixed(1)}×` : '—'}</text>
+              <text x="150" y="126" textAnchor="middle" fill={mu} fontSize="10" fontWeight="700" fontFamily="Figtree">Raw → PSA 10</text>
+              <text x="62" y="140" textAnchor="middle" fill={mu} fontSize="9" fontWeight="700" fontFamily="Figtree">1×</text>
+              <text x="238" y="140" textAnchor="middle" fill={mu} fontSize="9" fontWeight="700" fontFamily="Figtree">20×</text>
+            </svg>
+            <span style={{ fontSize: 13, color: gaugeCol, fontWeight: 800, fontFamily: 'Figtree', marginTop: 8 }}>{gaugeLabel}</span>
+            <div style={{ display: 'flex', gap: 10, marginTop: 18, width: '100%' }}>
+              {[['Raw', card.current_raw], ['PSA 10', card.current_psa10]].map(([label, val]) => (
+                <div key={String(label)} style={{ display: 'flex', flexDirection: 'column', flex: 1, background: dk ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', borderRadius: 10, padding: '12px 14px', border: `1px solid ${br}` }}>
+                  <span style={{ fontSize: 9, color: mu, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 5, fontFamily: 'Figtree' }}>{String(label)}</span>
+                  <span style={{ fontSize: 16, fontWeight: 900, color: tx, fontFamily: 'Outfit' }}>{fmt(val as number)}</span>
+                  <span style={{ fontSize: 10, color: mu, marginTop: 2, fontFamily: 'Figtree' }}>{fmtGbp(val as number)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <Footer />
+        </div>
+      ), { width, height: 520, fonts })
+    }
+
+    // ── PEAK DISTANCE ──────────────────────────────────────────────────────────
+
+    if (visualType === 'peak-distance' && card) {
+      const rawNow = card.current_raw
+      const peaks = [card.raw_30d_ago, card.raw_90d_ago, card.raw_180d_ago].filter(Boolean) as number[]
+      const peakPrice = peaks.length ? Math.max(...peaks) : null
+      const drawdownPct = rawNow && peakPrice ? ((rawNow - peakPrice) / peakPrice) * 100 : null
+      const isAtPeak = drawdownPct != null && drawdownPct > -5
+      const barFill = drawdownPct != null ? Math.min(100, Math.max(0, 100 + drawdownPct)) : 0
+      const barCol = isAtPeak ? '#ef4444' : drawdownPct != null && drawdownPct < -40 ? '#22c55e' : '#f59e0b'
+
+      return new ImageResponse((
+        <div style={{ display: 'flex', flexDirection: 'column', background: bg, width: 520, borderRadius: 22, border: `1px solid ${br}`, overflow: 'hidden', fontFamily: 'Figtree' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', background: hdGrad, padding: '20px 22px 18px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <Watermark />
+              <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.45)', fontFamily: 'Figtree' }}>Peak Distance</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              {imgSrc && <img src={imgSrc} width={50} height={70} style={{ objectFit: 'contain', borderRadius: 6 }} />}
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: 20, fontWeight: 900, color: '#fff', fontFamily: 'Outfit', letterSpacing: -0.3 }}>{card.card_name}</span>
+                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3, fontFamily: 'Figtree' }}>{card.set_name}</span>
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', padding: '24px 28px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 20 }}>
+              <span style={{ fontSize: 48, fontWeight: 900, color: barCol, fontFamily: 'Outfit', letterSpacing: -2, lineHeight: 1 }}>
+                {drawdownPct != null ? (isAtPeak ? 'At Peak' : `${drawdownPct.toFixed(0)}%`) : '—'}
+              </span>
+              <span style={{ fontSize: 12, color: mu, marginTop: 6, fontFamily: 'Figtree' }}>
+                {isAtPeak ? 'Trading near its recent high' : 'below recent high'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', height: 10, background: dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', borderRadius: 99, overflow: 'hidden', marginBottom: 20 }}>
+              <div style={{ height: '100%', width: `${barFill}%`, background: barCol, borderRadius: 99 }} />
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              {[['Current Raw', rawNow], ['Recent Peak', peakPrice]].map(([label, val]) => (
+                <div key={String(label)} style={{ display: 'flex', flexDirection: 'column', flex: 1, background: dk ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', borderRadius: 10, padding: '12px 14px', border: `1px solid ${br}` }}>
+                  <span style={{ fontSize: 9, color: mu, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 5, fontFamily: 'Figtree' }}>{String(label)}</span>
+                  <span style={{ fontSize: 16, fontWeight: 900, color: tx, fontFamily: 'Outfit' }}>{fmt(val as number)}</span>
+                  <span style={{ fontSize: 10, color: mu, marginTop: 2, fontFamily: 'Figtree' }}>{fmtGbp(val as number)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <Footer />
+        </div>
+      ), { width, height: 480, fonts })
+    }
+
+    // ── TEMPERATURE ────────────────────────────────────────────────────────────
+
+    if (visualType === 'temperature' && card) {
+      const p30 = card.raw_pct_30d
+      const temp = p30 == null ? 50 : Math.min(100, Math.max(0, 50 + p30 * 2))
+      const label = p30 == null ? 'Neutral' : p30 > 30 ? '🔥 Very Hot' : p30 > 10 ? '📈 Heating Up' : p30 < -30 ? '🧊 Very Cold' : p30 < -10 ? '📉 Cooling Down' : '➡ Neutral'
+      const col = p30 == null ? '#f59e0b' : p30 > 10 ? '#f97316' : p30 < -10 ? '#60a5fa' : '#f59e0b'
+
+      return new ImageResponse((
+        <div style={{ display: 'flex', flexDirection: 'column', background: bg, width: 520, borderRadius: 22, border: `1px solid ${br}`, overflow: 'hidden', fontFamily: 'Figtree' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', background: hdGrad, padding: '20px 22px 18px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <Watermark />
+              <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.45)', fontFamily: 'Figtree' }}>Market Temperature</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              {imgSrc && <img src={imgSrc} width={50} height={70} style={{ objectFit: 'contain', borderRadius: 6 }} />}
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: 20, fontWeight: 900, color: '#fff', fontFamily: 'Outfit', letterSpacing: -0.3 }}>{card.card_name}</span>
+                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3, fontFamily: 'Figtree' }}>{card.set_name}</span>
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', padding: '24px 28px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 20 }}>
+              <span style={{ fontSize: 36, fontWeight: 900, color: col, fontFamily: 'Outfit' }}>{label}</span>
+              {p30 != null && <span style={{ fontSize: 14, color: mu, marginTop: 6, fontFamily: 'Figtree' }}>{pct(p30)} in 30 days</span>}
+            </div>
+            {/* Temperature bar */}
+            <div style={{ display: 'flex', height: 14, borderRadius: 99, overflow: 'hidden', marginBottom: 10, background: '#60a5fa', position: 'relative' }}>
+              <div style={{ position: 'absolute', left: 0, top: 0, width: '33%', height: '100%', background: '#60a5fa' }} />
+              <div style={{ position: 'absolute', left: '33%', top: 0, width: '34%', height: '100%', background: '#22c55e' }} />
+              <div style={{ position: 'absolute', left: '67%', top: 0, width: '33%', height: '100%', background: '#ef4444' }} />
+              <div style={{ position: 'absolute', left: `calc(${temp}% - 2px)`, top: 0, width: 4, height: '100%', background: '#fff' }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18 }}>
+              <span style={{ fontSize: 9, color: '#60a5fa', fontWeight: 700, fontFamily: 'Figtree' }}>Cold</span>
+              <span style={{ fontSize: 9, color: '#ef4444', fontWeight: 700, fontFamily: 'Figtree' }}>Hot</span>
+            </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {[['7d', card.raw_pct_7d], ['30d', card.raw_pct_30d], ['90d', card.raw_pct_90d], ['Raw', card.current_raw]].map(([label, val], i) => (
+                <div key={i} style={{ display: 'flex', flexDirection: 'column', flex: 1, background: dk ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', borderRadius: 10, padding: '10px 12px', border: `1px solid ${br}` }}>
+                  <span style={{ fontSize: 9, color: mu, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 4, fontFamily: 'Figtree' }}>{String(label)}</span>
+                  <span style={{ fontSize: 16, fontWeight: 900, color: i < 3 ? pctColor(val as number) : tx, fontFamily: 'Outfit' }}>{i < 3 ? pct(val as number) : fmt(val as number)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <Footer />
+        </div>
+      ), { width, height: 500, fonts })
+    }
+
+    // ── GRADE COMPARE ──────────────────────────────────────────────────────────
+
+    if (visualType === 'grade-compare' && card) {
+      const grades = [
+        { label: 'Raw',    val: card.current_raw,   col: '#60a5fa' },
+        { label: 'PSA 9',  val: card.current_psa9,  col: '#34d399' },
+        { label: 'PSA 10', val: card.current_psa10, col: '#a78bfa' },
+      ].filter(g => g.val && g.val > 0)
+      const maxVal = Math.max(...grades.map(g => g.val || 0))
+
+      return new ImageResponse((
+        <div style={{ display: 'flex', flexDirection: 'column', background: bg, width: 520, borderRadius: 22, border: `1px solid ${br}`, overflow: 'hidden', fontFamily: 'Figtree' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', background: hdGrad, padding: '20px 22px 18px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <Watermark />
+              <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.45)', fontFamily: 'Figtree' }}>Grade Breakdown</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              {imgSrc && <img src={imgSrc} width={50} height={70} style={{ objectFit: 'contain', borderRadius: 6 }} />}
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: 20, fontWeight: 900, color: '#fff', fontFamily: 'Outfit', letterSpacing: -0.3 }}>{card.card_name}</span>
+                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3, fontFamily: 'Figtree' }}>{card.set_name}</span>
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', padding: '22px 24px 16px', gap: 14 }}>
+            {grades.map(g => {
+              const barW = maxVal > 0 ? Math.round((g.val! / maxVal) * 100) : 0
+              const multiple = card.current_raw && g.label !== 'Raw' ? (g.val! / card.current_raw).toFixed(1) : null
+              return (
+                <div key={g.label} style={{ display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ width: 10, height: 10, borderRadius: 2, background: g.col }} />
+                      <span style={{ fontSize: 13, fontWeight: 800, color: tx, fontFamily: 'Figtree' }}>{g.label}</span>
+                      {multiple && <span style={{ fontSize: 11, color: mu, fontFamily: 'Figtree' }}>({multiple}× raw)</span>}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                      <span style={{ fontSize: 16, fontWeight: 900, color: tx, fontFamily: 'Outfit' }}>{fmt(g.val)}</span>
+                      <span style={{ fontSize: 10, color: mu, fontFamily: 'Figtree' }}>{fmtGbp(g.val)}</span>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', height: 10, background: dk ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', borderRadius: 99, overflow: 'hidden' }}>
+                    <div style={{ width: `${barW}%`, height: '100%', background: g.col, borderRadius: 99 }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <Footer />
+        </div>
+      ), { width, height: 400 + grades.length * 70, fonts })
     }
 
     // ── MOVERS ─────────────────────────────────────────────────────────────────

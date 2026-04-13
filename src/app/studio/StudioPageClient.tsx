@@ -48,7 +48,7 @@ type MoversPeriod = '7d' | '30d' | '90d'
 type MoversDirection = 'rising' | 'falling'
 type GradeView = 'raw' | 'psa9' | 'psa10'
 // Layout variants for the Insight Card
-type CardLayout = 'compact' | 'showcase' | 'minimal'
+type CardLayout = 'compact' | 'showcase' | 'minimal' | 'hero'
 
 const VISUAL_TYPES: { id: VisualType; label: string; icon: string; desc: string; category: string }[] = [
   { id: 'insight',       label: 'Insight Card',   icon: '◈', desc: 'Prices, trend & grade premium',        category: 'Card'   },
@@ -463,11 +463,97 @@ function InsightCardMinimal({ card, theme, gradeView }: { card: CardData; theme:
   )
 }
 
-// ── Route to correct layout ────────────────────────────────────────────────────
+// ── VISUAL 1d: Insight Card — Hero (large card, data beneath) ────────────────
+// Inspired by Syncd — card dominates, data lives below it
+
+function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Theme; gradeView: GradeView }) {
+  const v = getThemeVars(theme)
+  const psa10x = card.current_raw && card.current_psa10 ? (card.current_psa10 / card.current_raw).toFixed(1) : null
+  const focusPrice = gradeView === 'psa10' ? card.current_psa10 : gradeView === 'psa9' ? card.current_psa9 : card.current_raw
+  const focusLabel = gradeView === 'psa10' ? 'PSA 10' : gradeView === 'psa9' ? 'PSA 9' : 'Raw'
+  const sig = card.raw_pct_30d != null
+    ? card.raw_pct_30d > 15  ? { label: '▲ Trending Up', col: v.green }
+    : card.raw_pct_30d < -15 ? { label: '▼ Cooling',     col: v.red   }
+    : { label: '— Stable', col: v.yellow }
+    : { label: '— Stable', col: v.yellow }
+  const trend30col = pctCol(card.raw_pct_30d, v)
+
+  return (
+    <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", width: '100%' }}>
+      {/* Header bar */}
+      <div style={{ background: 'linear-gradient(160deg, #0d2b5e 0%, #1a5fad 50%, #2874c8 100%)', padding: '14px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 14, height: 14, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.85)' }} />
+          </div>
+          <span style={{ fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,0.8)', letterSpacing: 1.4, textTransform: 'uppercase' }}>PokePrices.io</span>
+        </div>
+        <SignalBadge label={sig.label} color={sig.col} />
+      </div>
+
+      {/* Card name + set */}
+      <div style={{ background: 'linear-gradient(160deg, #0d2b5e 0%, #1a5fad 50%, #2874c8 100%)', padding: '0 22px 20px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.55)', fontWeight: 700, letterSpacing: 0.5, marginBottom: 4, fontFamily: "'Figtree', sans-serif" }}>{card.set_name}</div>
+        <div style={{ fontSize: 24, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.5, lineHeight: 1.1, marginBottom: 20 }}>{card.card_name}</div>
+
+        {/* Large centered card image */}
+        {card.image_url && (
+          <div style={{ position: 'relative', marginBottom: -50 }}>
+            <img src={card.image_url} alt={card.card_name} style={{ width: 200, height: 280, objectFit: 'contain', borderRadius: 14, filter: 'drop-shadow(0 20px 40px rgba(0,0,0,0.5))' }} />
+          </div>
+        )}
+      </div>
+
+      {/* Data section — sits below the card image with overlap */}
+      <div style={{ paddingTop: card.image_url ? 60 : 20, background: v.bg }}>
+        {/* Big price */}
+        <div style={{ textAlign: 'center', padding: '0 24px 16px', borderBottom: `1px solid ${v.br}` }}>
+          <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 6, fontFamily: "'Figtree', sans-serif" }}>{focusLabel} Price</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 10 }}>
+            <div style={{ fontSize: 44, fontWeight: 900, color: v.tx, letterSpacing: -2, lineHeight: 1, fontFamily: "'Outfit', sans-serif" }}>{fmt(focusPrice)}</div>
+            <div style={{ fontSize: 20, color: v.mu, fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>{fmtGbp(focusPrice)}</div>
+          </div>
+        </div>
+
+        {/* Grade grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderBottom: `1px solid ${v.br}` }}>
+          {[
+            { label: 'Raw',    usd: fmt(card.current_raw),   gbp: fmtGbp(card.current_raw),   active: gradeView === 'raw'   },
+            { label: 'PSA 9',  usd: fmt(card.current_psa9),  gbp: fmtGbp(card.current_psa9),  active: gradeView === 'psa9'  },
+            { label: 'PSA 10', usd: fmt(card.current_psa10), gbp: fmtGbp(card.current_psa10), active: gradeView === 'psa10' },
+          ].map((p, i) => (
+            <div key={p.label} style={{ padding: '13px 14px', borderRight: i < 2 ? `1px solid ${v.br}` : 'none', textAlign: 'center', background: p.active ? (v.dk ? 'rgba(26,95,173,0.1)' : 'rgba(26,95,173,0.05)') : 'transparent' }}>
+              <div style={{ fontSize: 9, color: p.active ? '#3b82f6' : v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 5, fontFamily: "'Figtree', sans-serif" }}>{p.label}</div>
+              <div style={{ fontSize: 15, fontWeight: 900, color: v.tx, fontFamily: "'Outfit', sans-serif" }}>{p.usd}</div>
+              <div style={{ fontSize: 10, color: v.mu, marginTop: 2, fontFamily: "'Figtree', sans-serif" }}>{p.gbp}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Trend + grade multiple */}
+        <div style={{ display: 'grid', gridTemplateColumns: psa10x ? '1fr 1fr 1fr' : '1fr 1fr', borderBottom: `1px solid ${v.br}` }}>
+          {[
+            { label: '7d',      val: pct(card.raw_pct_7d),  col: pctCol(card.raw_pct_7d,  v) },
+            { label: '30d',     val: pct(card.raw_pct_30d), col: pctCol(card.raw_pct_30d, v) },
+            ...(psa10x ? [{ label: 'Grade ×', val: psa10x + '×', col: '#a78bfa' }] : []),
+          ].map((s, i, arr) => (
+            <div key={s.label} style={{ padding: '12px 14px', borderRight: i < arr.length - 1 ? `1px solid ${v.br}` : 'none', textAlign: 'center' }}>
+              <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4, fontFamily: "'Figtree', sans-serif" }}>{s.label}</div>
+              <div style={{ fontSize: 20, fontWeight: 900, color: s.col, fontFamily: "'Outfit', sans-serif" }}>{s.val}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <BrandingBar v={v} />
+    </div>
+  )
+}
 
 function InsightCard({ card, theme, gradeView, layout }: { card: CardData; theme: Theme; gradeView: GradeView; layout: CardLayout }) {
   if (layout === 'showcase') return <InsightCardShowcase card={card} theme={theme} gradeView={gradeView} />
   if (layout === 'minimal')  return <InsightCardMinimal  card={card} theme={theme} gradeView={gradeView} />
+  if (layout === 'hero')     return <InsightCardHero     card={card} theme={theme} gradeView={gradeView} />
   return <InsightCardCompact card={card} theme={theme} gradeView={gradeView} />
 }
 
@@ -868,6 +954,9 @@ export default function StudioPageClient() {
   const [moversDir,    setMoversDir]    = useState<MoversDirection>('rising')
   const [setInput,     setSetInput]     = useState('')
   const [cardSearch,   setCardSearch]   = useState('')
+  const [suggestions,  setSuggestions]  = useState<{card_slug: string; card_name: string; set_name: string}[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const searchRef = useRef<HTMLDivElement>(null)
   const [loading,      setLoading]      = useState(false)
   const [exporting,    setExporting]    = useState(false)
   const [isMobile,     setIsMobile]     = useState(false)
@@ -896,6 +985,8 @@ export default function StudioPageClient() {
   async function searchCard(query: string) {
     if (!query.trim()) return
     setLoading(true)
+    setSuggestions([])
+    setShowSuggestions(false)
     const { data } = await supabase
       .from('card_trends')
       .select('card_slug,card_name,set_name')
@@ -907,11 +998,48 @@ export default function StudioPageClient() {
       const result = await fetchCard(data[0].card_slug)
       if (result) {
         setCard(result)
+        setCardSearch(result.card_name)
         if (['movers', 'set-report'].includes(visualType)) setVisualType('insight')
       }
     }
     setLoading(false)
   }
+
+  async function fetchSuggestions(query: string) {
+    if (query.length < 2) { setSuggestions([]); setShowSuggestions(false); return }
+    const { data } = await supabase
+      .from('card_trends')
+      .select('card_slug,card_name,set_name')
+      .ilike('card_name', `%${query.trim()}%`)
+      .not('current_raw', 'is', null)
+      .order('current_raw', { ascending: false })
+      .limit(8)
+    if (data?.length) { setSuggestions(data); setShowSuggestions(true) }
+    else { setSuggestions([]); setShowSuggestions(false) }
+  }
+
+  async function selectSuggestion(s: {card_slug: string; card_name: string; set_name: string}) {
+    setShowSuggestions(false)
+    setCardSearch(s.card_name)
+    setLoading(true)
+    const result = await fetchCard(s.card_slug)
+    if (result) {
+      setCard(result)
+      if (['movers', 'set-report'].includes(visualType)) setVisualType('insight')
+    }
+    setLoading(false)
+  }
+
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
 
   async function loadSetReport() {
     if (!setInput.trim()) return
@@ -1066,20 +1194,32 @@ export default function StudioPageClient() {
             ))}
           </div>
 
-          {/* Card search */}
+          {/* Card search with autocomplete */}
           {(needsCard || (!needsMovers && !needsSet)) && (
             <div style={panelStyle}>
               <span style={labelStyle}>Search Card</span>
-              <input
-                style={inputStyle}
-                placeholder="e.g. Charizard Base Set"
-                value={cardSearch}
-                onChange={e => setCardSearch(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && searchCard(cardSearch)}
-              />
-              <button onClick={() => searchCard(cardSearch)} style={{ ...btnStyle(false), width: '100%', marginTop: 8, justifyContent: 'center', display: 'flex' }}>
-                Search
-              </button>
+              <div ref={searchRef} style={{ position: 'relative' }}>
+                <input
+                  style={inputStyle}
+                  placeholder="e.g. Charizard, Umbreon VMAX…"
+                  value={cardSearch}
+                  onChange={e => { setCardSearch(e.target.value); fetchSuggestions(e.target.value) }}
+                  onKeyDown={e => { if (e.key === 'Enter') { searchCard(cardSearch) } if (e.key === 'Escape') setShowSuggestions(false) }}
+                  onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true) }}
+                />
+                {showSuggestions && suggestions.length > 0 && (
+                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, background: 'var(--card)', border: '1px solid var(--primary)', borderRadius: 10, marginTop: 4, overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>
+                    {suggestions.map((s, i) => (
+                      <button key={i} onMouseDown={() => selectSuggestion(s)} style={{ display: 'flex', flexDirection: 'column', width: '100%', padding: '9px 12px', background: 'transparent', border: 'none', borderBottom: i < suggestions.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer', textAlign: 'left', fontFamily: "'Figtree', sans-serif", transition: 'background 0.1s' }}
+                        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-light)' }}
+                        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{s.card_name}</span>
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>{s.set_name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1143,6 +1283,7 @@ export default function StudioPageClient() {
                     ['compact',  'Compact',  'Classic — prices + trend in one card'],
                     ['showcase', 'Showcase', 'Large image hero — great for sharing'],
                     ['minimal',  'Minimal',  'Clean text-forward layout'],
+                    ['hero',     'Hero',     'Big centered card + data beneath'],
                   ] as [CardLayout, string, string][]).map(([val, label, desc]) => (
                     <button key={val} onClick={() => setCardLayout(val)} style={{
                       display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
