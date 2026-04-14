@@ -51,7 +51,7 @@ interface SetData {
   card_count: number
 }
 
-type VisualType = 'insight' | 'psa-gauge' | 'peak-distance' | 'temperature' | 'movers' | 'grade-compare' | 'set-report'
+type VisualType = 'insight' | 'peak-distance' | 'temperature' | 'movers' | 'grade-compare' | 'set-report'
 type Theme = 'dark' | 'light'
 type MoversPeriod = '7d' | '30d' | '90d'
 type MoversDirection = 'rising' | 'falling'
@@ -61,7 +61,6 @@ type CardLayout = 'compact' | 'showcase' | 'minimal' | 'hero'
 
 const VISUAL_TYPES: { id: VisualType; label: string; icon: string; desc: string; category: string }[] = [
   { id: 'insight',       label: 'Insight Card',   icon: '*', desc: 'Prices, trend & grade premium',        category: 'Card'   },
-  { id: 'psa-gauge',     label: 'PSA Gauge',       icon: 'o', desc: 'How extreme is the grading premium?', category: 'Card'   },
   { id: 'peak-distance', label: 'Peak Distance',   icon: '^', desc: 'Price vs its recent high',            category: 'Card'   },
   { id: 'temperature',   label: 'Temperature',     icon: 'o', desc: 'Is this card hot or cooling?',        category: 'Card'   },
   { id: 'grade-compare', label: 'Grade Compare',   icon: 'o', desc: 'Raw vs PSA 9 vs PSA 10 bars',        category: 'Card'   },
@@ -200,7 +199,7 @@ function getThemeVars(theme: Theme) {
 // Proxy external images through our API to avoid CORS issues with html2canvas
 function proxyImg(url: string | null): string | null {
   if (!url) return null
-  return `/api/imgproxy?url=${encodeURIComponent(url)}`
+  return `/api/imgproxy?url=${encodeURIComponent(url)}&t=${Date.now()}`
 }
 
 function CardImg({ src, w, h, radius = 6 }: { src: string | null; w: number; h: number; radius?: number }) {
@@ -384,14 +383,16 @@ function BrandingBar({ v }: { v: ReturnType<typeof getThemeVars> }) {
 // Signal badge - contained, no overflow
 function SignalBadge({ label, color }: { label: string; color: string }) {
   return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center',
-      fontSize: 10, fontWeight: 800, color,
-      background: 'rgba(0,0,0,0.35)',
-      padding: '4px 12px', borderRadius: 20,
-      letterSpacing: 0.5, whiteSpace: 'nowrap', flexShrink: 0,
-      border: `1px solid ${color}40`,
-    }}>{label}</span>
+    <div style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      background: 'rgba(0,0,0,0.4)',
+      padding: '5px 12px', borderRadius: 20,
+      border: `1px solid ${color}50`,
+      flexShrink: 0, whiteSpace: 'nowrap',
+    }}>
+      <div style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
+      <span style={{ fontSize: 10, fontWeight: 800, color, letterSpacing: 0.5 }}>{label}</span>
+    </div>
   )
 }
 
@@ -403,10 +404,10 @@ function InsightCardCompact({ card, theme, gradeView }: { card: CardData; theme:
   const focusPrice = gradeView === 'psa10' ? card.current_psa10 : gradeView === 'psa9' ? card.current_psa9 : card.current_raw
   const focusLabel = gradeView === 'psa10' ? 'PSA 10' : gradeView === 'psa9' ? 'PSA 9' : 'Raw'
   const sig = card.raw_pct_30d != null
-    ? card.raw_pct_30d > 15  ? { label: '^ Trending Up', col: v.green }
-    : card.raw_pct_30d < -15 ? { label: 'v Cooling',     col: v.red   }
-    : { label: '- Stable', col: v.yellow }
-    : { label: '- Stable', col: v.yellow }
+    ? card.raw_pct_30d > 15  ? { label: 'Trending Up', col: v.green }
+    : card.raw_pct_30d < -15 ? { label: 'Cooling', col: v.red   }
+    : { label: 'Stable', col: v.yellow }
+    : { label: 'Stable', col: v.yellow }
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", width: '100%' }}>
@@ -420,8 +421,8 @@ function InsightCardCompact({ card, theme, gradeView }: { card: CardData; theme:
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <CardImg src={card.image_url} w={58} h={80} radius={8} />
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 20, fontWeight: 900, color: '#fff', lineHeight: 1.15, fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3 }}>{card.card_name}</div>
-            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 4, fontWeight: 700 }}>{card.set_name}</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: '#fff', lineHeight: 1.15, fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.card_name}</div>
+            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 4, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.set_name}</div>
             {gradeView !== 'raw' && (
               <div style={{ marginTop: 8, display: 'inline-flex', background: 'rgba(255,255,255,0.15)', borderRadius: 8, padding: '3px 10px' }}>
                 <span style={{ fontSize: 10, fontWeight: 800, color: '#fff', letterSpacing: 0.5 }}>Viewing: {focusLabel}</span>
@@ -434,9 +435,9 @@ function InsightCardCompact({ card, theme, gradeView }: { card: CardData; theme:
       {/* Featured price */}
       <div style={{ padding: '16px 22px', borderBottom: `1px solid ${v.br}`, background: v.dk ? 'rgba(26,95,173,0.06)' : 'rgba(26,95,173,0.03)' }}>
         <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 4 }}>{focusLabel} Price</div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-          <div style={{ fontSize: 34, fontWeight: 900, color: v.tx, letterSpacing: -1 }}>{fmt(focusPrice)}</div>
-          <div style={{ fontSize: 15, color: v.mu }}>{fmtGbp(focusPrice)}</div>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <div style={{ fontSize: 34, fontWeight: 900, color: v.tx, letterSpacing: -1, lineHeight: 1 }}>{fmt(focusPrice)}</div>
+          <div style={{ fontSize: 13, color: v.mu, marginTop: 4 }}>{fmtGbp(focusPrice)}</div>
         </div>
       </div>
 
@@ -488,10 +489,10 @@ function InsightCardShowcase({ card, theme, gradeView }: { card: CardData; theme
   const focusPrice = gradeView === 'psa10' ? card.current_psa10 : gradeView === 'psa9' ? card.current_psa9 : card.current_raw
   const focusLabel = gradeView === 'psa10' ? 'PSA 10' : gradeView === 'psa9' ? 'PSA 9' : 'Raw'
   const sig = card.raw_pct_30d != null
-    ? card.raw_pct_30d > 15  ? { label: '^ Trending Up', col: v.green }
-    : card.raw_pct_30d < -15 ? { label: 'v Cooling',     col: v.red   }
-    : { label: '- Stable', col: v.yellow }
-    : { label: '- Stable', col: v.yellow }
+    ? card.raw_pct_30d > 15  ? { label: 'Trending Up', col: v.green }
+    : card.raw_pct_30d < -15 ? { label: 'Cooling', col: v.red   }
+    : { label: 'Stable', col: v.yellow }
+    : { label: 'Stable', col: v.yellow }
 
   const accentGrad = 'linear-gradient(160deg, #0d2b5e 0%, #1a5fad 50%, #2874c8 100%)'
 
@@ -517,9 +518,9 @@ function InsightCardShowcase({ card, theme, gradeView }: { card: CardData; theme
           <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', fontWeight: 700, letterSpacing: 0.3, marginBottom: 4 }}>{card.set_name}</div>
           <div style={{ fontSize: 22, fontWeight: 900, color: '#fff', lineHeight: 1.1, fontFamily: "'Outfit', sans-serif", letterSpacing: -0.5, marginBottom: 14 }}>{card.card_name}</div>
           <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 4 }}>{focusLabel} Price</div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
             <div style={{ fontSize: 36, fontWeight: 900, color: '#fff', letterSpacing: -1.5, lineHeight: 1 }}>{fmt(focusPrice)}</div>
-            <div style={{ fontSize: 18, color: 'rgba(255,255,255,0.6)', fontWeight: 700 }}>{fmtGbp(focusPrice)}</div>
+            <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', fontWeight: 700, marginTop: 4 }}>{fmtGbp(focusPrice)}</div>
           </div>
         </div>
       </div>
@@ -586,9 +587,9 @@ function InsightCardMinimal({ card, theme, gradeView }: { card: CardData; theme:
       {/* Huge price */}
       <div style={{ padding: '20px 24px', borderBottom: `1px solid ${v.br}` }}>
         <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 6 }}>{focusLabel} Price</div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
           <div style={{ fontSize: 44, fontWeight: 900, color: v.tx, letterSpacing: -2, lineHeight: 1 }}>{fmt(focusPrice)}</div>
-          <div style={{ fontSize: 20, color: v.mu, fontWeight: 700 }}>{fmtGbp(focusPrice)}</div>
+          <div style={{ fontSize: 14, color: v.mu, fontWeight: 700, marginTop: 4 }}>{fmtGbp(focusPrice)}</div>
         </div>
         {trend30 != null && (
           <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -633,10 +634,10 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
   const focusPrice = gradeView === 'psa10' ? card.current_psa10 : gradeView === 'psa9' ? card.current_psa9 : card.current_raw
   const focusLabel = gradeView === 'psa10' ? 'PSA 10' : gradeView === 'psa9' ? 'PSA 9' : 'Raw'
   const sig = card.raw_pct_30d != null
-    ? card.raw_pct_30d > 15  ? { label: '^ Trending Up', col: v.green }
-    : card.raw_pct_30d < -15 ? { label: 'v Cooling',     col: v.red   }
-    : { label: '- Stable', col: v.yellow }
-    : { label: '- Stable', col: v.yellow }
+    ? card.raw_pct_30d > 15  ? { label: 'Trending Up', col: v.green }
+    : card.raw_pct_30d < -15 ? { label: 'Cooling', col: v.red   }
+    : { label: 'Stable', col: v.yellow }
+    : { label: 'Stable', col: v.yellow }
 
   // Pokemon IDs for background silhouettes
   const bgPokemon = [6, 150, 130, 197, 249]
@@ -737,9 +738,9 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
         {/* Price */}
         <div style={{ textAlign: 'center', padding: '20px 24px 16px', borderBottom: `1px solid ${v.br}` }}>
           <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 6 }}>{focusLabel} Price</div>
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 10 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <div style={{ fontSize: 44, fontWeight: 900, color: v.tx, letterSpacing: -2, lineHeight: 1, fontFamily: "'Outfit', sans-serif" }}>{fmt(focusPrice)}</div>
-            <div style={{ fontSize: 20, color: v.mu, fontWeight: 700 }}>{fmtGbp(focusPrice)}</div>
+            <div style={{ fontSize: 14, color: v.mu, fontWeight: 700, marginTop: 4 }}>{fmtGbp(focusPrice)}</div>
           </div>
         </div>
 
@@ -876,8 +877,8 @@ function PeakDistance({ card, theme }: { card: CardData; theme: Theme }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <CardImg src={card.image_url} w={50} h={70} radius={6} />
           <div>
-            <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3 }}>{card.card_name}</div>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3 }}>{card.set_name}</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.card_name}</div>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.set_name}</div>
           </div>
         </div>
       </div>
@@ -936,8 +937,8 @@ function MarketTemperature({ card, theme }: { card: CardData; theme: Theme }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <CardImg src={card.image_url} w={50} h={70} radius={6} />
           <div>
-            <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3 }}>{card.card_name}</div>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3 }}>{card.set_name}</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.card_name}</div>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.set_name}</div>
           </div>
         </div>
       </div>
@@ -998,8 +999,8 @@ function GradeCompare({ card, theme }: { card: CardData; theme: Theme }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <CardImg src={card.image_url} w={50} h={70} radius={6} />
           <div>
-            <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3 }}>{card.card_name}</div>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3 }}>{card.set_name}</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.card_name}</div>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.set_name}</div>
           </div>
         </div>
       </div>
@@ -1438,7 +1439,7 @@ export default function StudioPageClient() {
     setExporting(false)
   }
 
-  const needsCard   = ['insight', 'psa-gauge', 'peak-distance', 'temperature', 'grade-compare'].includes(visualType)
+  const needsCard   = ['insight', 'peak-distance', 'temperature', 'grade-compare'].includes(visualType)
   const needsMovers = visualType === 'movers'
   const needsSet    = visualType === 'set-report'
   const canExport   = (needsCard && !!card) || (needsMovers && movers.length > 0) || (needsSet && !!setData)
@@ -1458,7 +1459,6 @@ export default function StudioPageClient() {
     }
     switch (visualType) {
       case 'insight':       return <InsightCard       card={card!} theme={theme} gradeView={gradeView} layout={cardLayout} />
-      case 'psa-gauge':     return <PsaGauge          card={card!} theme={theme} />
       case 'peak-distance': return <PeakDistance      card={card!} theme={theme} />
       case 'temperature':   return <MarketTemperature card={card!} theme={theme} />
       case 'grade-compare': return <GradeCompare      card={card!} theme={theme} />
