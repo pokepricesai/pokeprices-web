@@ -1620,6 +1620,5 @@ export default function StudioPageClient() {
         )}
       </div>
     </div>
-  </div>
   )
 }
