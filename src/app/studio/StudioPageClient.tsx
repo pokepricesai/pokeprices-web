@@ -627,8 +627,70 @@ function InsightCardMinimal({ card, theme, gradeView }: { card: CardData; theme:
   )
 }
 
-// -- VISUAL 1d: Insight Card - Hero (large card, data beneath) ----------------
-// Inspired by Syncd - card dominates, data lives below it
+// -- VISUAL 1d: Insight Card - Hero (large card, full bleed) -----------------
+
+function HeroBgDecor({ v }: { v: ReturnType<typeof getThemeVars> }) {
+  // Rich background: multiple Pokemon + geometric circles + sparkles
+  const pokemon = [
+    { id: 6,   right: -30, top: -30,  size: 160, opacity: 0.13 },
+    { id: 150, left:  -20, top: -10,  size: 90,  opacity: 0.09 },
+    { id: 25,  right: 80,  bottom: 20, size: 55, opacity: 0.10 },
+    { id: 130, left:  60,  bottom: -10, size: 70, opacity: 0.07 },
+    { id: 197, right: 160, top: 30,   size: 50,  opacity: 0.06 },
+  ]
+  const circles = [
+    { size: 200, top: -80,  right: -60, opacity: 0.06 },
+    { size: 120, top: 20,   left: -40,  opacity: 0.04 },
+    { size: 80,  bottom: 0, right: 100, opacity: 0.05 },
+    { size: 50,  top: 40,   left: 120,  opacity: 0.04 },
+  ]
+  const sparkles = [
+    { top: '18%', left: '42%', size: 4 },
+    { top: '60%', left: '55%', size: 3 },
+    { top: '35%', left: '28%', size: 2 },
+    { top: '72%', right: '35%', size: 3 },
+    { top: '12%', right: '30%', size: 2 },
+    { top: '48%', left: '70%', size: 2 },
+  ]
+  return (
+    <>
+      {circles.map((d, i) => (
+        <div key={`c${i}`} style={{
+          position: 'absolute',
+          width: d.size, height: d.size,
+          borderRadius: '50%',
+          border: '1px solid rgba(255,255,255,0.15)',
+          top: (d as any).top, bottom: (d as any).bottom,
+          left: (d as any).left, right: (d as any).right,
+          pointerEvents: 'none',
+          background: `rgba(255,255,255,${d.opacity})`,
+        }} />
+      ))}
+      {pokemon.map((p, i) => (
+        <div key={`p${i}`} style={{
+          position: 'absolute',
+          top: (p as any).top !== undefined ? p.top : undefined,
+          bottom: (p as any).bottom !== undefined ? p.bottom : undefined,
+          left: (p as any).left !== undefined ? p.left : undefined,
+          right: (p as any).right !== undefined ? p.right : undefined,
+          width: p.size, height: p.size,
+          opacity: p.opacity, pointerEvents: 'none',
+          filter: 'brightness(0) invert(1)',
+        }}>
+          <img src={proxyImg(`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.id}.png`) || ''} alt="" width={p.size} height={p.size} style={{ objectFit: 'contain', width: '100%', height: '100%' }} />
+        </div>
+      ))}
+      {sparkles.map((d, i) => (
+        <div key={`s${i}`} style={{
+          position: 'absolute',
+          top: (d as any).top, left: (d as any).left, right: (d as any).right,
+          width: d.size, height: d.size, borderRadius: '50%',
+          background: 'rgba(255,255,255,0.55)', pointerEvents: 'none',
+        }} />
+      ))}
+    </>
+  )
+}
 
 function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Theme; gradeView: GradeView }) {
   const v = getThemeVars(theme)
@@ -640,44 +702,65 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
     : card.raw_pct_30d < -15 ? { label: 'v Cooling',     col: v.red   }
     : { label: '- Stable', col: v.yellow }
     : { label: '- Stable', col: v.yellow }
-  const sparklineCol = pctCol(card.raw_pct_30d, v)
+
+  // Card image height: 280px, we want 160px of it to overlap below gradient
+  const IMG_H = 280
+  const OVERLAP = 160
+  const GRAD_EXTRA_PAD = IMG_H - OVERLAP  // 120px of image sits above fold
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", width: '100%' }}>
-      {/* Header - full hero gradient with decor */}
-      <div style={{ background: 'linear-gradient(160deg, #0a1f4e 0%, #1a5fad 50%, #2874c8 100%)', position: 'relative' }}>
-        <PokeBgDecor v={v} />
+
+      {/* Full-bleed gradient header */}
+      <div style={{
+        background: 'linear-gradient(160deg, #081830 0%, #0d2b5e 35%, #1a5fad 70%, #2874c8 100%)',
+        position: 'relative', overflow: 'hidden',
+        paddingBottom: GRAD_EXTRA_PAD + 20,
+      }}>
+        <HeroBgDecor v={v} />
+
         {/* Top bar */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 22px', position: 'relative' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 22px 0', position: 'relative', zIndex: 2 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <div style={{ width: 14, height: 14, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.85)' }} />
+            <div style={{ width: 14, height: 14, borderRadius: '50%', background: 'rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff' }} />
             </div>
-            <span style={{ fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,0.8)', letterSpacing: 1.4, textTransform: 'uppercase' }}>PokePrices.io</span>
+            <span style={{ fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,0.85)', letterSpacing: 1.4, textTransform: 'uppercase' }}>PokePrices.io</span>
           </div>
           <SignalBadge label={sig.label} color={sig.col} />
         </div>
-        {/* Card name + set */}
-        <div style={{ textAlign: 'center', padding: '0 22px 0', position: 'relative' }}>
-          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', fontWeight: 700, marginBottom: 6 }}>{card.set_name}</div>
-          <div style={{ fontSize: 26, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.5, lineHeight: 1.1, marginBottom: 20 }}>{card.card_name}</div>
-          {/* Large centered card image - overlaps into data section */}
-          {card.image_url && (
-            <div style={{ position: 'relative', zIndex: 10, marginBottom: -120 }}>
-              <img src={proxyImg(card.image_url) || card.image_url || ''} alt={card.card_name} style={{ width: 200, height: 280, objectFit: 'contain', borderRadius: 14, filter: 'drop-shadow(0 24px 48px rgba(0,0,0,0.6))', display: 'block', margin: '0 auto' }} />
-            </div>
-          )}
+
+        {/* Set + card name */}
+        <div style={{ textAlign: 'center', padding: '14px 22px 20px', position: 'relative', zIndex: 2 }}>
+          <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', fontWeight: 700, letterSpacing: 0.5, marginBottom: 8 }}>{card.set_name}</div>
+          <div style={{ fontSize: 28, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.5, lineHeight: 1.1 }}>{card.card_name}</div>
         </div>
+
+        {/* Card image - sits at bottom of gradient, overlaps into data */}
+        {card.image_url && (
+          <div style={{ display: 'flex', justifyContent: 'center', position: 'relative', zIndex: 3, marginBottom: -OVERLAP }}>
+            <img
+              src={proxyImg(card.image_url) || ''}
+              alt={card.card_name}
+              style={{
+                width: 200, height: IMG_H, objectFit: 'contain', borderRadius: 16,
+                filter: 'drop-shadow(0 20px 60px rgba(0,0,0,0.7))',
+                display: 'block',
+              }}
+            />
+          </div>
+        )}
       </div>
 
-      {/* Data section */}
-      <div style={{ paddingTop: card.image_url ? 130 : 20, background: v.bg }}>
-        {/* Big price */}
+      {/* Data section - starts directly below gradient */}
+      <div style={{ background: v.bg, paddingTop: card.image_url ? OVERLAP + 16 : 16 }}>
+
+        {/* Big featured price */}
         <div style={{ textAlign: 'center', padding: '0 24px 16px', borderBottom: `1px solid ${v.br}` }}>
-          <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 6, fontFamily: "'Figtree', sans-serif" }}>{focusLabel} Price</div>
+          <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 6 }}>{focusLabel} Price</div>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 10 }}>
             <div style={{ fontSize: 44, fontWeight: 900, color: v.tx, letterSpacing: -2, lineHeight: 1, fontFamily: "'Outfit', sans-serif" }}>{fmt(focusPrice)}</div>
-            <div style={{ fontSize: 20, color: v.mu, fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>{fmtGbp(focusPrice)}</div>
+            <div style={{ fontSize: 20, color: v.mu, fontWeight: 700 }}>{fmtGbp(focusPrice)}</div>
           </div>
         </div>
 
@@ -688,29 +771,29 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
             { label: 'PSA 9',  usd: fmt(card.current_psa9),  gbp: fmtGbp(card.current_psa9),  active: gradeView === 'psa9'  },
             { label: 'PSA 10', usd: fmt(card.current_psa10), gbp: fmtGbp(card.current_psa10), active: gradeView === 'psa10' },
           ].map((p, i) => (
-            <div key={p.label} style={{ padding: '13px 14px', borderRight: i < 2 ? `1px solid ${v.br}` : 'none', textAlign: 'center', background: p.active ? (v.dk ? 'rgba(26,95,173,0.1)' : 'rgba(26,95,173,0.05)') : 'transparent' }}>
-              <div style={{ fontSize: 9, color: p.active ? '#3b82f6' : v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 5, fontFamily: "'Figtree', sans-serif" }}>{p.label}</div>
-              <div style={{ fontSize: 15, fontWeight: 900, color: v.tx, fontFamily: "'Outfit', sans-serif" }}>{p.usd}</div>
-              <div style={{ fontSize: 10, color: v.mu, marginTop: 2, fontFamily: "'Figtree', sans-serif" }}>{p.gbp}</div>
+            <div key={p.label} style={{ padding: '13px 14px', borderRight: i < 2 ? `1px solid ${v.br}` : 'none', textAlign: 'center', background: p.active ? (v.dk ? 'rgba(26,95,173,0.12)' : 'rgba(26,95,173,0.06)') : 'transparent' }}>
+              <div style={{ fontSize: 9, color: p.active ? '#60a5fa' : v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 5 }}>{p.label}</div>
+              <div style={{ fontSize: 16, fontWeight: 900, color: v.tx, fontFamily: "'Outfit', sans-serif" }}>{p.usd}</div>
+              <div style={{ fontSize: 10, color: v.mu, marginTop: 2 }}>{p.gbp}</div>
             </div>
           ))}
         </div>
 
-        {/* Trend numbers */}
+        {/* Trend row */}
         <div style={{ display: 'grid', gridTemplateColumns: psa10x ? '1fr 1fr 1fr' : '1fr 1fr', borderBottom: `1px solid ${v.br}` }}>
           {[
-            { label: '7d',      val: pct(card.raw_pct_7d),  col: pctCol(card.raw_pct_7d,  v) },
-            { label: '30d',     val: pct(card.raw_pct_30d), col: pctCol(card.raw_pct_30d, v) },
-            ...(psa10x ? [{ label: 'Grade x', val: psa10x + 'x', col: '#a78bfa' }] : []),
+            { label: '7D',       val: pct(card.raw_pct_7d),   col: pctCol(card.raw_pct_7d,  v) },
+            { label: '30D',      val: pct(card.raw_pct_30d),  col: pctCol(card.raw_pct_30d, v) },
+            ...(psa10x ? [{ label: 'GRADE X', val: psa10x + 'x', col: '#a78bfa' }] : []),
           ].map((s, i, arr) => (
-            <div key={s.label} style={{ padding: '12px 14px', borderRight: i < arr.length - 1 ? `1px solid ${v.br}` : 'none', textAlign: 'center' }}>
-              <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4, fontFamily: "'Figtree', sans-serif" }}>{s.label}</div>
-              <div style={{ fontSize: 20, fontWeight: 900, color: s.col, fontFamily: "'Outfit', sans-serif" }}>{s.val}</div>
+            <div key={s.label} style={{ padding: '13px 14px', borderRight: i < arr.length - 1 ? `1px solid ${v.br}` : 'none', textAlign: 'center' }}>
+              <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4 }}>{s.label}</div>
+              <div style={{ fontSize: 22, fontWeight: 900, color: s.col, letterSpacing: -0.5, fontFamily: "'Outfit', sans-serif" }}>{s.val}</div>
             </div>
           ))}
         </div>
 
-        {/* Full-width sparkline graph */}
+        {/* Full-width sparkline */}
         <FullWidthSparkline card={card} v={v} />
       </div>
 
@@ -1645,6 +1728,5 @@ export default function StudioPageClient() {
         )}
       </div>
     </div>
-  
   )
 }
