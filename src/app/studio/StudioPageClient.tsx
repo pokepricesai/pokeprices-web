@@ -310,28 +310,42 @@ function Sparkline({ card, color, height = 40 }: { card: CardData; color: string
   )
 }
 
-// -- Pokemon silhouettes + sparkles for card headers -------------------------
+// -- Pokemon silhouettes + inline SVG circles for card headers ---------------
 const CARD_POKEMON = [
-  { id: 6,   right: '-20px', top: '-20px',    size: 120, opacity: 0.13 },
-  { id: 150, right: '70px',  top: '0px',      size: 70,  opacity: 0.08 },
-  { id: 25,  left:  '-15px', bottom: '-15px', size: 60,  opacity: 0.09 },
-  { id: 197, left:  '75px',  top: '-8px',     size: 44,  opacity: 0.06 },
+  { id: 6,   right: -20, top: -20,   size: 110, opacity: 0.12 },
+  { id: 150, right: 68,  top: 5,     size: 65,  opacity: 0.07 },
+  { id: 25,  left: -12,  bottom: -12, size: 55, opacity: 0.08 },
+  { id: 197, left: 72,   top: -5,    size: 40,  opacity: 0.05 },
 ]
 
 function PokeBgDecor({ v }: { v: ReturnType<typeof getThemeVars> }) {
   return (
     <>
+      {/* Inline SVG for circles + sparkles - works in html-to-image */}
+      <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }} viewBox="0 0 520 140" preserveAspectRatio="xMidYMid slice">
+        <circle cx="490" cy="-10" r="90"  fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth="1.5"/>
+        <circle cx="490" cy="-10" r="50"  fill="rgba(255,255,255,0.05)"/>
+        <circle cx="-20" cy="80"  r="70"  fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="1"/>
+        <circle cx="260" cy="150" r="60"  fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="1"/>
+        <circle cx="420" cy="80"  r="35"  fill="rgba(255,255,255,0.03)"/>
+        <circle cx="190" cy="50"  r="2.5" fill="rgba(255,255,255,0.45)"/>
+        <circle cx="340" cy="80"  r="2"   fill="rgba(255,255,255,0.35)"/>
+        <circle cx="120" cy="110" r="1.5" fill="rgba(255,255,255,0.30)"/>
+        <circle cx="390" cy="30"  r="2"   fill="rgba(255,255,255,0.40)"/>
+        <circle cx="270" cy="20"  r="1.5" fill="rgba(255,255,255,0.30)"/>
+      </svg>
       {/* Pokemon silhouettes */}
       {CARD_POKEMON.map((p, i) => (
         <div key={i} style={{
           position: 'absolute',
-          right: (p as any).right,
-          left: (p as any).left,
-          top: (p as any).top,
-          bottom: (p as any).bottom,
+          top: (p as any).top !== undefined ? p.top : 'auto',
+          bottom: (p as any).bottom !== undefined ? (p as any).bottom : 'auto',
+          left: (p as any).left !== undefined ? (p as any).left : 'auto',
+          right: (p as any).right !== undefined ? (p as any).right : 'auto',
           width: p.size, height: p.size,
           opacity: p.opacity, pointerEvents: 'none',
           filter: 'brightness(0) invert(1)',
+          zIndex: 1,
         }}>
           <img
             src={proxyImg(`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.id}.png`) || ''}
@@ -340,27 +354,9 @@ function PokeBgDecor({ v }: { v: ReturnType<typeof getThemeVars> }) {
           />
         </div>
       ))}
-      {/* Sparkle dots */}
-      {[
-        { top: '20%', left: '38%', size: 3, op: 0.5 },
-        { top: '65%', left: '48%', size: 2, op: 0.4 },
-        { top: '35%', left: '62%', size: 4, op: 0.3 },
-        { top: '50%', right: '38%', size: 2, op: 0.4 },
-        { top: '15%', left: '52%', size: 2, op: 0.3 },
-      ].map((d, i) => (
-        <div key={`sp${i}`} style={{
-          position: 'absolute',
-          top: (d as any).top, left: (d as any).left, right: (d as any).right,
-          width: d.size, height: d.size,
-          borderRadius: '50%',
-          background: `rgba(255,255,255,${d.op})`,
-          pointerEvents: 'none',
-        }} />
-      ))}
     </>
   )
 }
-
 function BrandingBar({ v }: { v: ReturnType<typeof getThemeVars> }) {
   return (
     <div style={{
@@ -627,70 +623,7 @@ function InsightCardMinimal({ card, theme, gradeView }: { card: CardData; theme:
   )
 }
 
-// -- VISUAL 1d: Insight Card - Hero (large card, full bleed) -----------------
-
-function HeroBgDecor({ v }: { v: ReturnType<typeof getThemeVars> }) {
-  // Rich background: multiple Pokemon + geometric circles + sparkles
-  const pokemon = [
-    { id: 6,   right: -30, top: -30,  size: 160, opacity: 0.13 },
-    { id: 150, left:  -20, top: -10,  size: 90,  opacity: 0.09 },
-    { id: 25,  right: 80,  bottom: 20, size: 55, opacity: 0.10 },
-    { id: 130, left:  60,  bottom: -10, size: 70, opacity: 0.07 },
-    { id: 197, right: 160, top: 30,   size: 50,  opacity: 0.06 },
-  ]
-  const circles = [
-    { size: 200, top: -80,  right: -60, opacity: 0.06 },
-    { size: 120, top: 20,   left: -40,  opacity: 0.04 },
-    { size: 80,  bottom: 0, right: 100, opacity: 0.05 },
-    { size: 50,  top: 40,   left: 120,  opacity: 0.04 },
-  ]
-  const sparkles = [
-    { top: '18%', left: '42%', size: 4 },
-    { top: '60%', left: '55%', size: 3 },
-    { top: '35%', left: '28%', size: 2 },
-    { top: '72%', right: '35%', size: 3 },
-    { top: '12%', right: '30%', size: 2 },
-    { top: '48%', left: '70%', size: 2 },
-  ]
-  return (
-    <>
-      {circles.map((d, i) => (
-        <div key={`c${i}`} style={{
-          position: 'absolute',
-          width: d.size, height: d.size,
-          borderRadius: '50%',
-          border: '1px solid rgba(255,255,255,0.15)',
-          top: (d as any).top, bottom: (d as any).bottom,
-          left: (d as any).left, right: (d as any).right,
-          pointerEvents: 'none',
-          background: `rgba(255,255,255,${d.opacity})`,
-        }} />
-      ))}
-      {pokemon.map((p, i) => (
-        <div key={`p${i}`} style={{
-          position: 'absolute',
-          top: (p as any).top !== undefined ? p.top : undefined,
-          bottom: (p as any).bottom !== undefined ? p.bottom : undefined,
-          left: (p as any).left !== undefined ? p.left : undefined,
-          right: (p as any).right !== undefined ? p.right : undefined,
-          width: p.size, height: p.size,
-          opacity: p.opacity, pointerEvents: 'none',
-          filter: 'brightness(0) invert(1)',
-        }}>
-          <img src={proxyImg(`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.id}.png`) || ''} alt="" width={p.size} height={p.size} style={{ objectFit: 'contain', width: '100%', height: '100%' }} />
-        </div>
-      ))}
-      {sparkles.map((d, i) => (
-        <div key={`s${i}`} style={{
-          position: 'absolute',
-          top: (d as any).top, left: (d as any).left, right: (d as any).right,
-          width: d.size, height: d.size, borderRadius: '50%',
-          background: 'rgba(255,255,255,0.55)', pointerEvents: 'none',
-        }} />
-      ))}
-    </>
-  )
-}
+// -- VISUAL 1d: Insight Card - Hero ------------------------------------------
 
 function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Theme; gradeView: GradeView }) {
   const v = getThemeVars(theme)
@@ -703,24 +636,69 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
     : { label: '- Stable', col: v.yellow }
     : { label: '- Stable', col: v.yellow }
 
-  // Card image height: 280px, we want 160px of it to overlap below gradient
-  const IMG_H = 280
-  const OVERLAP = 160
-  const GRAD_EXTRA_PAD = IMG_H - OVERLAP  // 120px of image sits above fold
+  // Pokemon IDs for background silhouettes
+  const bgPokemon = [6, 150, 130, 197, 249]
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", width: '100%' }}>
 
-      {/* Full-bleed gradient header */}
+      {/* === GRADIENT HEADER - self-contained, no overflow tricks === */}
       <div style={{
-        background: 'linear-gradient(160deg, #081830 0%, #0d2b5e 35%, #1a5fad 70%, #2874c8 100%)',
-        position: 'relative', overflow: 'hidden',
-        paddingBottom: GRAD_EXTRA_PAD + 20,
+        background: 'linear-gradient(160deg, #050e1f 0%, #0d2b5e 40%, #1a5fad 75%, #2874c8 100%)',
+        position: 'relative',
+        paddingBottom: 24,
       }}>
-        <HeroBgDecor v={v} />
+
+        {/* Background circles - inline SVG so html-to-image captures them */}
+        <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }} viewBox="0 0 520 400" preserveAspectRatio="xMidYMid slice">
+          <circle cx="480" cy="-20" r="140" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1"/>
+          <circle cx="480" cy="-20" r="90"  fill="rgba(255,255,255,0.04)"/>
+          <circle cx="-30"  cy="80"  r="110" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="1"/>
+          <circle cx="-30"  cy="80"  r="60"  fill="rgba(255,255,255,0.03)"/>
+          <circle cx="260" cy="320" r="70"  fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="1"/>
+          <circle cx="420" cy="180" r="40"  fill="rgba(255,255,255,0.03)"/>
+          <circle cx="80"  cy="250" r="55"  fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1"/>
+          {/* Sparkle dots */}
+          <circle cx="180" cy="60"  r="2.5" fill="rgba(255,255,255,0.5)"/>
+          <circle cx="350" cy="90"  r="2"   fill="rgba(255,255,255,0.4)"/>
+          <circle cx="120" cy="160" r="1.5" fill="rgba(255,255,255,0.35)"/>
+          <circle cx="400" cy="250" r="2"   fill="rgba(255,255,255,0.4)"/>
+          <circle cx="260" cy="40"  r="1.5" fill="rgba(255,255,255,0.3)"/>
+          <circle cx="70"  cy="300" r="2"   fill="rgba(255,255,255,0.35)"/>
+        </svg>
+
+        {/* Pokemon silhouettes */}
+        {bgPokemon.map((id, i) => {
+          const configs = [
+            { top: -20, right: -20, size: 150, opacity: 0.12 },
+            { top: 10,  left: -15, size: 85,  opacity: 0.08 },
+            { bottom: 10, left: 50, size: 65, opacity: 0.07 },
+            { top: 30, right: 130, size: 48, opacity: 0.06 },
+            { bottom: 20, right: 60, size: 55, opacity: 0.07 },
+          ][i]
+          return (
+            <div key={id} style={{
+              position: 'absolute',
+              top: configs.top !== undefined ? configs.top : 'auto',
+              bottom: (configs as any).bottom !== undefined ? (configs as any).bottom : 'auto',
+              left: (configs as any).left !== undefined ? (configs as any).left : 'auto',
+              right: (configs as any).right !== undefined ? (configs as any).right : 'auto',
+              width: configs.size, height: configs.size,
+              opacity: configs.opacity, pointerEvents: 'none',
+              filter: 'brightness(0) invert(1)',
+              zIndex: 1,
+            }}>
+              <img
+                src={proxyImg(`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${id}.png`) || ''}
+                alt="" width={configs.size} height={configs.size}
+                style={{ objectFit: 'contain', width: '100%', height: '100%' }}
+              />
+            </div>
+          )
+        })}
 
         {/* Top bar */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 22px 0', position: 'relative', zIndex: 2 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 22px 0', position: 'relative', zIndex: 4 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <div style={{ width: 14, height: 14, borderRadius: '50%', background: 'rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff' }} />
@@ -730,21 +708,21 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
           <SignalBadge label={sig.label} color={sig.col} />
         </div>
 
-        {/* Set + card name */}
-        <div style={{ textAlign: 'center', padding: '14px 22px 20px', position: 'relative', zIndex: 2 }}>
-          <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', fontWeight: 700, letterSpacing: 0.5, marginBottom: 8 }}>{card.set_name}</div>
+        {/* Set name + card name */}
+        <div style={{ textAlign: 'center', padding: '16px 22px 20px', position: 'relative', zIndex: 4 }}>
+          <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.65)', fontWeight: 700, letterSpacing: 0.5, marginBottom: 8 }}>{card.set_name}</div>
           <div style={{ fontSize: 28, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.5, lineHeight: 1.1 }}>{card.card_name}</div>
         </div>
 
-        {/* Card image - sits at bottom of gradient, overlaps into data */}
+        {/* Card image - inside gradient, centred, no negative margins */}
         {card.image_url && (
-          <div style={{ display: 'flex', justifyContent: 'center', position: 'relative', zIndex: 3, marginBottom: -OVERLAP }}>
+          <div style={{ display: 'flex', justifyContent: 'center', position: 'relative', zIndex: 4 }}>
             <img
               src={proxyImg(card.image_url) || ''}
               alt={card.card_name}
               style={{
-                width: 200, height: IMG_H, objectFit: 'contain', borderRadius: 16,
-                filter: 'drop-shadow(0 20px 60px rgba(0,0,0,0.7))',
+                width: 200, height: 280, objectFit: 'contain', borderRadius: 16,
+                filter: 'drop-shadow(0 16px 48px rgba(0,0,0,0.8))',
                 display: 'block',
               }}
             />
@@ -752,11 +730,11 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
         )}
       </div>
 
-      {/* Data section - starts directly below gradient */}
-      <div style={{ background: v.bg, paddingTop: card.image_url ? OVERLAP + 16 : 16 }}>
+      {/* === DATA SECTION - directly below gradient, no gap === */}
+      <div style={{ background: v.bg }}>
 
-        {/* Big featured price */}
-        <div style={{ textAlign: 'center', padding: '0 24px 16px', borderBottom: `1px solid ${v.br}` }}>
+        {/* Price */}
+        <div style={{ textAlign: 'center', padding: '20px 24px 16px', borderBottom: `1px solid ${v.br}` }}>
           <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 6 }}>{focusLabel} Price</div>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 10 }}>
             <div style={{ fontSize: 44, fontWeight: 900, color: v.tx, letterSpacing: -2, lineHeight: 1, fontFamily: "'Outfit', sans-serif" }}>{fmt(focusPrice)}</div>
@@ -771,7 +749,7 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
             { label: 'PSA 9',  usd: fmt(card.current_psa9),  gbp: fmtGbp(card.current_psa9),  active: gradeView === 'psa9'  },
             { label: 'PSA 10', usd: fmt(card.current_psa10), gbp: fmtGbp(card.current_psa10), active: gradeView === 'psa10' },
           ].map((p, i) => (
-            <div key={p.label} style={{ padding: '13px 14px', borderRight: i < 2 ? `1px solid ${v.br}` : 'none', textAlign: 'center', background: p.active ? (v.dk ? 'rgba(26,95,173,0.12)' : 'rgba(26,95,173,0.06)') : 'transparent' }}>
+            <div key={p.label} style={{ padding: '14px', borderRight: i < 2 ? `1px solid ${v.br}` : 'none', textAlign: 'center', background: p.active ? (v.dk ? 'rgba(26,95,173,0.12)' : 'rgba(26,95,173,0.06)') : 'transparent' }}>
               <div style={{ fontSize: 9, color: p.active ? '#60a5fa' : v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 5 }}>{p.label}</div>
               <div style={{ fontSize: 16, fontWeight: 900, color: v.tx, fontFamily: "'Outfit', sans-serif" }}>{p.usd}</div>
               <div style={{ fontSize: 10, color: v.mu, marginTop: 2 }}>{p.gbp}</div>
@@ -779,11 +757,11 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
           ))}
         </div>
 
-        {/* Trend row */}
+        {/* Trend */}
         <div style={{ display: 'grid', gridTemplateColumns: psa10x ? '1fr 1fr 1fr' : '1fr 1fr', borderBottom: `1px solid ${v.br}` }}>
           {[
-            { label: '7D',       val: pct(card.raw_pct_7d),   col: pctCol(card.raw_pct_7d,  v) },
-            { label: '30D',      val: pct(card.raw_pct_30d),  col: pctCol(card.raw_pct_30d, v) },
+            { label: '7D',      val: pct(card.raw_pct_7d),  col: pctCol(card.raw_pct_7d,  v) },
+            { label: '30D',     val: pct(card.raw_pct_30d), col: pctCol(card.raw_pct_30d, v) },
             ...(psa10x ? [{ label: 'GRADE X', val: psa10x + 'x', col: '#a78bfa' }] : []),
           ].map((s, i, arr) => (
             <div key={s.label} style={{ padding: '13px 14px', borderRight: i < arr.length - 1 ? `1px solid ${v.br}` : 'none', textAlign: 'center' }}>
@@ -793,7 +771,6 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
           ))}
         </div>
 
-        {/* Full-width sparkline */}
         <FullWidthSparkline card={card} v={v} />
       </div>
 
@@ -1728,5 +1705,6 @@ export default function StudioPageClient() {
         )}
       </div>
     </div>
+  </div>
   )
 }
