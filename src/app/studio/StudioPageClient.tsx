@@ -199,13 +199,13 @@ function getThemeVars(theme: Theme) {
 // Proxy external images through our API to avoid CORS issues with html2canvas
 function proxyImg(url: string | null): string | null {
   if (!url) return null
-  return `/api/imgproxy?url=${encodeURIComponent(url)}&t=${Date.now()}`
+  return `/api/imgproxy?url=${encodeURIComponent(url)}`
 }
 
 function CardImg({ src, w, h, radius = 6 }: { src: string | null; w: number; h: number; radius?: number }) {
   const proxied = proxyImg(src)
   if (!proxied) return <div style={{ width: w, height: h, borderRadius: radius, background: 'rgba(255,255,255,0.06)', flexShrink: 0 }} />
-  return <img src={proxied} alt="" style={{ width: w, height: h, objectFit: 'contain', borderRadius: radius, flexShrink: 0, display: 'block' }} />
+  return <img key={proxied} src={proxied} alt="" crossOrigin="anonymous" style={{ width: w, height: h, objectFit: 'contain', borderRadius: radius, flexShrink: 0, display: 'block' }} />
 }
 
 function Watermark({ color = 'rgba(255,255,255,0.7)' }: { color?: string }) {
@@ -347,7 +347,7 @@ function PokeBgDecor({ v }: { v: ReturnType<typeof getThemeVars> }) {
           zIndex: 1,
         }}>
           <img
-            src={proxyImg(`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.id}.png`) || ''}
+            src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.id}.png`}
             alt="" width={p.size} height={p.size}
             style={{ objectFit: 'contain', width: '100%', height: '100%' }}
           />
@@ -385,13 +385,13 @@ function SignalBadge({ label, color }: { label: string; color: string }) {
   return (
     <div style={{
       display: 'inline-flex', alignItems: 'center', gap: 5,
-      background: 'rgba(0,0,0,0.4)',
-      padding: '5px 12px', borderRadius: 20,
-      border: `1px solid ${color}50`,
+      background: `${color}18`,
+      padding: '5px 12px 5px 8px', borderRadius: 20,
+      border: `1px solid ${color}60`,
       flexShrink: 0, whiteSpace: 'nowrap',
     }}>
-      <div style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
-      <span style={{ fontSize: 10, fontWeight: 800, color, letterSpacing: 0.5 }}>{label}</span>
+      <div style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0, boxShadow: `0 0 6px ${color}` }} />
+      <span style={{ fontSize: 10, fontWeight: 800, color, letterSpacing: 0.3, fontFamily: "'Figtree', sans-serif" }}>{label}</span>
     </div>
   )
 }
@@ -421,7 +421,7 @@ function InsightCardCompact({ card, theme, gradeView }: { card: CardData; theme:
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <CardImg src={card.image_url} w={58} h={80} radius={8} />
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 20, fontWeight: 900, color: '#fff', lineHeight: 1.15, fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.card_name}</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: '#fff', lineHeight: 1.15, fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3, overflow: 'hidden' }}>{card.card_name}</div>
             <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 4, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.set_name}</div>
             {gradeView !== 'raw' && (
               <div style={{ marginTop: 8, display: 'inline-flex', background: 'rgba(255,255,255,0.15)', borderRadius: 8, padding: '3px 10px' }}>
@@ -691,7 +691,7 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
               zIndex: 1,
             }}>
               <img
-                src={proxyImg(`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${id}.png`) || ''}
+                src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${id}.png`}
                 alt="" width={configs.size} height={configs.size}
                 style={{ objectFit: 'contain', width: '100%', height: '100%' }}
               />
@@ -720,6 +720,7 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
         {card.image_url && (
           <div style={{ display: 'flex', justifyContent: 'center', position: 'relative', zIndex: 4 }}>
             <img
+              key={card.card_slug}
               src={proxyImg(card.image_url) || ''}
               alt={card.card_name}
               style={{
@@ -877,7 +878,7 @@ function PeakDistance({ card, theme }: { card: CardData; theme: Theme }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <CardImg src={card.image_url} w={50} h={70} radius={6} />
           <div>
-            <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.card_name}</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3, overflow: 'hidden' }}>{card.card_name}</div>
             <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.set_name}</div>
           </div>
         </div>
@@ -937,7 +938,7 @@ function MarketTemperature({ card, theme }: { card: CardData; theme: Theme }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <CardImg src={card.image_url} w={50} h={70} radius={6} />
           <div>
-            <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.card_name}</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3, overflow: 'hidden' }}>{card.card_name}</div>
             <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.set_name}</div>
           </div>
         </div>
@@ -999,7 +1000,7 @@ function GradeCompare({ card, theme }: { card: CardData; theme: Theme }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <CardImg src={card.image_url} w={50} h={70} radius={6} />
           <div>
-            <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.card_name}</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3, overflow: 'hidden' }}>{card.card_name}</div>
             <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.set_name}</div>
           </div>
         </div>
@@ -1706,6 +1707,6 @@ export default function StudioPageClient() {
         )}
       </div>
     </div>
-
+  </div>
   )
 }
