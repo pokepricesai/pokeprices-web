@@ -82,8 +82,9 @@ function fmt(cents: number | null): string {
 function fmtGbp(cents: number | null): string {
   if (!cents || cents <= 0) return '-'
   const v = (cents / 100) * GBP
-  if (v >= 1000) return `£${v.toLocaleString('en-GB', { maximumFractionDigits: 0 })}`
-  return `£${v.toFixed(2)}`
+  const gbp = '\u00a3'
+  if (v >= 1000) return gbp + v.toLocaleString('en-GB', { maximumFractionDigits: 0 })
+  return gbp + v.toFixed(2)
 }
 function pct(v: number | null): string {
   if (v == null) return '-'
@@ -393,7 +394,7 @@ function InsightCardCompact({ card, theme, gradeView }: { card: CardData; theme:
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", width: '100%' }}>
       {/* Header */}
-      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px', position: 'relative', overflow: 'hidden', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px', position: 'relative', overflow: 'hidden' }}>
         <PokeBgDecor v={v} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, position: 'relative' }}>
           <Watermark />
@@ -1625,6 +1626,6 @@ export default function StudioPageClient() {
         )}
       </div>
     </div>
-  </div>
+  
   )
 }
