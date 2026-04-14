@@ -196,9 +196,16 @@ function getThemeVars(theme: Theme) {
 
 // ── Shared components ─────────────────────────────────────────────────────────
 
+// Proxy external images through our API to avoid CORS issues with html2canvas
+function proxyImg(url: string | null): string | null {
+  if (!url) return null
+  return `/api/imgproxy?url=${encodeURIComponent(url)}`
+}
+
 function CardImg({ src, w, h, radius = 6 }: { src: string | null; w: number; h: number; radius?: number }) {
-  if (!src) return <div style={{ width: w, height: h, borderRadius: radius, background: 'rgba(255,255,255,0.06)', flexShrink: 0 }} />
-  return <img src={src} alt="" style={{ width: w, height: h, objectFit: 'contain', borderRadius: radius, flexShrink: 0, display: 'block' }} />
+  const proxied = proxyImg(src)
+  if (!proxied) return <div style={{ width: w, height: h, borderRadius: radius, background: 'rgba(255,255,255,0.06)', flexShrink: 0 }} />
+  return <img src={proxied} alt="" style={{ width: w, height: h, objectFit: 'contain', borderRadius: radius, flexShrink: 0, display: 'block' }} />
 }
 
 function Watermark({ color = 'rgba(255,255,255,0.7)' }: { color?: string }) {
@@ -302,25 +309,35 @@ function Sparkline({ card, color, height = 40 }: { card: CardData; color: string
   )
 }
 
-// ── Decorative Pokemon outline SVGs for header backgrounds ───────────────────
-// Simple geometric outlines - not actual copyrighted art, just abstract shapes
+// ── Pokemon silhouettes for card headers — matches homepage style ─────────────
+const CARD_POKEMON = [
+  { id: 6,   right: '-10px', top: '-15px',  size: 90,  opacity: 0.08 },
+  { id: 150, right: '60px',  top: '10px',   size: 55,  opacity: 0.05 },
+  { id: 25,  left:  '10px',  bottom: '-5px', size: 40, opacity: 0.06 },
+]
+
 function PokeBgDecor({ v }: { v: ReturnType<typeof getThemeVars> }) {
-  const col = 'rgba(255,255,255,0.04)'
   return (
-    <svg style={{ position: 'absolute', top: 0, right: 0, width: '100%', height: '100%', pointerEvents: 'none' }} viewBox="0 0 520 140" preserveAspectRatio="xMaxYMid slice">
-      {/* Pokeball outline */}
-      <circle cx="440" cy="30" r="55" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="1.5" />
-      <line x1="385" y1="30" x2="495" y2="30" stroke="rgba(255,255,255,0.06)" strokeWidth="1.5" />
-      <circle cx="440" cy="30" r="12" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1.5" />
-      {/* Diamond shapes */}
-      <polygon points="490,80 504,95 490,110 476,95" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="1.2" />
-      <polygon points="30,5 42,18 30,31 18,18" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
-      {/* Star-like shape */}
-      <polygon points="380,100 385,112 397,112 388,120 391,132 380,124 369,132 372,120 363,112 375,112" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
-      {/* Circles */}
-      <circle cx="60" cy="95" r="25" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
-      <circle cx="200" cy="10" r="18" fill="none" stroke="rgba(255,255,255,0.03)" strokeWidth="1" />
-    </svg>
+    <>
+      {CARD_POKEMON.map((p, i) => (
+        <div key={i} style={{
+          position: 'absolute',
+          right: p.right, left: (p as any).left,
+          top: p.top, bottom: (p as any).bottom,
+          width: p.size, height: p.size,
+          opacity: p.opacity, pointerEvents: 'none',
+          filter: 'brightness(0) invert(1)',
+          flexShrink: 0,
+        }}>
+          <img
+            src={proxyImg(`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.id}.png`) || ``}
+            alt=""
+            width={p.size} height={p.size}
+            style={{ objectFit: 'contain', width: '100%', height: '100%' }}
+          />
+        </div>
+      ))}
+    </>
   )
 }
 
@@ -376,7 +393,7 @@ function InsightCardCompact({ card, theme, gradeView }: { card: CardData; theme:
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", width: '100%' }}>
       {/* Header */}
-      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px', position: 'relative', overflow: 'hidden', position: 'relative', overflow: 'hidden' }}>
         <PokeBgDecor v={v} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, position: 'relative' }}>
           <Watermark />
@@ -608,7 +625,7 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", width: '100%' }}>
       {/* Header - full hero gradient with decor */}
-      <div style={{ background: 'linear-gradient(160deg, #0a1f4e 0%, #1a5fad 50%, #2874c8 100%)', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ background: 'linear-gradient(160deg, #0a1f4e 0%, #1a5fad 50%, #2874c8 100%)', position: 'relative' }}>
         <PokeBgDecor v={v} />
         {/* Top bar */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 22px', position: 'relative' }}>
@@ -621,20 +638,20 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
           <SignalBadge label={sig.label} color={sig.col} />
         </div>
         {/* Card name + set */}
-        <div style={{ textAlign: 'center', padding: '0 22px 22px', position: 'relative' }}>
+        <div style={{ textAlign: 'center', padding: '0 22px 0', position: 'relative' }}>
           <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', fontWeight: 700, marginBottom: 6 }}>{card.set_name}</div>
           <div style={{ fontSize: 26, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.5, lineHeight: 1.1, marginBottom: 20 }}>{card.card_name}</div>
-          {/* Large centered card image */}
+          {/* Large centered card image - overlaps into data section */}
           {card.image_url && (
-            <div style={{ marginBottom: -50 }}>
-              <img src={card.image_url} alt={card.card_name} style={{ width: 200, height: 280, objectFit: 'contain', borderRadius: 14, filter: 'drop-shadow(0 20px 40px rgba(0,0,0,0.5))', display: 'block', margin: '0 auto' }} />
+            <div style={{ position: 'relative', zIndex: 10, marginBottom: -120 }}>
+              <img src={proxyImg(card.image_url) || card.image_url || ''} alt={card.card_name} style={{ width: 200, height: 280, objectFit: 'contain', borderRadius: 14, filter: 'drop-shadow(0 24px 48px rgba(0,0,0,0.6))', display: 'block', margin: '0 auto' }} />
             </div>
           )}
         </div>
       </div>
 
       {/* Data section */}
-      <div style={{ paddingTop: card.image_url ? 60 : 20, background: v.bg }}>
+      <div style={{ paddingTop: card.image_url ? 130 : 20, background: v.bg }}>
         {/* Big price */}
         <div style={{ textAlign: 'center', padding: '0 24px 16px', borderBottom: `1px solid ${v.br}` }}>
           <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 6, fontFamily: "'Figtree', sans-serif" }}>{focusLabel} Price</div>
@@ -700,21 +717,23 @@ function PsaGauge({ card, theme }: { card: CardData; theme: Theme }) {
   const label = !multiple ? 'No data' : multiple < 3 ? 'Low premium — consider PSA 10' : multiple < 8 ? 'Meaningful premium' : 'Very high premium — high risk'
 
   const arcPath = (pct: number) => {
+    // Semicircle from left (-180deg) to right (0deg) going OVER the top
+    // Left point: (cx-r, cy), Right point: (cx+r, cy), apex: (cx, cy-r)
     const r = 90, cx = 150, cy = 130
-    const startAngle = -180
-    const endAngle = startAngle + (pct / 100) * 180
-    const toRad = (d: number) => (d * Math.PI) / 180
-    const x1 = cx + r * Math.cos(toRad(startAngle))
-    const y1 = cy + r * Math.sin(toRad(startAngle))
-    const x2 = cx + r * Math.cos(toRad(endAngle))
-    const y2 = cy + r * Math.sin(toRad(endAngle))
-    return `M ${x1} ${y1} A ${r} ${r} 0 ${pct > 50 ? 1 : 0} 1 ${x2} ${y2}`
+    const lx = cx - r, ly = cy  // always starts from left
+    const angleRad = Math.PI * (1 - pct / 100)  // 0% = right side, 100% = left side sweep
+    const ex = cx + r * Math.cos(angleRad)
+    const ey = cy - r * Math.sin(angleRad)  // negative because SVG y-axis is flipped
+    const largeArc = pct > 50 ? 1 : 0
+    // sweep=0 = counter-clockwise = goes over the top
+    return `M ${lx} ${ly} A ${r} ${r} 0 ${largeArc} 0 ${ex.toFixed(1)} ${ey.toFixed(1)}`
   }
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif" }}>
-      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px', position: 'relative', overflow: 'hidden' }}>
+        <PokeBgDecor v={v} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, position: 'relative' }}>
           <Watermark />
           <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.5 }}>Grade Premium</span>
         </div>
@@ -767,8 +786,9 @@ function PeakDistance({ card, theme }: { card: CardData; theme: Theme }) {
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif" }}>
-      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px', position: 'relative', overflow: 'hidden' }}>
+        <PokeBgDecor v={v} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, position: 'relative' }}>
           <Watermark />
           <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.5 }}>Peak Distance</span>
         </div>
@@ -826,8 +846,9 @@ function MarketTemperature({ card, theme }: { card: CardData; theme: Theme }) {
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif" }}>
-      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px', position: 'relative', overflow: 'hidden' }}>
+        <PokeBgDecor v={v} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, position: 'relative' }}>
           <Watermark />
           <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.5 }}>Market Temperature</span>
         </div>
@@ -887,8 +908,9 @@ function GradeCompare({ card, theme }: { card: CardData; theme: Theme }) {
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif" }}>
-      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px', position: 'relative', overflow: 'hidden' }}>
+        <PokeBgDecor v={v} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, position: 'relative' }}>
           <Watermark />
           <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.5 }}>Grade Breakdown</span>
         </div>
@@ -993,7 +1015,7 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
             <div style={{ width: 20, flexShrink: 0, fontSize: 11, fontWeight: 900, color: v.mu, textAlign: 'center', fontFamily: "'Outfit', sans-serif" }}>{i + 1}</div>
             <div style={{ flexShrink: 0 }}>
               {m.image_url
-                ? <img src={m.image_url} alt={m.card_name} style={{ width: 44, height: 62, objectFit: 'contain', borderRadius: 5, display: 'block' }} loading="lazy" />
+                ? <img src={proxyImg(m.image_url) || m.image_url || ''} alt={m.card_name} style={{ width: 44, height: 62, objectFit: 'contain', borderRadius: 5, display: 'block' }} loading="lazy" />
                 : <div style={{ width: 44, height: 62, background: v.dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: v.mu }}>?</div>
               }
             </div>
@@ -1304,39 +1326,23 @@ export default function StudioPageClient() {
     if (exporting) return
     setExporting(true)
     try {
-      // Build payload for server-side Satori rendering
-      const payload: any = {
-        visualType,
-        theme,
-        gradeView,
-        cardLayout,
-        period: moversPeriod,
-        direction: moversDir,
-      }
-      if (card)     payload.card     = card
-      if (movers.length) payload.movers  = movers
-      if (setData)  payload.setData  = setData
+      // Dynamically import html2canvas to avoid SSR issues
+      const html2canvas = (await import('html2canvas')).default
 
-      const res = await fetch('/api/studio/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      // Find the preview element
+      const el = document.getElementById('studio-preview')
+      if (!el) throw new Error('Preview not found')
+
+      // Screenshot at 2x resolution for crisp output
+      const canvas = await html2canvas(el, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: null,
+        logging: false,
       })
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.error || `Export failed: ${res.status}`)
-      }
-
-      // Verify we got an image back, not a JSON error
-      const ct = res.headers.get('content-type') || ''
-      if (!ct.includes('image') && !ct.includes('octet')) {
-        const text = await res.text()
-        throw new Error(`Server error: ${text.slice(0, 300)}`)
-      }
-
-      const blob = await res.blob()
-      const url  = URL.createObjectURL(blob)
+      const url  = canvas.toDataURL('image/png')
       const link = document.createElement('a')
       const fileName = card
         ? `pokeprices-${card.card_name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${visualType}-${cardLayout}.png`
@@ -1344,7 +1350,6 @@ export default function StudioPageClient() {
       link.download = fileName
       link.href = url
       link.click()
-      URL.revokeObjectURL(url)
     } catch (e: any) {
       console.error('Export failed:', e)
       alert(`Export failed — ${e.message || 'please try again'}`)
@@ -1566,7 +1571,7 @@ export default function StudioPageClient() {
 
         {/* CENTRE: Preview */}
         <div>
-          <div style={{ maxWidth: 520 }}>
+          <div id="studio-preview" style={{ maxWidth: 520 }}>
             {renderVisual()}
           </div>
           {/* Download button below preview */}
@@ -1605,7 +1610,7 @@ export default function StudioPageClient() {
                   onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
                 >
                   {m.image_url && (
-                    <img src={m.image_url} alt="" style={{ width: 28, height: 39, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
+                    <img src={proxyImg(m.image_url) || m.image_url || ''} alt="" style={{ width: 28, height: 39, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
                   )}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.card_name}</div>
@@ -1620,5 +1625,6 @@ export default function StudioPageClient() {
         )}
       </div>
     </div>
+  </div>
   )
 }

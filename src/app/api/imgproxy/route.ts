@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   if (!url) return new NextResponse('Missing url', { status: 400 })
 
   // Only allow known image domains
-  const allowed = ['pricecharting.com', 'tcgplayer.com', 'pokemontcg.io', 'limitlesstcg.com', 'cdn.', 'images.']
+  const allowed = ['pricecharting.com', 'tcgplayer.com', 'pokemontcg.io', 'limitlesstcg.com', 'cdn.', 'images.', 'githubusercontent.com', 'raw.github', 'pokeapi']
   const isAllowed = allowed.some(d => url.includes(d))
   if (!isAllowed) return new NextResponse('Domain not allowed', { status: 403 })
 
