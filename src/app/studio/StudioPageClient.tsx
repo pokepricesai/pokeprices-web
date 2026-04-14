@@ -135,7 +135,7 @@ async function fetchMovers(direction: MoversDirection, period: MoversPeriod): Pr
   return filtered.map((r: any) => ({
     card_name: r.card_name,
     set_name: r.set_name,
-    current_price: r.current_price,
+    current_price: r.current_price ?? r.current_raw ?? 0,
     pct_change: direction === 'rising' ? r.pct_30d ?? r.pct_change : -(Math.abs(r.pct_30d ?? r.pct_change ?? 0)),
     card_url_slug: imgMap[r.card_slug]?.card_url_slug ?? null,
     image_url: imgMap[r.card_slug]?.image_url ?? null,
@@ -213,7 +213,60 @@ function Watermark({ color = 'rgba(255,255,255,0.7)' }: { color?: string }) {
 }
 
 // Footer branding bar — consistent across all visuals
-// ── Sparkline — SVG price trend from historical data points ──────────────────
+// ── Full-width sparkline for Hero layout ─────────────────────────────────────
+function FullWidthSparkline({ card, v }: { card: CardData; v: ReturnType<typeof getThemeVars> }) {
+  const now = card.current_raw
+  if (!now) return null
+  const pts: { label: string; val: number }[] = []
+  if (card.raw_180d_ago) pts.push({ label: '180d', val: card.raw_180d_ago })
+  if (card.raw_90d_ago)  pts.push({ label: '90d',  val: card.raw_90d_ago  })
+  if (card.raw_30d_ago)  pts.push({ label: '30d',  val: card.raw_30d_ago  })
+  pts.push({ label: 'Now', val: now })
+  if (pts.length < 2) return null
+
+  const values = pts.map(p => p.val)
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const range = max - min || 1
+  const col = pctCol(card.raw_pct_30d, v)
+
+  const W = 480, H = 80, padX = 24, padY = 10
+  const coords = pts.map((p, i) => ({
+    x: padX + (i / (pts.length - 1)) * (W - padX * 2),
+    y: H - padY - ((p.val - min) / range) * (H - padY * 2),
+    label: p.label,
+    val: p.val,
+  }))
+
+  const polyline = coords.map(c => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ')
+  const fillPath = `${padX},${H} ${polyline} ${W - padX},${H}`
+
+  return (
+    <div style={{ padding: '12px 0 0', borderBottom: `1px solid ${v.br}` }}>
+      <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase', paddingLeft: 24, marginBottom: 4, fontFamily: "'Figtree', sans-serif" }}>Price Trend</div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`} style={{ display: 'block', overflow: 'visible' }}>
+        {/* Subtle grid lines */}
+        {[0.25, 0.5, 0.75].map(t => {
+          const y = H - padY - t * (H - padY * 2)
+          return <line key={t} x1={padX} y1={y} x2={W - padX} y2={y} stroke={v.br} strokeWidth={1} />
+        })}
+        {/* Fill */}
+        <polygon points={fillPath} fill={col} opacity={0.1} />
+        {/* Line */}
+        <polyline points={polyline} fill="none" stroke={col} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+        {/* Data points + labels */}
+        {coords.map((c2, i) => (
+          <g key={i}>
+            <circle cx={c2.x} cy={c2.y} r={i === coords.length - 1 ? 4 : 3} fill={col} />
+            <text x={c2.x} y={H + 16} textAnchor="middle" fontSize={8} fill={v.mu} fontFamily="Figtree, sans-serif" fontWeight={600}>{c2.label}</text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  )
+}
+
+
 function Sparkline({ card, color, height = 40 }: { card: CardData; color: string; height?: number }) {
   const now = card.current_raw
   if (!now) return null
@@ -245,6 +298,28 @@ function Sparkline({ card, color, height = 40 }: { card: CardData; color: string
       <polygon points={fillPath} fill={color} opacity={0.12} />
       <polyline points={polyline} fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
       <circle cx={lastX} cy={lastY} r={2.5} fill={color} />
+    </svg>
+  )
+}
+
+// ── Decorative Pokémon outline SVGs for header backgrounds ───────────────────
+// Simple geometric outlines - not actual copyrighted art, just abstract shapes
+function PokeBgDecor({ v }: { v: ReturnType<typeof getThemeVars> }) {
+  const col = 'rgba(255,255,255,0.04)'
+  return (
+    <svg style={{ position: 'absolute', top: 0, right: 0, width: '100%', height: '100%', pointerEvents: 'none' }} viewBox="0 0 520 140" preserveAspectRatio="xMaxYMid slice">
+      {/* Pokéball outline */}
+      <circle cx="440" cy="30" r="55" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="1.5" />
+      <line x1="385" y1="30" x2="495" y2="30" stroke="rgba(255,255,255,0.06)" strokeWidth="1.5" />
+      <circle cx="440" cy="30" r="12" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1.5" />
+      {/* Diamond shapes */}
+      <polygon points="490,80 504,95 490,110 476,95" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="1.2" />
+      <polygon points="30,5 42,18 30,31 18,18" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
+      {/* Star-like shape */}
+      <polygon points="380,100 385,112 397,112 388,120 391,132 380,124 369,132 372,120 363,112 375,112" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
+      {/* Circles */}
+      <circle cx="60" cy="95" r="25" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
+      <circle cx="200" cy="10" r="18" fill="none" stroke="rgba(255,255,255,0.03)" strokeWidth="1" />
     </svg>
   )
 }
@@ -301,8 +376,9 @@ function InsightCardCompact({ card, theme, gradeView }: { card: CardData; theme:
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", width: '100%' }}>
       {/* Header */}
-      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px', position: 'relative', overflow: 'hidden' }}>
+        <PokeBgDecor v={v} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, position: 'relative' }}>
           <Watermark />
           <SignalBadge label={sig.label} color={sig.col} />
         </div>
@@ -527,35 +603,37 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
     : card.raw_pct_30d < -15 ? { label: '▼ Cooling',     col: v.red   }
     : { label: '— Stable', col: v.yellow }
     : { label: '— Stable', col: v.yellow }
-  const trend30col = pctCol(card.raw_pct_30d, v)
+  const sparklineCol = pctCol(card.raw_pct_30d, v)
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", width: '100%' }}>
-      {/* Header bar */}
-      <div style={{ background: 'linear-gradient(160deg, #0d2b5e 0%, #1a5fad 50%, #2874c8 100%)', padding: '14px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <div style={{ width: 14, height: 14, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.85)' }} />
+      {/* Header — full hero gradient with decor */}
+      <div style={{ background: 'linear-gradient(160deg, #0a1f4e 0%, #1a5fad 50%, #2874c8 100%)', position: 'relative', overflow: 'hidden' }}>
+        <PokeBgDecor v={v} />
+        {/* Top bar */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 22px', position: 'relative' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ width: 14, height: 14, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.85)' }} />
+            </div>
+            <span style={{ fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,0.8)', letterSpacing: 1.4, textTransform: 'uppercase' }}>PokePrices.io</span>
           </div>
-          <span style={{ fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,0.8)', letterSpacing: 1.4, textTransform: 'uppercase' }}>PokePrices.io</span>
+          <SignalBadge label={sig.label} color={sig.col} />
         </div>
-        <SignalBadge label={sig.label} color={sig.col} />
+        {/* Card name + set */}
+        <div style={{ textAlign: 'center', padding: '0 22px 22px', position: 'relative' }}>
+          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', fontWeight: 700, marginBottom: 6 }}>{card.set_name}</div>
+          <div style={{ fontSize: 26, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.5, lineHeight: 1.1, marginBottom: 20 }}>{card.card_name}</div>
+          {/* Large centered card image */}
+          {card.image_url && (
+            <div style={{ marginBottom: -50 }}>
+              <img src={card.image_url} alt={card.card_name} style={{ width: 200, height: 280, objectFit: 'contain', borderRadius: 14, filter: 'drop-shadow(0 20px 40px rgba(0,0,0,0.5))', display: 'block', margin: '0 auto' }} />
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Card name + set */}
-      <div style={{ background: 'linear-gradient(160deg, #0d2b5e 0%, #1a5fad 50%, #2874c8 100%)', padding: '16px 22px 20px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', fontWeight: 700, letterSpacing: 0.5, marginBottom: 6, fontFamily: "'Figtree', sans-serif" }}>{card.set_name}</div>
-        <div style={{ fontSize: 26, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.5, lineHeight: 1.1, marginBottom: 24 }}>{card.card_name}</div>
-
-        {/* Large centered card image */}
-        {card.image_url && (
-          <div style={{ position: 'relative', marginBottom: -50 }}>
-            <img src={card.image_url} alt={card.card_name} style={{ width: 200, height: 280, objectFit: 'contain', borderRadius: 14, filter: 'drop-shadow(0 20px 40px rgba(0,0,0,0.5))' }} />
-          </div>
-        )}
-      </div>
-
-      {/* Data section — sits below the card image with overlap */}
+      {/* Data section */}
       <div style={{ paddingTop: card.image_url ? 60 : 20, background: v.bg }}>
         {/* Big price */}
         <div style={{ textAlign: 'center', padding: '0 24px 16px', borderBottom: `1px solid ${v.br}` }}>
@@ -581,7 +659,7 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
           ))}
         </div>
 
-        {/* Trend + grade multiple */}
+        {/* Trend numbers */}
         <div style={{ display: 'grid', gridTemplateColumns: psa10x ? '1fr 1fr 1fr' : '1fr 1fr', borderBottom: `1px solid ${v.br}` }}>
           {[
             { label: '7d',      val: pct(card.raw_pct_7d),  col: pctCol(card.raw_pct_7d,  v) },
@@ -594,6 +672,9 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
             </div>
           ))}
         </div>
+
+        {/* Full-width sparkline graph */}
+        <FullWidthSparkline card={card} v={v} />
       </div>
 
       <BrandingBar v={v} />
@@ -857,54 +938,80 @@ function GradeCompare({ card, theme }: { card: CardData; theme: Theme }) {
 function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; theme: Theme; period: MoversPeriod; direction: MoversDirection }) {
   const v = getThemeVars(theme)
   const periodLabel = { '7d': '7 Days', '30d': '30 Days', '90d': '90 Days' }[period]
-  const accentCol = direction === 'rising' ? v.green : v.red
+  const isRising = direction === 'rising'
+  const accentCol = isRising ? v.green : v.red
   const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
   const top5 = movers.slice(0, 5)
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", width: '100%' }}>
-      {/* Header */}
-      <div style={{ background: '#0d2040', padding: '20px 24px 18px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <Watermark color="rgba(255,255,255,0.6)" />
-          <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.35)' }}>{today}</span>
-        </div>
-        <div style={{ fontSize: 24, fontWeight: 900, color: '#fff', letterSpacing: -0.5, fontFamily: "'Outfit', sans-serif" }}>
-          {direction === 'rising' ? 'Top 5 Risers' : 'Top 5 Fallers'}
-        </div>
-        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', marginTop: 4, fontWeight: 600 }}>
-          Past {periodLabel} · Volume-verified signals
+      {/* Fun gradient header */}
+      <div style={{
+        background: isRising
+          ? 'linear-gradient(135deg, #051a0a 0%, #0a3015 40%, #0f4520 100%)'
+          : 'linear-gradient(135deg, #1a0505 0%, #300a0a 40%, #451010 100%)',
+        padding: '22px 24px 20px', position: 'relative', overflow: 'hidden',
+      }}>
+        {/* Decorative circles */}
+        <div style={{ position: 'absolute', top: -30, right: -20, width: 120, height: 120, borderRadius: '50%', background: accentCol, opacity: 0.1 }} />
+        <div style={{ position: 'absolute', top: 10, right: 60, width: 60, height: 60, borderRadius: '50%', background: accentCol, opacity: 0.07 }} />
+        <div style={{ position: 'absolute', bottom: -20, left: 40, width: 80, height: 80, borderRadius: '50%', background: accentCol, opacity: 0.05 }} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', position: 'relative' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <div style={{ width: 14, height: 14, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.85)' }} />
+              </div>
+              <span style={{ fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,0.7)', letterSpacing: 1.4, textTransform: 'uppercase' }}>PokePrices.io</span>
+            </div>
+            <div style={{ fontSize: 28, fontWeight: 900, color: '#fff', letterSpacing: -0.5, lineHeight: 1, fontFamily: "'Outfit', sans-serif" }}>
+              Top 5 {isRising ? 'Risers' : 'Fallers'}
+            </div>
+            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 6, fontWeight: 600 }}>
+              Past {periodLabel} · Volume-verified
+            </div>
+          </div>
+          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+            <div style={{
+              fontSize: 11, fontWeight: 800, color: accentCol,
+              background: `${accentCol}20`, border: `1px solid ${accentCol}40`,
+              borderRadius: 20, padding: '4px 12px', marginBottom: 6, whiteSpace: 'nowrap',
+            }}>{isRising ? '↑ Rising' : '↓ Falling'}</div>
+            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>{today}</div>
+          </div>
         </div>
       </div>
 
-      {/* Cards */}
-      <div style={{ padding: '8px 0 4px' }}>
+      {/* Card rows */}
+      <div>
         {top5.map((m, i) => (
           <div key={i} style={{
-            display: 'flex', alignItems: 'center', gap: 14,
+            display: 'flex', alignItems: 'center', gap: 12,
             padding: '14px 20px',
             borderBottom: i < top5.length - 1 ? `1px solid ${v.br}` : 'none',
           }}>
-            {/* Card image */}
+            <div style={{ width: 20, flexShrink: 0, fontSize: 11, fontWeight: 900, color: v.mu, textAlign: 'center', fontFamily: "'Outfit', sans-serif" }}>{i + 1}</div>
             <div style={{ flexShrink: 0 }}>
               {m.image_url
                 ? <img src={m.image_url} alt={m.card_name} style={{ width: 44, height: 62, objectFit: 'contain', borderRadius: 5, display: 'block' }} loading="lazy" />
-                : <div style={{ width: 44, height: 62, background: v.dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>🃏</div>
+                : <div style={{ width: 44, height: 62, background: v.dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: v.mu }}>?</div>
               }
             </div>
-
-            {/* Name + set + volume */}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 14, fontWeight: 800, color: v.tx, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.2 }}>{m.card_name}</div>
               <div style={{ fontSize: 12, color: v.mu, fontWeight: 600, marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.set_name}</div>
               {m.volume_label && <div style={{ fontSize: 11, color: v.green, fontWeight: 700, marginTop: 3 }}>{m.volume_label}</div>}
             </div>
-
-            {/* Price + change */}
             <div style={{ flexShrink: 0, textAlign: 'right' }}>
-              <div style={{ fontSize: 14, fontWeight: 900, color: v.tx, fontFamily: "'Outfit', sans-serif" }}>{fmt(m.current_price)}</div>
-              <div style={{ fontSize: 11, color: v.mu, marginTop: 2 }}>{fmtGbp(m.current_price)}</div>
-              <div style={{ fontSize: 16, fontWeight: 900, color: accentCol, marginTop: 4, letterSpacing: -0.3, fontFamily: "'Outfit', sans-serif" }}>{pct(m.pct_change)}</div>
+              <div style={{ fontSize: 14, fontWeight: 900, color: v.tx, fontFamily: "'Outfit', sans-serif" }}>
+                {m.current_price > 0 ? fmt(m.current_price) : '—'}
+              </div>
+              <div style={{ fontSize: 11, color: v.mu, marginTop: 1 }}>
+                {m.current_price > 0 ? fmtGbp(m.current_price) : ''}
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 900, color: accentCol, marginTop: 4, letterSpacing: -0.5, fontFamily: "'Outfit', sans-serif" }}>
+                {pct(m.pct_change)}
+              </div>
             </div>
           </div>
         ))}
@@ -1455,22 +1562,6 @@ export default function StudioPageClient() {
               </div>
             )}
           </div>
-
-          {/* Export */}
-          <button
-            onClick={exportPng}
-            disabled={!canExport || exporting}
-            style={{
-              padding: '14px 20px', borderRadius: 12,
-              background: canExport ? 'var(--primary)' : 'var(--bg-light)',
-              color: canExport ? '#fff' : 'var(--text-muted)',
-              border: 'none', cursor: canExport ? 'pointer' : 'not-allowed',
-              fontSize: 14, fontWeight: 800, fontFamily: "'Figtree',sans-serif",
-              transition: 'opacity 0.15s', opacity: exporting ? 0.6 : 1,
-            }}
-          >
-            {exporting ? 'Exporting…' : '⬇ Download PNG'}
-          </button>
         </div>
 
         {/* ── CENTRE: Preview ── */}
@@ -1478,6 +1569,24 @@ export default function StudioPageClient() {
           <div style={{ maxWidth: 520 }}>
             {renderVisual()}
           </div>
+          {/* Download button below preview */}
+          <button
+            onClick={exportPng}
+            disabled={!canExport || exporting}
+            style={{
+              marginTop: 16, padding: '14px 28px', borderRadius: 12,
+              background: canExport ? 'linear-gradient(135deg, #1a5fad, #2874c8)' : 'var(--bg-light)',
+              color: canExport ? '#fff' : 'var(--text-muted)',
+              border: 'none', cursor: canExport ? 'pointer' : 'not-allowed',
+              fontSize: 14, fontWeight: 800, fontFamily: "'Figtree',sans-serif",
+              transition: 'opacity 0.15s', opacity: exporting ? 0.6 : 1,
+              display: 'flex', alignItems: 'center', gap: 8,
+              boxShadow: canExport ? '0 4px 16px rgba(26,95,173,0.35)' : 'none',
+            }}
+          >
+            <span style={{ fontSize: 16 }}>⬇</span>
+            {exporting ? 'Generating PNG…' : 'Download PNG'}
+          </button>
         </div>
 
         {/* ── RIGHT: Quick Risers ── */}
@@ -1511,5 +1620,6 @@ export default function StudioPageClient() {
         )}
       </div>
     </div>
+  </div>
   )
 }

@@ -44,7 +44,7 @@ async function toDataUrl(url: string): Promise<string | null> {
     let b = ''
     const chunk = 8192
     for (let i = 0; i < bytes.length; i += chunk) {
-      b += String.fromCharCode(...bytes.subarray(i, i + chunk))
+      b += String.fromCharCode(...Array.from(bytes.subarray(i, i + chunk)))
     }
     return `data:${ct};base64,${btoa(b)}`
   } catch {
@@ -99,8 +99,7 @@ export async function POST(req: NextRequest) {
     if (figtreeReg)  fonts.push({ name: 'Figtree', data: figtreeReg,  weight: 700, style: 'normal' })
 
     // Canvas dimensions
-    const isWide = visualType === 'movers'
-    const width  = isWide ? 680 : 520
+    const width  = 480  // uniform width for all exports
 
     // Pre-fetch card image
     let imgSrc: string | null = null
@@ -108,7 +107,7 @@ export async function POST(req: NextRequest) {
 
     // ── Helpers for JSX ────────────────────────────────────────────────────────
 
-    function Watermark() {
+    const Watermark = () => {
       return (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{ width: 14, height: 14, borderRadius: 7, background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -119,7 +118,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    function Footer() {
+    const Footer = () => {
       return (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 20px', borderTop: `1px solid ${br}`, background: dk ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.02)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
@@ -134,7 +133,7 @@ export async function POST(req: NextRequest) {
     }
 
     // SVG triangle badge — avoids Unicode glyph issues in Satori
-    function SigBadge({ label, dir, col }: { label: string; dir: string; col: string }) {
+    const SigBadge = ({ label, dir, col }: { label: string; dir: string; col: string }) => {
       const triUp   = 'M5,10 L10,2 L15,10 Z'
       const triDown = 'M5,2 L10,10 L15,2 Z'
       const triFlat = 'M2,6 L14,6 M8,2 L14,6 L8,10'
@@ -153,7 +152,7 @@ export async function POST(req: NextRequest) {
     }
 
     // SVG sparkline from historical price points
-    function Sparkline({ points, color, w = 110, h = 44 }: { points: number[]; color: string; w?: number; h?: number }) {
+    const Sparkline = ({ points, color, w = 110, h = 44 }: { points: number[]; color: string; w?: number; h?: number }) => {
       if (points.length < 2) return null
       const pad = 3
       const min = Math.min(...points), max = Math.max(...points)
@@ -230,7 +229,7 @@ export async function POST(req: NextRequest) {
             </div>
             <Footer />
           </div>
-        ), { width, height: 700, fonts })
+        ), { width: 480, height: 640, fonts })
       }
 
       // ── MINIMAL layout ──
@@ -274,7 +273,7 @@ export async function POST(req: NextRequest) {
             )}
             <Footer />
           </div>
-        ), { width, height: 500, fonts })
+        ), { width: 480, height: 460, fonts })
       }
 
       // ── HERO layout ──
@@ -321,7 +320,7 @@ export async function POST(req: NextRequest) {
             </div>
             <Footer />
           </div>
-        ), { width, height: 800, fonts })
+        ), { width: 480, height: 740, fonts })
       }
 
       // ── COMPACT layout (default) ──
@@ -378,7 +377,7 @@ export async function POST(req: NextRequest) {
           </div>
           <Footer />
         </div>
-      ), { width, height: 560, fonts })
+      ), { width: 480, height: 520, fonts })
     }
 
     // ── PSA GAUGE ──────────────────────────────────────────────────────────────
@@ -451,7 +450,7 @@ export async function POST(req: NextRequest) {
           </div>
           <Footer />
         </div>
-      ), { width, height: 520, fonts })
+      ), { width: 480, height: 480, fonts })
     }
 
     // ── PEAK DISTANCE ──────────────────────────────────────────────────────────
@@ -504,7 +503,7 @@ export async function POST(req: NextRequest) {
           </div>
           <Footer />
         </div>
-      ), { width, height: 480, fonts })
+      ), { width: 480, height: 440, fonts })
     }
 
     // ── TEMPERATURE ────────────────────────────────────────────────────────────
@@ -557,7 +556,7 @@ export async function POST(req: NextRequest) {
           </div>
           <Footer />
         </div>
-      ), { width, height: 500, fonts })
+      ), { width: 480, height: 460, fonts })
     }
 
     // ── GRADE COMPARE ──────────────────────────────────────────────────────────
@@ -611,7 +610,7 @@ export async function POST(req: NextRequest) {
           </div>
           <Footer />
         </div>
-      ), { width, height: 400 + grades.length * 70, fonts })
+      ), { width: 480, height: 380 + grades.length * 66, fonts })
     }
 
     // ── MOVERS ─────────────────────────────────────────────────────────────────
@@ -661,8 +660,8 @@ export async function POST(req: NextRequest) {
               </div>
               {/* Price + change */}
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flexShrink: 0 }}>
-                <span style={{ fontSize: 14, fontWeight: 900, color: tx, fontFamily: 'Outfit' }}>{fmt(m.current_price)}</span>
-                <span style={{ fontSize: 11, color: mu, marginTop: 2, fontFamily: 'Figtree' }}>{fmtGbp(m.current_price)}</span>
+                <span style={{ fontSize: 14, fontWeight: 900, color: tx, fontFamily: 'Outfit' }}>{m.current_price > 0 ? fmt(m.current_price) : '—'}</span>
+                <span style={{ fontSize: 11, color: mu, marginTop: 2, fontFamily: 'Figtree' }}>{m.current_price > 0 ? fmtGbp(m.current_price) : ''}</span>
                 <span style={{ fontSize: 18, fontWeight: 900, color: accentCol, marginTop: 4, fontFamily: 'Outfit', letterSpacing: -0.3 }}>{pct(m.pct_change)}</span>
               </div>
             </div>
@@ -670,7 +669,7 @@ export async function POST(req: NextRequest) {
 
           <Footer />
         </div>
-      ), { width: 520, height: 148 + top5.length * 90, fonts })
+      ), { width: 480, height: 138 + top5.length * 84, fonts })
     }
 
     // ── SET REPORT ─────────────────────────────────────────────────────────────
@@ -720,7 +719,7 @@ export async function POST(req: NextRequest) {
           })}
           <Footer />
         </div>
-      ), { width: 520, height: 200 + setData.top_cards.slice(0, 10).length * 52, fonts })
+      ), { width: 480, height: 180 + Math.min(setData.top_cards.length, 10) * 48, fonts })
     }
 
     return new Response(JSON.stringify({ error: 'Nothing to render' }), {
