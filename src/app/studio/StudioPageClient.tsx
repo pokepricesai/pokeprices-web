@@ -360,21 +360,23 @@ function PokeBgDecor({ v }: { v: ReturnType<typeof getThemeVars> }) {
 function BrandingBar({ v }: { v: ReturnType<typeof getThemeVars> }) {
   return (
     <div style={{
-      padding: '10px 20px',
+      padding: '12px 20px',
       borderTop: `1px solid ${v.br}`,
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
-      minHeight: 38,
+      minHeight: 44,
       background: v.dk ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.02)',
+      flexWrap: 'nowrap',
+      gap: 8,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0 }}>
         <div style={{ width: 16, height: 16, borderRadius: '50%', background: 'linear-gradient(135deg, #1a5fad, #2874c8)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'rgba(255,255,255,0.9)' }} />
         </div>
-        <span style={{ fontSize: 11, fontWeight: 800, color: v.tx, letterSpacing: 0.3, opacity: 0.6 }}>Powered by PokePrices.io</span>
+        <span style={{ fontSize: 11, fontWeight: 800, color: v.tx, letterSpacing: 0.3, opacity: 0.6, whiteSpace: 'nowrap' }}>Powered by PokePrices.io</span>
       </div>
-      <span style={{ fontSize: 10, color: v.mu, fontWeight: 600 }}>Not financial advice</span>
+      <span style={{ fontSize: 10, color: v.mu, fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0 }}>Not financial advice</span>
     </div>
   )
 }
@@ -1650,7 +1652,7 @@ export default function StudioPageClient() {
 
         {/* CENTRE: Preview */}
         <div>
-          <div id="studio-preview" style={{ maxWidth: 520 }}>
+          <div id="studio-preview" style={{ width: 520, maxWidth: '100%' }}>
             {renderVisual()}
           </div>
           {/* Download button below preview */}
@@ -1704,5 +1706,6 @@ export default function StudioPageClient() {
         )}
       </div>
     </div>
+
   )
 }
