@@ -302,13 +302,13 @@ function Sparkline({ card, color, height = 40 }: { card: CardData; color: string
   )
 }
 
-// ── Decorative Pokémon outline SVGs for header backgrounds ───────────────────
+// ── Decorative Pokemon outline SVGs for header backgrounds ───────────────────
 // Simple geometric outlines - not actual copyrighted art, just abstract shapes
 function PokeBgDecor({ v }: { v: ReturnType<typeof getThemeVars> }) {
   const col = 'rgba(255,255,255,0.04)'
   return (
     <svg style={{ position: 'absolute', top: 0, right: 0, width: '100%', height: '100%', pointerEvents: 'none' }} viewBox="0 0 520 140" preserveAspectRatio="xMaxYMid slice">
-      {/* Pokéball outline */}
+      {/* Pokeball outline */}
       <circle cx="440" cy="30" r="55" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="1.5" />
       <line x1="385" y1="30" x2="495" y2="30" stroke="rgba(255,255,255,0.06)" strokeWidth="1.5" />
       <circle cx="440" cy="30" r="12" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1.5" />
@@ -607,7 +607,7 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", width: '100%' }}>
-      {/* Header — full hero gradient with decor */}
+      {/* Header - full hero gradient with decor */}
       <div style={{ background: 'linear-gradient(160deg, #0a1f4e 0%, #1a5fad 50%, #2874c8 100%)', position: 'relative', overflow: 'hidden' }}>
         <PokeBgDecor v={v} />
         {/* Top bar */}
@@ -1402,7 +1402,7 @@ export default function StudioPageClient() {
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '280px 1fr 240px', gap: isMobile ? 14 : 24, alignItems: 'start' }}>
 
-        {/* ── LEFT: Controls ── */}
+        {/* LEFT: Controls */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
           {/* Visual type selector */}
@@ -1521,7 +1521,7 @@ export default function StudioPageClient() {
               </div>
             </div>
 
-            {/* Layout variants — only for insight card */}
+            {/* Layout variants - only for insight card */}
             {visualType === 'insight' && (
               <div style={{ marginBottom: 12 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, fontFamily: "'Figtree',sans-serif" }}>Layout</div>
@@ -1564,7 +1564,7 @@ export default function StudioPageClient() {
           </div>
         </div>
 
-        {/* ── CENTRE: Preview ── */}
+        {/* CENTRE: Preview */}
         <div>
           <div style={{ maxWidth: 520 }}>
             {renderVisual()}
@@ -1589,7 +1589,7 @@ export default function StudioPageClient() {
           </button>
         </div>
 
-        {/* ── RIGHT: Quick Risers ── */}
+        {/* RIGHT: Quick Risers */}
         {!isMobile && (
           <div style={{ ...panelStyle, position: 'sticky', top: 24 }}>
             <span style={labelStyle}>Quick Risers</span>
