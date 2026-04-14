@@ -310,33 +310,52 @@ function Sparkline({ card, color, height = 40 }: { card: CardData; color: string
   )
 }
 
-// -- Pokemon silhouettes for card headers - matches homepage style -------------
+// -- Pokemon silhouettes + sparkles for card headers -------------------------
 const CARD_POKEMON = [
-  { id: 6,   right: '-10px', top: '-15px',  size: 90,  opacity: 0.08 },
-  { id: 150, right: '60px',  top: '10px',   size: 55,  opacity: 0.05 },
-  { id: 25,  left:  '10px',  bottom: '-5px', size: 40, opacity: 0.06 },
+  { id: 6,   right: '-20px', top: '-20px',    size: 120, opacity: 0.13 },
+  { id: 150, right: '70px',  top: '0px',      size: 70,  opacity: 0.08 },
+  { id: 25,  left:  '-15px', bottom: '-15px', size: 60,  opacity: 0.09 },
+  { id: 197, left:  '75px',  top: '-8px',     size: 44,  opacity: 0.06 },
 ]
 
 function PokeBgDecor({ v }: { v: ReturnType<typeof getThemeVars> }) {
   return (
     <>
+      {/* Pokemon silhouettes */}
       {CARD_POKEMON.map((p, i) => (
         <div key={i} style={{
           position: 'absolute',
-          right: p.right, left: (p as any).left,
-          top: p.top, bottom: (p as any).bottom,
+          right: (p as any).right,
+          left: (p as any).left,
+          top: (p as any).top,
+          bottom: (p as any).bottom,
           width: p.size, height: p.size,
           opacity: p.opacity, pointerEvents: 'none',
           filter: 'brightness(0) invert(1)',
-          flexShrink: 0,
         }}>
           <img
-            src={proxyImg(`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.id}.png`) || ``}
-            alt=""
-            width={p.size} height={p.size}
+            src={proxyImg(`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.id}.png`) || ''}
+            alt="" width={p.size} height={p.size}
             style={{ objectFit: 'contain', width: '100%', height: '100%' }}
           />
         </div>
+      ))}
+      {/* Sparkle dots */}
+      {[
+        { top: '20%', left: '38%', size: 3, op: 0.5 },
+        { top: '65%', left: '48%', size: 2, op: 0.4 },
+        { top: '35%', left: '62%', size: 4, op: 0.3 },
+        { top: '50%', right: '38%', size: 2, op: 0.4 },
+        { top: '15%', left: '52%', size: 2, op: 0.3 },
+      ].map((d, i) => (
+        <div key={`sp${i}`} style={{
+          position: 'absolute',
+          top: (d as any).top, left: (d as any).left, right: (d as any).right,
+          width: d.size, height: d.size,
+          borderRadius: '50%',
+          background: `rgba(255,255,255,${d.op})`,
+          pointerEvents: 'none',
+        }} />
       ))}
     </>
   )
@@ -732,7 +751,7 @@ function PsaGauge({ card, theme }: { card: CardData; theme: Theme }) {
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif" }}>
-      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ background: 'linear-gradient(135deg, #1a0a3e 0%, #4a1a8a 60%, #7c3aed 100%)', padding: '20px 22px 18px', position: 'relative', overflow: 'hidden' }}>
         <PokeBgDecor v={v} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, position: 'relative' }}>
           <Watermark />
@@ -787,7 +806,7 @@ function PeakDistance({ card, theme }: { card: CardData; theme: Theme }) {
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif" }}>
-      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ background: 'linear-gradient(135deg, #0a2a2a 0%, #0d5c5c 60%, #0891b2 100%)', padding: '20px 22px 18px', position: 'relative', overflow: 'hidden' }}>
         <PokeBgDecor v={v} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, position: 'relative' }}>
           <Watermark />
@@ -847,7 +866,7 @@ function MarketTemperature({ card, theme }: { card: CardData; theme: Theme }) {
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif" }}>
-      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ background: 'linear-gradient(135deg, #2a0a00 0%, #7c2d12 60%, #c2410c 100%)', padding: '20px 22px 18px', position: 'relative', overflow: 'hidden' }}>
         <PokeBgDecor v={v} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, position: 'relative' }}>
           <Watermark />
@@ -909,7 +928,7 @@ function GradeCompare({ card, theme }: { card: CardData; theme: Theme }) {
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif" }}>
-      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '20px 22px 18px', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ background: 'linear-gradient(135deg, #052010 0%, #065f46 60%, #059669 100%)', padding: '20px 22px 18px', position: 'relative', overflow: 'hidden' }}>
         <PokeBgDecor v={v} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, position: 'relative' }}>
           <Watermark />
@@ -1054,7 +1073,7 @@ function SetReport({ setData, theme }: { setData: SetData; theme: Theme }) {
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif" }}>
-      <div style={{ background: 'linear-gradient(135deg, #0d2b5e 0%, #1a5fad 60%, #2874c8 100%)', padding: '22px 24px 20px' }}>
+      <div style={{ background: 'linear-gradient(135deg, #1e1b4b 0%, #3730a3 60%, #4f46e5 100%)', padding: '22px 24px 20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <Watermark />
           <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.4)' }}>Set Performance Report</span>
@@ -1327,29 +1346,29 @@ export default function StudioPageClient() {
     if (exporting) return
     setExporting(true)
     try {
-      // Dynamically import html2canvas to avoid SSR issues
-      const html2canvas = (await import('html2canvas')).default
-
-      // Find the preview element
       const el = document.getElementById('studio-preview')
       if (!el) throw new Error('Preview not found')
 
-      // Screenshot at 2x resolution for crisp output
-      const canvas = await html2canvas(el, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: null,
-        logging: false,
-      })
+      // Load html-to-image from CDN
+      if (!(window as any).htmlToImage) {
+        await new Promise<void>((resolve, reject) => {
+          const s = document.createElement('script')
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html-to-image/1.11.11/html-to-image.min.js'
+          s.onload = () => resolve()
+          s.onerror = () => reject(new Error('Failed to load export library'))
+          document.head.appendChild(s)
+        })
+      }
 
-      const url  = canvas.toDataURL('image/png')
+      const { toPng } = (window as any).htmlToImage
+      const dataUrl = await toPng(el, { pixelRatio: 2 })
+
       const link = document.createElement('a')
       const fileName = card
         ? `pokeprices-${card.card_name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${visualType}-${cardLayout}.png`
         : `pokeprices-${visualType}-${moversPeriod}.png`
       link.download = fileName
-      link.href = url
+      link.href = dataUrl
       link.click()
     } catch (e: any) {
       console.error('Export failed:', e)
