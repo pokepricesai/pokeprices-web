@@ -11,7 +11,7 @@ function useDebounce<T>(value: T, delay: number): T {
   return debounced
 }
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// -- Types ---------------------------------------------------------------------
 
 interface CardData {
   card_slug: string
@@ -60,16 +60,16 @@ type GradeView = 'raw' | 'psa9' | 'psa10'
 type CardLayout = 'compact' | 'showcase' | 'minimal' | 'hero'
 
 const VISUAL_TYPES: { id: VisualType; label: string; icon: string; desc: string; category: string }[] = [
-  { id: 'insight',       label: 'Insight Card',   icon: '◈', desc: 'Prices, trend & grade premium',        category: 'Card'   },
-  { id: 'psa-gauge',     label: 'PSA Gauge',       icon: '◎', desc: 'How extreme is the grading premium?', category: 'Card'   },
-  { id: 'peak-distance', label: 'Peak Distance',   icon: '△', desc: 'Price vs its recent high',            category: 'Card'   },
-  { id: 'temperature',   label: 'Temperature',     icon: '◉', desc: 'Is this card hot or cooling?',        category: 'Card'   },
-  { id: 'grade-compare', label: 'Grade Compare',   icon: '⬡', desc: 'Raw vs PSA 9 vs PSA 10 bars',        category: 'Card'   },
-  { id: 'movers',        label: 'Market Movers',   icon: '↑↓', desc: 'Top risers or fallers',              category: 'Market' },
-  { id: 'set-report',    label: 'Set Report',      icon: '▦', desc: '30-day performance snapshot',         category: 'Set'    },
+  { id: 'insight',       label: 'Insight Card',   icon: '*', desc: 'Prices, trend & grade premium',        category: 'Card'   },
+  { id: 'psa-gauge',     label: 'PSA Gauge',       icon: 'o', desc: 'How extreme is the grading premium?', category: 'Card'   },
+  { id: 'peak-distance', label: 'Peak Distance',   icon: '^', desc: 'Price vs its recent high',            category: 'Card'   },
+  { id: 'temperature',   label: 'Temperature',     icon: 'o', desc: 'Is this card hot or cooling?',        category: 'Card'   },
+  { id: 'grade-compare', label: 'Grade Compare',   icon: 'o', desc: 'Raw vs PSA 9 vs PSA 10 bars',        category: 'Card'   },
+  { id: 'movers',        label: 'Market Movers',   icon: '^v', desc: 'Top risers or fallers',              category: 'Market' },
+  { id: 'set-report',    label: 'Set Report',      icon: '#', desc: '30-day performance snapshot',         category: 'Set'    },
 ]
 
-// ── Data fetching ─────────────────────────────────────────────────────────────
+// -- Data fetching -------------------------------------------------------------
 
 const GBP = 0.79
 
@@ -175,7 +175,7 @@ async function fetchSetData(setName: string): Promise<SetData | null> {
   }
 }
 
-// ── Theme ─────────────────────────────────────────────────────────────────────
+// -- Theme ---------------------------------------------------------------------
 
 function getThemeVars(theme: Theme) {
   const dk = theme === 'dark'
@@ -194,7 +194,7 @@ function getThemeVars(theme: Theme) {
   }
 }
 
-// ── Shared components ─────────────────────────────────────────────────────────
+// -- Shared components ---------------------------------------------------------
 
 // Proxy external images through our API to avoid CORS issues with html2canvas
 function proxyImg(url: string | null): string | null {
@@ -220,7 +220,7 @@ function Watermark({ color = 'rgba(255,255,255,0.7)' }: { color?: string }) {
 }
 
 // Footer branding bar - consistent across all visuals
-// ── Full-width sparkline for Hero layout ─────────────────────────────────────
+// -- Full-width sparkline for Hero layout -------------------------------------
 function FullWidthSparkline({ card, v }: { card: CardData; v: ReturnType<typeof getThemeVars> }) {
   const now = card.current_raw
   if (!now) return null
@@ -309,7 +309,7 @@ function Sparkline({ card, color, height = 40 }: { card: CardData; color: string
   )
 }
 
-// ── Pokemon silhouettes for card headers - matches homepage style ─────────────
+// -- Pokemon silhouettes for card headers - matches homepage style -------------
 const CARD_POKEMON = [
   { id: 6,   right: '-10px', top: '-15px',  size: 90,  opacity: 0.08 },
   { id: 150, right: '60px',  top: '10px',   size: 55,  opacity: 0.05 },
@@ -377,7 +377,7 @@ function SignalBadge({ label, color }: { label: string; color: string }) {
   )
 }
 
-// ── VISUAL 1a: Insight Card - Compact (original style, fixed) ─────────────────
+// -- VISUAL 1a: Insight Card - Compact (original style, fixed) -----------------
 
 function InsightCardCompact({ card, theme, gradeView }: { card: CardData; theme: Theme; gradeView: GradeView }) {
   const v = getThemeVars(theme)
@@ -385,8 +385,8 @@ function InsightCardCompact({ card, theme, gradeView }: { card: CardData; theme:
   const focusPrice = gradeView === 'psa10' ? card.current_psa10 : gradeView === 'psa9' ? card.current_psa9 : card.current_raw
   const focusLabel = gradeView === 'psa10' ? 'PSA 10' : gradeView === 'psa9' ? 'PSA 9' : 'Raw'
   const sig = card.raw_pct_30d != null
-    ? card.raw_pct_30d > 15  ? { label: '▲ Trending Up', col: v.green }
-    : card.raw_pct_30d < -15 ? { label: '▼ Cooling',     col: v.red   }
+    ? card.raw_pct_30d > 15  ? { label: '^ Trending Up', col: v.green }
+    : card.raw_pct_30d < -15 ? { label: 'v Cooling',     col: v.red   }
     : { label: '- Stable', col: v.yellow }
     : { label: '- Stable', col: v.yellow }
 
@@ -443,7 +443,7 @@ function InsightCardCompact({ card, theme, gradeView }: { card: CardData; theme:
           {[
             { label: '7d',      val: pct(card.raw_pct_7d),  col: pctCol(card.raw_pct_7d,  v) },
             { label: '30d',     val: pct(card.raw_pct_30d), col: pctCol(card.raw_pct_30d, v) },
-            ...(psa10x ? [{ label: 'Grade ×', val: psa10x + '×', col: '#a78bfa' }] : []),
+            ...(psa10x ? [{ label: 'Grade x', val: psa10x + 'x', col: '#a78bfa' }] : []),
           ].map((s, i, arr) => (
             <div key={s.label} style={{ padding: '12px 14px', borderRight: i < arr.length - 1 ? `1px solid ${v.br}` : 'none' }}>
               <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4 }}>{s.label}</div>
@@ -462,7 +462,7 @@ function InsightCardCompact({ card, theme, gradeView }: { card: CardData; theme:
   )
 }
 
-// ── VISUAL 1b: Insight Card - Showcase (Syncd-style, large image) ─────────────
+// -- VISUAL 1b: Insight Card - Showcase (Syncd-style, large image) -------------
 
 function InsightCardShowcase({ card, theme, gradeView }: { card: CardData; theme: Theme; gradeView: GradeView }) {
   const v = getThemeVars(theme)
@@ -470,8 +470,8 @@ function InsightCardShowcase({ card, theme, gradeView }: { card: CardData; theme
   const focusPrice = gradeView === 'psa10' ? card.current_psa10 : gradeView === 'psa9' ? card.current_psa9 : card.current_raw
   const focusLabel = gradeView === 'psa10' ? 'PSA 10' : gradeView === 'psa9' ? 'PSA 9' : 'Raw'
   const sig = card.raw_pct_30d != null
-    ? card.raw_pct_30d > 15  ? { label: '▲ Trending Up', col: v.green }
-    : card.raw_pct_30d < -15 ? { label: '▼ Cooling',     col: v.red   }
+    ? card.raw_pct_30d > 15  ? { label: '^ Trending Up', col: v.green }
+    : card.raw_pct_30d < -15 ? { label: 'v Cooling',     col: v.red   }
     : { label: '- Stable', col: v.yellow }
     : { label: '- Stable', col: v.yellow }
 
@@ -526,7 +526,7 @@ function InsightCardShowcase({ card, theme, gradeView }: { card: CardData; theme
         {[
           { label: '7d',      val: pct(card.raw_pct_7d),  col: pctCol(card.raw_pct_7d,  v) },
           { label: '30d',     val: pct(card.raw_pct_30d), col: pctCol(card.raw_pct_30d, v) },
-          ...(psa10x ? [{ label: 'Grade ×', val: psa10x + '×', col: '#a78bfa' }] : []),
+          ...(psa10x ? [{ label: 'Grade x', val: psa10x + 'x', col: '#a78bfa' }] : []),
         ].map((s, i, arr) => (
           <div key={s.label} style={{ padding: '14px 16px', borderRight: i < arr.length - 1 ? `1px solid ${v.br}` : 'none' }}>
             <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4 }}>{s.label}</div>
@@ -540,7 +540,7 @@ function InsightCardShowcase({ card, theme, gradeView }: { card: CardData; theme
   )
 }
 
-// ── VISUAL 1c: Insight Card - Minimal (clean, text-forward) ──────────────────
+// -- VISUAL 1c: Insight Card - Minimal (clean, text-forward) ------------------
 
 function InsightCardMinimal({ card, theme, gradeView }: { card: CardData; theme: Theme; gradeView: GradeView }) {
   const v = getThemeVars(theme)
@@ -598,7 +598,7 @@ function InsightCardMinimal({ card, theme, gradeView }: { card: CardData; theme:
       {psa10x && (
         <div style={{ padding: '12px 24px', borderBottom: `1px solid ${v.br}` }}>
           <span style={{ fontSize: 12, color: v.mu }}>Grade multiple: </span>
-          <span style={{ fontSize: 14, fontWeight: 900, color: '#a78bfa' }}>{psa10x}× raw</span>
+          <span style={{ fontSize: 14, fontWeight: 900, color: '#a78bfa' }}>{psa10x}x raw</span>
         </div>
       )}
 
@@ -607,7 +607,7 @@ function InsightCardMinimal({ card, theme, gradeView }: { card: CardData; theme:
   )
 }
 
-// ── VISUAL 1d: Insight Card - Hero (large card, data beneath) ────────────────
+// -- VISUAL 1d: Insight Card - Hero (large card, data beneath) ----------------
 // Inspired by Syncd - card dominates, data lives below it
 
 function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Theme; gradeView: GradeView }) {
@@ -616,8 +616,8 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
   const focusPrice = gradeView === 'psa10' ? card.current_psa10 : gradeView === 'psa9' ? card.current_psa9 : card.current_raw
   const focusLabel = gradeView === 'psa10' ? 'PSA 10' : gradeView === 'psa9' ? 'PSA 9' : 'Raw'
   const sig = card.raw_pct_30d != null
-    ? card.raw_pct_30d > 15  ? { label: '▲ Trending Up', col: v.green }
-    : card.raw_pct_30d < -15 ? { label: '▼ Cooling',     col: v.red   }
+    ? card.raw_pct_30d > 15  ? { label: '^ Trending Up', col: v.green }
+    : card.raw_pct_30d < -15 ? { label: 'v Cooling',     col: v.red   }
     : { label: '- Stable', col: v.yellow }
     : { label: '- Stable', col: v.yellow }
   const sparklineCol = pctCol(card.raw_pct_30d, v)
@@ -681,7 +681,7 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
           {[
             { label: '7d',      val: pct(card.raw_pct_7d),  col: pctCol(card.raw_pct_7d,  v) },
             { label: '30d',     val: pct(card.raw_pct_30d), col: pctCol(card.raw_pct_30d, v) },
-            ...(psa10x ? [{ label: 'Grade ×', val: psa10x + '×', col: '#a78bfa' }] : []),
+            ...(psa10x ? [{ label: 'Grade x', val: psa10x + 'x', col: '#a78bfa' }] : []),
           ].map((s, i, arr) => (
             <div key={s.label} style={{ padding: '12px 14px', borderRight: i < arr.length - 1 ? `1px solid ${v.br}` : 'none', textAlign: 'center' }}>
               <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4, fontFamily: "'Figtree', sans-serif" }}>{s.label}</div>
@@ -706,7 +706,7 @@ function InsightCard({ card, theme, gradeView, layout }: { card: CardData; theme
   return <InsightCardCompact card={card} theme={theme} gradeView={gradeView} />
 }
 
-// ── VISUAL 2: PSA Gauge ───────────────────────────────────────────────────────
+// -- VISUAL 2: PSA Gauge -------------------------------------------------------
 
 function PsaGauge({ card, theme }: { card: CardData; theme: Theme }) {
   const v = getThemeVars(theme)
@@ -745,10 +745,10 @@ function PsaGauge({ card, theme }: { card: CardData; theme: Theme }) {
         <svg viewBox="0 0 300 145" style={{ width: '100%', maxWidth: 300, margin: '0 auto', display: 'block', overflow: 'visible' }}>
           <path d={arcPath(100)} fill="none" stroke={v.br} strokeWidth={16} strokeLinecap="round" />
           {pct20 > 0 && <path d={arcPath(pct20)} fill="none" stroke={gaugeCol} strokeWidth={16} strokeLinecap="round" style={{ filter: `drop-shadow(0 0 6px ${gaugeCol}80)` }} />}
-          <text x="150" y="108" textAnchor="middle" fill={v.tx} fontSize="30" fontWeight="900" fontFamily="Figtree, sans-serif">{multiple ? `${multiple.toFixed(1)}×` : '-'}</text>
-          <text x="150" y="126" textAnchor="middle" fill={v.mu} fontSize="10" fontWeight="700">Raw → PSA 10</text>
-          <text x="60" y="140" textAnchor="middle" fill={v.mu} fontSize="9" fontWeight="700">1×</text>
-          <text x="240" y="140" textAnchor="middle" fill={v.mu} fontSize="9" fontWeight="700">20×</text>
+          <text x="150" y="108" textAnchor="middle" fill={v.tx} fontSize="30" fontWeight="900" fontFamily="Figtree, sans-serif">{multiple ? `${multiple.toFixed(1)}x` : '-'}</text>
+          <text x="150" y="126" textAnchor="middle" fill={v.mu} fontSize="10" fontWeight="700">Raw to PSA 10</text>
+          <text x="60" y="140" textAnchor="middle" fill={v.mu} fontSize="9" fontWeight="700">1x</text>
+          <text x="240" y="140" textAnchor="middle" fill={v.mu} fontSize="9" fontWeight="700">20x</text>
         </svg>
 
         <div style={{ textAlign: 'center', marginTop: 8, fontSize: 12, color: gaugeCol, fontWeight: 800 }}>{label}</div>
@@ -772,7 +772,7 @@ function PsaGauge({ card, theme }: { card: CardData; theme: Theme }) {
   )
 }
 
-// ── VISUAL 3: Peak Distance ───────────────────────────────────────────────────
+// -- VISUAL 3: Peak Distance ---------------------------------------------------
 
 function PeakDistance({ card, theme }: { card: CardData; theme: Theme }) {
   const v = getThemeVars(theme)
@@ -834,13 +834,13 @@ function PeakDistance({ card, theme }: { card: CardData; theme: Theme }) {
   )
 }
 
-// ── VISUAL 4: Market Temperature ──────────────────────────────────────────────
+// -- VISUAL 4: Market Temperature ----------------------------------------------
 
 function MarketTemperature({ card, theme }: { card: CardData; theme: Theme }) {
   const v = getThemeVars(theme)
   const p30 = card.raw_pct_30d
   const temp = p30 == null ? 50 : Math.min(100, Math.max(0, 50 + p30 * 2))
-  const label = p30 == null ? 'Neutral' : p30 > 30 ? '🔥 Very Hot' : p30 > 10 ? '📈 Heating Up' : p30 < -30 ? '🧊 Very Cold' : p30 < -10 ? '📉 Cooling Down' : '➡ Neutral'
+  const label = p30 == null ? 'Neutral' : p30 > 30 ? 'Very Hot' : p30 > 10 ? 'Heating Up' : p30 < -30 ? 'Very Cold' : p30 < -10 ? 'Cooling Down' : ' Neutral'
   const col = p30 == null ? v.yellow : p30 > 10 ? '#f97316' : p30 < -10 ? '#60a5fa' : v.yellow
   const gradFill = `linear-gradient(to right, #60a5fa 0%, #22c55e 30%, ${v.yellow} 50%, #f97316 70%, #ef4444 100%)`
 
@@ -895,7 +895,7 @@ function MarketTemperature({ card, theme }: { card: CardData; theme: Theme }) {
   )
 }
 
-// ── VISUAL 5: Grade Compare ───────────────────────────────────────────────────
+// -- VISUAL 5: Grade Compare ---------------------------------------------------
 
 function GradeCompare({ card, theme }: { card: CardData; theme: Theme }) {
   const v = getThemeVars(theme)
@@ -934,7 +934,7 @@ function GradeCompare({ card, theme }: { card: CardData; theme: Theme }) {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <div style={{ width: 10, height: 10, borderRadius: 2, background: g.col, flexShrink: 0 }} />
                     <span style={{ fontSize: 13, fontWeight: 800, color: v.tx }}>{g.label}</span>
-                    {multiple && <span style={{ fontSize: 11, color: v.mu }}>({multiple}× raw)</span>}
+                    {multiple && <span style={{ fontSize: 11, color: v.mu }}>({multiple}x raw)</span>}
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: 16, fontWeight: 900, color: v.tx }}>{fmt(g.val)}</div>
@@ -955,7 +955,7 @@ function GradeCompare({ card, theme }: { card: CardData; theme: Theme }) {
   )
 }
 
-// ── VISUAL 6: Market Movers ───────────────────────────────────────────────────
+// -- VISUAL 6: Market Movers ---------------------------------------------------
 
 function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; theme: Theme; period: MoversPeriod; direction: MoversDirection }) {
   const v = getThemeVars(theme)
@@ -990,7 +990,7 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
               Top 5 {isRising ? 'Risers' : 'Fallers'}
             </div>
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 6, fontWeight: 600 }}>
-              Past {periodLabel} · Volume-verified
+              Past {periodLabel} . Volume-verified
             </div>
           </div>
           <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -998,7 +998,7 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
               fontSize: 11, fontWeight: 800, color: accentCol,
               background: `${accentCol}20`, border: `1px solid ${accentCol}40`,
               borderRadius: 20, padding: '4px 12px', marginBottom: 6, whiteSpace: 'nowrap',
-            }}>{isRising ? '↑ Rising' : '↓ Falling'}</div>
+            }}>{isRising ? '+ Rising' : '- Falling'}</div>
             <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>{today}</div>
           </div>
         </div>
@@ -1044,7 +1044,7 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
   )
 }
 
-// ── VISUAL 7: Set Report ──────────────────────────────────────────────────────
+// -- VISUAL 7: Set Report ------------------------------------------------------
 
 function SetReport({ setData, theme }: { setData: SetData; theme: Theme }) {
   const v = getThemeVars(theme)
@@ -1112,18 +1112,18 @@ function SetReport({ setData, theme }: { setData: SetData; theme: Theme }) {
   )
 }
 
-// ── Placeholder ───────────────────────────────────────────────────────────────
+// -- Placeholder ---------------------------------------------------------------
 
 function Placeholder({ message = 'Search for a card above to get started' }: { message?: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 320, color: 'var(--text-muted)', fontFamily: "'Figtree',sans-serif", gap: 12, padding: 32, textAlign: 'center' }}>
-      <div style={{ fontSize: 40, opacity: 0.3 }}>◈</div>
+      <div style={{ fontSize: 40, opacity: 0.3 }}>*</div>
       <div style={{ fontSize: 14 }}>{message}</div>
     </div>
   )
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+// -- Main component ------------------------------------------------------------
 
 export default function StudioPageClient() {
   const [visualType,   setVisualType]   = useState<VisualType>('insight')
@@ -1171,7 +1171,7 @@ export default function StudioPageClient() {
     }
   }, [visualType, moversDir, moversPeriod])
 
-  // ── Search - mirrors main site SearchBar logic ────────────────────────────
+  // -- Search - mirrors main site SearchBar logic ----------------------------
   function parseSearchQuery(raw: string): { namePart: string; numberPart: string | null } {
     let q = raw.trim()
     const numberFull  = q.match(/\b(\d{1,3})\/\d+\b/)   // 6/102, 086/123
