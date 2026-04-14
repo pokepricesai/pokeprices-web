@@ -322,17 +322,17 @@ function PokeBgDecor({ v }: { v: ReturnType<typeof getThemeVars> }) {
   return (
     <>
       {/* Inline SVG for circles + sparkles - works in html-to-image */}
-      <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }} viewBox="0 0 520 140" preserveAspectRatio="xMidYMid slice">
-        <circle cx="490" cy="-10" r="90"  fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth="1.5"/>
-        <circle cx="490" cy="-10" r="50"  fill="rgba(255,255,255,0.05)"/>
-        <circle cx="-20" cy="80"  r="70"  fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="1"/>
-        <circle cx="260" cy="150" r="60"  fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="1"/>
-        <circle cx="420" cy="80"  r="35"  fill="rgba(255,255,255,0.03)"/>
-        <circle cx="190" cy="50"  r="2.5" fill="rgba(255,255,255,0.45)"/>
-        <circle cx="340" cy="80"  r="2"   fill="rgba(255,255,255,0.35)"/>
-        <circle cx="120" cy="110" r="1.5" fill="rgba(255,255,255,0.30)"/>
-        <circle cx="390" cy="30"  r="2"   fill="rgba(255,255,255,0.40)"/>
-        <circle cx="270" cy="20"  r="1.5" fill="rgba(255,255,255,0.30)"/>
+      <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }} viewBox="0 0 520 180">
+        <circle cx="500" cy="10"  r="90"  fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth="1.5"/>
+        <circle cx="500" cy="10"  r="50"  fill="rgba(255,255,255,0.05)"/>
+        <circle cx="10"  cy="90"  r="70"  fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="1"/>
+        <circle cx="260" cy="160" r="60"  fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="1"/>
+        <circle cx="420" cy="85"  r="35"  fill="rgba(255,255,255,0.03)"/>
+        <circle cx="190" cy="55"  r="2.5" fill="rgba(255,255,255,0.45)"/>
+        <circle cx="340" cy="85"  r="2"   fill="rgba(255,255,255,0.35)"/>
+        <circle cx="120" cy="115" r="1.5" fill="rgba(255,255,255,0.30)"/>
+        <circle cx="390" cy="35"  r="2"   fill="rgba(255,255,255,0.40)"/>
+        <circle cx="270" cy="25"  r="1.5" fill="rgba(255,255,255,0.30)"/>
       </svg>
       {/* Pokemon silhouettes */}
       {CARD_POKEMON.map((p, i) => (
@@ -650,15 +650,14 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
       }}>
 
         {/* Background circles - inline SVG so html-to-image captures them */}
-        <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }} viewBox="0 0 520 400" preserveAspectRatio="xMidYMid slice">
-          <circle cx="480" cy="-20" r="140" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1"/>
-          <circle cx="480" cy="-20" r="90"  fill="rgba(255,255,255,0.04)"/>
-          <circle cx="-30"  cy="80"  r="110" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="1"/>
-          <circle cx="-30"  cy="80"  r="60"  fill="rgba(255,255,255,0.03)"/>
+        <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }} viewBox="0 0 520 440">
+          <circle cx="480" cy="10"  r="140" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1"/>
+          <circle cx="480" cy="10"  r="90"  fill="rgba(255,255,255,0.04)"/>
+          <circle cx="10"  cy="80"  r="110" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="1"/>
+          <circle cx="10"  cy="80"  r="60"  fill="rgba(255,255,255,0.03)"/>
           <circle cx="260" cy="320" r="70"  fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="1"/>
           <circle cx="420" cy="180" r="40"  fill="rgba(255,255,255,0.03)"/>
           <circle cx="80"  cy="250" r="55"  fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1"/>
-          {/* Sparkle dots */}
           <circle cx="180" cy="60"  r="2.5" fill="rgba(255,255,255,0.5)"/>
           <circle cx="350" cy="90"  r="2"   fill="rgba(255,255,255,0.4)"/>
           <circle cx="120" cy="160" r="1.5" fill="rgba(255,255,255,0.35)"/>
@@ -1705,6 +1704,5 @@ export default function StudioPageClient() {
         )}
       </div>
     </div>
-  </div>
   )
 }
