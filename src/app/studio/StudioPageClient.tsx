@@ -74,19 +74,19 @@ const VISUAL_TYPES: { id: VisualType; label: string; icon: string; desc: string;
 const GBP = 0.79
 
 function fmt(cents: number | null): string {
-  if (!cents || cents <= 0) return '—'
+  if (!cents || cents <= 0) return '-'
   const v = cents / 100
   if (v >= 1000) return `$${v.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
   return `$${v.toFixed(2)}`
 }
 function fmtGbp(cents: number | null): string {
-  if (!cents || cents <= 0) return '—'
+  if (!cents || cents <= 0) return '-'
   const v = (cents / 100) * GBP
   if (v >= 1000) return `£${v.toLocaleString('en-GB', { maximumFractionDigits: 0 })}`
   return `£${v.toFixed(2)}`
 }
 function pct(v: number | null): string {
-  if (v == null) return '—'
+  if (v == null) return '-'
   return `${v > 0 ? '+' : ''}${v.toFixed(1)}%`
 }
 function pctCol(v: number | null, v2 = getThemeVars('dark')) {
@@ -219,7 +219,7 @@ function Watermark({ color = 'rgba(255,255,255,0.7)' }: { color?: string }) {
   )
 }
 
-// Footer branding bar — consistent across all visuals
+// Footer branding bar - consistent across all visuals
 // ── Full-width sparkline for Hero layout ─────────────────────────────────────
 function FullWidthSparkline({ card, v }: { card: CardData; v: ReturnType<typeof getThemeVars> }) {
   const now = card.current_raw
@@ -309,7 +309,7 @@ function Sparkline({ card, color, height = 40 }: { card: CardData; color: string
   )
 }
 
-// ── Pokemon silhouettes for card headers — matches homepage style ─────────────
+// ── Pokemon silhouettes for card headers - matches homepage style ─────────────
 const CARD_POKEMON = [
   { id: 6,   right: '-10px', top: '-15px',  size: 90,  opacity: 0.08 },
   { id: 150, right: '60px',  top: '10px',   size: 55,  opacity: 0.05 },
@@ -363,7 +363,7 @@ function BrandingBar({ v }: { v: ReturnType<typeof getThemeVars> }) {
   )
 }
 
-// Signal badge — contained, no overflow
+// Signal badge - contained, no overflow
 function SignalBadge({ label, color }: { label: string; color: string }) {
   return (
     <span style={{
@@ -377,7 +377,7 @@ function SignalBadge({ label, color }: { label: string; color: string }) {
   )
 }
 
-// ── VISUAL 1a: Insight Card — Compact (original style, fixed) ─────────────────
+// ── VISUAL 1a: Insight Card - Compact (original style, fixed) ─────────────────
 
 function InsightCardCompact({ card, theme, gradeView }: { card: CardData; theme: Theme; gradeView: GradeView }) {
   const v = getThemeVars(theme)
@@ -387,8 +387,8 @@ function InsightCardCompact({ card, theme, gradeView }: { card: CardData; theme:
   const sig = card.raw_pct_30d != null
     ? card.raw_pct_30d > 15  ? { label: '▲ Trending Up', col: v.green }
     : card.raw_pct_30d < -15 ? { label: '▼ Cooling',     col: v.red   }
-    : { label: '— Stable', col: v.yellow }
-    : { label: '— Stable', col: v.yellow }
+    : { label: '- Stable', col: v.yellow }
+    : { label: '- Stable', col: v.yellow }
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", width: '100%' }}>
@@ -462,7 +462,7 @@ function InsightCardCompact({ card, theme, gradeView }: { card: CardData; theme:
   )
 }
 
-// ── VISUAL 1b: Insight Card — Showcase (Syncd-style, large image) ─────────────
+// ── VISUAL 1b: Insight Card - Showcase (Syncd-style, large image) ─────────────
 
 function InsightCardShowcase({ card, theme, gradeView }: { card: CardData; theme: Theme; gradeView: GradeView }) {
   const v = getThemeVars(theme)
@@ -472,8 +472,8 @@ function InsightCardShowcase({ card, theme, gradeView }: { card: CardData; theme
   const sig = card.raw_pct_30d != null
     ? card.raw_pct_30d > 15  ? { label: '▲ Trending Up', col: v.green }
     : card.raw_pct_30d < -15 ? { label: '▼ Cooling',     col: v.red   }
-    : { label: '— Stable', col: v.yellow }
-    : { label: '— Stable', col: v.yellow }
+    : { label: '- Stable', col: v.yellow }
+    : { label: '- Stable', col: v.yellow }
 
   const accentGrad = 'linear-gradient(160deg, #0d2b5e 0%, #1a5fad 50%, #2874c8 100%)'
 
@@ -540,7 +540,7 @@ function InsightCardShowcase({ card, theme, gradeView }: { card: CardData; theme
   )
 }
 
-// ── VISUAL 1c: Insight Card — Minimal (clean, text-forward) ──────────────────
+// ── VISUAL 1c: Insight Card - Minimal (clean, text-forward) ──────────────────
 
 function InsightCardMinimal({ card, theme, gradeView }: { card: CardData; theme: Theme; gradeView: GradeView }) {
   const v = getThemeVars(theme)
@@ -607,8 +607,8 @@ function InsightCardMinimal({ card, theme, gradeView }: { card: CardData; theme:
   )
 }
 
-// ── VISUAL 1d: Insight Card — Hero (large card, data beneath) ────────────────
-// Inspired by Syncd — card dominates, data lives below it
+// ── VISUAL 1d: Insight Card - Hero (large card, data beneath) ────────────────
+// Inspired by Syncd - card dominates, data lives below it
 
 function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Theme; gradeView: GradeView }) {
   const v = getThemeVars(theme)
@@ -618,8 +618,8 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
   const sig = card.raw_pct_30d != null
     ? card.raw_pct_30d > 15  ? { label: '▲ Trending Up', col: v.green }
     : card.raw_pct_30d < -15 ? { label: '▼ Cooling',     col: v.red   }
-    : { label: '— Stable', col: v.yellow }
-    : { label: '— Stable', col: v.yellow }
+    : { label: '- Stable', col: v.yellow }
+    : { label: '- Stable', col: v.yellow }
   const sparklineCol = pctCol(card.raw_pct_30d, v)
 
   return (
@@ -714,7 +714,7 @@ function PsaGauge({ card, theme }: { card: CardData; theme: Theme }) {
   const maxMultiple = 20
   const pct20 = multiple ? Math.min(100, (multiple / maxMultiple) * 100) : 0
   const gaugeCol = !multiple ? v.mu : multiple < 3 ? v.green : multiple < 8 ? v.yellow : v.red
-  const label = !multiple ? 'No data' : multiple < 3 ? 'Low premium — consider PSA 10' : multiple < 8 ? 'Meaningful premium' : 'Very high premium — high risk'
+  const label = !multiple ? 'No data' : multiple < 3 ? 'Low premium - consider PSA 10' : multiple < 8 ? 'Meaningful premium' : 'Very high premium - high risk'
 
   const arcPath = (pct: number) => {
     // Semicircle from left (-180deg) to right (0deg) going OVER the top
@@ -745,7 +745,7 @@ function PsaGauge({ card, theme }: { card: CardData; theme: Theme }) {
         <svg viewBox="0 0 300 145" style={{ width: '100%', maxWidth: 300, margin: '0 auto', display: 'block', overflow: 'visible' }}>
           <path d={arcPath(100)} fill="none" stroke={v.br} strokeWidth={16} strokeLinecap="round" />
           {pct20 > 0 && <path d={arcPath(pct20)} fill="none" stroke={gaugeCol} strokeWidth={16} strokeLinecap="round" style={{ filter: `drop-shadow(0 0 6px ${gaugeCol}80)` }} />}
-          <text x="150" y="108" textAnchor="middle" fill={v.tx} fontSize="30" fontWeight="900" fontFamily="Figtree, sans-serif">{multiple ? `${multiple.toFixed(1)}×` : '—'}</text>
+          <text x="150" y="108" textAnchor="middle" fill={v.tx} fontSize="30" fontWeight="900" fontFamily="Figtree, sans-serif">{multiple ? `${multiple.toFixed(1)}×` : '-'}</text>
           <text x="150" y="126" textAnchor="middle" fill={v.mu} fontSize="10" fontWeight="700">Raw → PSA 10</text>
           <text x="60" y="140" textAnchor="middle" fill={v.mu} fontSize="9" fontWeight="700">1×</text>
           <text x="240" y="140" textAnchor="middle" fill={v.mu} fontSize="9" fontWeight="700">20×</text>
@@ -804,7 +804,7 @@ function PeakDistance({ card, theme }: { card: CardData; theme: Theme }) {
       <div style={{ padding: '20px 24px' }}>
         <div style={{ textAlign: 'center', marginBottom: 20 }}>
           <div style={{ fontSize: 46, fontWeight: 900, color: barCol, letterSpacing: -2 }}>
-            {drawdownPct != null ? (isAtPeak ? 'At Peak' : `${drawdownPct.toFixed(0)}%`) : '—'}
+            {drawdownPct != null ? (isAtPeak ? 'At Peak' : `${drawdownPct.toFixed(0)}%`) : '-'}
           </div>
           <div style={{ fontSize: 12, color: v.mu, marginTop: 4 }}>
             {isAtPeak ? 'Trading near its recent high' : 'below recent high'}
@@ -1026,7 +1026,7 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
             </div>
             <div style={{ flexShrink: 0, textAlign: 'right' }}>
               <div style={{ fontSize: 14, fontWeight: 900, color: v.tx, fontFamily: "'Outfit', sans-serif" }}>
-                {m.current_price > 0 ? fmt(m.current_price) : '—'}
+                {m.current_price > 0 ? fmt(m.current_price) : '-'}
               </div>
               <div style={{ fontSize: 11, color: v.mu, marginTop: 1 }}>
                 {m.current_price > 0 ? fmtGbp(m.current_price) : ''}
@@ -1171,7 +1171,7 @@ export default function StudioPageClient() {
     }
   }, [visualType, moversDir, moversPeriod])
 
-  // ── Search — mirrors main site SearchBar logic ────────────────────────────
+  // ── Search - mirrors main site SearchBar logic ────────────────────────────
   function parseSearchQuery(raw: string): { namePart: string; numberPart: string | null } {
     let q = raw.trim()
     const numberFull  = q.match(/\b(\d{1,3})\/\d+\b/)   // 6/102, 086/123
@@ -1230,7 +1230,7 @@ export default function StudioPageClient() {
       if (data?.length) return data
     }
 
-    // Name search — try full query OR name tokens against card_name OR set_name
+    // Name search - try full query OR name tokens against card_name OR set_name
     const [byName, bySet, byFullQ] = await Promise.all([
       supabase.from('cards').select('card_slug, card_name, set_name, card_number, image_url')
         .ilike('card_name', `%${namePart || q}%`).not('card_slug', 'is', null).limit(6),
@@ -1262,11 +1262,11 @@ export default function StudioPageClient() {
 
   async function selectSuggestion(s: any) {
     setShowSuggestions(false)
-    setCardSearch(`${s.card_name}${s.card_number ? ` #${s.card_number}` : ''} — ${s.set_name}`)
+    setCardSearch(`${s.card_name}${s.card_number ? ` #${s.card_number}` : ''} - ${s.set_name}`)
     setLoading(true)
 
     let cardSlug = s.card_slug
-    // If result came from search_global, card_slug is actually a card_url_slug — look up real slug
+    // If result came from search_global, card_slug is actually a card_url_slug - look up real slug
     if (s.needs_slug_lookup) {
       const { data } = await supabase.from('cards')
         .select('card_slug').eq('card_url_slug', s.card_url_slug)
@@ -1352,7 +1352,7 @@ export default function StudioPageClient() {
       link.click()
     } catch (e: any) {
       console.error('Export failed:', e)
-      alert(`Export failed — ${e.message || 'please try again'}`)
+      alert(`Export failed: ${e.message || 'please try again'}`)
     }
     setExporting(false)
   }
@@ -1365,10 +1365,10 @@ export default function StudioPageClient() {
   const categories  = ['Card', 'Market', 'Set']
 
   function renderVisual() {
-    if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 300, color: 'var(--text-muted)', fontFamily: "'Figtree',sans-serif", fontSize: 14 }}>Loading…</div>
+    if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 300, color: 'var(--text-muted)', fontFamily: "'Figtree',sans-serif", fontSize: 14 }}>Loading...</div>
     if (needsCard && !card) return <Placeholder />
     if (needsMovers) {
-      if (!movers.length) return <Placeholder message="Loading market data…" />
+      if (!movers.length) return <Placeholder message="Loading market data..." />
       return <MarketMovers movers={movers} theme={theme} period={moversPeriod} direction={moversDir} />
     }
     if (needsSet) {
@@ -1499,7 +1499,7 @@ export default function StudioPageClient() {
               <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
                 {(['rising', 'falling'] as MoversDirection[]).map(d => (
                   <button key={d} onClick={() => setMoversDir(d)} style={btnStyle(moversDir === d)}>
-                    {d === 'rising' ? '▲ Rising' : '▼ Falling'}
+                    {d === 'rising' ? '+  Rising' : '-  Falling'}
                   </button>
                 ))}
               </div>
@@ -1520,7 +1520,7 @@ export default function StudioPageClient() {
               <div style={{ display: 'flex', gap: 6 }}>
                 {(['dark', 'light'] as Theme[]).map(t => (
                   <button key={t} onClick={() => setTheme(t)} style={btnStyle(theme === t)}>
-                    {t === 'dark' ? '🌙 Dark' : '☀️ Light'}
+                    {t === 'dark' ? 'Dark' : 'Light'}
                   </button>
                 ))}
               </div>
@@ -1532,8 +1532,8 @@ export default function StudioPageClient() {
                 <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, fontFamily: "'Figtree',sans-serif" }}>Layout</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                   {([
-                    ['compact',  'Compact',  'Classic — prices + trend in one card'],
-                    ['showcase', 'Showcase', 'Large image hero — great for sharing'],
+                    ['compact',  'Compact',  'Classic - prices + trend in one card'],
+                    ['showcase', 'Showcase', 'Large image hero - great for sharing'],
                     ['minimal',  'Minimal',  'Clean text-forward layout'],
                     ['hero',     'Hero',     'Big centered card + data beneath'],
                   ] as [CardLayout, string, string][]).map(([val, label, desc]) => (
@@ -1589,8 +1589,8 @@ export default function StudioPageClient() {
               boxShadow: canExport ? '0 4px 16px rgba(26,95,173,0.35)' : 'none',
             }}
           >
-            <span style={{ fontSize: 16 }}>⬇</span>
-            {exporting ? 'Generating PNG…' : 'Download PNG'}
+            <span style={{ fontSize: 16 }}>v</span>
+            {exporting ? 'Generating PNG...' : 'Download PNG'}
           </button>
         </div>
 
