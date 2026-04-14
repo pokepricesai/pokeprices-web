@@ -213,6 +213,42 @@ function Watermark({ color = 'rgba(255,255,255,0.7)' }: { color?: string }) {
 }
 
 // Footer branding bar — consistent across all visuals
+// ── Sparkline — SVG price trend from historical data points ──────────────────
+function Sparkline({ card, color, height = 40 }: { card: CardData; color: string; height?: number }) {
+  const now = card.current_raw
+  if (!now) return null
+  const points: number[] = []
+  if (card.raw_180d_ago) points.push(card.raw_180d_ago)
+  if (card.raw_90d_ago)  points.push(card.raw_90d_ago)
+  if (card.raw_30d_ago)  points.push(card.raw_30d_ago)
+  points.push(now)
+  if (points.length < 2) return null
+
+  const w = 120, h = height, pad = 3
+  const min = Math.min(...points)
+  const max = Math.max(...points)
+  const range = max - min || 1
+
+  const coords = points.map((p, i) => {
+    const x = pad + (i / (points.length - 1)) * (w - pad * 2)
+    const y = h - pad - ((p - min) / range) * (h - pad * 2)
+    return [x, y] as [number, number]
+  })
+
+  const polyline = coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
+  const fillPath = `${pad},${h} ${polyline} ${w - pad},${h}`
+  const lastX = coords[coords.length - 1][0].toFixed(1)
+  const lastY = coords[coords.length - 1][1].toFixed(1)
+
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: 'block', overflow: 'visible' }}>
+      <polygon points={fillPath} fill={color} opacity={0.12} />
+      <polyline points={polyline} fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={lastX} cy={lastY} r={2.5} fill={color} />
+    </svg>
+  )
+}
+
 function BrandingBar({ v }: { v: ReturnType<typeof getThemeVars> }) {
   return (
     <div style={{
@@ -274,7 +310,7 @@ function InsightCardCompact({ card, theme, gradeView }: { card: CardData; theme:
           <CardImg src={card.image_url} w={58} h={80} radius={8} />
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 20, fontWeight: 900, color: '#fff', lineHeight: 1.15, fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3 }}>{card.card_name}</div>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', marginTop: 4, fontWeight: 600 }}>{card.set_name}</div>
+            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 4, fontWeight: 700 }}>{card.set_name}</div>
             {gradeView !== 'raw' && (
               <div style={{ marginTop: 8, display: 'inline-flex', background: 'rgba(255,255,255,0.15)', borderRadius: 8, padding: '3px 10px' }}>
                 <span style={{ fontSize: 10, fontWeight: 800, color: '#fff', letterSpacing: 0.5 }}>Viewing: {focusLabel}</span>
@@ -308,18 +344,24 @@ function InsightCardCompact({ card, theme, gradeView }: { card: CardData; theme:
         ))}
       </div>
 
-      {/* Trend row */}
-      <div style={{ display: 'grid', gridTemplateColumns: psa10x ? '1fr 1fr 1fr' : '1fr 1fr', borderBottom: `1px solid ${v.br}` }}>
-        {[
-          { label: '7d',      val: pct(card.raw_pct_7d),  col: pctCol(card.raw_pct_7d,  v) },
-          { label: '30d',     val: pct(card.raw_pct_30d), col: pctCol(card.raw_pct_30d, v) },
-          ...(psa10x ? [{ label: 'Grade ×', val: psa10x + '×', col: '#a78bfa' }] : []),
-        ].map((s, i, arr) => (
-          <div key={s.label} style={{ padding: '12px 14px', borderRight: i < arr.length - 1 ? `1px solid ${v.br}` : 'none' }}>
-            <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4 }}>{s.label}</div>
-            <div style={{ fontSize: 19, fontWeight: 900, color: s.col, letterSpacing: -0.5 }}>{s.val}</div>
-          </div>
-        ))}
+      {/* Trend row + sparkline */}
+      <div style={{ display: 'flex', borderBottom: `1px solid ${v.br}` }}>
+        <div style={{ display: 'grid', gridTemplateColumns: psa10x ? '1fr 1fr 1fr' : '1fr 1fr', flex: 1 }}>
+          {[
+            { label: '7d',      val: pct(card.raw_pct_7d),  col: pctCol(card.raw_pct_7d,  v) },
+            { label: '30d',     val: pct(card.raw_pct_30d), col: pctCol(card.raw_pct_30d, v) },
+            ...(psa10x ? [{ label: 'Grade ×', val: psa10x + '×', col: '#a78bfa' }] : []),
+          ].map((s, i, arr) => (
+            <div key={s.label} style={{ padding: '12px 14px', borderRight: i < arr.length - 1 ? `1px solid ${v.br}` : 'none' }}>
+              <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4 }}>{s.label}</div>
+              <div style={{ fontSize: 19, fontWeight: 900, color: s.col, letterSpacing: -0.5 }}>{s.val}</div>
+            </div>
+          ))}
+        </div>
+        {/* Sparkline */}
+        <div style={{ display: 'flex', alignItems: 'center', padding: '8px 16px 8px 8px', borderLeft: `1px solid ${v.br}` }}>
+          <Sparkline card={card} color={pctCol(card.raw_pct_30d, v)} height={44} />
+        </div>
       </div>
 
       <BrandingBar v={v} />
@@ -816,50 +858,53 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
   const v = getThemeVars(theme)
   const periodLabel = { '7d': '7 Days', '30d': '30 Days', '90d': '90 Days' }[period]
   const accentCol = direction === 'rising' ? v.green : v.red
-  const arrow = direction === 'rising' ? '▲' : '▼'
   const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+  const top5 = movers.slice(0, 5)
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif", width: '100%' }}>
+      {/* Header */}
       <div style={{ background: '#0d2040', padding: '20px 24px 18px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <Watermark color="rgba(255,255,255,0.6)" />
           <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.35)' }}>{today}</span>
         </div>
         <div style={{ fontSize: 24, fontWeight: 900, color: '#fff', letterSpacing: -0.5, fontFamily: "'Outfit', sans-serif" }}>
-          {arrow} Top 10 {direction === 'rising' ? 'Risers' : 'Fallers'}
+          {direction === 'rising' ? 'Top 5 Risers' : 'Top 5 Fallers'}
         </div>
         <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', marginTop: 4, fontWeight: 600 }}>
           Past {periodLabel} · Volume-verified signals
         </div>
       </div>
 
-      <div style={{ padding: '4px 0 8px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 90px 76px', gap: 8, padding: '8px 20px 6px', borderBottom: `1px solid ${v.br}` }}>
-          {['#', 'Card', 'Price', 'Change'].map(h => (
-            <div key={h} style={{ fontSize: 9, fontWeight: 800, color: v.mu, textTransform: 'uppercase', letterSpacing: 1, textAlign: h === '#' ? 'center' : h === 'Change' ? 'right' : 'left' }}>{h}</div>
-          ))}
-        </div>
-
-        {movers.map((m, i) => (
+      {/* Cards */}
+      <div style={{ padding: '8px 0 4px' }}>
+        {top5.map((m, i) => (
           <div key={i} style={{
-            display: 'grid', gridTemplateColumns: '28px 1fr 90px 76px', gap: 8,
-            padding: '13px 20px',
-            borderBottom: i < movers.length - 1 ? `1px solid ${v.br}` : 'none',
-            background: i % 2 === 0 ? 'transparent' : v.dk ? 'rgba(255,255,255,0.015)' : 'rgba(0,0,0,0.015)',
+            display: 'flex', alignItems: 'center', gap: 14,
+            padding: '14px 20px',
+            borderBottom: i < top5.length - 1 ? `1px solid ${v.br}` : 'none',
           }}>
-            <div style={{ fontSize: 12, fontWeight: 900, color: v.mu, textAlign: 'center', alignSelf: 'center' }}>{i + 1}</div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: v.tx, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.card_name}</div>
-              <div style={{ fontSize: 11, color: v.mu, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>{m.set_name}</div>
-              {m.volume_label && <div style={{ fontSize: 10, color: v.green, fontWeight: 700, marginTop: 2 }}>{m.volume_label}</div>}
+            {/* Card image */}
+            <div style={{ flexShrink: 0 }}>
+              {m.image_url
+                ? <img src={m.image_url} alt={m.card_name} style={{ width: 44, height: 62, objectFit: 'contain', borderRadius: 5, display: 'block' }} loading="lazy" />
+                : <div style={{ width: 44, height: 62, background: v.dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>🃏</div>
+              }
             </div>
-            <div style={{ alignSelf: 'center' }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: v.tx }}>{fmt(m.current_price)}</div>
+
+            {/* Name + set + volume */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: v.tx, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.2 }}>{m.card_name}</div>
+              <div style={{ fontSize: 12, color: v.mu, fontWeight: 600, marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.set_name}</div>
+              {m.volume_label && <div style={{ fontSize: 11, color: v.green, fontWeight: 700, marginTop: 3 }}>{m.volume_label}</div>}
+            </div>
+
+            {/* Price + change */}
+            <div style={{ flexShrink: 0, textAlign: 'right' }}>
+              <div style={{ fontSize: 14, fontWeight: 900, color: v.tx, fontFamily: "'Outfit', sans-serif" }}>{fmt(m.current_price)}</div>
               <div style={{ fontSize: 11, color: v.mu, marginTop: 2 }}>{fmtGbp(m.current_price)}</div>
-            </div>
-            <div style={{ textAlign: 'right', alignSelf: 'center' }}>
-              <div style={{ fontSize: 15, fontWeight: 900, color: accentCol, letterSpacing: -0.3 }}>{pct(m.pct_change)}</div>
+              <div style={{ fontSize: 16, fontWeight: 900, color: accentCol, marginTop: 4, letterSpacing: -0.3, fontFamily: "'Outfit', sans-serif" }}>{pct(m.pct_change)}</div>
             </div>
           </div>
         ))}
@@ -1430,7 +1475,7 @@ export default function StudioPageClient() {
 
         {/* ── CENTRE: Preview ── */}
         <div>
-          <div style={{ maxWidth: needsMovers ? 680 : 520 }}>
+          <div style={{ maxWidth: 520 }}>
             {renderVisual()}
           </div>
         </div>

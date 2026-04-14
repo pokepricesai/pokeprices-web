@@ -152,7 +152,30 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── CARD VISUALS ───────────────────────────────────────────────────────────
+    // SVG sparkline from historical price points
+    function Sparkline({ points, color, w = 110, h = 44 }: { points: number[]; color: string; w?: number; h?: number }) {
+      if (points.length < 2) return null
+      const pad = 3
+      const min = Math.min(...points), max = Math.max(...points)
+      const range = max - min || 1
+      const coords = points.map((p, i) => {
+        const x = pad + (i / (points.length - 1)) * (w - pad * 2)
+        const y = h - pad - ((p - min) / range) * (h - pad * 2)
+        return [x, y] as [number, number]
+      })
+      const line = coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
+      const fill = `${pad},${h} ${line} ${w - pad},${h}`
+      const [lx, ly] = coords[coords.length - 1]
+      return (
+        <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
+          <polygon points={fill} fill={color} opacity={0.15} />
+          <polyline points={line} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+          <circle cx={lx.toFixed(1)} cy={ly.toFixed(1)} r={3} fill={color} />
+        </svg>
+      )
+    }
+
+
 
     if (card && visualType === 'insight') {
       const focusPrice = gradeView === 'psa10' ? card.current_psa10 : gradeView === 'psa9' ? card.current_psa9 : card.current_raw
@@ -334,12 +357,24 @@ export async function POST(req: NextRequest) {
             ))}
           </div>
           <div style={{ display: 'flex', borderBottom: `1px solid ${br}` }}>
-            {[['7d', card.raw_pct_7d], ['30d', card.raw_pct_30d], ...(psa10x ? [['Grade ×', null]] : [])].map(([label, val], i, arr) => (
-              <div key={String(label)} style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '12px 14px', borderRight: i < arr.length-1 ? `1px solid ${br}` : 'none' }}>
-                <span style={{ fontSize: 9, color: mu, fontWeight: 700, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>{String(label)}</span>
-                <span style={{ fontSize: 20, fontWeight: 900, color: label === 'Grade ×' ? '#a78bfa' : pctColor(val as number), fontFamily: 'Outfit' }}>{label === 'Grade ×' ? `${psa10x}×` : pct(val as number)}</span>
-              </div>
-            ))}
+            <div style={{ display: 'flex', flex: 1 }}>
+              {[['7d', card.raw_pct_7d], ['30d', card.raw_pct_30d], ...(psa10x ? [['Grade ×', null]] : [])].map(([label, val], i, arr) => (
+                <div key={String(label)} style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '12px 14px', borderRight: i < arr.length-1 ? `1px solid ${br}` : 'none' }}>
+                  <span style={{ fontSize: 9, color: mu, fontWeight: 700, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>{String(label)}</span>
+                  <span style={{ fontSize: 20, fontWeight: 900, color: label === 'Grade ×' ? '#a78bfa' : pctColor(val as number), fontFamily: 'Outfit' }}>{label === 'Grade ×' ? `${psa10x}×` : pct(val as number)}</span>
+                </div>
+              ))}
+            </div>
+            {/* Sparkline */}
+            {(() => {
+              const pts = [card.raw_180d_ago, card.raw_90d_ago, card.raw_30d_ago, card.current_raw].filter(Boolean) as number[]
+              const col = card.raw_pct_30d != null ? (card.raw_pct_30d > 0 ? '#22c55e' : '#ef4444') : mu
+              return pts.length >= 2 ? (
+                <div style={{ display: 'flex', alignItems: 'center', padding: '8px 14px 8px 6px', borderLeft: `1px solid ${br}` }}>
+                  <Sparkline points={pts} color={col} />
+                </div>
+              ) : null
+            })()}
           </div>
           <Footer />
         </div>
@@ -585,47 +620,57 @@ export async function POST(req: NextRequest) {
       const accentCol = direction === 'rising' ? '#22c55e' : '#ef4444'
       const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
       const periodLabel = { '7d': '7 Days', '30d': '30 Days', '90d': '90 Days' }[period as string] || period
+      const top5 = movers.slice(0, 5)
+
+      // Pre-fetch card images
+      const imgUrls = await Promise.all(
+        top5.map((m: any) => m.image_url ? toDataUrl(m.image_url) : Promise.resolve(null))
+      )
 
       return new ImageResponse((
-        <div style={{ display: 'flex', flexDirection: 'column', background: bg, width: 680, borderRadius: 22, border: `1px solid ${br}`, overflow: 'hidden', fontFamily: 'Figtree' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', background: bg, width: 520, borderRadius: 22, border: `1px solid ${br}`, overflow: 'hidden', fontFamily: 'Figtree' }}>
+          {/* Header */}
           <div style={{ display: 'flex', flexDirection: 'column', background: '#0d2040', padding: '20px 24px 18px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <Watermark />
               <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.35)', fontFamily: 'Figtree' }}>{today}</span>
             </div>
             <span style={{ fontSize: 26, fontWeight: 900, color: '#fff', fontFamily: 'Outfit', letterSpacing: -0.5 }}>
-              {direction === 'rising' ? 'Top' : 'Top'} {Math.min(movers.length, 10)} {direction === 'rising' ? 'Risers' : 'Fallers'}
+              Top 5 {direction === 'rising' ? 'Risers' : 'Fallers'}
             </span>
             <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', marginTop: 4, fontWeight: 700, fontFamily: 'Figtree' }}>
               Past {periodLabel} · Volume-verified signals
             </span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', padding: '8px 20px 6px', borderBottom: `1px solid ${br}` }}>
-            <span style={{ width: 28, fontSize: 9, fontWeight: 700, color: mu, textTransform: 'uppercase', letterSpacing: 1, fontFamily: 'Figtree' }}>#</span>
-            <span style={{ flex: 1, fontSize: 9, fontWeight: 700, color: mu, textTransform: 'uppercase', letterSpacing: 1, marginLeft: 8, fontFamily: 'Figtree' }}>Card</span>
-            <span style={{ width: 90, fontSize: 9, fontWeight: 700, color: mu, textTransform: 'uppercase', letterSpacing: 1, fontFamily: 'Figtree' }}>Price</span>
-            <span style={{ width: 76, fontSize: 9, fontWeight: 700, color: mu, textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right', fontFamily: 'Figtree' }}>Change</span>
-          </div>
-          {movers.slice(0, 10).map((m: any, i: number) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '12px 20px', borderBottom: i < movers.length - 1 ? `1px solid ${br}` : 'none', background: i % 2 === 0 ? 'transparent' : dk ? 'rgba(255,255,255,0.012)' : 'rgba(0,0,0,0.012)' }}>
-              <span style={{ width: 28, fontSize: 12, fontWeight: 900, color: mu, fontFamily: 'Outfit' }}>{i + 1}</span>
-              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, marginLeft: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: 800, color: tx, fontFamily: 'Figtree' }}>{m.card_name}</span>
-                <span style={{ fontSize: 11, color: mu, fontWeight: 600, marginTop: 2, fontFamily: 'Figtree' }}>{m.set_name}</span>
-                {m.volume_label && <span style={{ fontSize: 10, color: '#22c55e', fontWeight: 700, marginTop: 2, fontFamily: 'Figtree' }}>{m.volume_label}</span>}
+
+          {/* Card rows */}
+          {top5.map((m: any, i: number) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', borderBottom: i < top5.length - 1 ? `1px solid ${br}` : 'none' }}>
+              {/* Card image */}
+              {imgUrls[i]
+                ? <img src={imgUrls[i]!} width={44} height={62} style={{ objectFit: 'contain', borderRadius: 5, flexShrink: 0 }} />
+                : <div style={{ width: 44, height: 62, background: dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <span style={{ fontSize: 18, fontFamily: 'Figtree' }}>?</span>
+                  </div>
+              }
+              {/* Name + set + volume */}
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 14, fontWeight: 800, color: tx, fontFamily: 'Figtree' }}>{m.card_name}</span>
+                <span style={{ fontSize: 12, color: mu, fontWeight: 700, marginTop: 3, fontFamily: 'Figtree' }}>{m.set_name}</span>
+                {m.volume_label && <span style={{ fontSize: 11, color: '#22c55e', fontWeight: 700, marginTop: 3, fontFamily: 'Figtree' }}>{m.volume_label}</span>}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', width: 90 }}>
-                <span style={{ fontSize: 13, fontWeight: 800, color: tx, fontFamily: 'Outfit' }}>{fmt(m.current_price)}</span>
+              {/* Price + change */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flexShrink: 0 }}>
+                <span style={{ fontSize: 14, fontWeight: 900, color: tx, fontFamily: 'Outfit' }}>{fmt(m.current_price)}</span>
                 <span style={{ fontSize: 11, color: mu, marginTop: 2, fontFamily: 'Figtree' }}>{fmtGbp(m.current_price)}</span>
+                <span style={{ fontSize: 18, fontWeight: 900, color: accentCol, marginTop: 4, fontFamily: 'Outfit', letterSpacing: -0.3 }}>{pct(m.pct_change)}</span>
               </div>
-              <span style={{ width: 76, fontSize: 16, fontWeight: 900, color: accentCol, textAlign: 'right', fontFamily: 'Outfit' }}>
-                {pct(m.pct_change)}
-              </span>
             </div>
           ))}
+
           <Footer />
         </div>
-      ), { width: 680, height: 120 + movers.slice(0, 10).length * 62, fonts })
+      ), { width: 520, height: 148 + top5.length * 90, fonts })
     }
 
     // ── SET REPORT ─────────────────────────────────────────────────────────────
