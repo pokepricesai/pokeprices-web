@@ -1440,19 +1440,42 @@ export default function StudioPageClient() {
         })
       }
 
-      const { toPng } = (window as any).htmlToImage
+      // Convert all non-silhouette card images to base64 inline data URLs BEFORE capture.
+      // This is the only reliable fix for browser image caching - once an image is a
+      // data URL, html-to-image uses the pixel data directly and never fetches anything.
+      const cardImgs = Array.from(
+        el.querySelectorAll('img:not([data-silhouette])')
+      ) as HTMLImageElement[]
 
-      // Use filter to skip silhouette images (they have CSS filter applied by parent)
-      // cacheBust: true appends a timestamp to every image URL html-to-image fetches
-      const dataUrl = await toPng(el, {
-        pixelRatio: 2,
-        cacheBust: true,
-        filter: (node: HTMLElement) => {
-          // Skip nodes marked as silhouettes - they render fine with CSS filter
-          if (node.getAttribute && node.getAttribute('data-silhouette') === 'true') return false
-          return true
-        },
-      })
+      const origSrcs: string[] = []
+      await Promise.all(cardImgs.map(async (img, i) => {
+        origSrcs[i] = img.src
+        try {
+          const ts = Date.now()
+          const src = img.src.includes('/api/imgproxy')
+            ? img.src.split('&b=')[0] + `&b=export_${ts}`
+            : `/api/imgproxy?url=${encodeURIComponent(img.src)}&b=export_${ts}`
+          const res = await fetch(src, { cache: 'no-store' })
+          const blob = await res.blob()
+          const dataUrl = await new Promise<string>(resolve => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(reader.result as string)
+            reader.readAsDataURL(blob)
+          })
+          img.src = dataUrl
+        } catch {
+          // leave original src if fetch fails
+        }
+      }))
+
+      // Small delay for browser to paint the new data URLs
+      await new Promise(r => setTimeout(r, 150))
+
+      const { toPng } = (window as any).htmlToImage
+      const dataUrl = await toPng(el, { pixelRatio: 2 })
+
+      // Restore original srcs
+      cardImgs.forEach((img, i) => { img.src = origSrcs[i] })
 
       const link = document.createElement('a')
       const safeCardName = card ? card.card_name.replace(/[^a-z0-9]/gi, '-').toLowerCase() : ''
