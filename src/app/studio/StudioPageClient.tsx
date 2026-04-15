@@ -1427,8 +1427,9 @@ export default function StudioPageClient() {
       const dataUrl = await toPng(el, { pixelRatio: 2 })
 
       const link = document.createElement('a')
+      const safeCardName = card ? card.card_name.replace(/[^a-z0-9]/gi, '-').toLowerCase() : ''
       const fileName = card
-        ? `pokeprices-${card.card_name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${visualType}-${cardLayout}.png`
+        ? `pokeprices-${safeCardName}-${visualType}-${cardLayout}.png`
         : `pokeprices-${visualType}-${moversPeriod}.png`
       link.download = fileName
       link.href = dataUrl
@@ -1707,6 +1708,5 @@ export default function StudioPageClient() {
         )}
       </div>
     </div>
-  </div>
   )
 }
