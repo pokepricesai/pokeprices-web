@@ -177,14 +177,24 @@ async function fetchSetData(setName: string): Promise<SetData | null> {
   const imgMap: Record<string, string | null> = {}
   ;(imgData || []).forEach((r: any) => { imgMap[r.card_slug] = r.image_url })
 
-  // Build sparkline: avg set value at 180d, 90d, 30d, now
-  const withHistory = cards.filter((d: any) => d.raw_180d_ago || d.raw_90d_ago || d.raw_30d_ago)
-  const avgAt = (field: string) => {
-    const vals = cards.filter((d: any) => (d as any)[field]).map((d: any) => (d as any)[field] as number)
+  // Build sparkline using only cards that have data at ALL timepoints
+  // This ensures we compare the same basket of cards - prevents misleading slope
+  const cardsWithFull = cards.filter((d: any) => d.raw_30d_ago && d.raw_90d_ago && d.current_raw)
+  const cardsWithPartial = cardsWithFull.length >= 3 ? cardsWithFull : cards.filter((d: any) => d.raw_30d_ago && d.current_raw)
+  const avg = (field: string, subset: any[]) => {
+    const vals = subset.map((d: any) => (d as any)[field] as number).filter(Boolean)
     return vals.length ? vals.reduce((a: number, b: number) => a + b, 0) / vals.length : null
   }
-  const spark = [avgAt('raw_180d_ago'), avgAt('raw_90d_ago'), avgAt('raw_30d_ago'), cards.reduce((s: number, d: any) => s + (d.current_raw || 0), 0) / cards.length]
-    .filter((v): v is number => v !== null)
+  const sparkPoints: { label: string; val: number }[] = []
+  const a180 = avg('raw_180d_ago', cardsWithFull.filter((d: any) => d.raw_180d_ago))
+  const a90  = avg('raw_90d_ago',  cardsWithPartial)
+  const a30  = avg('raw_30d_ago',  cardsWithPartial)
+  const aNow = avg('current_raw',  cardsWithPartial)
+  if (a180) sparkPoints.push({ label: '180d', val: a180 })
+  if (a90)  sparkPoints.push({ label: '90d',  val: a90  })
+  if (a30)  sparkPoints.push({ label: '30d',  val: a30  })
+  if (aNow) sparkPoints.push({ label: 'Now',  val: aNow })
+  const spark = sparkPoints.map(p => p.val)
 
   const withPct7 = cards.filter((d: any) => d.raw_pct_7d != null)
   const avg7 = withPct7.length ? withPct7.reduce((s: number, d: any) => s + (d.raw_pct_7d || 0), 0) / withPct7.length : null
