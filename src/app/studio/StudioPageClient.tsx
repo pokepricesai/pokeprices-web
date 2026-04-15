@@ -46,11 +46,13 @@ interface Mover {
 interface SetData {
   set_name: string
   set_logo_url: string | null
-  top_cards: { card_name: string; current_raw: number; pct_30d: number | null; image_url: string | null; card_slug: string }[]
+  release_year: string | null
+  top_cards: { card_name: string; current_raw: number; current_psa9: number | null; current_psa10: number | null; pct_30d: number | null; image_url: string | null; card_slug: string }[]
   set_pct_30d: number | null
   set_pct_90d: number | null
+  set_pct_7d: number | null
+  sparkline: number[]
   total_value: number
-  card_count: number
 }
 
 type VisualType = 'insight' | 'peak-distance' | 'temperature' | 'movers' | 'grade-compare' | 'set-report'
@@ -154,7 +156,7 @@ async function fetchMovers(direction: MoversDirection, period: MoversPeriod): Pr
 async function fetchSetData(setName: string): Promise<SetData | null> {
   const { data } = await supabase
     .from('card_trends')
-    .select('card_slug,card_name,set_name,current_raw,raw_pct_30d,raw_pct_90d')
+    .select('card_slug,card_name,set_name,current_raw,current_psa9,current_psa10,raw_pct_7d,raw_pct_30d,raw_pct_90d,raw_30d_ago,raw_90d_ago,raw_180d_ago')
     .ilike('set_name', `%${setName}%`)
     .not('current_raw', 'is', null)
     .order('current_raw', { ascending: false })
@@ -162,7 +164,7 @@ async function fetchSetData(setName: string): Promise<SetData | null> {
   if (!data || !data.length) return null
 
   // Exclude sealed products from set report
-  const SEALED = [/booster box/i, /booster pack/i, /elite trainer/i, /\betb\b/i, /collection box/i, /\btin\b/i, /display box/i, /stadium/i, /build.*battle/i, /pokemon center/i]
+  const SEALED = [/booster box/i, /booster pack/i, /blister/i, /elite trainer/i, /\betb\b/i, /collection box/i, /\btin\b/i, /display box/i, /stadium/i, /build.*battle/i, /pokemon center/i, /trainer deck/i, /theme deck/i]
   const cards = data.filter(d => !SEALED.some(p => p.test(d.card_name || '')))
 
   const total = cards.reduce((s, d) => s + (d.current_raw || 0), 0)
@@ -176,25 +178,43 @@ async function fetchSetData(setName: string): Promise<SetData | null> {
 
   const [{ data: imgData }, { data: setMeta }] = await Promise.all([
     supabase.from('cards').select('card_slug,image_url').in('card_slug', top5Slugs),
-    supabase.from('set_metadata').select('set_logo_url').eq('set_name', cards[0].set_name).single(),
+    supabase.from('set_metadata').select('set_logo_url,release_date').ilike('set_name', cards[0].set_name).single(),
   ])
   const imgMap: Record<string, string | null> = {}
   ;(imgData || []).forEach((r: any) => { imgMap[r.card_slug] = r.image_url })
 
+  // Build sparkline: avg set value at 180d, 90d, 30d, now
+  const withHistory = cards.filter((d: any) => d.raw_180d_ago || d.raw_90d_ago || d.raw_30d_ago)
+  const avgAt = (field: string) => {
+    const vals = cards.filter((d: any) => (d as any)[field]).map((d: any) => (d as any)[field] as number)
+    return vals.length ? vals.reduce((a: number, b: number) => a + b, 0) / vals.length : null
+  }
+  const spark = [avgAt('raw_180d_ago'), avgAt('raw_90d_ago'), avgAt('raw_30d_ago'), cards.reduce((s: number, d: any) => s + (d.current_raw || 0), 0) / cards.length]
+    .filter((v): v is number => v !== null)
+
+  const withPct7 = cards.filter((d: any) => d.raw_pct_7d != null)
+  const avg7 = withPct7.length ? withPct7.reduce((s: number, d: any) => s + (d.raw_pct_7d || 0), 0) / withPct7.length : null
+
+  const releaseYear = setMeta?.release_date ? new Date(setMeta.release_date).getFullYear().toString() : null
+
   return {
     set_name: cards[0].set_name,
     set_logo_url: setMeta?.set_logo_url ?? null,
+    release_year: releaseYear,
     top_cards: top5.map((d: any) => ({
       card_name: d.card_name,
       current_raw: d.current_raw!,
+      current_psa9: d.current_psa9 ?? null,
+      current_psa10: d.current_psa10 ?? null,
       pct_30d: d.raw_pct_30d,
       image_url: imgMap[d.card_slug] ?? null,
       card_slug: d.card_slug,
     })),
     set_pct_30d: avg30,
     set_pct_90d: avg90,
+    set_pct_7d: avg7,
+    sparkline: spark,
     total_value: total,
-    card_count: cards.length,
   }
 }
 
@@ -1164,96 +1184,133 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
 
 // -- VISUAL 7: Set Report ------------------------------------------------------
 
+function SetSparkline({ data, v }: { data: number[]; v: ReturnType<typeof getThemeVars> }) {
+  if (data.length < 2) return null
+  const W = 480; const H = 60; const pad = 8
+  const min = Math.min(...data); const max = Math.max(...data)
+  const range = max - min || 1
+  const pts = data.map((val, i) => {
+    const x = pad + (i / (data.length - 1)) * (W - pad * 2)
+    const y = H - pad - ((val - min) / range) * (H - pad * 2)
+    return `${x},${y}`
+  })
+  const col = data[data.length - 1] >= data[0] ? '#22c55e' : '#ef4444'
+  const polyline = pts.join(' ')
+  const areaPath = `M${pts[0]} ` + pts.slice(1).map(p => `L${p}`).join(' ') + ` L${W - pad},${H - pad} L${pad},${H - pad} Z`
+  const labels = ['180d', '90d', '30d', 'Now']
+  return (
+    <div style={{ padding: '14px 20px 6px' }}>
+      <div style={{ fontSize: 9, fontWeight: 800, color: v.mu, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 }}>Avg Card Price Trend</div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+        <defs>
+          <linearGradient id="sgfill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={col} stopOpacity="0.25"/>
+            <stop offset="100%" stopColor={col} stopOpacity="0"/>
+          </linearGradient>
+        </defs>
+        <path d={areaPath} fill="url(#sgfill)"/>
+        <polyline points={polyline} fill="none" stroke={col} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>
+        {data.map((val, i) => {
+          const x = pad + (i / (data.length - 1)) * (W - pad * 2)
+          const y = H - pad - ((val - min) / range) * (H - pad * 2)
+          return <circle key={i} cx={x} cy={y} r="4" fill={col} stroke={v.bg} strokeWidth="2"/>
+        })}
+      </svg>
+      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0 8px', marginTop: 2 }}>
+        {labels.slice(0, data.length).map((l, i) => (
+          <span key={i} style={{ fontSize: 9, color: v.mu, fontWeight: 600 }}>{l}</span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function SetReport({ setData, theme }: { setData: SetData; theme: Theme }) {
   const v = getThemeVars(theme)
   const pct30col = pctCol(setData.set_pct_30d, v)
   const pct90col = pctCol(setData.set_pct_90d, v)
-  const maxVal = Math.max(...setData.top_cards.map(c => c.current_raw), 1)
-
-  // Simple bar chart data for set performance
-  const bars = setData.top_cards.map(c => ({
-    name: c.card_name.split(' ')[0],
-    val: c.current_raw,
-    pct: c.pct_30d,
-    w: Math.round((c.current_raw / maxVal) * 100),
-  }))
+  const pct7col  = pctCol(setData.set_pct_7d, v)
+  const maxVal   = Math.max(...setData.top_cards.map(c => c.current_raw), 1)
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif" }}>
 
-      {/* Header with set logo */}
+      {/* Header */}
       <div style={{ background: 'linear-gradient(135deg, #1e1b4b 0%, #3730a3 60%, #4f46e5 100%)', padding: '20px 24px 18px', position: 'relative', overflow: 'hidden' }}>
         <PokeBgDecor v={v} />
         <div style={{ position: 'relative', zIndex: 2 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
             <Watermark />
-            <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.5 }}>Set Report</span>
+            <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.4)', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>Set Report{setData.release_year ? ` - ${setData.release_year}` : ''}</span>
           </div>
           {setData.set_logo_url ? (
-            <div style={{ marginBottom: 10 }}>
-              <img
-                crossOrigin="anonymous"
-                src={setData.set_logo_url}
-                alt={setData.set_name}
-                style={{ height: 48, maxWidth: 260, objectFit: 'contain', display: 'block' }}
-              />
-            </div>
+            <img
+              crossOrigin="anonymous"
+              src={setData.set_logo_url}
+              alt={setData.set_name}
+              style={{ height: 44, maxWidth: 260, objectFit: 'contain', display: 'block', marginBottom: 6 }}
+            />
           ) : (
-            <div style={{ fontSize: 24, fontWeight: 900, color: '#fff', letterSpacing: -0.5, lineHeight: 1.1, fontFamily: "'Outfit', sans-serif", marginBottom: 10 }}>
+            <div style={{ fontSize: 24, fontWeight: 900, color: '#fff', letterSpacing: -0.5, fontFamily: "'Outfit', sans-serif", marginBottom: 6 }}>
               {setData.set_name}
             </div>
           )}
-          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: 600 }}>{setData.card_count} cards tracked</div>
+          {setData.release_year && (
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', fontWeight: 600 }}>{setData.release_year}</span>
+          )}
         </div>
       </div>
 
-      {/* Stats row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderBottom: `1px solid ${v.br}` }}>
+      {/* Stats - 4 cols */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', borderBottom: `1px solid ${v.br}` }}>
         {[
-          { label: 'Top 5 Value', val: fmt(setData.top_cards.reduce((s, c) => s + c.current_raw, 0)), sub: 'combined raw' },
-          { label: 'Avg 30d',     val: pct(setData.set_pct_30d), sub: 'all cards', col: pct30col },
-          { label: 'Avg 90d',     val: pct(setData.set_pct_90d), sub: 'all cards', col: pct90col },
+          { label: 'Top 5 Value', val: fmt(setData.top_cards.reduce((s, c) => s + c.current_raw, 0)), sub: 'raw combined' },
+          { label: '7D Avg',      val: pct(setData.set_pct_7d),  sub: 'all cards', col: pct7col  },
+          { label: '30D Avg',     val: pct(setData.set_pct_30d), sub: 'all cards', col: pct30col },
+          { label: '90D Avg',     val: pct(setData.set_pct_90d), sub: 'all cards', col: pct90col },
         ].map((s, i) => (
-          <div key={s.label} style={{ padding: '14px 16px', borderRight: i < 2 ? `1px solid ${v.br}` : 'none' }}>
-            <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>{s.label}</div>
-            <div style={{ fontSize: 18, fontWeight: 900, color: (s as any).col || v.tx, letterSpacing: -0.5 }}>{s.val}</div>
-            <div style={{ fontSize: 10, color: v.mu, marginTop: 2 }}>{s.sub}</div>
+          <div key={s.label} style={{ padding: '12px 14px', borderRight: i < 3 ? `1px solid ${v.br}` : 'none' }}>
+            <div style={{ fontSize: 8, color: v.mu, fontWeight: 800, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>{s.label}</div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: (s as any).col || v.tx, letterSpacing: -0.5 }}>{s.val}</div>
+            <div style={{ fontSize: 9, color: v.mu, marginTop: 2 }}>{s.sub}</div>
           </div>
         ))}
       </div>
 
-      {/* Top 5 cards with images */}
-      <div style={{ padding: '12px 0' }}>
-        <div style={{ padding: '0 20px 10px', fontSize: 9, fontWeight: 800, color: v.mu, textTransform: 'uppercase', letterSpacing: 1.5 }}>Top 5 by Value</div>
+      {/* Sparkline */}
+      {setData.sparkline.length >= 2 && (
+        <div style={{ borderBottom: `1px solid ${v.br}` }}>
+          <SetSparkline data={setData.sparkline} v={v} />
+        </div>
+      )}
+
+      {/* Top 5 cards */}
+      <div style={{ padding: '10px 0' }}>
+        <div style={{ padding: '0 20px 8px', fontSize: 9, fontWeight: 800, color: v.mu, textTransform: 'uppercase', letterSpacing: 1.5 }}>Top 5 by Value</div>
         {setData.top_cards.map((card, i) => (
-          <div key={i} style={{ padding: '10px 20px', borderBottom: i < setData.top_cards.length - 1 ? `1px solid ${v.br}` : 'none', display: 'flex', alignItems: 'center', gap: 12 }}>
-            {/* Rank */}
-            <span style={{ fontSize: 11, color: v.mu, fontWeight: 800, width: 16, flexShrink: 0, textAlign: 'center' }}>{i + 1}</span>
-            {/* Card image */}
-            <div style={{ width: 36, height: 50, flexShrink: 0, borderRadius: 4, overflow: 'hidden', background: v.br }}>
+          <div key={i} style={{ padding: '9px 20px', borderBottom: i < setData.top_cards.length - 1 ? `1px solid ${v.br}` : 'none', display: 'flex', alignItems: 'center', gap: 11 }}>
+            <span style={{ fontSize: 10, color: v.mu, fontWeight: 800, width: 14, flexShrink: 0, textAlign: 'center' }}>{i + 1}</span>
+            <div style={{ width: 34, height: 48, flexShrink: 0, borderRadius: 4, overflow: 'hidden', background: v.br }}>
               {card.image_url ? (
-                <img
-                  key={card.card_slug}
-                  crossOrigin="anonymous"
-                  src={proxyImg(card.image_url, card.card_slug) || ''}
-                  alt={card.card_name}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                />
-              ) : (
-                <div style={{ width: '100%', height: '100%', background: v.br }} />
-              )}
+                <img key={card.card_slug} crossOrigin="anonymous" src={proxyImg(card.image_url, card.card_slug) || ''} alt={card.card_name}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+              ) : <div style={{ width: '100%', height: '100%', background: v.br }} />}
             </div>
-            {/* Card info */}
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: v.tx, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.card_name}</div>
-              {/* Bar showing relative value */}
-              <div style={{ marginTop: 5, height: 3, borderRadius: 2, background: v.br, overflow: 'hidden' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: v.tx, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.card_name}</div>
+              <div style={{ marginTop: 4, height: 3, borderRadius: 2, background: v.br, overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: `${Math.round((card.current_raw / maxVal) * 100)}%`, background: 'linear-gradient(to right, #3730a3, #4f46e5)', borderRadius: 2 }} />
               </div>
+              {(card.current_psa9 || card.current_psa10) && (
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  {card.current_psa9 && <span style={{ fontSize: 9, color: v.mu }}>PSA9: <span style={{ color: v.tx, fontWeight: 700 }}>{fmt(card.current_psa9)}</span></span>}
+                  {card.current_psa10 && <span style={{ fontSize: 9, color: v.mu }}>PSA10: <span style={{ color: '#a78bfa', fontWeight: 700 }}>{fmt(card.current_psa10)}</span></span>}
+                </div>
+              )}
             </div>
-            {/* Price + pct */}
             <div style={{ flexShrink: 0, textAlign: 'right' }}>
               <div style={{ fontSize: 13, fontWeight: 900, color: v.tx }}>{fmt(card.current_raw)}</div>
+              <div style={{ fontSize: 10, color: v.mu, marginTop: 1 }}>{fmtGbp(card.current_raw)}</div>
               {card.pct_30d != null && (
                 <div style={{ fontSize: 11, fontWeight: 800, color: pctCol(card.pct_30d, v), marginTop: 2 }}>{pct(card.pct_30d)}</div>
               )}
@@ -1266,6 +1323,7 @@ function SetReport({ setData, theme }: { setData: SetData; theme: Theme }) {
     </div>
   )
 }
+
 
 // -- Placeholder ---------------------------------------------------------------
 
