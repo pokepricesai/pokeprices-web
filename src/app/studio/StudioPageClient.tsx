@@ -45,7 +45,7 @@ interface Mover {
 
 interface SetData {
   set_name: string
-  set_logo_url: string | null
+  logo_url: string | null
   release_year: string | null
   top_cards: { card_name: string; current_raw: number; current_psa9: number | null; current_psa10: number | null; pct_30d: number | null; image_url: string | null; card_slug: string }[]
   set_pct_30d: number | null
@@ -107,13 +107,13 @@ async function fetchCard(slug: string): Promise<CardData | null> {
   if (!data) return null
   const [{ data: cardRow }, { data: setMeta }] = await Promise.all([
     supabase.from('cards').select('card_url_slug,image_url').eq('card_slug', slug).single(),
-    supabase.from('set_metadata').select('set_logo_url').eq('set_name', data.set_name).single(),
+    supabase.from('set_info').select('logo_url').eq('set_name', data.set_name).single(),
   ])
   return {
     ...data,
     card_url_slug: cardRow?.card_url_slug ?? null,
     image_url: cardRow?.image_url ?? null,
-    set_logo_url: setMeta?.set_logo_url ?? null,
+    set_logo_url: setMeta?.logo_url ?? null,
   }
 }
 
@@ -178,7 +178,7 @@ async function fetchSetData(setName: string): Promise<SetData | null> {
 
   const [{ data: imgData }, { data: setMeta }] = await Promise.all([
     supabase.from('cards').select('card_slug,image_url').in('card_slug', top5Slugs),
-    supabase.from('set_metadata').select('set_logo_url,release_date').ilike('set_name', cards[0].set_name).single(),
+    supabase.from('set_info').select('logo_url').eq('set_name', cards[0].set_name).single(),
   ])
   const imgMap: Record<string, string | null> = {}
   ;(imgData || []).forEach((r: any) => { imgMap[r.card_slug] = r.image_url })
@@ -195,12 +195,10 @@ async function fetchSetData(setName: string): Promise<SetData | null> {
   const withPct7 = cards.filter((d: any) => d.raw_pct_7d != null)
   const avg7 = withPct7.length ? withPct7.reduce((s: number, d: any) => s + (d.raw_pct_7d || 0), 0) / withPct7.length : null
 
-  const releaseYear = setMeta?.release_date ? new Date(setMeta.release_date).getFullYear().toString() : null
-
   return {
     set_name: cards[0].set_name,
-    set_logo_url: setMeta?.set_logo_url ?? null,
-    release_year: releaseYear,
+    logo_url: setMeta?.logo_url ?? null,
+    release_year: null,
     top_cards: top5.map((d: any) => ({
       card_name: d.card_name,
       current_raw: d.current_raw!,
@@ -1243,10 +1241,10 @@ function SetReport({ setData, theme }: { setData: SetData; theme: Theme }) {
             <Watermark />
             <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.4)', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>Set Report{setData.release_year ? ` - ${setData.release_year}` : ''}</span>
           </div>
-          {setData.set_logo_url ? (
+          {setData.logo_url ? (
             <img
               crossOrigin="anonymous"
-              src={setData.set_logo_url}
+              src={setData.logo_url}
               alt={setData.set_name}
               style={{ height: 44, maxWidth: 260, objectFit: 'contain', display: 'block', marginBottom: 6 }}
             />
