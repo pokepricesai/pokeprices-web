@@ -45,7 +45,8 @@ interface Mover {
 
 interface SetData {
   set_name: string
-  top_cards: { card_name: string; current_raw: number; pct_30d: number | null }[]
+  set_logo_url: string | null
+  top_cards: { card_name: string; current_raw: number; pct_30d: number | null; image_url: string | null; card_slug: string }[]
   set_pct_30d: number | null
   set_pct_90d: number | null
   total_value: number
@@ -170,9 +171,26 @@ async function fetchSetData(setName: string): Promise<SetData | null> {
   const avg30 = withPct30.length ? withPct30.reduce((s, d) => s + (d.raw_pct_30d || 0), 0) / withPct30.length : null
   const avg90 = withPct90.length ? withPct90.reduce((s, d) => s + (d.raw_pct_90d || 0), 0) / withPct90.length : null
 
+  const top5 = cards.slice(0, 5)
+  const top5Slugs = top5.map((d: any) => d.card_slug).filter(Boolean)
+
+  const [{ data: imgData }, { data: setMeta }] = await Promise.all([
+    supabase.from('cards').select('card_slug,image_url').in('card_slug', top5Slugs),
+    supabase.from('set_metadata').select('set_logo_url').eq('set_name', cards[0].set_name).single(),
+  ])
+  const imgMap: Record<string, string | null> = {}
+  ;(imgData || []).forEach((r: any) => { imgMap[r.card_slug] = r.image_url })
+
   return {
     set_name: cards[0].set_name,
-    top_cards: cards.slice(0, 10).map(d => ({ card_name: d.card_name, current_raw: d.current_raw!, pct_30d: d.raw_pct_30d })),
+    set_logo_url: setMeta?.set_logo_url ?? null,
+    top_cards: top5.map((d: any) => ({
+      card_name: d.card_name,
+      current_raw: d.current_raw!,
+      pct_30d: d.raw_pct_30d,
+      image_url: imgMap[d.card_slug] ?? null,
+      card_slug: d.card_slug,
+    })),
     set_pct_30d: avg30,
     set_pct_90d: avg90,
     total_value: total,
@@ -1150,61 +1168,98 @@ function SetReport({ setData, theme }: { setData: SetData; theme: Theme }) {
   const v = getThemeVars(theme)
   const pct30col = pctCol(setData.set_pct_30d, v)
   const pct90col = pctCol(setData.set_pct_90d, v)
+  const maxVal = Math.max(...setData.top_cards.map(c => c.current_raw), 1)
+
+  // Simple bar chart data for set performance
+  const bars = setData.top_cards.map(c => ({
+    name: c.card_name.split(' ')[0],
+    val: c.current_raw,
+    pct: c.pct_30d,
+    w: Math.round((c.current_raw / maxVal) * 100),
+  }))
 
   return (
     <div style={{ background: v.bg, borderRadius: 22, overflow: 'hidden', border: `1px solid ${v.br}`, boxShadow: v.shadow, fontFamily: "'Figtree', sans-serif" }}>
-      <div style={{ background: 'linear-gradient(135deg, #1e1b4b 0%, #3730a3 60%, #4f46e5 100%)', padding: '22px 24px 20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <Watermark />
-          <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.4)' }}>Set Performance Report</span>
+
+      {/* Header with set logo */}
+      <div style={{ background: 'linear-gradient(135deg, #1e1b4b 0%, #3730a3 60%, #4f46e5 100%)', padding: '20px 24px 18px', position: 'relative', overflow: 'hidden' }}>
+        <PokeBgDecor v={v} />
+        <div style={{ position: 'relative', zIndex: 2 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+            <Watermark />
+            <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.5 }}>Set Report</span>
+          </div>
+          {setData.set_logo_url ? (
+            <div style={{ marginBottom: 10 }}>
+              <img
+                crossOrigin="anonymous"
+                src={setData.set_logo_url}
+                alt={setData.set_name}
+                style={{ height: 48, maxWidth: 260, objectFit: 'contain', display: 'block' }}
+              />
+            </div>
+          ) : (
+            <div style={{ fontSize: 24, fontWeight: 900, color: '#fff', letterSpacing: -0.5, lineHeight: 1.1, fontFamily: "'Outfit', sans-serif", marginBottom: 10 }}>
+              {setData.set_name}
+            </div>
+          )}
+          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: 600 }}>{setData.card_count} cards tracked</div>
         </div>
-        <div style={{ fontSize: 26, fontWeight: 900, color: '#fff', letterSpacing: -0.5, lineHeight: 1.1, fontFamily: "'Outfit', sans-serif" }}>{setData.set_name}</div>
-        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)', marginTop: 6, fontWeight: 600 }}>{setData.card_count} cards tracked</div>
       </div>
 
+      {/* Stats row */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderBottom: `1px solid ${v.br}` }}>
         {[
-          { label: 'Set Value', val: fmtGbp(setData.total_value), sub: fmt(setData.total_value) },
-          { label: 'Avg 30d',   val: pct(setData.set_pct_30d),    sub: 'all cards', col: pct30col },
-          { label: 'Avg 90d',   val: pct(setData.set_pct_90d),    sub: 'all cards', col: pct90col },
+          { label: 'Top 5 Value', val: fmt(setData.top_cards.reduce((s, c) => s + c.current_raw, 0)), sub: 'combined raw' },
+          { label: 'Avg 30d',     val: pct(setData.set_pct_30d), sub: 'all cards', col: pct30col },
+          { label: 'Avg 90d',     val: pct(setData.set_pct_90d), sub: 'all cards', col: pct90col },
         ].map((s, i) => (
-          <div key={s.label} style={{ padding: '16px', borderRight: i < 2 ? `1px solid ${v.br}` : 'none' }}>
-            <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 5 }}>{s.label}</div>
-            <div style={{ fontSize: 20, fontWeight: 900, color: (s as any).col || v.tx, letterSpacing: -0.5 }}>{s.val}</div>
+          <div key={s.label} style={{ padding: '14px 16px', borderRight: i < 2 ? `1px solid ${v.br}` : 'none' }}>
+            <div style={{ fontSize: 9, color: v.mu, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>{s.label}</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: (s as any).col || v.tx, letterSpacing: -0.5 }}>{s.val}</div>
             <div style={{ fontSize: 10, color: v.mu, marginTop: 2 }}>{s.sub}</div>
           </div>
         ))}
       </div>
 
-      <div style={{ padding: '14px 0' }}>
-        <div style={{ padding: '0 20px 10px', fontSize: 9, fontWeight: 800, color: v.mu, textTransform: 'uppercase', letterSpacing: 1.5 }}>
-          Top Cards by Value
-        </div>
-        {setData.top_cards.slice(0, 10).map((c, i) => {
-          const sharePct = setData.total_value > 0 ? (c.current_raw / setData.total_value) * 100 : 0
-          const barW = Math.min(100, sharePct * 3)
-          return (
-            <div key={i} style={{ padding: '13px 20px', borderBottom: i < setData.top_cards.length - 1 ? `1px solid ${v.br}` : 'none' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 10, color: v.mu, fontWeight: 800, width: 16, flexShrink: 0 }}>{i + 1}</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: v.tx, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.card_name}</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0, marginLeft: 12 }}>
-                  <span style={{ fontSize: 13, fontWeight: 800, color: v.tx }}>{fmt(c.current_raw)}</span>
-                  {c.pct_30d != null && (
-                    <span style={{ fontSize: 12, fontWeight: 800, color: pctCol(c.pct_30d, v), minWidth: 54, textAlign: 'right' }}>{pct(c.pct_30d)}</span>
-                  )}
-                </div>
-              </div>
-              <div style={{ marginLeft: 26 }}>
-                <div style={{ height: 3, borderRadius: 2, background: v.br, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${barW}%`, background: 'linear-gradient(to right, #1a5fad, #2874c8)', borderRadius: 2 }} />
-                </div>
+      {/* Top 5 cards with images */}
+      <div style={{ padding: '12px 0' }}>
+        <div style={{ padding: '0 20px 10px', fontSize: 9, fontWeight: 800, color: v.mu, textTransform: 'uppercase', letterSpacing: 1.5 }}>Top 5 by Value</div>
+        {setData.top_cards.map((card, i) => (
+          <div key={i} style={{ padding: '10px 20px', borderBottom: i < setData.top_cards.length - 1 ? `1px solid ${v.br}` : 'none', display: 'flex', alignItems: 'center', gap: 12 }}>
+            {/* Rank */}
+            <span style={{ fontSize: 11, color: v.mu, fontWeight: 800, width: 16, flexShrink: 0, textAlign: 'center' }}>{i + 1}</span>
+            {/* Card image */}
+            <div style={{ width: 36, height: 50, flexShrink: 0, borderRadius: 4, overflow: 'hidden', background: v.br }}>
+              {card.image_url ? (
+                <img
+                  key={card.card_slug}
+                  crossOrigin="anonymous"
+                  src={proxyImg(card.image_url, card.card_slug) || ''}
+                  alt={card.card_name}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                />
+              ) : (
+                <div style={{ width: '100%', height: '100%', background: v.br }} />
+              )}
+            </div>
+            {/* Card info */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: v.tx, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.card_name}</div>
+              {/* Bar showing relative value */}
+              <div style={{ marginTop: 5, height: 3, borderRadius: 2, background: v.br, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${Math.round((card.current_raw / maxVal) * 100)}%`, background: 'linear-gradient(to right, #3730a3, #4f46e5)', borderRadius: 2 }} />
               </div>
             </div>
-          )
-        })}
+            {/* Price + pct */}
+            <div style={{ flexShrink: 0, textAlign: 'right' }}>
+              <div style={{ fontSize: 13, fontWeight: 900, color: v.tx }}>{fmt(card.current_raw)}</div>
+              {card.pct_30d != null && (
+                <div style={{ fontSize: 11, fontWeight: 800, color: pctCol(card.pct_30d, v), marginTop: 2 }}>{pct(card.pct_30d)}</div>
+              )}
+            </div>
+          </div>
+        ))}
       </div>
 
       <BrandingBar v={v} />
