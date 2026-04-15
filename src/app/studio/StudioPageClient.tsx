@@ -202,15 +202,14 @@ function getThemeVars(theme: Theme) {
 // -- Shared components ---------------------------------------------------------
 
 // Proxy external images through our API to avoid CORS issues with html2canvas
-function proxyImg(url: string | null): string | null {
+function proxyImg(url: string | null, bust?: string): string | null {
   if (!url) return null
-  // Use last 8 chars of encoded URL as stable cache key - unique per card, stable per render
-  const key = encodeURIComponent(url).slice(-8)
-  return `/api/imgproxy?url=${encodeURIComponent(url)}&k=${key}`
+  const b = bust ? `&b=${encodeURIComponent(bust)}` : ''
+  return `/api/imgproxy?url=${encodeURIComponent(url)}${b}`
 }
 
-function CardImg({ src, w, h, radius = 6 }: { src: string | null; w: number; h: number; radius?: number }) {
-  const proxied = proxyImg(src)
+function CardImg({ src, cardSlug, w, h, radius = 6 }: { src: string | null; cardSlug?: string; w: number; h: number; radius?: number }) {
+  const proxied = proxyImg(src, cardSlug)
   if (!proxied) return <div style={{ width: w, height: h, borderRadius: radius, background: 'rgba(255,255,255,0.06)', flexShrink: 0 }} />
   return <img key={proxied} crossOrigin="anonymous" src={proxied} alt="" style={{ width: w, height: h, objectFit: 'contain', borderRadius: radius, flexShrink: 0, display: 'block' }} />
 }
@@ -427,7 +426,7 @@ function InsightCardCompact({ card, theme, gradeView }: { card: CardData; theme:
           <SignalBadge label={sig.label} color={sig.col} />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <CardImg src={card.image_url} w={58} h={80} radius={8} />
+          <CardImg src={card.image_url} cardSlug={card.card_slug} w={58} h={80} radius={8} />
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 20, fontWeight: 900, color: '#fff', lineHeight: 1.15, fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3, overflow: 'hidden' }}>{card.card_name}</div>
             <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 4, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.set_name}</div>
@@ -518,7 +517,7 @@ function InsightCardShowcase({ card, theme, gradeView }: { card: CardData; theme
       <div style={{ background: accentGrad, padding: '0 22px 24px', display: 'flex', gap: 20, alignItems: 'flex-end' }}>
         {/* Large card image */}
         <div style={{ flexShrink: 0, position: 'relative', marginTop: -10 }}>
-          <CardImg src={card.image_url} w={130} h={182} radius={12} />
+          <CardImg src={card.image_url} cardSlug={card.card_slug} w={130} h={182} radius={12} />
         </div>
 
         {/* Name + featured price */}
@@ -587,7 +586,7 @@ function InsightCardMinimal({ card, theme, gradeView }: { card: CardData; theme:
         </div>
         {card.image_url && (
           <div style={{ flexShrink: 0, marginLeft: 16 }}>
-            <CardImg src={card.image_url} w={56} h={78} radius={6} />
+            <CardImg src={card.image_url} cardSlug={card.card_slug} w={56} h={78} radius={6} />
           </div>
         )}
       </div>
@@ -723,7 +722,7 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
         <div style={{ textAlign: 'center', padding: '16px 22px 20px', position: 'relative', zIndex: 4 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 10 }}>
             {card.set_logo_url ? (
-              <img src={card.set_logo_url} alt={card.set_name} style={{ height: 20, maxWidth: 80, objectFit: 'contain', filter: 'brightness(0) invert(1)', opacity: 0.75 }} />
+              <img crossOrigin="anonymous" src={card.set_logo_url} alt={card.set_name} style={{ height: 20, maxWidth: 80, objectFit: 'contain', filter: 'brightness(0) invert(1)', opacity: 0.75 }} />
             ) : (
               <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', fontWeight: 700, letterSpacing: 0.5 }}>{card.set_name}</span>
             )}
@@ -737,7 +736,7 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
             <img
               key={card.card_slug}
               crossOrigin="anonymous"
-              src={proxyImg(card.image_url) || ''}
+              src={proxyImg(card.image_url, card.card_slug) || ''}
               alt={card.card_name}
               style={{
                 width: 200, height: 280, objectFit: 'contain', borderRadius: 16,
@@ -892,7 +891,7 @@ function PeakDistance({ card, theme }: { card: CardData; theme: Theme }) {
           <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.5 }}>Peak Distance</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <CardImg src={card.image_url} w={50} h={70} radius={6} />
+          <CardImg src={card.image_url} cardSlug={card.card_slug} w={50} h={70} radius={6} />
           <div>
             <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3, overflow: 'hidden' }}>{card.card_name}</div>
             <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.set_name}</div>
@@ -952,7 +951,7 @@ function MarketTemperature({ card, theme }: { card: CardData; theme: Theme }) {
           <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.5 }}>Market Temperature</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <CardImg src={card.image_url} w={50} h={70} radius={6} />
+          <CardImg src={card.image_url} cardSlug={card.card_slug} w={50} h={70} radius={6} />
           <div>
             <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3, overflow: 'hidden' }}>{card.card_name}</div>
             <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.set_name}</div>
@@ -1014,7 +1013,7 @@ function GradeCompare({ card, theme }: { card: CardData; theme: Theme }) {
           <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.5 }}>Grade Breakdown</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <CardImg src={card.image_url} w={50} h={70} radius={6} />
+          <CardImg src={card.image_url} cardSlug={card.card_slug} w={50} h={70} radius={6} />
           <div>
             <div style={{ fontSize: 18, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.3, overflow: 'hidden' }}>{card.card_name}</div>
             <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.set_name}</div>
@@ -1116,7 +1115,7 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
             <div style={{ width: 20, flexShrink: 0, fontSize: 11, fontWeight: 900, color: v.mu, textAlign: 'center', fontFamily: "'Outfit', sans-serif" }}>{i + 1}</div>
             <div style={{ flexShrink: 0 }}>
               {m.image_url
-                ? <img key={m.image_url} crossOrigin="anonymous" src={proxyImg(m.image_url) || m.image_url || ''} alt={m.card_name} style={{ width: 44, height: 62, objectFit: 'contain', borderRadius: 5, display: 'block' }} loading="lazy" />
+                ? <img key={m.image_url} crossOrigin="anonymous" src={proxyImg(m.image_url, m.card_slug) || m.image_url || ''} alt={m.card_name} style={{ width: 44, height: 62, objectFit: 'contain', borderRadius: 5, display: 'block' }} loading="lazy" />
                 : <div style={{ width: 44, height: 62, background: v.dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: v.mu }}>?</div>
               }
             </div>
@@ -1441,15 +1440,19 @@ export default function StudioPageClient() {
         })
       }
 
-      // Wait for any pending images to settle
-      await new Promise(r => setTimeout(r, 200))
-
       const { toPng } = (window as any).htmlToImage
 
-      // Run toPng twice - first pass loads images into cache, second captures correctly
-      await toPng(el, { pixelRatio: 1, cacheBust: true }).catch(() => {})
-      await new Promise(r => setTimeout(r, 200))
-      const dataUrl = await toPng(el, { pixelRatio: 2, cacheBust: true })
+      // Use filter to skip silhouette images (they have CSS filter applied by parent)
+      // cacheBust: true appends a timestamp to every image URL html-to-image fetches
+      const dataUrl = await toPng(el, {
+        pixelRatio: 2,
+        cacheBust: true,
+        filter: (node: HTMLElement) => {
+          // Skip nodes marked as silhouettes - they render fine with CSS filter
+          if (node.getAttribute && node.getAttribute('data-silhouette') === 'true') return false
+          return true
+        },
+      })
 
       const link = document.createElement('a')
       const safeCardName = card ? card.card_name.replace(/[^a-z0-9]/gi, '-').toLowerCase() : ''
@@ -1718,7 +1721,7 @@ export default function StudioPageClient() {
                   onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
                 >
                   {m.image_url && (
-                    <img key={m.image_url} crossOrigin="anonymous" src={proxyImg(m.image_url) || m.image_url || ''} alt="" style={{ width: 28, height: 39, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
+                    <img key={m.image_url} crossOrigin="anonymous" src={proxyImg(m.image_url, m.card_slug) || m.image_url || ''} alt="" style={{ width: 28, height: 39, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
                   )}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.card_name}</div>
