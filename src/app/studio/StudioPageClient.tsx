@@ -199,7 +199,9 @@ function getThemeVars(theme: Theme) {
 // Proxy external images through our API to avoid CORS issues with html2canvas
 function proxyImg(url: string | null): string | null {
   if (!url) return null
-  return `/api/imgproxy?url=${encodeURIComponent(url)}`
+  // Use last 8 chars of encoded URL as stable cache key - unique per card, stable per render
+  const key = encodeURIComponent(url).slice(-8)
+  return `/api/imgproxy?url=${encodeURIComponent(url)}&k=${key}`
 }
 
 function CardImg({ src, w, h, radius = 6 }: { src: string | null; w: number; h: number; radius?: number }) {
@@ -712,7 +714,12 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
 
         {/* Set name + card name */}
         <div style={{ textAlign: 'center', padding: '16px 22px 20px', position: 'relative', zIndex: 4 }}>
-          <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.65)', fontWeight: 700, letterSpacing: 0.5, marginBottom: 8 }}>{card.set_name}</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 10 }}>
+            <div style={{ width: 22, height: 22, borderRadius: 6, background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <span style={{ fontSize: 9, fontWeight: 900, color: '#fff', letterSpacing: 0 }}>{card.set_name.charAt(0).toUpperCase()}</span>
+            </div>
+            <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', fontWeight: 700, letterSpacing: 0.5 }}>{card.set_name}</span>
+          </div>
           <div style={{ fontSize: 28, fontWeight: 900, color: '#fff', fontFamily: "'Outfit', sans-serif", letterSpacing: -0.5, lineHeight: 1.1 }}>{card.card_name}</div>
         </div>
 
@@ -1055,14 +1062,16 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
         background: isRising
           ? 'linear-gradient(135deg, #051a0a 0%, #0a3015 40%, #0f4520 100%)'
           : 'linear-gradient(135deg, #1a0505 0%, #300a0a 40%, #451010 100%)',
-        padding: '22px 24px 20px', position: 'relative', overflow: 'hidden',
+        padding: '20px 24px 18px', position: 'relative', overflow: 'hidden', minHeight: 110,
       }}>
-        {/* Decorative circles */}
-        <div style={{ position: 'absolute', top: -30, right: -20, width: 120, height: 120, borderRadius: '50%', background: accentCol, opacity: 0.1 }} />
-        <div style={{ position: 'absolute', top: 10, right: 60, width: 60, height: 60, borderRadius: '50%', background: accentCol, opacity: 0.07 }} />
-        <div style={{ position: 'absolute', bottom: -20, left: 40, width: 80, height: 80, borderRadius: '50%', background: accentCol, opacity: 0.05 }} />
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', position: 'relative' }}>
-          <div>
+        {/* Decorative circles via SVG - no negative coords */}
+        <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }} viewBox="0 0 520 130">
+          <circle cx="520" cy="10" r="80" fill="rgba(255,255,255,0.07)"/>
+          <circle cx="460" cy="20" r="45" fill="rgba(255,255,255,0.04)"/>
+          <circle cx="40" cy="110" r="55" fill="rgba(255,255,255,0.03)"/>
+        </svg>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', position: 'relative', zIndex: 2 }}>
+          <div style={{ flex: 1, minWidth: 0, paddingRight: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
               <div style={{ width: 14, height: 14, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.85)' }} />
@@ -1098,7 +1107,7 @@ function MarketMovers({ movers, theme, period, direction }: { movers: Mover[]; t
             <div style={{ width: 20, flexShrink: 0, fontSize: 11, fontWeight: 900, color: v.mu, textAlign: 'center', fontFamily: "'Outfit', sans-serif" }}>{i + 1}</div>
             <div style={{ flexShrink: 0 }}>
               {m.image_url
-                ? <img src={proxyImg(m.image_url) || m.image_url || ''} alt={m.card_name} style={{ width: 44, height: 62, objectFit: 'contain', borderRadius: 5, display: 'block' }} loading="lazy" />
+                ? <img key={m.image_url} crossOrigin="anonymous" src={proxyImg(m.image_url) || m.image_url || ''} alt={m.card_name} style={{ width: 44, height: 62, objectFit: 'contain', borderRadius: 5, display: 'block' }} loading="lazy" />
                 : <div style={{ width: 44, height: 62, background: v.dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: v.mu }}>?</div>
               }
             </div>
@@ -1423,8 +1432,34 @@ export default function StudioPageClient() {
         })
       }
 
+      // Force-reload every image through proxy with a fresh timestamp
+      // This is the only reliable way to bust the browser image cache for html-to-image
+      const ts = Date.now()
+      const imgs = Array.from(el.querySelectorAll('img')) as HTMLImageElement[]
+      await Promise.all(imgs.map(img => new Promise<void>(resolve => {
+        const originalSrc = img.getAttribute('data-original-src') || img.src
+        img.setAttribute('data-original-src', originalSrc)
+        img.crossOrigin = 'anonymous'
+        img.onload = () => resolve()
+        img.onerror = () => resolve()
+        // Build fresh proxy URL with timestamp
+        const baseUrl = originalSrc.split('?')[0]
+        const isProxy = originalSrc.includes('/api/imgproxy')
+        const rawUrl = isProxy
+          ? decodeURIComponent(new URL(originalSrc, window.location.href).searchParams.get('url') || originalSrc)
+          : originalSrc
+        if (rawUrl && !rawUrl.startsWith('data:')) {
+          img.src = `/api/imgproxy?url=${encodeURIComponent(rawUrl)}&t=${ts}`
+        } else {
+          resolve()
+        }
+      })))
+
+      // Wait for paint
+      await new Promise(r => setTimeout(r, 400))
+
       const { toPng } = (window as any).htmlToImage
-      const dataUrl = await toPng(el, { pixelRatio: 2 })
+      const dataUrl = await toPng(el, { pixelRatio: 2, cacheBust: true })
 
       const link = document.createElement('a')
       const safeCardName = card ? card.card_name.replace(/[^a-z0-9]/gi, '-').toLowerCase() : ''
@@ -1693,7 +1728,7 @@ export default function StudioPageClient() {
                   onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
                 >
                   {m.image_url && (
-                    <img src={proxyImg(m.image_url) || m.image_url || ''} alt="" style={{ width: 28, height: 39, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
+                    <img key={m.image_url} crossOrigin="anonymous" src={proxyImg(m.image_url) || m.image_url || ''} alt="" style={{ width: 28, height: 39, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
                   )}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.card_name}</div>
