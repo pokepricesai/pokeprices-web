@@ -177,23 +177,40 @@ async function fetchSetData(setName: string): Promise<SetData | null> {
   const imgMap: Record<string, string | null> = {}
   ;(imgData || []).forEach((r: any) => { imgMap[r.card_slug] = r.image_url })
 
-  // Build sparkline using only cards that have data at ALL timepoints
-  // This ensures we compare the same basket of cards - prevents misleading slope
-  const cardsWithFull = cards.filter((d: any) => d.raw_30d_ago && d.raw_90d_ago && d.current_raw)
-  const cardsWithPartial = cardsWithFull.length >= 3 ? cardsWithFull : cards.filter((d: any) => d.raw_30d_ago && d.current_raw)
-  const avg = (field: string, subset: any[]) => {
-    const vals = subset.map((d: any) => (d as any)[field] as number).filter(Boolean)
-    return vals.length ? vals.reduce((a: number, b: number) => a + b, 0) / vals.length : null
+  // Build sparkline - same basket, exclude sealed + data outliers
+  // Sealed products and extreme price swings (>80%) skew the average badly
+  const SEALED_SPARK = [/booster box/i, /booster pack/i, /blister/i, /elite trainer/i, /theme deck/i, /trainer deck/i, /tin/i]
+  const sparkCards = cards.filter((d: any) => {
+    // Must have current + 30d data
+    if (!d.current_raw || !d.raw_30d_ago) return false
+    // Exclude sealed products
+    if (SEALED_SPARK.some((p: RegExp) => p.test(d.card_name || ''))) return false
+    // Exclude data errors: >80% swing between any two consecutive points
+    const pct30 = Math.abs((d.current_raw - d.raw_30d_ago) / d.raw_30d_ago)
+    if (pct30 > 0.8) return false
+    if (d.raw_90d_ago) {
+      const pct90 = Math.abs((d.raw_30d_ago - d.raw_90d_ago) / d.raw_90d_ago)
+      if (pct90 > 0.8) return false
+    }
+    return true
+  })
+  const medianAvg = (field: string, subset: any[]) => {
+    const vals = subset.map((d: any) => (d as any)[field] as number).filter(Boolean).sort((a: number, b: number) => a - b)
+    if (!vals.length) return null
+    // Use median to resist outliers
+    const mid = Math.floor(vals.length / 2)
+    return vals.length % 2 !== 0 ? vals[mid] : (vals[mid - 1] + vals[mid]) / 2
   }
   const sparkPoints: { label: string; val: number }[] = []
-  const a180 = avg('raw_180d_ago', cardsWithFull.filter((d: any) => d.raw_180d_ago))
-  const a90  = avg('raw_90d_ago',  cardsWithPartial)
-  const a30  = avg('raw_30d_ago',  cardsWithPartial)
-  const aNow = avg('current_raw',  cardsWithPartial)
-  if (a180) sparkPoints.push({ label: '180d', val: a180 })
-  if (a90)  sparkPoints.push({ label: '90d',  val: a90  })
-  if (a30)  sparkPoints.push({ label: '30d',  val: a30  })
-  if (aNow) sparkPoints.push({ label: 'Now',  val: aNow })
+  const has180 = sparkCards.filter((d: any) => d.raw_180d_ago)
+  const a180 = medianAvg('raw_180d_ago', has180)
+  const a90  = medianAvg('raw_90d_ago',  sparkCards.filter((d: any) => d.raw_90d_ago))
+  const a30  = medianAvg('raw_30d_ago',  sparkCards)
+  const aNow = medianAvg('current_raw',  sparkCards)
+  if (a180 && has180.length >= 3) sparkPoints.push({ label: '180d', val: a180 })
+  if (a90  && sparkCards.filter((d: any) => d.raw_90d_ago).length >= 3) sparkPoints.push({ label: '90d', val: a90 })
+  if (a30  && sparkCards.length >= 3) sparkPoints.push({ label: '30d', val: a30 })
+  if (aNow && sparkCards.length >= 3) sparkPoints.push({ label: 'Now', val: aNow })
   const spark = sparkPoints.map(p => p.val)
 
   const withPct7 = cards.filter((d: any) => d.raw_pct_7d != null)
