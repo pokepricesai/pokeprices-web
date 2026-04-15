@@ -105,15 +105,12 @@ async function fetchCard(slug: string): Promise<CardData | null> {
     .eq('card_slug', slug)
     .single()
   if (!data) return null
-  const [{ data: cardRow }, { data: setMeta }] = await Promise.all([
-    supabase.from('cards').select('card_url_slug,image_url').eq('card_slug', slug).single(),
-    supabase.from('set_info').select('logo_url').eq('set_name', data.set_name).single(),
-  ])
+  const { data: cardRow } = await supabase.from('cards').select('card_url_slug,image_url').eq('card_slug', slug).single()
   return {
     ...data,
     card_url_slug: cardRow?.card_url_slug ?? null,
     image_url: cardRow?.image_url ?? null,
-    set_logo_url: setMeta?.logo_url ?? null,
+    set_logo_url: getSetLogoUrl(data.set_name),
   }
 }
 
@@ -176,10 +173,7 @@ async function fetchSetData(setName: string): Promise<SetData | null> {
   const top5 = cards.slice(0, 5)
   const top5Slugs = top5.map((d: any) => d.card_slug).filter(Boolean)
 
-  const [{ data: imgData }, { data: setMeta }] = await Promise.all([
-    supabase.from('cards').select('card_slug,image_url').in('card_slug', top5Slugs),
-    supabase.from('set_info').select('logo_url').eq('set_name', cards[0].set_name).single(),
-  ])
+  const { data: imgData } = await supabase.from('cards').select('card_slug,image_url').in('card_slug', top5Slugs)
   const imgMap: Record<string, string | null> = {}
   ;(imgData || []).forEach((r: any) => { imgMap[r.card_slug] = r.image_url })
 
@@ -197,7 +191,7 @@ async function fetchSetData(setName: string): Promise<SetData | null> {
 
   return {
     set_name: cards[0].set_name,
-    logo_url: setMeta?.logo_url ?? null,
+    logo_url: getSetLogoUrl(cards[0].set_name),
     release_year: null,
     top_cards: top5.map((d: any) => ({
       card_name: d.card_name,
@@ -238,6 +232,10 @@ function getThemeVars(theme: Theme) {
 // -- Shared components ---------------------------------------------------------
 
 // Proxy external images through our API to avoid CORS issues with html2canvas
+function getSetLogoUrl(setName: string): string {
+  return '/set-assets/logos/' + encodeURIComponent(setName) + '.webp'
+}
+
 function proxyImg(url: string | null, bust?: string): string | null {
   if (!url) return null
   const b = bust ? `&b=${encodeURIComponent(bust)}` : ''
@@ -758,7 +756,7 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
         <div style={{ textAlign: 'center', padding: '16px 22px 20px', position: 'relative', zIndex: 4 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 10 }}>
             {card.set_logo_url ? (
-              <img crossOrigin="anonymous" src={card.set_logo_url} alt={card.set_name} style={{ height: 20, maxWidth: 80, objectFit: 'contain', filter: 'brightness(0) invert(1)', opacity: 0.75 }} />
+              <img crossOrigin="anonymous" src={card.set_logo_url} alt={card.set_name} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} style={{ height: 20, maxWidth: 80, objectFit: 'contain', filter: 'brightness(0) invert(1)', opacity: 0.75 }} />
             ) : (
               <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', fontWeight: 700, letterSpacing: 0.5 }}>{card.set_name}</span>
             )}
@@ -1246,6 +1244,7 @@ function SetReport({ setData, theme }: { setData: SetData; theme: Theme }) {
               crossOrigin="anonymous"
               src={setData.logo_url}
               alt={setData.set_name}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
               style={{ height: 44, maxWidth: 260, objectFit: 'contain', display: 'block', marginBottom: 6 }}
             />
           ) : (
