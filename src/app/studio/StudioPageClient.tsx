@@ -233,7 +233,8 @@ function getThemeVars(theme: Theme) {
 
 // Proxy external images through our API to avoid CORS issues with html2canvas
 function getSetLogoUrl(setName: string): string {
-  return '/set-assets/logos/' + encodeURIComponent(setName) + '.webp'
+  // Files stored with spaces - Next.js serves them fine with spaces in URL
+  return '/set-assets/logos/' + setName + '.webp'
 }
 
 function proxyImg(url: string | null, bust?: string): string | null {
@@ -387,7 +388,7 @@ function PokeBgDecor({ v }: { v: ReturnType<typeof getThemeVars> }) {
           zIndex: 1,
         }}>
           <img
-            data-silhouette="true"
+            data-bg-pokemon="true"
             src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.id}.png`}
             alt="" width={p.size} height={p.size}
             style={{ objectFit: 'contain', width: '100%', height: '100%' }}
@@ -732,7 +733,7 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
               zIndex: 1,
             }}>
               <img
-                data-silhouette="true"
+                data-bg-pokemon="true"
                 src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${id}.png`}
                 alt="" width={configs.size} height={configs.size}
                 style={{ objectFit: 'contain', width: '100%', height: '100%' }}
@@ -756,7 +757,7 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
         <div style={{ textAlign: 'center', padding: '16px 22px 20px', position: 'relative', zIndex: 4 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 10 }}>
             {card.set_logo_url ? (
-              <img crossOrigin="anonymous" src={card.set_logo_url} alt={card.set_name} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} style={{ height: 20, maxWidth: 80, objectFit: 'contain', filter: 'brightness(0) invert(1)', opacity: 0.75 }} />
+              <img crossOrigin="anonymous" src={card.set_logo_url} alt={card.set_name} style={{ height: 20, maxWidth: 80, objectFit: 'contain', filter: 'brightness(0) invert(1)', opacity: 0.75 }} />
             ) : (
               <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', fontWeight: 700, letterSpacing: 0.5 }}>{card.set_name}</span>
             )}
@@ -1239,19 +1240,16 @@ function SetReport({ setData, theme }: { setData: SetData; theme: Theme }) {
             <Watermark />
             <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.4)', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>Set Report{setData.release_year ? ` - ${setData.release_year}` : ''}</span>
           </div>
-          {setData.logo_url ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 6, flexWrap: 'wrap' }}>
             <img
-              crossOrigin="anonymous"
               src={setData.logo_url}
               alt={setData.set_name}
-              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-              style={{ height: 44, maxWidth: 260, objectFit: 'contain', display: 'block', marginBottom: 6 }}
+              style={{ height: 38, maxWidth: 180, objectFit: 'contain', display: 'block', flexShrink: 0 }}
             />
-          ) : (
-            <div style={{ fontSize: 24, fontWeight: 900, color: '#fff', letterSpacing: -0.5, fontFamily: "'Outfit', sans-serif", marginBottom: 6 }}>
+            <div style={{ fontSize: 22, fontWeight: 900, color: '#fff', letterSpacing: -0.5, fontFamily: "'Outfit', sans-serif", lineHeight: 1.1 }}>
               {setData.set_name}
             </div>
-          )}
+          </div>
           {setData.release_year && (
             <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', fontWeight: 600 }}>{setData.release_year}</span>
           )}
@@ -1554,7 +1552,7 @@ export default function StudioPageClient() {
       // This is the only reliable fix for browser image caching - once an image is a
       // data URL, html-to-image uses the pixel data directly and never fetches anything.
       const cardImgs = Array.from(
-        el.querySelectorAll('img:not([data-silhouette])')
+        el.querySelectorAll('img:not([data-bg-pokemon])')
       ) as HTMLImageElement[]
 
       const origSrcs: string[] = []
@@ -1562,9 +1560,13 @@ export default function StudioPageClient() {
         origSrcs[i] = img.src
         try {
           const ts = Date.now()
-          const src = img.src.includes('/api/imgproxy')
-            ? img.src.split('&b=')[0] + `&b=export_${ts}`
-            : `/api/imgproxy?url=${encodeURIComponent(img.src)}&b=export_${ts}`
+          // Same-origin assets (set logos) fetch directly; external images go through proxy
+          const isSameOrigin = img.src.startsWith(window.location.origin) || img.src.startsWith('/')
+          const src = isSameOrigin
+            ? img.src
+            : img.src.includes('/api/imgproxy')
+              ? img.src.split('&b=')[0] + '&b=export_' + ts
+              : '/api/imgproxy?url=' + encodeURIComponent(img.src) + '&b=export_' + ts
           const res = await fetch(src, { cache: 'no-store' })
           const blob = await res.blob()
           const dataUrl = await new Promise<string>(resolve => {
