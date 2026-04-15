@@ -1246,7 +1246,7 @@ function SetReport({ setData, theme }: { setData: SetData; theme: Theme }) {
               alt={setData.set_name}
               style={{ height: 38, maxWidth: 180, objectFit: 'contain', display: 'block', flexShrink: 0 }}
             />
-            <div style={{ fontSize: 22, fontWeight: 900, color: '#fff', letterSpacing: -0.5, fontFamily: "'Outfit', sans-serif", lineHeight: 1.1 }}>
+            <div style={{ fontSize: 22, fontWeight: 900, color: '#fff', letterSpacing: 0.5, fontFamily: "'Outfit', sans-serif", lineHeight: 1.1 }}>
               {setData.set_name}
             </div>
           </div>
