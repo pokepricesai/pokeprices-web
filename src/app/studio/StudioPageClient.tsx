@@ -1240,13 +1240,13 @@ function SetReport({ setData, theme }: { setData: SetData; theme: Theme }) {
             <Watermark />
             <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.4)', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>Set Report{setData.release_year ? ` - ${setData.release_year}` : ''}</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 6, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
             <img
               src={setData.logo_url}
               alt={setData.set_name}
-              style={{ height: 38, maxWidth: 180, objectFit: 'contain', display: 'block', flexShrink: 0 }}
+              style={{ height: 32, maxWidth: 140, objectFit: 'contain', display: 'block', flexShrink: 0 }}
             />
-            <div style={{ fontSize: 22, fontWeight: 900, color: '#fff', letterSpacing: 0.5, fontFamily: "'Outfit', sans-serif", lineHeight: 1.1 }}>
+            <div style={{ fontSize: 20, fontWeight: 900, color: '#fff', letterSpacing: 0.3, fontFamily: "'Outfit', sans-serif", lineHeight: 1.1, whiteSpace: 'nowrap' }}>
               {setData.set_name}
             </div>
           </div>
