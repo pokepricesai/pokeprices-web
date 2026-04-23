@@ -26,6 +26,18 @@ const NON_POKEMON_SUFFIXES = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Format card number for display: prefer "95/165" when set has multiple cards, else "#95"
+function formatCardNumber(
+  cardNumber: string | number | null | undefined,
+  cardNumberDisplay: string | null | undefined,
+  setPrintedTotal: string | number | null | undefined,
+): string {
+  const totalNum = setPrintedTotal ? Number(setPrintedTotal) : 0
+  if (cardNumberDisplay && totalNum > 1) return cardNumberDisplay
+  if (cardNumber) return `#${cardNumber}`
+  return ''
+}
+
 function extractVariant(cardName: string): string | null {
   const match = cardName.match(/\[([^\]]+)\]/)
   return match ? match[1] : null
@@ -382,6 +394,9 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
 
   const raw = metrics?.results?.[0] || metrics || {}
 
+  // Formatted card number for display: "95/165" or "#95"
+  const cardNumberFormatted = formatCardNumber(card.card_number, card.card_number_display, card.set_printed_total)
+
   const grades = [
     { label: 'Raw',     value: card.raw_usd   },
     { label: 'PSA 7',   value: card.psa7_usd  },
@@ -421,8 +436,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
     : null
 
   const salesMonthly  = raw.sales_30d ?? raw.volume_30d ?? null
-  // Volume label from card_volume is more reliable than raw count for liquidity
-  // 4 sales/week = ~17/mo = high liquidity
   const liquidityLabel = volumeLabel
     ? volumeLabel.includes('per day') ? 'High — very active market'
     : volumeLabel.includes('per week') ? 'High — sells regularly'
@@ -456,8 +469,9 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
 
   const hasDeals    = ebayDeals.length > 0
   const hasListings = ebayListings.length > 0
-  const cardNumber  = card.card_number ? ` #${card.card_number}` : ''
-  const prefillMessage = `I'm looking at ${card.card_name}${cardNumber} from ${card.set_name}`
+  // Prefill message uses formatted number for natural reading: "Bulbasaur 95/165" or "Bulbasaur #95"
+  const numberForMessage = cardNumberFormatted ? ` ${cardNumberFormatted}` : ''
+  const prefillMessage = `I'm looking at ${card.card_name}${numberForMessage} from ${card.set_name}`
 
   const ebayUkForSale = buildEbayUrl(card.card_name, card.set_name, card.card_number, 'UK', 'forsale')
   const ebayUkSold    = buildEbayUrl(card.card_name, card.set_name, card.card_number, 'UK', 'sold')
@@ -495,7 +509,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
     sub: drawdown >= -2 ? `Current ~$${card.raw_usd ? Math.round(card.raw_usd / 100) : '—'}` : athUsd ? `ATH ~$${athUsd}` : 'from peak',
     highlight: drawdown < -30,
   })
-  // Volume — use volume_label phrase if available, else fall back to raw count
   if (volumeLabel) {
     tiles.push({
       label: 'Market Activity', value: volumeLabel,
@@ -517,7 +530,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
     sub: trend.raw_pct_30d > 0 ? 'Rising' : 'Falling',
     color: trend.raw_pct_30d > 0 ? 'var(--green)' : '#ef4444',
   })
-  // Price stability — use 7d price swing for meaningful short-term signal
   if (trend?.raw_pct_7d != null && pctQuality(trend.raw_pct_7d, '7d') !== 'suppress') {
     const swing7d = Math.abs(trend.raw_pct_7d)
     tiles.push({
@@ -591,12 +603,11 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
         <div style={{ flex: 1, minWidth: 280 }}>
           <h1 style={{ fontFamily: "'Outfit', serif", fontSize: 26, margin: '0 0 4px', color: 'var(--text)', letterSpacing: '-0.3px' }}>{card.card_name}</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 16px', fontFamily: "'Figtree', sans-serif" }}>
-            {card.set_name}{card.card_number ? ` · #${card.card_number}` : ''}
+            {card.set_name}{cardNumberFormatted ? ` · ${cardNumberFormatted}` : ''}
           </p>
 
           <HeroBanner trend={trend} hasInsight={!!displayInsight} />
 
-          {/* Insight box — with volume pill */}
           {displayInsight && (
             <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderLeft: '3px solid var(--primary)', borderRadius: 10, padding: '12px 14px', marginBottom: 16, fontSize: 13, lineHeight: 1.7, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>
               {displayInsight}
@@ -608,7 +619,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
             </div>
           )}
 
-          {/* Prices */}
           <div style={{ background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)', padding: '14px 16px', marginBottom: 14 }}>
             <SectionLabel>Current Prices (USD)</SectionLabel>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
@@ -621,7 +631,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
             </div>
           </div>
 
-          {/* Trend */}
           {trendPeriods.length > 0 && (
             <div style={{ background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)', padding: '14px 16px' }}>
               <SectionLabel>Raw Price Trend</SectionLabel>
@@ -877,7 +886,7 @@ function ExploreMoreSpecies({ speciesSlug, currentUrlSlug, setName }: { speciesS
       `card_name.ilike.% ${displayName} %`,
     ].join(',')
 
-    supabase.from('cards').select('card_name, set_name, card_url_slug, image_url, card_number')
+    supabase.from('cards').select('card_name, set_name, card_url_slug, image_url, card_number, card_number_display, set_printed_total')
       .or(namePatterns).eq('is_sealed', false).neq('card_url_slug', currentUrlSlug)
       .order('set_name').limit(24)
       .then(({ data }) => { if (data) setCards(data); setLoading(false) })
@@ -919,7 +928,7 @@ function ExploreMoreSet({ setName, currentUrlSlug }: { setName: string; currentU
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    supabase.from('cards').select('card_name, set_name, card_url_slug, image_url, card_number')
+    supabase.from('cards').select('card_name, set_name, card_url_slug, image_url, card_number, card_number_display, set_printed_total')
       .eq('set_name', setName).eq('is_sealed', false).neq('card_url_slug', currentUrlSlug)
       .order('card_number').limit(24)
       .then(({ data }) => { if (data) setCards(data); setLoading(false) })
@@ -934,20 +943,23 @@ function ExploreMoreSet({ setName, currentUrlSlug }: { setName: string; currentU
         <Link href={`/set/${encodeURIComponent(setName)}`} style={{ fontSize: 13, fontWeight: 600, color: 'var(--primary)', fontFamily: "'Figtree', sans-serif", textDecoration: 'none' }}>View full set →</Link>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 8 }}>
-        {cards.slice(0, 20).map((c, i) => (
-          <Link key={i} href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`} style={{ textDecoration: 'none' }}>
-            <div style={{ background: 'var(--bg-light)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 8px', textAlign: 'center', transition: 'border-color 0.15s, transform 0.15s' }}
-              onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--primary)'; el.style.transform = 'translateY(-2px)' }}
-              onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--border)'; el.style.transform = 'translateY(0)' }}
-            >
-              {c.image_url
-                ? <img src={c.image_url} alt={c.card_name} style={{ width: 72, height: 100, objectFit: 'contain', display: 'block', margin: '0 auto 6px', borderRadius: 4 }} loading="lazy" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
-                : <div style={{ width: 72, height: 100, background: 'var(--border)', borderRadius: 4, margin: '0 auto 6px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🃏</div>}
-              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.3, marginBottom: 2 }}>{c.card_name}</div>
-              {c.card_number && <div style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>#{c.card_number}</div>}
-            </div>
-          </Link>
-        ))}
+        {cards.slice(0, 20).map((c, i) => {
+          const numLabel = formatCardNumber(c.card_number, c.card_number_display, c.set_printed_total)
+          return (
+            <Link key={i} href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`} style={{ textDecoration: 'none' }}>
+              <div style={{ background: 'var(--bg-light)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 8px', textAlign: 'center', transition: 'border-color 0.15s, transform 0.15s' }}
+                onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--primary)'; el.style.transform = 'translateY(-2px)' }}
+                onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--border)'; el.style.transform = 'translateY(0)' }}
+              >
+                {c.image_url
+                  ? <img src={c.image_url} alt={c.card_name} style={{ width: 72, height: 100, objectFit: 'contain', display: 'block', margin: '0 auto 6px', borderRadius: 4 }} loading="lazy" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
+                  : <div style={{ width: 72, height: 100, background: 'var(--border)', borderRadius: 4, margin: '0 auto 6px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🃏</div>}
+                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.3, marginBottom: 2 }}>{c.card_name}</div>
+                {numLabel && <div style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>{numLabel}</div>}
+              </div>
+            </Link>
+          )
+        })}
       </div>
     </div>
   )
