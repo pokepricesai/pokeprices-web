@@ -3,12 +3,22 @@ import type { Metadata } from 'next'
 import InsightsPageClient from './InsightsPageClient'
 
 export const metadata: Metadata = {
-  title: 'Market Insights',
-  description: 'Pokemon TCG market analysis, price trend reports and collecting guides — powered by real sales data. Updated weekly.',
+  title: 'Pokémon Card Guides: Grading Advice, Market Trends and Price Analysis | PokePrices',
+  description: 'Read practical Pokémon card guides on grading, PSA 10 value gaps, market trends, chase cards and smarter buying decisions.',
   openGraph: {
-    title: 'Pokemon TCG Market Insights | PokePrices',
-    description: 'Pokemon TCG market analysis, price trend reports and collecting guides — powered by real sales data.',
+    title: 'Pokémon Card Guides: Grading, Trends and Price Analysis | PokePrices',
+    description: 'Practical guides for Pokémon card collectors — grading advice, PSA population analysis, market trends and price breakdowns.',
     url: 'https://pokeprices.io/insights',
+    siteName: 'PokePrices',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'Pokémon Card Guides: Grading, Trends and Price Analysis',
+    description: 'Practical Pokémon card guides on grading, PSA 10 value gaps, market trends and chase cards.',
+  },
+  alternates: {
+    canonical: 'https://pokeprices.io/insights',
   },
 }
 

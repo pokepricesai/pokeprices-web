@@ -1,3 +1,4 @@
+// app/layout.tsx
 import type { Metadata } from 'next'
 import Script from 'next/script'
 import './globals.css'
@@ -7,10 +8,10 @@ import Footer from '@/components/Footer'
 export const metadata: Metadata = {
   metadataBase: new URL('https://pokeprices.io'),
   title: {
-    default: 'PokePrices — Know What Your Cards Are Really Worth',
+    default: 'PokePrices — Pokémon Card Prices, PSA Values and Grading Data',
     template: '%s | PokePrices',
   },
-  description: 'Real Pokemon card prices for 40,000+ cards across 156 sets. Daily updates, PSA population data, trend analysis and grading advice. Free, no login required.',
+  description: 'Free Pokémon card price guide. Live raw and graded values, PSA population data, trend analysis and practical grading insights. 40,000+ cards, no login required.',
   keywords: ['pokemon card prices', 'pokemon tcg price guide', 'PSA population', 'pokemon card values', 'pokemon grading', 'pokemon card market'],
   authors: [{ name: 'PokePrices' }],
   creator: 'PokePrices',
@@ -19,21 +20,21 @@ export const metadata: Metadata = {
     locale: 'en_GB',
     url: 'https://pokeprices.io',
     siteName: 'PokePrices',
-    title: 'PokePrices — Know What Your Cards Are Really Worth',
-    description: 'Real Pokemon card prices for 40,000+ cards. Daily updates, PSA population data, grading advice. Free.',
+    title: 'PokePrices — Pokémon Card Prices, PSA Values and Grading Data',
+    description: 'Free Pokémon card price guide — raw, PSA 9 and PSA 10 values, population data, grading analysis. No login, updated nightly.',
     images: [
       {
         url: '/og-image.png',
         width: 1200,
         height: 630,
-        alt: 'PokePrices — Pokemon Card Price Guide',
+        alt: 'PokePrices — Pokémon Card Price Guide',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'PokePrices — Know What Your Cards Are Really Worth',
-    description: 'Real Pokemon card prices for 40,000+ cards. Daily updates, PSA population data, grading advice. Free.',
+    title: 'PokePrices — Pokémon Card Prices, PSA Values and Grading Data',
+    description: 'Free Pokémon card price guide. Live raw and graded values, PSA population data. No login.',
     images: ['/og-image.png'],
   },
   robots: {

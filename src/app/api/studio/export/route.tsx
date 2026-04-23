@@ -398,18 +398,19 @@ export async function POST(req: NextRequest) {
       //   sweep-flag=0 (counter-clockwise), large-arc=1
       // Fill: partial arc from left, same direction
       const r2 = 90, cx2 = 150, cy2 = 130
-      const lx = cx2 - r2, ly = cy2   // left point
-      const rx2 = cx2 + r2, ry2 = cy2  // right point
+      const lx = cx2 - r2, ly = cy2   // left point (start of arc)
 
-      // End point of fill arc
-      const fillAngle = Math.PI - (Math.PI * fillPct / 100)  // from left, going counter-clockwise over top
+      // Counter-clockwise sweep over top: sweep-flag=0
+      // fillPct=0 stays at left, fillPct=100 completes to right
+      const fillAngle = Math.PI * (1 - fillPct / 100)
       const fex = cx2 + r2 * Math.cos(fillAngle)
-      const fey = cy2 + r2 * Math.sin(fillAngle)
+      const fey = cy2 - r2 * Math.sin(fillAngle)  // minus because SVG y is flipped
       const fillLarge = fillPct > 50 ? 1 : 0
 
-      const trackPath = `M ${lx} ${ly} A ${r2} ${r2} 0 1 1 ${rx2} ${ry2}`
+      // Track: full top semicircle, counter-clockwise (sweep=0, largeArc=1)
+      const trackPath = `M ${lx} ${ly} A ${r2} ${r2} 0 1 0 ${cx2 + r2} ${cy2}`
       const fillPath  = fillPct > 0
-        ? `M ${lx} ${ly} A ${r2} ${r2} 0 ${fillLarge} 1 ${fex.toFixed(1)} ${fey.toFixed(1)}`
+        ? `M ${lx} ${ly} A ${r2} ${r2} 0 ${fillLarge} 0 ${fex.toFixed(1)} ${fey.toFixed(1)}`
         : ''
 
       return new ImageResponse((

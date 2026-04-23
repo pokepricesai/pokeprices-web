@@ -24,8 +24,18 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
   if (!card) return { title: 'Card Not Found | PokePrices' }
 
-  const name     = card.card_name
-  const num      = card.card_number ? ` #${card.card_number}` : ''
+  // Strip trailing " #NN" from card_name (DB stores "Pikachu #55")
+  // Regex handles "Pikachu #55", "Pikachu [1st Edition] #55", and trailing suffixes
+  const name = card.card_name.replace(/\s*#\d+\w*\s*$/, '').trim()
+
+  // Number suffix: prefer "95/165" when set has multiple cards, else "#95"
+  let num = ''
+  if (card.card_number_display && card.set_printed_total && card.set_printed_total > 1) {
+    num = ` ${card.card_number_display}`
+  } else if (card.card_number) {
+    num = ` #${card.card_number}`
+  }
+
   const rawUsd   = card.raw_usd   ? card.raw_usd   / 100 : null
   const psa9Usd  = card.psa9_usd  ? card.psa9_usd  / 100 : null
   const psa10Usd = card.psa10_usd ? card.psa10_usd / 100 : null
