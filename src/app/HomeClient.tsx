@@ -1,88 +1,182 @@
 'use client'
-import { useState, useEffect } from 'react'
+
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { supabase, formatPrice, formatPct } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import InlineChat from '@/components/InlineChat'
 import NewsletterSignup from '@/components/NewsletterSignup'
 
-const upcomingReleases = [
-  { name: 'Chaos Rising',          date: 'May 22, 2026',    confirmed: true,  type: 'Main Set'     },
-  { name: 'Abyss Eye',             date: 'Jul 2026 (est)',  confirmed: false, type: 'Main Set'     },
-  { name: 'Celebration Collection',date: 'Nov 2026 (est)',  confirmed: false, type: 'Special Set'  },
-]
+// ── Types ─────────────────────────────────────────────────────────────────
 
-const features = [
-  { icon: '◈', title: 'Real Sales Data',       desc: 'Daily prices from actual completed sales. No estimates, no guesswork.' },
-  { icon: '◈', title: 'True Landed Cost',       desc: 'VAT, shipping, customs, handling — the real cost of buying a card, not just the sticker price.' },
-  { icon: '◈', title: 'Trend Analysis',         desc: '7 days to 5 years of price history. Spot movement before it happens.' },
-  { icon: '◈', title: 'Grading Intelligence',   desc: 'PSA population data, grade premiums, and honest grading advice.' },
-]
-
-const faqs = [
-  { q: 'Where does the pricing data come from?',  a: 'All prices are sourced from actual completed sales, updated every night. We track last sold prices and historical data so you always have current market values.' },
-  { q: 'Is this really free?',                    a: "Genuinely free. No login, no email capture, no premium tier. Revenue comes from optional affiliate links when you're ready to buy." },
-  { q: 'Do you cover import costs?',              a: 'Yes. The true landed cost tool factors in VAT, handling fees, shipping, and customs so you see what a card actually costs to get in hand — not just the listed price.' },
-  { q: 'What grading companies do you track?',    a: 'PSA and CGC prices and population data across 32,000+ entries. Grading advice covers PSA, CGC, BGS, SGC, and ACE.' },
-  { q: 'Can I find a card shop near me?',         a: 'Yes — check the Vendor Directory. You can search by postcode or town to find physical shops, retailers, and grading services near you.' },
-]
-
-interface MarketIndexRow {
+type MarketIndexRow = {
   date: string
   total_raw_usd: number
   median_raw_usd: number
-  raw_pct_30d?: number
+  raw_pct_30d: number | null
 }
 
-interface WeeklyReportRow {
-  category: string
-  card_name: string
-  set_name: string
-  current_price: number
-  metric_value: number
-  metric_label: string
-  card_slug: string
-  card_url_slug: string
-}
-
-interface HeatmapCard {
-  card_slug: string
-  card_url_slug: string
-  card_name: string
-  set_name: string
-  current_price: number
-  pct_change: number
-  price_usd: number
-  color_band: string
-  trend_quality: string
-  is_recovery: boolean
-}
-
-interface HiddenGem {
-  card_slug: string
-  card_url_slug: string
-  card_name: string
-  set_name: string
-  current_price: number
-  pct_30d: number
-  psa10_pop: number
-  sales_30d: number
-  live_listings: number
-  gem_score: number
-}
-
-interface MarketTotal {
+type MarketTotal = {
   total_raw_usd: number
   cards_tracked: number
 }
 
+type WeeklyReportRow = {
+  category: string
+  card_slug: string
+  card_name: string
+  set_name: string
+  card_url_slug: string | null
+  current_price: number
+  metric_label: string
+}
+
+type HeatmapCard = {
+  card_slug: string
+  card_name: string
+  set_name: string
+  card_url_slug: string | null
+  price_usd: number | null
+  pct_change: number | null
+  color_band: string
+  is_recovery: boolean
+}
+
+type HiddenGem = {
+  card_slug: string
+  card_name: string
+  set_name: string
+  card_url_slug: string | null
+  current_price: number
+  pct_30d: number | null
+  psa10_pop: number
+  gem_score: number
+}
+
+// ── Tools Row Components ─────────────────────────────────────────────────
+
+function ToolIcon({ path }: { path: string }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+      <path d={path} />
+    </svg>
+  )
+}
+
+function PokeballIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="9" />
+      <line x1="3" y1="12" x2="9" y2="12" />
+      <line x1="15" y1="12" x2="21" y2="12" />
+      <circle cx="12" cy="12" r="2.5" fill="currentColor" />
+    </svg>
+  )
+}
+
+function ToolChip({ href, icon, label, comingSoon = false }: {
+  href?: string; icon: React.ReactNode; label: string; comingSoon?: boolean
+}) {
+  const baseStyle: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 7,
+    padding: '7px 14px',
+    borderRadius: 20,
+    fontSize: 12,
+    fontWeight: 700,
+    fontFamily: "'Figtree', sans-serif",
+    textDecoration: 'none',
+    whiteSpace: 'nowrap',
+    transition: 'all 0.15s',
+    backdropFilter: 'blur(4px)',
+  }
+
+  if (comingSoon) {
+    return (
+      <span style={{
+        ...baseStyle,
+        background: 'rgba(255,255,255,0.06)',
+        color: 'rgba(255,255,255,0.55)',
+        border: '1px dashed rgba(255,255,255,0.2)',
+        cursor: 'default',
+      }}>
+        {icon}
+        {label}
+        <span style={{
+          fontSize: 9,
+          fontWeight: 800,
+          letterSpacing: 0.5,
+          background: 'rgba(255,203,5,0.2)',
+          color: 'var(--accent)',
+          padding: '1px 6px',
+          borderRadius: 10,
+          textTransform: 'uppercase',
+          marginLeft: 2,
+        }}>
+          Soon
+        </span>
+      </span>
+    )
+  }
+
+  return (
+    <Link href={href!} style={{
+      ...baseStyle,
+      background: 'rgba(255,255,255,0.15)',
+      color: '#fff',
+      border: '1px solid rgba(255,255,255,0.25)',
+    }}
+      onMouseEnter={e => {
+        const el = e.currentTarget as HTMLAnchorElement
+        el.style.background = 'rgba(255,255,255,0.25)'
+        el.style.borderColor = 'rgba(255,255,255,0.4)'
+        el.style.transform = 'translateY(-1px)'
+      }}
+      onMouseLeave={e => {
+        const el = e.currentTarget as HTMLAnchorElement
+        el.style.background = 'rgba(255,255,255,0.15)'
+        el.style.borderColor = 'rgba(255,255,255,0.25)'
+        el.style.transform = ''
+      }}
+    >
+      {icon}
+      {label}
+    </Link>
+  )
+}
+
+function ToolsRow() {
+  return (
+    <div style={{
+      display: 'flex',
+      gap: 8,
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      maxWidth: 780,
+      margin: '0 auto',
+    }}>
+      <ToolChip href="/browse" icon={<ToolIcon path="M21 21l-4.35-4.35M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16z" />} label="Browse sets" />
+      <ToolChip href="/pokemon" icon={<PokeballIcon />} label="By Pokémon" />
+      <ToolChip href="/insights" icon={<ToolIcon path="M12 20h9M3 17l6-6 4 4 8-8" />} label="Insights" />
+      <ToolChip href="/studio" icon={<ToolIcon path="M12 19l7-7 3 3-7 7-3-3zM18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5zM2 2l7.586 7.586M11 11a2 2 0 1 1-2-2 2 2 0 0 1 2 2z" />} label="Studio" />
+      <ToolChip href="/creators" icon={<ToolIcon path="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />} label="Creators" />
+      <ToolChip href="/vendors" icon={<ToolIcon path="M3 7h18M3 7l2-4h14l2 4M3 7v13a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V7M9 12h6" />} label="Vendors" />
+
+      <ToolChip icon={<ToolIcon path="M3 3v18h18M7 14l4-4 4 4 5-5" />} label="Portfolio tracker" comingSoon />
+      <ToolChip icon={<ToolIcon path="M6 2l.01 7.01L12 17l5.99-7.99L18 2H6zM6 22h12" />} label="Pull rates" comingSoon />
+      <ToolChip icon={<ToolIcon path="M5 12l5 5L20 7" />} label="Rip or keep" comingSoon />
+    </div>
+  )
+}
+
+// ── Hero visual components ───────────────────────────────────────────────
+
 const HERO_POKEMON = [
-  { id: 6,   x: '4%',  y: '10%', size: 90,  opacity: 0.07, delay: '0s'   },
-  { id: 249, x: '88%', y: '5%',  size: 110, opacity: 0.06, delay: '0.5s' },
-  { id: 384, x: '78%', y: '55%', size: 80,  opacity: 0.07, delay: '1s'   },
-  { id: 150, x: '12%', y: '60%', size: 70,  opacity: 0.06, delay: '1.5s' },
-  { id: 25,  x: '50%', y: '5%',  size: 55,  opacity: 0.08, delay: '0.8s' },
-  { id: 197, x: '65%', y: '20%', size: 65,  opacity: 0.06, delay: '2s'   },
-  { id: 130, x: '30%', y: '70%', size: 75,  opacity: 0.05, delay: '1.2s' },
+  { id: 6,   x: '6%',  y: '18%', size: 140, opacity: 0.09, delay: '0s'   },
+  { id: 149, x: '88%', y: '12%', size: 130, opacity: 0.08, delay: '1s'   },
+  { id: 25,  x: '12%', y: '60%', size: 110, opacity: 0.07, delay: '2s'   },
+  { id: 150, x: '85%', y: '55%', size: 120, opacity: 0.08, delay: '1.5s' },
+  { id: 94,  x: '45%', y: '75%', size: 100, opacity: 0.06, delay: '0.5s' },
 ]
 
 function PokemonSilhouettes() {
@@ -95,7 +189,8 @@ function PokemonSilhouettes() {
           animation: `float 6s ease-in-out ${p.delay} infinite`,
           filter: 'brightness(0) invert(1)',
         }}>
-          <img src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.id}.png`}
+          <img
+            src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.id}.png`}
             alt="" width={p.size} height={p.size}
             style={{ objectFit: 'contain', width: '100%', height: '100%' }} />
         </div>
@@ -149,6 +244,26 @@ function Sparkline({ data, color = '#22c55e', height = 48 }: { data: number[], c
   )
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+function formatMarketTotal(cents: number): string {
+  const dollars = cents / 100
+  if (dollars >= 1_000_000) return `$${(dollars / 1_000_000).toFixed(1)}M`
+  if (dollars >= 1_000) return `$${(dollars / 1_000).toFixed(0)}K`
+  return `$${dollars.toFixed(0)}`
+}
+
+function categoryMeta(cat: string) {
+  switch (cat) {
+    case 'top_riser':     return { label: 'Top Riser (30d)',  color: '#22c55e' }
+    case 'top_faller':    return { label: 'Top Faller (30d)', color: '#ef4444' }
+    case 'most_volatile': return { label: 'Most Volatile',    color: '#f59e0b' }
+    case 'new_ath':       return { label: 'New High',         color: '#a78bfa' }
+    case 'most_traded':   return { label: 'Most Active',      color: '#3b82f6' }
+    default:              return { label: cat,                color: '#94a3b8' }
+  }
+}
+
 function heatColor(band: string) {
   switch (band) {
     case 'strong_up':   return { bg: 'rgba(34,197,94,0.15)',   border: 'rgba(34,197,94,0.3)',   text: '#16a34a' }
@@ -159,23 +274,29 @@ function heatColor(band: string) {
   }
 }
 
-function categoryMeta(cat: string) {
-  switch (cat) {
-    case 'top_riser':     return { label: 'Top Riser (30d)',  color: '#22c55e' }
-    case 'top_faller':    return { label: 'Top Faller (30d)', color: '#ef4444' }
-    case 'most_volatile': return { label: 'Most Volatile',    color: '#f59e0b' }
-    case 'new_ath':       return { label: 'New High',         color: '#a78bfa' }
-    case 'most_traded':   return { label: 'Most Active',      color: '#3b82f6' }
-    default:              return { label: cat,                 color: '#94a3b8' }
-  }
-}
+const upcomingReleases = [
+  { name: 'Chaos Rising',       date: 'May 22, 2026', confirmed: true  },
+  { name: 'Destined Rivals 2',  date: 'Jul 2026',      confirmed: false },
+  { name: 'Mega Evolution Set', date: 'Aug 2026',      confirmed: false },
+  { name: 'Journey Together 2', date: 'Q4 2026',       confirmed: false },
+]
 
-function formatMarketTotal(cents: number): string {
-  const dollars = cents / 100
-  if (dollars >= 1_000_000) return `$${(dollars / 1_000_000).toFixed(1)}M`
-  if (dollars >= 1_000) return `$${(dollars / 1_000).toFixed(0)}K`
-  return `$${dollars.toFixed(0)}`
-}
+const features = [
+  { icon: '📊', title: 'Real sold data',     desc: 'Prices from actual sold listings, not asking prices' },
+  { icon: '🎯', title: 'Grading insights',   desc: 'Is it worth grading? See the PSA 10 premium and gem rate' },
+  { icon: '📈', title: 'Market trends',      desc: 'Price movements, drawdowns and momentum for every card' },
+  { icon: '🔒', title: 'No data collection', desc: 'No login, no tracking, no email capture — ever' },
+]
+
+const faqs = [
+  { q: 'Where does the price data come from?',     a: 'We track sold listings from PriceCharting, updated nightly. Prices reflect what cards actually sell for, not asking prices.' },
+  { q: 'Is PokePrices really free?',               a: 'Yes. No login, no paywall, no hidden fees. The core price data is free forever. Future tools may include optional paid features but the card price guide will always be free.' },
+  { q: 'Do you sell my data?',                     a: 'No. We do not collect personal data, track users across sites, or run ads. The site uses basic analytics (page views) only.' },
+  { q: 'How do I know the PSA population data is accurate?', a: 'PSA population figures are scraped directly from PSA\'s public population reports and updated biweekly.' },
+  { q: 'Can I submit corrections?',                a: 'Yes. If you spot a data error, use the contact form — we read every submission.' },
+]
+
+// ── Main ──────────────────────────────────────────────────────────────────
 
 export default function HomeClient() {
   const nextRelease = new Date('2026-05-22T00:00:00')
@@ -267,12 +388,13 @@ export default function HomeClient() {
       }}>
         <PokemonSilhouettes />
         <Sparkles />
-        <div style={{ maxWidth: 720, margin: '0 auto', textAlign: 'center', position: 'relative', zIndex: 1 }}>
+        <div style={{ maxWidth: 820, margin: '0 auto', textAlign: 'center', position: 'relative', zIndex: 1 }}>
           <img src="/logo.png" alt="PokePrices" style={{
             height: 120, margin: '0 auto 16px', display: 'block',
             filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.2))',
             animation: 'float 4s ease-in-out infinite',
           }} />
+
           <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
             {['100% Free', 'No Login', 'No Data Collection'].map(pill => (
               <span key={pill} style={{
@@ -282,19 +404,25 @@ export default function HomeClient() {
               }}>{pill}</span>
             ))}
           </div>
+
           <h1 style={{
             fontSize: 38, color: '#fff', margin: '0 0 10px', lineHeight: 1.15,
             textShadow: '0 2px 10px rgba(0,0,0,0.15)', fontFamily: "'Outfit', sans-serif",
           }}>
-            Know what your cards<br />are <span style={{ color: 'var(--accent)' }}>really</span> worth
+            The numbers behind every<br /><span style={{ color: 'var(--accent)' }}>Pokémon</span> card
           </h1>
-          <p style={{ color: 'rgba(255,255,255,0.85)', fontSize: 16, margin: '0 0 8px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif", fontWeight: 600 }}>
-            Pokémon TCG prices · PSA 10 values · Grading calculator · Market trends
+          <p style={{ color: 'rgba(255,255,255,0.9)', fontSize: 16, margin: '0 0 8px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif", fontWeight: 600 }}>
+            Live prices · PSA 10 values · Grading calculator · Collector&apos;s AI assistant
           </p>
-          <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, margin: '0 0 24px', lineHeight: 1.5, fontFamily: "'Figtree', sans-serif" }}>
+          <p style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14, margin: '0 0 22px', lineHeight: 1.5, fontFamily: "'Figtree', sans-serif" }}>
             40,000+ cards · 156+ sets · Updated nightly from real sold listings
           </p>
-          <InlineChat />
+
+          <ToolsRow />
+
+          <div style={{ marginTop: 18 }}>
+            <InlineChat />
+          </div>
           <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, marginTop: 12, fontFamily: "'Figtree', sans-serif" }}>
             Updated nightly from actual sold listings
           </p>
