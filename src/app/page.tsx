@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Pokémon Card Prices, PSA 10 Values and Grading Data | PokePrices',
     description: 'Free Pokémon card price guide — raw, PSA 9 and PSA 10 values, population data, market trends and grading analysis. No login, updated nightly.',
-    url: 'https://pokeprices.io',
+    url: 'https://www.pokeprices.io',
     siteName: 'PokePrices',
     type: 'website',
   },
@@ -19,7 +19,7 @@ export const metadata: Metadata = {
     description: 'Free Pokémon card price guide. Live raw and graded values, PSA population data, trend analysis. No login.',
   },
   alternates: {
-    canonical: 'https://pokeprices.io',
+    canonical: 'https://www.pokeprices.io',
   },
 }
 

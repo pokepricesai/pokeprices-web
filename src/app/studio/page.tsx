@@ -8,10 +8,10 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'PokePrices Studio — Shareable Pokémon Market Visuals',
     description: 'Turn Pokémon TCG price data into shareable visuals.',
-    url: 'https://pokeprices.io/studio',
+    url: 'https://www.pokeprices.io/studio',
     siteName: 'PokePrices',
   },
-  alternates: { canonical: 'https://pokeprices.io/studio' },
+  alternates: { canonical: 'https://www.pokeprices.io/studio' },
 }
 
 interface Props {

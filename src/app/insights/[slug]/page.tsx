@@ -28,7 +28,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     || data.excerpt
     || `${data.title} — practical Pokémon card collecting guide from PokePrices.`
 
-  const canonical = `https://pokeprices.io/insights/${slug}`
+  const canonical = `https://www.pokeprices.io/insights/${slug}`
 
   return {
     title: `${title} | PokePrices`,

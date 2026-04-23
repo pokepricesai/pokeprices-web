@@ -14,7 +14,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
   const title       = `${setName} Price Guide: Best Cards, Raw Prices, PSA 10 Values`
   const description = `Explore ${setName} card prices, chase cards, raw vs PSA 10 spreads and the cards collectors are grading most aggressively. Updated daily.`
-  const canonical   = `https://pokeprices.io/set/${slug}`
+  const canonical   = `https://www.pokeprices.io/set/${slug}`
 
   return {
     title: `${title} | PokePrices`,

@@ -18,7 +18,7 @@ export default function CardStructuredData({ card }: { card: any }) {
     '@type': 'WebPage',
     name: `${card.card_name} Price Guide`,
     description: `${card.card_name} from ${card.set_name}. Current market prices: ${priceStr}. Includes PSA population data, price trend and grading analysis.`,
-    url: `https://pokeprices.io/set/${encodeURIComponent(card.set_name)}/card/${card.card_url_slug || card.card_slug}`,
+    url: `https://www.pokeprices.io/set/${encodeURIComponent(card.set_name)}/card/${card.card_url_slug || card.card_slug}`,
     image: card.image_url || undefined,
     about: {
       '@type': 'Thing',
@@ -29,7 +29,7 @@ export default function CardStructuredData({ card }: { card: any }) {
     isPartOf: {
       '@type': 'WebSite',
       name: 'PokePrices',
-      url: 'https://pokeprices.io',
+      url: 'https://www.pokeprices.io',
     },
   }
 

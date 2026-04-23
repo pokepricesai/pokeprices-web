@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Contact | PokePrices',
     description: 'Get in touch with PokePrices. Found a bug, got a feature request, or want to say hi?',
-    url: 'https://pokeprices.io/contact',
+    url: 'https://www.pokeprices.io/contact',
   },
 }
 

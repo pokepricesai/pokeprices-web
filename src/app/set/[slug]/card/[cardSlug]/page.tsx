@@ -40,7 +40,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const psa9Usd  = card.psa9_usd  ? card.psa9_usd  / 100 : null
   const psa10Usd = card.psa10_usd ? card.psa10_usd / 100 : null
   const multiple = rawUsd && psa10Usd ? psa10Usd / rawUsd : null
-  const canonical = `https://pokeprices.io/set/${slug}/card/${cardSlug}`
+  const canonical = `https://www.pokeprices.io/set/${slug}/card/${cardSlug}`
 
   // Variant A: grading-focused (PSA 10 is 3x+ the raw price)
   const useGradingVariant = multiple != null && multiple >= 3

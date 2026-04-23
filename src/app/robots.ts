@@ -6,6 +6,6 @@ export default function robots(): MetadataRoute.Robots {
       userAgent: '*',
       allow: '/',
     },
-    sitemap: 'https://pokeprices.io/sitemap.xml',
+    sitemap: 'https://www.pokeprices.io/sitemap.xml',
   }
 }

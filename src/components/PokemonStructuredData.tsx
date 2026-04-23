@@ -5,7 +5,7 @@ export default function PokemonStructuredData({ name, slug, cards }: {
   slug: string
   cards: { card_name: string; set_name: string; card_url_slug: string | null }[]
 }) {
-  const url = `https://pokeprices.io/pokemon/${slug}`
+  const url = `https://www.pokeprices.io/pokemon/${slug}`
   const topCards = cards.slice(0, 10)
 
   const schema = {
@@ -17,7 +17,7 @@ export default function PokemonStructuredData({ name, slug, cards }: {
     isPartOf: {
       '@type': 'WebSite',
       name: 'PokePrices',
-      url: 'https://pokeprices.io',
+      url: 'https://www.pokeprices.io',
     },
     ...(topCards.length > 0 ? {
       mainEntity: {
@@ -29,7 +29,7 @@ export default function PokemonStructuredData({ name, slug, cards }: {
           position: i + 1,
           name: `${c.card_name} — ${c.set_name}`,
           url: c.card_url_slug
-            ? `https://pokeprices.io/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`
+            ? `https://www.pokeprices.io/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`
             : url,
         })),
       },

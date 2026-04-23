@@ -6,7 +6,7 @@ import Navbar from '@/components/Navbar'
 import Footer from '@/components/Footer'
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://pokeprices.io'),
+  metadataBase: new URL('https://www.pokeprices.io'),
   title: {
     default: 'PokePrices — Pokémon Card Prices, PSA Values and Grading Data',
     template: '%s | PokePrices',
@@ -18,7 +18,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     locale: 'en_GB',
-    url: 'https://pokeprices.io',
+    url: 'https://www.pokeprices.io',
     siteName: 'PokePrices',
     title: 'PokePrices — Pokémon Card Prices, PSA Values and Grading Data',
     description: 'Free Pokémon card price guide — raw, PSA 9 and PSA 10 values, population data, grading analysis. No login, updated nightly.',

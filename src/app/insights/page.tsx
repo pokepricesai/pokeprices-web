@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Pokémon Card Guides: Grading, Trends and Price Analysis | PokePrices',
     description: 'Practical guides for Pokémon card collectors — grading advice, PSA population analysis, market trends and price breakdowns.',
-    url: 'https://pokeprices.io/insights',
+    url: 'https://www.pokeprices.io/insights',
     siteName: 'PokePrices',
     type: 'website',
   },
@@ -18,7 +18,7 @@ export const metadata: Metadata = {
     description: 'Practical Pokémon card guides on grading, PSA 10 value gaps, market trends and chase cards.',
   },
   alternates: {
-    canonical: 'https://pokeprices.io/insights',
+    canonical: 'https://www.pokeprices.io/insights',
   },
 }
 

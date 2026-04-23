@@ -22,13 +22,13 @@ export default function BreadcrumbSchema({ items }: { items: BreadcrumbItem[] })
         '@type': 'ListItem',
         position: 1,
         name: 'PokePrices',
-        item: 'https://pokeprices.io',
+        item: 'https://www.pokeprices.io',
       },
       ...items.map((item, i) => ({
         '@type': 'ListItem',
         position: i + 2,
         name: item.name,
-        ...(item.url ? { item: `https://pokeprices.io${item.url}` } : {}),
+        ...(item.url ? { item: `https://www.pokeprices.io${item.url}` } : {}),
       })),
     ],
   }

@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Pokémon Card Sets — Browse All Sets & Prices | PokePrices',
     description: 'Browse all Pokémon TCG sets. Card prices, PSA population data and market trends for every set.',
-    url: 'https://pokeprices.io/browse',
+    url: 'https://www.pokeprices.io/browse',
     siteName: 'PokePrices',
     type: 'website',
   },
@@ -18,7 +18,7 @@ export const metadata: Metadata = {
     description: 'Browse all Pokémon TCG sets. Card prices, PSA data and market trends. Free, updated daily.',
   },
   alternates: {
-    canonical: 'https://pokeprices.io/browse',
+    canonical: 'https://www.pokeprices.io/browse',
   },
 }
 
