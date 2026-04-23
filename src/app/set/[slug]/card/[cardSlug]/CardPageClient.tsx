@@ -601,9 +601,11 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
         </div>
 
         <div style={{ flex: 1, minWidth: 280 }}>
-          <h1 style={{ fontFamily: "'Outfit', serif", fontSize: 26, margin: '0 0 4px', color: 'var(--text)', letterSpacing: '-0.3px' }}>{card.card_name}</h1>
+          <h1 style={{ fontFamily: "'Outfit', serif", fontSize: 26, margin: '0 0 4px', color: 'var(--text)', letterSpacing: '-0.3px' }}>
+            {card.card_name.replace(/\s*#\d+\w*\s*$/, '').trim()}{cardNumberFormatted ? ` ${cardNumberFormatted}` : ''}
+          </h1>
           <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 16px', fontFamily: "'Figtree', sans-serif" }}>
-            {card.set_name}{cardNumberFormatted ? ` · ${cardNumberFormatted}` : ''}
+            {card.set_name}
           </p>
 
           <HeroBanner trend={trend} hasInsight={!!displayInsight} />
