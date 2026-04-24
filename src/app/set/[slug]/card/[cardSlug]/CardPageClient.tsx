@@ -594,7 +594,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
       <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         <div style={{ flex: '0 0 auto' }}>
           {card.image_url ? (
-            <img src={card.image_url} alt={card.card_name} style={{ width: 220, borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.15)' }} />
+            <img src={card.image_url} alt={`${card.card_name} Pokémon card from ${card.set_name}`} fetchPriority="high" loading="eager" style={{ width: 220, borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.15)' }} />
           ) : (
             <div style={{ width: 220, height: 308, background: 'var(--bg)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 40, border: '1px solid var(--border)' }}>🃏</div>
           )}

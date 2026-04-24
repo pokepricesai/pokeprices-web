@@ -3,6 +3,10 @@ import type { Metadata } from 'next'
 import { createClient } from '@supabase/supabase-js'
 import CardPageClient from './CardPageClient'
 
+// ISR: regenerate every 24h. Prices refresh nightly, so this aligns with data cadence.
+// Dramatically reduces crawl-budget consumption across 40k+ card pages.
+export const revalidate = 86400
+
 const supabaseServer = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -78,7 +82,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
       type: 'website',
     },
     twitter: {
-      card: 'summary',
+      card: 'summary_large_image',
       title,
       description,
       images: card.image_url ? [card.image_url] : [],

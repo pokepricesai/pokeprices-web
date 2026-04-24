@@ -4,6 +4,7 @@ import Script from 'next/script'
 import './globals.css'
 import Navbar from '@/components/Navbar'
 import Footer from '@/components/Footer'
+import SiteStructuredData from '@/components/SiteStructuredData'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://www.pokeprices.io'),
@@ -11,7 +12,6 @@ export const metadata: Metadata = {
     default: 'PokePrices — Pokémon Card Prices & PSA 10 Values (2026)',
   },
   description: 'How much is your Pokémon card worth? Live raw and PSA 10 values for 40,000+ cards. Price trends, grading spreads and PSA population data. Free, no login.',
-  keywords: ['pokemon card prices', 'pokemon tcg price guide', 'PSA population', 'pokemon card values', 'pokemon grading', 'pokemon card market'],
   authors: [{ name: 'PokePrices' }],
   creator: 'PokePrices',
   openGraph: {
@@ -19,8 +19,8 @@ export const metadata: Metadata = {
     locale: 'en_GB',
     url: 'https://www.pokeprices.io',
     siteName: 'PokePrices',
-    title: 'PokePrices — Pokémon Card Prices, PSA Values and Grading Data',
-    description: 'Free Pokémon card price guide — raw, PSA 9 and PSA 10 values, population data, grading analysis. No login, updated nightly.',
+    title: 'PokePrices — Pokémon Card Prices & PSA 10 Values (2026)',
+    description: 'Live raw and PSA 10 values for 40,000+ Pokémon cards. Price trends, grading spreads, PSA population data. Free, no login.',
     images: [
       {
         url: '/og-image.png',
@@ -32,8 +32,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'PokePrices — Pokémon Card Prices, PSA Values and Grading Data',
-    description: 'Free Pokémon card price guide. Live raw and graded values, PSA population data. No login.',
+    title: 'PokePrices — Pokémon Card Prices & PSA 10 Values (2026)',
+    description: 'Live raw and PSA 10 values for 40,000+ Pokémon cards. Price trends, grading spreads, PSA population data. Free, no login.',
     images: ['/og-image.png'],
   },
   robots: {
@@ -75,6 +75,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             gtag('config', 'G-91WBNN7V11');
           `}
         </Script>
+        <SiteStructuredData />
         <Navbar />
         <main className="flex-1">{children}</main>
         <Footer />

@@ -2,6 +2,8 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import ArticleSchema from '@/components/ArticleSchema'
+import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 const THEME_COLOURS: Record<string, string> = {
   grading:    '#a78bfa',
@@ -200,6 +202,11 @@ export default function InsightsArticleClient({ article }: { article: any }) {
 
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '40px 24px' }}>
+      <ArticleSchema article={article} />
+      <BreadcrumbSchema items={[
+        { name: 'Guides', url: '/insights' },
+        { name: article.headline || article.title },
+      ]} />
 
       <Link href="/insights" style={{ color: 'var(--text-muted)', fontSize: 13, textDecoration: 'none', marginBottom: 20, display: 'inline-block', fontFamily: "'Figtree', sans-serif" }}>
         ← Market Insights

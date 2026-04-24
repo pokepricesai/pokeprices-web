@@ -2,6 +2,8 @@
 import type { Metadata } from 'next'
 import PokemonSpeciesPageClient from './PokemonSpeciesPageClient'
 
+export const revalidate = 86400
+
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params
   const name = slug.split('-').map((w: string) => w[0].toUpperCase() + w.slice(1)).join(' ')
