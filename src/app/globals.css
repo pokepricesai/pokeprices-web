@@ -43,6 +43,7 @@ h1, h2, h3 { font-family: 'Nunito', sans-serif; font-weight: 800; }
 @keyframes twinkle { 0%, 100% { opacity: 0.2; transform: scale(0.6); } 50% { opacity: 1; transform: scale(1.1); } }
 @keyframes pokeball-bounce { 0%, 100% { transform: translateY(0) rotate(0deg); } 25% { transform: translateY(-4px) rotate(-10deg); } 75% { transform: translateY(-4px) rotate(10deg); } }
 @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+@keyframes pulseGlow { 0%, 100% { opacity: 0.55; transform: scale(1); } 50% { opacity: 0.9; transform: scale(1.04); } }
 
 .animate-fade-in { animation: fadeIn 0.3s ease-out; }
 .animate-fade-in-up { animation: fadeInUp 0.4s ease-out both; }

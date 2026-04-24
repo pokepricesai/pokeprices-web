@@ -420,11 +420,44 @@ export default function HomeClient() {
 
           <ToolsRow />
 
-          <div style={{ marginTop: 18 }}>
-            <InlineChat />
+          <div style={{ marginTop: 24, position: 'relative' }}>
+            <div style={{ textAlign: 'center', marginBottom: 10 }}>
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                background: 'linear-gradient(135deg, #ffcb05, #ffae00)',
+                color: '#1a5fad',
+                padding: '6px 8px 6px 14px',
+                borderRadius: 22, fontSize: 12, fontWeight: 800,
+                fontFamily: "'Figtree', sans-serif", letterSpacing: 0.2,
+                boxShadow: '0 4px 14px rgba(0,0,0,0.18)',
+              }}>
+                <span style={{ fontSize: 13 }}>✨</span>
+                Try the collector&apos;s AI assistant
+                <span aria-hidden style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: 20, height: 20, borderRadius: '50%',
+                  background: 'rgba(26,95,173,0.15)',
+                  fontSize: 13, fontWeight: 900,
+                  animation: 'bounce 1.4s ease-in-out infinite',
+                }}>↓</span>
+              </span>
+            </div>
+
+            <div style={{ maxWidth: 640, margin: '0 auto', position: 'relative' }}>
+              <div aria-hidden style={{
+                position: 'absolute', inset: -12, borderRadius: 28,
+                background: 'radial-gradient(ellipse at center, rgba(255,203,5,0.5), rgba(106,176,245,0.25) 55%, transparent 78%)',
+                filter: 'blur(18px)',
+                animation: 'pulseGlow 3.2s ease-in-out infinite',
+                pointerEvents: 'none',
+              }} />
+              <div style={{ position: 'relative' }}>
+                <InlineChat />
+              </div>
+            </div>
           </div>
-          <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, marginTop: 12, fontFamily: "'Figtree', sans-serif" }}>
-            Updated nightly from actual sold listings
+          <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 11, marginTop: 14, fontFamily: "'Figtree', sans-serif" }}>
+            Free, no login — knows every card, set and sold price we track
           </p>
         </div>
       </section>

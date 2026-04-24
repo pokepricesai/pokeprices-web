@@ -150,11 +150,21 @@ export default function InlineChat({ cardContext, prefillMessage, suggestedPromp
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         background: 'var(--bg-light)',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)', boxShadow: '0 0 6px rgba(39,174,96,0.4)' }} />
-          <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 700 }}>
-            {cardContext ? `Ask about ${cardContext.split(' | ')[0]}` : 'Ask me anything about Pokemon cards'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <div style={{
+            width: 26, height: 26, borderRadius: 8,
+            background: 'linear-gradient(135deg, #1a5fad, #3b82d6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 2px 6px rgba(26,95,173,0.25)',
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          </div>
+          <span style={{ fontSize: 13, color: 'var(--text)', fontWeight: 800, fontFamily: "'Figtree', sans-serif" }}>
+            {cardContext ? `Ask about ${cardContext.split(' | ')[0]}` : "Collector's AI assistant"}
           </span>
+          <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green)', boxShadow: '0 0 6px rgba(39,174,96,0.5)' }} />
         </div>
         {messages.length > 0 && (
           <button onClick={clearChat} style={{
@@ -227,7 +237,7 @@ export default function InlineChat({ cardContext, prefillMessage, suggestedPromp
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-          placeholder="Ask any questions here..."
+          placeholder={cardContext ? 'Ask anything about this card…' : 'Ask anything about Pokémon cards…'}
           style={{ flex: 1, border: 'none', outline: 'none', fontSize: 14, color: 'var(--text)', background: 'transparent', fontFamily: 'inherit', fontWeight: 600 }}
         />
         <button onClick={() => sendMessage()} disabled={loading} style={{
