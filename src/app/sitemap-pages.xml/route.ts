@@ -9,8 +9,13 @@ export async function GET() {
   const pages = [
     { url: BASE_URL, priority: '1.0', changefreq: 'daily' },
     { url: `${BASE_URL}/browse`, priority: '0.9', changefreq: 'daily' },
-    { url: `${BASE_URL}/dealer`, priority: '0.7', changefreq: 'monthly' },
+    { url: `${BASE_URL}/pokemon`, priority: '0.9', changefreq: 'weekly' },
+    { url: `${BASE_URL}/insights`, priority: '0.8', changefreq: 'weekly' },
+    { url: `${BASE_URL}/creators`, priority: '0.7', changefreq: 'weekly' },
     { url: `${BASE_URL}/vendors`, priority: '0.7', changefreq: 'weekly' },
+    { url: `${BASE_URL}/dealer`, priority: '0.6', changefreq: 'monthly' },
+    { url: `${BASE_URL}/studio`, priority: '0.5', changefreq: 'monthly' },
+    { url: `${BASE_URL}/contact`, priority: '0.3', changefreq: 'monthly' },
     { url: `${BASE_URL}/terms`, priority: '0.3', changefreq: 'monthly' },
   ]
 

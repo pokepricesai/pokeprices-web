@@ -3,19 +3,19 @@ import type { Metadata } from 'next'
 import BrowsePageClient from './BrowsePageClient'
 
 export const metadata: Metadata = {
-  title: 'Pokémon Card Sets — Browse All Sets & Prices | PokePrices',
-  description: 'Browse all Pokémon TCG sets from Base Set to the latest releases. Find card prices, PSA population data, grading insights and market trends for every set. Free, updated daily.',
+  title: 'All Pokémon TCG Sets (2026) — Card Lists, Prices & PSA 10 Values',
+  description: 'Browse every Pokémon TCG set from Base Set to the latest releases. Full card lists, raw and PSA 10 prices, PSA population data and market trends. Free, updated daily.',
   openGraph: {
-    title: 'Pokémon Card Sets — Browse All Sets & Prices | PokePrices',
-    description: 'Browse all Pokémon TCG sets. Card prices, PSA population data and market trends for every set.',
+    title: 'All Pokémon TCG Sets (2026) — Card Lists, Prices & PSA 10 Values',
+    description: 'Browse every Pokémon TCG set. Full card lists, raw and PSA 10 prices, PSA population data, market trends. Free, updated daily.',
     url: 'https://www.pokeprices.io/browse',
     siteName: 'PokePrices',
     type: 'website',
   },
   twitter: {
     card: 'summary',
-    title: 'Pokémon Card Sets — Browse All Sets & Prices | PokePrices',
-    description: 'Browse all Pokémon TCG sets. Card prices, PSA data and market trends. Free, updated daily.',
+    title: 'All Pokémon TCG Sets (2026) — Card Lists, Prices & PSA 10 Values',
+    description: 'Browse every Pokémon TCG set. Full card lists, raw and PSA 10 prices, market trends. Free.',
   },
   alternates: {
     canonical: 'https://www.pokeprices.io/browse',

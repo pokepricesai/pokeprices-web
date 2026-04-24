@@ -28,10 +28,19 @@ export async function GET() {
     offset += PAGE_SIZE
   }
 
+  const pokeSlug = (name: string) => name
+    .toLowerCase()
+    .replace(/['.]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+
   const now = new Date().toISOString()
-  const urls = allSpecies.map((s: any) =>
-    '  <url>\n    <loc>' + BASE_URL + '/pokemon/' + s.name.toLowerCase() + '</loc>\n    <lastmod>' + now + '</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.7</priority>\n  </url>'
-  ).join('\n')
+  const urls = allSpecies
+    .map((s: any) => pokeSlug(s.name))
+    .filter((slug: string) => slug.length > 0)
+    .map((slug: string) =>
+      '  <url>\n    <loc>' + BASE_URL + '/pokemon/' + slug + '</loc>\n    <lastmod>' + now + '</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.7</priority>\n  </url>'
+    ).join('\n')
 
   const xml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + urls + '\n</urlset>'
 

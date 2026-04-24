@@ -12,12 +12,13 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const { slug } = await params
   const setName = decodeURIComponent(slug)
 
-  const title       = `${setName} Price Guide: Best Cards, Raw Prices, PSA 10 Values`
-  const description = `Explore ${setName} card prices, chase cards, raw vs PSA 10 spreads and the cards collectors are grading most aggressively. Updated daily.`
+  const year        = new Date().getFullYear()
+  const title       = `${setName} Card List (${year}) — All Cards, Prices & PSA 10 Values`
+  const description = `Every card from ${setName} with current raw and PSA 10 prices, grading spreads and chase cards. Full ${setName} checklist with market trends. Updated daily.`
   const canonical   = `https://www.pokeprices.io/set/${slug}`
 
   return {
-    title: `${title} | PokePrices`,
+    title,
     description,
     openGraph: {
       title,

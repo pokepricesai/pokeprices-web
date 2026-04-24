@@ -6,12 +6,13 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const { slug } = await params
   const name = slug.split('-').map((w: string) => w[0].toUpperCase() + w.slice(1)).join(' ')
 
-  const title       = `${name} Pokémon Card Prices: Best Cards, PSA 10s and Trends`
-  const description = `Track the top ${name} cards by raw price, PSA 10 value, demand and grading potential. A clean view of what collectors care about most.`
+  const year        = new Date().getFullYear()
+  const title       = `${name} Card Value (${year}) — Every ${name} Card + Prices`
+  const description = `How much are ${name} cards worth? See every ${name} Pokémon card with current raw and PSA 10 values, grading spreads and market trends across all sets. Updated daily.`
   const canonical   = `https://www.pokeprices.io/pokemon/${slug}`
 
   return {
-    title: `${title} | PokePrices`,
+    title,
     description,
     openGraph: {
       title,

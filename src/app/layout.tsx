@@ -8,10 +8,9 @@ import Footer from '@/components/Footer'
 export const metadata: Metadata = {
   metadataBase: new URL('https://www.pokeprices.io'),
   title: {
-    default: 'PokePrices — Pokémon Card Prices, PSA Values and Grading Data',
-    template: '%s | PokePrices',
+    default: 'PokePrices — Pokémon Card Prices & PSA 10 Values (2026)',
   },
-  description: 'Free Pokémon card price guide. Live raw and graded values, PSA population data, trend analysis and practical grading insights. 40,000+ cards, no login required.',
+  description: 'How much is your Pokémon card worth? Live raw and PSA 10 values for 40,000+ cards. Price trends, grading spreads and PSA population data. Free, no login.',
   keywords: ['pokemon card prices', 'pokemon tcg price guide', 'PSA population', 'pokemon card values', 'pokemon grading', 'pokemon card market'],
   authors: [{ name: 'PokePrices' }],
   creator: 'PokePrices',

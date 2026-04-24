@@ -3,19 +3,19 @@ import type { Metadata } from 'next'
 import InsightsPageClient from './InsightsPageClient'
 
 export const metadata: Metadata = {
-  title: 'Pokémon Card Guides: Grading Advice, Market Trends and Price Analysis | PokePrices',
-  description: 'Read practical Pokémon card guides on grading, PSA 10 value gaps, market trends, chase cards and smarter buying decisions.',
+  title: 'Pokémon Card Guides (2026) — Grading, PSA 10 Values & Market Trends',
+  description: 'Practical Pokémon card guides — when to grade, PSA 10 value gaps, chase card analysis, market trends and price breakdowns. Real data, no hype.',
   openGraph: {
-    title: 'Pokémon Card Guides: Grading, Trends and Price Analysis | PokePrices',
-    description: 'Practical guides for Pokémon card collectors — grading advice, PSA population analysis, market trends and price breakdowns.',
+    title: 'Pokémon Card Guides (2026) — Grading, PSA 10 Values & Market Trends',
+    description: 'Practical Pokémon card guides — when to grade, PSA 10 value gaps, chase card analysis, market trends. Real data.',
     url: 'https://www.pokeprices.io/insights',
     siteName: 'PokePrices',
     type: 'website',
   },
   twitter: {
     card: 'summary',
-    title: 'Pokémon Card Guides: Grading, Trends and Price Analysis',
-    description: 'Practical Pokémon card guides on grading, PSA 10 value gaps, market trends and chase cards.',
+    title: 'Pokémon Card Guides (2026) — Grading, PSA 10 & Market Trends',
+    description: 'Practical Pokémon card guides — grading advice, PSA 10 value gaps, chase cards and trends.',
   },
   alternates: {
     canonical: 'https://www.pokeprices.io/insights',
