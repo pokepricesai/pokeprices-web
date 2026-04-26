@@ -258,8 +258,20 @@ export default function AlertsClient() {
   const load = useCallback(async () => {
     if (!user) return
     setLoading(true)
-    const { data } = await supabase.rpc('get_alerts_with_prices', { p_user_id: user.id })
-    setAlerts(data || [])
+    const { data, error } = await supabase.rpc('get_alerts_with_prices', { p_user_id: user.id })
+    if (error) {
+      console.error('[alerts] get_alerts_with_prices failed:', error)
+      // Fall back to direct table read so the alert at least shows up
+      const { data: rows, error: tableErr } = await supabase
+        .from('user_alerts')
+        .select('id, card_slug, card_name, set_name, card_url_slug, image_url, grade, alert_type, threshold_cents, is_active, triggered_at, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+      if (tableErr) console.error('[alerts] fallback select failed:', tableErr)
+      setAlerts((rows || []).map(r => ({ ...r, current_cents: null, distance_pct: null })))
+    } else {
+      setAlerts(data || [])
+    }
     setLoading(false)
   }, [user])
 

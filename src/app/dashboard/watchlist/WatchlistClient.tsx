@@ -160,8 +160,23 @@ export default function WatchlistClient() {
   const load = useCallback(async () => {
     if (!user) return
     setLoading(true)
-    const { data } = await supabase.rpc('get_watchlist_with_prices', { p_user_id: user.id })
-    setItems(data || [])
+    const { data, error } = await supabase.rpc('get_watchlist_with_prices', { p_user_id: user.id })
+    if (error) {
+      console.error('[watchlist] get_watchlist_with_prices failed:', error)
+      // Fallback so the row at least appears even if the RPC is missing
+      const { data: rows } = await supabase
+        .from('watchlist')
+        .select('id, card_slug, card_name, set_name, card_url_slug, image_url, card_number, notes, added_at, raw_at_add, psa10_at_add')
+        .eq('user_id', user.id)
+        .order('added_at', { ascending: false })
+      setItems((rows || []).map(r => ({
+        ...r,
+        current_raw: null, current_psa9: null, current_psa10: null,
+        pct_7d: null, pct_30d: null, psa10_premium: null,
+      })))
+    } else {
+      setItems(data || [])
+    }
     setLoading(false)
   }, [user])
 
