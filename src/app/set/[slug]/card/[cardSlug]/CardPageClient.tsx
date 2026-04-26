@@ -7,6 +7,7 @@ import PriceChart from '@/components/PriceChart'
 import CardStructuredData from '@/components/CardStructuredData'
 import CardFaqSchema from '@/components/CardFaqSchema'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
+import CardQuickActions from '@/components/CardQuickActions'
 import { getSetAssets } from '@/lib/setAssets'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -604,9 +605,11 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
           <h1 style={{ fontFamily: "'Outfit', serif", fontSize: 26, margin: '0 0 4px', color: 'var(--text)', letterSpacing: '-0.3px' }}>
             {card.card_name.replace(/\s*#\d+\w*\s*$/, '').trim()}{cardNumberFormatted ? ` ${cardNumberFormatted}` : ''}
           </h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 16px', fontFamily: "'Figtree', sans-serif" }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 14px', fontFamily: "'Figtree', sans-serif" }}>
             {card.set_name}
           </p>
+
+          <CardQuickActions card={card} />
 
           <HeroBanner trend={trend} hasInsight={!!displayInsight} />
 

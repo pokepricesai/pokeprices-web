@@ -39,8 +39,15 @@ export default function Navbar() {
   const [searching, setSearching] = useState(false)
   const [showResults, setShowResults] = useState(false)
   const [activeIndex, setActiveIndex] = useState(-1)
+  const [isAuthed, setIsAuthed] = useState(false)
   const debounceRef = useRef<NodeJS.Timeout>()
   const searchRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => setIsAuthed(!!session))
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => setIsAuthed(!!session))
+    return () => subscription.unsubscribe()
+  }, [])
 
   const cardResults    = allResults.filter(r => r.result_type === 'card')
   const setResults     = allResults.filter(r => r.result_type === 'set')
@@ -241,6 +248,14 @@ export default function Navbar() {
             } : {}),
           }}>{item.label}</Link>
         ))}
+        {isAuthed && (
+          <Link href="/dashboard" style={{
+            color: '#fff', textDecoration: 'none', fontSize: 13, fontWeight: 800,
+            background: 'rgba(255,255,255,0.15)',
+            border: '1px solid rgba(255,255,255,0.25)',
+            padding: '4px 12px', borderRadius: 20, whiteSpace: 'nowrap',
+          }}>Dashboard</Link>
+        )}
       </div>
 
       {/* Mobile dropdown */}
@@ -274,6 +289,14 @@ export default function Navbar() {
                 fontWeight: 700, borderBottom: '1px solid rgba(255,255,255,0.1)',
               }}>{item.label}</Link>
           ))}
+          {isAuthed && (
+            <Link href="/dashboard" onClick={() => setMenuOpen(false)}
+              style={{
+                display: 'block', color: '#fff',
+                textDecoration: 'none', padding: '10px 0', fontSize: 15,
+                fontWeight: 800, borderBottom: '1px solid rgba(255,255,255,0.1)',
+              }}>Dashboard</Link>
+          )}
         </div>
       )}
 

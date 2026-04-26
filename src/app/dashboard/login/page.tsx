@@ -1,4 +1,4 @@
-// src/app/portfolio/login/page.tsx
+// src/app/dashboard/login/page.tsx
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -18,7 +18,7 @@ export default function PortfolioLoginPage() {
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
       options: {
-        emailRedirectTo: `${window.location.origin}/portfolio`,
+        emailRedirectTo: `${window.location.origin}/dashboard`,
       },
     })
     if (error) setError(error.message)
@@ -29,7 +29,7 @@ export default function PortfolioLoginPage() {
   async function handleGoogle() {
     await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: `${window.location.origin}/portfolio` },
+      options: { redirectTo: `${window.location.origin}/dashboard` },
     })
   }
 

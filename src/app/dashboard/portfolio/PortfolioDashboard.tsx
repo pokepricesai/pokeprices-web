@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import DashboardNav from '../DashboardNav'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -416,11 +417,11 @@ export default function PortfolioDashboard() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) { router.push('/portfolio/login'); return }
+      if (!session) { router.push('/dashboard/login'); return }
       setUser(session.user)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
-      if (!session) router.push('/portfolio/login')
+      if (!session) router.push('/dashboard/login')
       else setUser(session.user)
     })
     return () => subscription.unsubscribe()
@@ -506,21 +507,18 @@ export default function PortfolioDashboard() {
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 16px' }}>
+      <DashboardNav current="portfolio" email={user?.email} />
 
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 26, margin: '0 0 2px', color: 'var(--text)' }}>My Collection</h1>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0 }}>{user?.email}</p>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0 }}>Track what you own — value, P&amp;L, grading insights.</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setShowAddModal(true)}
             style={{ padding: '9px 20px', borderRadius: 10, border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif", cursor: 'pointer' }}>
             + Add Card
-          </button>
-          <button onClick={handleSignOut}
-            style={{ padding: '9px 16px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontSize: 13, fontFamily: "'Figtree', sans-serif", cursor: 'pointer' }}>
-            Sign out
           </button>
         </div>
       </div>
