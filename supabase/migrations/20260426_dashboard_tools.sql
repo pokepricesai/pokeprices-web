@@ -122,9 +122,8 @@ ALTER TABLE pending_emails ENABLE ROW LEVEL SECURITY;
 
 DROP FUNCTION IF EXISTS get_watchlist_with_prices(UUID);
 
--- Note: pct_7d / pct_30d are not native columns on card_trends in this DB.
--- Returning NULL placeholders for now; client computes psa10_premium and
--- "since added" change from the raw_at_add / psa10_at_add snapshot columns.
+-- Watchlist returns current prices + raw 7d/30d % moves + PSA 10 premium ratio.
+-- card_trends pct columns are named raw_pct_7d / raw_pct_30d (NOT pct_7d).
 CREATE OR REPLACE FUNCTION get_watchlist_with_prices(p_user_id UUID)
 RETURNS TABLE (
   id             UUID,
@@ -162,8 +161,8 @@ SET search_path = public AS $$
     ct.current_raw,
     ct.current_psa9,
     ct.current_psa10,
-    NULL::NUMERIC AS pct_7d,
-    NULL::NUMERIC AS pct_30d,
+    ct.raw_pct_7d  AS pct_7d,
+    ct.raw_pct_30d AS pct_30d,
     CASE
       WHEN ct.current_raw IS NOT NULL AND ct.current_raw > 0 AND ct.current_psa10 IS NOT NULL
       THEN (ct.current_psa10::NUMERIC / ct.current_raw::NUMERIC)
