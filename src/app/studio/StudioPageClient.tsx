@@ -1390,7 +1390,7 @@ export default function StudioPageClient() {
   const [quickRisers,  setQuickRisers]  = useState<Mover[]>([])
   const [canShareFiles, setCanShareFiles] = useState(false)
 
-  // Filter-by-criteria state (find cards by set / price / 30d move)
+  // Filter-by-criteria state (find cards by set / price / 30d move / volume)
   const [filterOpen,     setFilterOpen]     = useState(false)
   const [filterSet,      setFilterSet]      = useState('')
   const [filterMinPrice, setFilterMinPrice] = useState('')
@@ -1398,6 +1398,9 @@ export default function StudioPageClient() {
   const [filterMinRise,  setFilterMinRise]  = useState('')
   const [filterGrade,    setFilterGrade]    = useState<'raw' | 'psa10'>('raw')
   const [filterSort,     setFilterSort]     = useState<'pct_30d' | 'price_desc' | 'price_asc'>('pct_30d')
+  // Volume filter — minimum sales in last 30 days. card_volume.sales_30d is the
+  // backing column. Common cadences: 1/mo ≈ 1, weekly ≈ 4, several/wk ≈ 12, daily ≈ 30.
+  const [filterMinSales, setFilterMinSales] = useState<number | null>(null)
   const [filtering,      setFiltering]      = useState(false)
   const [filterResults,  setFilterResults]  = useState<any[] | null>(null)
 
@@ -1427,6 +1430,24 @@ export default function StudioPageClient() {
       const maxP = filterMaxPrice.trim() ? parseFloat(filterMaxPrice) * 100 : null
       const minR = filterMinRise.trim()  ? parseFloat(filterMinRise)        : null
 
+      // Volume pre-filter: if a min-sales threshold is set, look up qualifying
+      // card_slugs in card_volume first (Ungraded grade) and constrain the
+      // trend query to that set. This is faster than a join across two tables
+      // and lets us short-circuit when nothing qualifies.
+      let volumeFilteredSlugs: Set<string> | null = null
+      if (filterMinSales != null && filterMinSales > 0) {
+        const { data: volRows } = await supabase.from('card_volume')
+          .select('card_slug')
+          .eq('grade', 'Ungraded')
+          .gte('sales_30d', filterMinSales)
+          .limit(5000)
+        volumeFilteredSlugs = new Set((volRows || []).map((v: any) => v.card_slug))
+        if (volumeFilteredSlugs.size === 0) {
+          setFilterResults([])
+          return
+        }
+      }
+
       let q: any = supabase.from('card_trends')
         .select('card_slug, card_name, set_name, current_raw, current_psa10, raw_pct_30d')
         .not(priceCol, 'is', null)
@@ -1435,6 +1456,9 @@ export default function StudioPageClient() {
       if (minP != null && !Number.isNaN(minP)) q = q.gte(priceCol, minP)
       if (maxP != null && !Number.isNaN(maxP)) q = q.lte(priceCol, maxP)
       if (minR != null && !Number.isNaN(minR)) q = q.gte('raw_pct_30d', minR)
+      if (volumeFilteredSlugs && volumeFilteredSlugs.size > 0) {
+        q = q.in('card_slug', Array.from(volumeFilteredSlugs).slice(0, 1000))
+      }
 
       if (filterSort === 'pct_30d')        q = q.order('raw_pct_30d', { ascending: false, nullsFirst: false })
       else if (filterSort === 'price_desc') q = q.order(priceCol, { ascending: false })
@@ -1448,15 +1472,23 @@ export default function StudioPageClient() {
         return
       }
 
-      // Hydrate with card_url_slug + image_url + card_number from cards table
+      // Hydrate in parallel: card details + volume labels for the matched slugs
       const slugs = data.map((r: any) => r.card_slug)
-      const { data: cardData } = await supabase.from('cards')
-        .select('card_slug, card_url_slug, image_url, card_number')
-        .in('card_slug', slugs)
-      const cardMap = new Map<string, any>((cardData || []).map((c: any) => [c.card_slug, c]))
+      const [cardsRes, volRes] = await Promise.all([
+        supabase.from('cards')
+          .select('card_slug, card_url_slug, image_url, card_number')
+          .in('card_slug', slugs),
+        supabase.from('card_volume')
+          .select('card_slug, sales_30d, volume_label')
+          .eq('grade', 'Ungraded')
+          .in('card_slug', slugs),
+      ])
+      const cardMap = new Map<string, any>((cardsRes.data || []).map((c: any) => [c.card_slug, c]))
+      const volMap  = new Map<string, any>((volRes.data  || []).map((v: any) => [v.card_slug, v]))
 
       const enriched = data.map((r: any) => {
         const c = cardMap.get(r.card_slug) || {}
+        const v = volMap.get(r.card_slug)
         return {
           card_slug: r.card_slug,
           card_name: r.card_name,
@@ -1467,6 +1499,8 @@ export default function StudioPageClient() {
           _meta: {
             price: filterGrade === 'raw' ? r.current_raw : r.current_psa10,
             pct_30d: r.raw_pct_30d,
+            volume_label: v?.volume_label ?? null,
+            sales_30d: v?.sales_30d ?? null,
           },
         }
       })
@@ -1970,6 +2004,24 @@ export default function StudioPageClient() {
                     ))}
                   </div>
 
+                  {/* Min sales volume — filter on card_volume.sales_30d.
+                      Cadences mapped to ~30-day equivalents:
+                        monthly ≈ 1, weekly ≈ 4, several/wk ≈ 12, daily ≈ 30 */}
+                  <div style={{ display: 'flex', gap: 4, fontSize: 11, flexWrap: 'wrap' }}>
+                    <span style={{ color: 'var(--text-muted)', alignSelf: 'center', marginRight: 4, fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>Min sales:</span>
+                    {([
+                      [null, 'Any'],
+                      [1,    '≥ Monthly'],
+                      [4,    '≥ Weekly'],
+                      [12,   '≥ Few/wk'],
+                      [30,   '≥ Daily'],
+                    ] as const).map(([val, label]) => (
+                      <button key={String(val)} onClick={() => setFilterMinSales(val)} style={btnStyle(filterMinSales === val)}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
                   <button
                     onClick={findByCriteria}
                     disabled={filtering}
@@ -2015,6 +2067,11 @@ export default function StudioPageClient() {
                                 <div style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                   {r.set_name}
                                 </div>
+                                {r._meta?.volume_label && (
+                                  <div style={{ fontSize: 9, color: '#3b82f6', fontWeight: 700, marginTop: 1 }}>
+                                    {r._meta.volume_label}
+                                  </div>
+                                )}
                               </div>
                               <div style={{ flexShrink: 0, textAlign: 'right' }}>
                                 {r._meta?.price != null && (
