@@ -787,7 +787,7 @@ function InsightCardHero({ card, theme, gradeView }: { card: CardData; theme: Th
         <div style={{ textAlign: 'center', padding: '16px 22px 20px', position: 'relative', zIndex: 4 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 10 }}>
             {card.set_logo_url ? (
-              <img crossOrigin="anonymous" src={card.set_logo_url} alt={card.set_name} style={{ height: 20, maxWidth: 80, objectFit: 'contain', filter: 'brightness(0) invert(1)', opacity: 0.75 }} />
+              <img crossOrigin="anonymous" src={card.set_logo_url} alt={card.set_name} style={{ height: 22, maxWidth: 90, objectFit: 'contain' }} />
             ) : (
               <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', fontWeight: 700, letterSpacing: 0.5 }}>{card.set_name}</span>
             )}
