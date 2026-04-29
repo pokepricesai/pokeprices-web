@@ -22,25 +22,28 @@ interface Props {
   mostExpensivePsa10: CardData | null
 }
 
+// Brightened palette — each type's bg/bg2 nudged ~5% lighter while
+// preserving hue and saturation. Keeps the type recognisable but lets
+// more vibrancy shine through on the dossier.
 const TYPE_COLORS: Record<string, { bg: string; bg2: string; text: string; accent: string }> = {
-  fire:     { bg: '#FF6B35', bg2: '#C72D14', text: '#fff',     accent: '#FFD166' },
-  water:    { bg: '#4A90D9', bg2: '#1D5494', text: '#fff',     accent: '#74CEC0' },
-  grass:    { bg: '#56C271', bg2: '#1F8A3E', text: '#fff',     accent: '#FFD166' },
-  electric: { bg: '#F5C518', bg2: '#B8901A', text: '#1a1a1a',  accent: '#fff'    },
-  psychic:  { bg: '#E8538F', bg2: '#A82565', text: '#fff',     accent: '#FFD166' },
-  ice:      { bg: '#74CEC0', bg2: '#3F8C82', text: '#1a1a1a',  accent: '#fff'    },
-  dragon:   { bg: '#6B5FA6', bg2: '#3B315F', text: '#fff',     accent: '#FFD166' },
-  dark:     { bg: '#5C4A3B', bg2: '#2B1F16', text: '#fff',     accent: '#FFD166' },
-  fairy:    { bg: '#F4A7C3', bg2: '#C16591', text: '#1a1a1a',  accent: '#fff'    },
-  fighting: { bg: '#C03028', bg2: '#7A1610', text: '#fff',     accent: '#FFD166' },
-  poison:   { bg: '#9B59B6', bg2: '#5C2D77', text: '#fff',     accent: '#FFD166' },
-  ground:   { bg: '#C49A3C', bg2: '#7A5A14', text: '#fff',     accent: '#FFD166' },
-  rock:     { bg: '#B8A038', bg2: '#7A6920', text: '#fff',     accent: '#FFD166' },
-  bug:      { bg: '#8CB820', bg2: '#5A7510', text: '#fff',     accent: '#FFD166' },
-  ghost:    { bg: '#5B4F8A', bg2: '#312957', text: '#fff',     accent: '#FFD166' },
-  steel:    { bg: '#9EB8D0', bg2: '#5A7A98', text: '#1a1a1a',  accent: '#fff'    },
-  normal:   { bg: '#A8A878', bg2: '#6E6E47', text: '#fff',     accent: '#FFD166' },
-  flying:   { bg: '#8EC8F0', bg2: '#4F8AB8', text: '#1a1a1a',  accent: '#fff'    },
+  fire:     { bg: '#FF7A47', bg2: '#DC4524', text: '#fff',     accent: '#FFD166' },
+  water:    { bg: '#5598E0', bg2: '#2A609F', text: '#fff',     accent: '#74CEC0' },
+  grass:    { bg: '#61CC7B', bg2: '#2A9748', text: '#fff',     accent: '#FFD166' },
+  electric: { bg: '#FFD32A', bg2: '#C9A028', text: '#1a1a1a',  accent: '#fff'    },
+  psychic:  { bg: '#ED6098', bg2: '#B33775', text: '#fff',     accent: '#FFD166' },
+  ice:      { bg: '#80D5C8', bg2: '#4D9A8F', text: '#1a1a1a',  accent: '#fff'    },
+  dragon:   { bg: '#756AAE', bg2: '#443978', text: '#fff',     accent: '#FFD166' },
+  dark:     { bg: '#6B5648', bg2: '#3A2A20', text: '#fff',     accent: '#FFD166' },
+  fairy:    { bg: '#F8B5CD', bg2: '#CD759F', text: '#1a1a1a',  accent: '#fff'    },
+  fighting: { bg: '#CC382F', bg2: '#8C1E18', text: '#fff',     accent: '#FFD166' },
+  poison:   { bg: '#A565BF', bg2: '#6A3787', text: '#fff',     accent: '#FFD166' },
+  ground:   { bg: '#CFA546', bg2: '#8A671E', text: '#fff',     accent: '#FFD166' },
+  rock:     { bg: '#C5AC42', bg2: '#8A782B', text: '#fff',     accent: '#FFD166' },
+  bug:      { bg: '#98C42A', bg2: '#66831D', text: '#fff',     accent: '#FFD166' },
+  ghost:    { bg: '#685B97', bg2: '#3C3265', text: '#fff',     accent: '#FFD166' },
+  steel:    { bg: '#ABC2D7', bg2: '#6885A3', text: '#1a1a1a',  accent: '#fff'    },
+  normal:   { bg: '#B3B385', bg2: '#7B7B53', text: '#fff',     accent: '#FFD166' },
+  flying:   { bg: '#99D0F3', bg2: '#5B96C3', text: '#1a1a1a',  accent: '#fff'    },
 }
 
 const STAT_LABEL: Record<string, string> = {
@@ -118,7 +121,11 @@ export default function PokemonInsightCard({
         width: 1080,
         height: 1080,
         boxSizing: 'border-box',
-        background: `linear-gradient(165deg, ${tc.bg} 0%, ${tc.bg2} 50%, #0c0c18 100%)`,
+        // Push bg2 stop later (50→60) so more of the canvas stays in the
+        // bright type-colour zone; soften the end from #0c0c18 to #1a1a2a so
+        // the bottom fade isn't as harsh. The featured-card band is still
+        // solid #0c0c18 so the contrast against it remains crisp.
+        background: `linear-gradient(165deg, ${tc.bg} 0%, ${tc.bg2} 60%, #1a1a2a 100%)`,
         color: tc.text,
         fontFamily: "'Figtree', sans-serif",
         display: 'grid',
