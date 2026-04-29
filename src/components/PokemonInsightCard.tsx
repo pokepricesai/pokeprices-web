@@ -296,7 +296,7 @@ export default function PokemonInsightCard({
         </div>
       </div>
 
-      {/* COLLECTOR STATS panel — slightly larger numbers */}
+      {/* COLLECTOR STATS panel — solid dark fill so text reads on every type */}
       <div style={{
         position: 'relative', zIndex: 2,
         padding: '0 52px',
@@ -305,7 +305,7 @@ export default function PokemonInsightCard({
       }}>
         <div style={{
           width: '100%',
-          background: 'rgba(0,0,0,0.42)',
+          background: 'rgba(12,12,24,0.82)',
           backdropFilter: 'blur(8px)',
           border: '1.5px solid rgba(255,255,255,0.18)',
           borderRadius: 22,
@@ -313,6 +313,7 @@ export default function PokemonInsightCard({
           display: 'grid',
           gridTemplateColumns: '1fr 1fr 1fr',
           gap: 16,
+          color: '#fff',
         }}>
           <BigStat big={String(cards.length)}    small="Total Cards" />
           <BigStat big={String(uniqueSetCount)}  small="Sets Featured" />
@@ -320,11 +321,14 @@ export default function PokemonInsightCard({
         </div>
       </div>
 
-      {/* BATTLE STATS — bigger labels and values */}
+      {/* BATTLE STATS — bigger labels and values. Force white text so the
+          section reads on Electric / Ice / Fairy / Steel / Flying where the
+          type's tc.text is dark and the gradient has already darkened. */}
       <div style={{
         position: 'relative', zIndex: 2,
         padding: '14px 52px 0',
         overflow: 'hidden',
+        color: '#fff',
       }}>
         <div style={{
           fontSize: 16, fontWeight: 900, letterSpacing: 4,
@@ -352,12 +356,15 @@ export default function PokemonInsightCard({
         </div>
       </div>
 
-      {/* FEATURED CARD + FOOTER — taller band, bigger card thumbnail and text */}
+      {/* FEATURED CARD + FOOTER — solid dark band (was rgba(0,0,0,0.55) which
+          tinted toward yellow/cyan/etc. on light-bg types and made dark text
+          unreadable). Force white text so it works on every type. */}
       <div style={{
         position: 'relative', zIndex: 2,
         padding: '14px 52px 16px',
-        background: 'rgba(0,0,0,0.55)',
+        background: '#0c0c18',
         borderTop: '1px solid rgba(255,255,255,0.18)',
+        color: '#fff',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
