@@ -31,11 +31,15 @@ export default function PokemonPageClient() {
 
   useEffect(() => {
     async function load() {
+      // NOTE: Supabase / PostgREST caps responses at 1,000 rows by default.
+      // Both queries below explicitly request up to 2,000 to cover all 1,025
+      // current species (and a buffer for future generations).
       const [speciesRes, countRes] = await Promise.all([
         supabase
           .from('pokemon_species_stats')
           .select('species_name, species_id, card_count, max_raw_usd')
-          .order('species_id', { ascending: true }),
+          .order('species_id', { ascending: true })
+          .range(0, 1999),
         supabase
           .from('cards')
           .select('id', { count: 'exact', head: true })
@@ -51,6 +55,7 @@ export default function PokemonPageClient() {
         .from('pokemon_species')
         .select('id, name')
         .order('id', { ascending: true })
+        .range(0, 1999)
 
       const statsMap: Record<string, { card_count: number; max_raw_usd: number | null }> = {}
       rows.forEach((r: any) => {
