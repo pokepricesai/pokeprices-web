@@ -6,6 +6,8 @@ import PokemonStructuredData from '@/components/PokemonStructuredData'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import FAQ from '@/components/FAQ'
 import { getPokemonFaqItems } from '@/lib/faqs'
+import PokemonInsightCard from '@/components/PokemonInsightCard'
+import { exportElementAsPng, canShareFiles } from '@/lib/pngExport'
 
 const TYPE_COLORS: Record<string, { bg: string; text: string; light: string }> = {
   fire:     { bg: '#FF6B35', text: '#fff', light: 'rgba(255,107,53,0.1)' },
@@ -81,6 +83,31 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
   const [cards,       setCards]       = useState<Card[]>([])
   const [loading,     setLoading]     = useState(true)
   const [cardSort,    setCardSort]    = useState<'set' | 'price_desc' | 'price_asc' | 'name'>('price_desc')
+  const [exporting,   setExporting]   = useState(false)
+  const [shareMode,   setShareMode]   = useState(false)
+
+  useEffect(() => {
+    setShareMode(canShareFiles())
+  }, [])
+
+  async function handleDownloadInsight() {
+    if (exporting) return
+    setExporting(true)
+    try {
+      await exportElementAsPng({
+        elementId: 'pokemon-insight-card',
+        fileName: `pokeprices-${slug}-dossier.png`,
+        pixelRatio: 2,
+        shareTitle: 'PokePrices',
+        shareText: `${slug.charAt(0).toUpperCase() + slug.slice(1)} — collector's dossier from PokePrices`,
+      })
+    } catch (e: any) {
+      console.error('Insight export failed:', e)
+      alert(`Export failed: ${e?.message || 'please try again'}`)
+    } finally {
+      setExporting(false)
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -245,6 +272,30 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
               </div>
             ))}
           </div>
+
+          {/* Download Insight CTA */}
+          <button
+            onClick={handleDownloadInsight}
+            disabled={exporting}
+            style={{
+              marginTop: 18, padding: '11px 20px', borderRadius: 12,
+              border: 'none', cursor: exporting ? 'wait' : 'pointer',
+              background: `linear-gradient(135deg, ${typeColor.bg}, ${typeColor.bg === 'var(--primary)' ? '#1a5fad' : typeColor.bg})`,
+              color: typeColor.text,
+              fontFamily: "'Figtree', sans-serif", fontSize: 13, fontWeight: 800,
+              letterSpacing: 0.3,
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              boxShadow: '0 4px 14px rgba(0,0,0,0.15)',
+              opacity: exporting ? 0.65 : 1,
+            }}
+          >
+            <span style={{ fontSize: 15 }}>{shareMode ? '↗' : '↓'}</span>
+            {exporting
+              ? 'Generating dossier…'
+              : shareMode
+                ? `Save ${displayName} dossier`
+                : `Download ${displayName} dossier`}
+          </button>
         </div>
         <div style={{ flex: '0 0 auto', minWidth: 240, background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)', padding: '16px 20px' }}>
           <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.5, color: 'var(--text-muted)', marginBottom: 14, fontFamily: "'Figtree', sans-serif" }}>
@@ -404,6 +455,27 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
           isMythical,
         })} />
       )}
+
+      {/* Off-screen 1080×1080 dossier — rendered for html-to-image capture.
+          Kept in the layout (not display:none) because html-to-image needs a
+          live element to capture. Position is way off-screen to keep it
+          invisible to users without affecting page scroll. */}
+      <div aria-hidden style={{
+        position: 'absolute',
+        left: -20000, top: 0,
+        width: 1080, height: 1080,
+        pointerEvents: 'none',
+      }}>
+        <PokemonInsightCard
+          pokeData={pokeData}
+          speciesData={speciesData}
+          displayName={displayName}
+          cards={regularCards}
+          uniqueSetCount={uniqueSets.length}
+          mostExpensiveRaw={mostExpensiveCard ?? null}
+          mostExpensivePsa10={mostExpensivePsa10 ?? null}
+        />
+      </div>
 
     </div>
   )
