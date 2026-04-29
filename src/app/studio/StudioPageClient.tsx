@@ -1398,9 +1398,13 @@ export default function StudioPageClient() {
   const [filterMinRise,  setFilterMinRise]  = useState('')
   const [filterGrade,    setFilterGrade]    = useState<'raw' | 'psa10'>('raw')
   const [filterSort,     setFilterSort]     = useState<'pct_30d' | 'price_desc' | 'price_asc'>('pct_30d')
-  // Volume filter — minimum sales in last 30 days. card_volume.sales_30d is the
-  // backing column. Common cadences: 1/mo ≈ 1, weekly ≈ 4, several/wk ≈ 12, daily ≈ 30.
-  const [filterMinSales, setFilterMinSales] = useState<number | null>(null)
+  // Volume filter — user enters a count + unit (per day / week / month).
+  // We convert that to a sales_30d threshold for the query:
+  //   per day   → ×30
+  //   per week  → ×(30/7) ≈ ×4.2857
+  //   per month → ×1
+  const [filterMinVolume, setFilterMinVolume] = useState('')
+  const [filterVolumeUnit, setFilterVolumeUnit] = useState<'day' | 'week' | 'month'>('week')
   const [filtering,      setFiltering]      = useState(false)
   const [filterResults,  setFilterResults]  = useState<any[] | null>(null)
 
@@ -1430,16 +1434,25 @@ export default function StudioPageClient() {
       const maxP = filterMaxPrice.trim() ? parseFloat(filterMaxPrice) * 100 : null
       const minR = filterMinRise.trim()  ? parseFloat(filterMinRise)        : null
 
+      // Convert user-entered "N per day/week/month" into a sales_30d threshold
+      const minVolNum = parseFloat(filterMinVolume)
+      let minSales30d: number | null = null
+      if (Number.isFinite(minVolNum) && minVolNum > 0) {
+        const mult = filterVolumeUnit === 'day' ? 30 : filterVolumeUnit === 'week' ? 30 / 7 : 1
+        // Round up so that "≥ 2 per week" includes cards selling exactly 2/week
+        minSales30d = Math.ceil(minVolNum * mult)
+      }
+
       // Volume pre-filter: if a min-sales threshold is set, look up qualifying
       // card_slugs in card_volume first (Ungraded grade) and constrain the
       // trend query to that set. This is faster than a join across two tables
       // and lets us short-circuit when nothing qualifies.
       let volumeFilteredSlugs: Set<string> | null = null
-      if (filterMinSales != null && filterMinSales > 0) {
+      if (minSales30d != null && minSales30d > 0) {
         const { data: volRows } = await supabase.from('card_volume')
           .select('card_slug')
           .eq('grade', 'Ungraded')
-          .gte('sales_30d', filterMinSales)
+          .gte('sales_30d', minSales30d)
           .limit(5000)
         volumeFilteredSlugs = new Set((volRows || []).map((v: any) => v.card_slug))
         if (volumeFilteredSlugs.size === 0) {
@@ -2004,22 +2017,56 @@ export default function StudioPageClient() {
                     ))}
                   </div>
 
-                  {/* Min sales volume — filter on card_volume.sales_30d.
-                      Cadences mapped to ~30-day equivalents:
-                        monthly ≈ 1, weekly ≈ 4, several/wk ≈ 12, daily ≈ 30 */}
-                  <div style={{ display: 'flex', gap: 4, fontSize: 11, flexWrap: 'wrap' }}>
-                    <span style={{ color: 'var(--text-muted)', alignSelf: 'center', marginRight: 4, fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>Min sales:</span>
-                    {([
-                      [null, 'Any'],
-                      [1,    '≥ Monthly'],
-                      [4,    '≥ Weekly'],
-                      [12,   '≥ Few/wk'],
-                      [30,   '≥ Daily'],
-                    ] as const).map(([val, label]) => (
-                      <button key={String(val)} onClick={() => setFilterMinSales(val)} style={btnStyle(filterMinSales === val)}>
-                        {label}
-                      </button>
-                    ))}
+                  {/* Min sales volume — free-form: N per day / week / month.
+                      Converted to a sales_30d threshold inside findByCriteria. */}
+                  <div>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', fontSize: 11 }}>
+                      <span style={{ color: 'var(--text-muted)', fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>Min sales:</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.5"
+                        placeholder="2"
+                        value={filterMinVolume}
+                        onChange={e => setFilterMinVolume(e.target.value)}
+                        style={{
+                          width: 64, padding: '6px 10px', fontSize: 12, fontFamily: "'Figtree', sans-serif",
+                          borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card)',
+                          color: 'var(--text)', outline: 'none', boxSizing: 'border-box',
+                        }}
+                      />
+                      <span style={{ color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>per</span>
+                      {(['day', 'week', 'month'] as const).map(u => (
+                        <button key={u} onClick={() => setFilterVolumeUnit(u)} style={btnStyle(filterVolumeUnit === u)}>
+                          {u}
+                        </button>
+                      ))}
+                      {filterMinVolume && (
+                        <button
+                          onClick={() => setFilterMinVolume('')}
+                          style={{
+                            background: 'none', border: 'none', color: 'var(--text-muted)',
+                            fontSize: 11, padding: 0, cursor: 'pointer', textDecoration: 'underline',
+                            fontFamily: "'Figtree', sans-serif",
+                          }}
+                          title="Clear volume filter"
+                        >
+                          clear
+                        </button>
+                      )}
+                    </div>
+                    {(() => {
+                      const n = parseFloat(filterMinVolume)
+                      if (!Number.isFinite(n) || n <= 0) return null
+                      const mult = filterVolumeUnit === 'day' ? 30 : filterVolumeUnit === 'week' ? 30 / 7 : 1
+                      const sales30 = Math.ceil(n * mult)
+                      return (
+                        <p style={{ fontSize: 10, color: 'var(--text-muted)', margin: '4px 0 0', fontFamily: "'Figtree', sans-serif" }}>
+                          ≈ at least {sales30} sales over 30 days
+                        </p>
+                      )
+                    })()}
                   </div>
 
                   <button
