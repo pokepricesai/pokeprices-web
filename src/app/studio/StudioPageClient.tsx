@@ -1563,11 +1563,23 @@ export default function StudioPageClient() {
   async function exportPng() {
     if (exporting) return
     setExporting(true)
+
+    // 1×1 transparent PNG — fallback for any image that fails to inline.
+    // Using this instead of leaving the original cross-origin src in place
+    // prevents html-to-image from attempting a CORS fetch at capture time
+    // (which is what was intermittently dropping bg pokemon silhouettes).
+    const TRANSPARENT_PIXEL =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII='
+
+    // Capture targets for restore — declared outside try so finally can reach them
+    let allImgs: HTMLImageElement[] = []
+    const origSrcs: string[] = []
+
     try {
       const el = document.getElementById('studio-preview')
       if (!el) throw new Error('Preview not found')
 
-      // Load html-to-image from CDN
+      // Load html-to-image from CDN once
       if (!(window as any).htmlToImage) {
         await new Promise<void>((resolve, reject) => {
           const s = document.createElement('script')
@@ -1578,46 +1590,50 @@ export default function StudioPageClient() {
         })
       }
 
-      // Convert all non-silhouette card images to base64 inline data URLs BEFORE capture.
-      // This is the only reliable fix for browser image caching - once an image is a
-      // data URL, html-to-image uses the pixel data directly and never fetches anything.
-      const cardImgs = Array.from(
-        el.querySelectorAll('img:not([data-bg-pokemon])')
-      ) as HTMLImageElement[]
+      // Inline EVERY image in the preview — including data-bg-pokemon silhouettes,
+      // which were previously skipped and were the source of the "missing images"
+      // bug. imgproxy already whitelists raw.githubusercontent.com and pokeapi.
+      allImgs = Array.from(el.querySelectorAll('img')) as HTMLImageElement[]
 
-      const origSrcs: string[] = []
-      await Promise.all(cardImgs.map(async (img, i) => {
+      await Promise.all(allImgs.map(async (img, i) => {
         origSrcs[i] = img.src
+        const ts = Date.now()
+        const isSameOrigin = img.src.startsWith(window.location.origin) || img.src.startsWith('/')
+        const fetchUrl = isSameOrigin
+          ? img.src
+          : img.src.includes('/api/imgproxy')
+            ? img.src.split('&b=')[0] + '&b=export_' + ts
+            : '/api/imgproxy?url=' + encodeURIComponent(img.src) + '&b=export_' + ts
         try {
-          const ts = Date.now()
-          // Same-origin assets (set logos) fetch directly; external images go through proxy
-          const isSameOrigin = img.src.startsWith(window.location.origin) || img.src.startsWith('/')
-          const src = isSameOrigin
-            ? img.src
-            : img.src.includes('/api/imgproxy')
-              ? img.src.split('&b=')[0] + '&b=export_' + ts
-              : '/api/imgproxy?url=' + encodeURIComponent(img.src) + '&b=export_' + ts
-          const res = await fetch(src, { cache: 'no-store' })
+          const res = await fetch(fetchUrl, { cache: 'no-store' })
+          if (!res.ok) throw new Error(`fetch ${res.status}`)
           const blob = await res.blob()
-          const dataUrl = await new Promise<string>(resolve => {
+          const dataUrl = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader()
             reader.onload = () => resolve(reader.result as string)
+            reader.onerror = () => reject(reader.error)
             reader.readAsDataURL(blob)
           })
           img.src = dataUrl
-        } catch {
-          // leave original src if fetch fails
+        } catch (err) {
+          console.warn('[studio export] failed to inline image, using placeholder:', img.src, err)
+          img.src = TRANSPARENT_PIXEL
         }
       }))
 
-      // Small delay for browser to paint the new data URLs
-      await new Promise(r => setTimeout(r, 150))
+      // Wait for each <img> to actually decode into a bitmap before capturing.
+      // This replaces the old arbitrary 150 ms timeout, which was racy on slower
+      // devices or larger images.
+      await Promise.all(allImgs.map(img =>
+        img.decode().catch(() => { /* swallow — placeholder will render blank */ })
+      ))
 
       const { toPng } = (window as any).htmlToImage
-      const dataUrl = await toPng(el, { pixelRatio: 2 })
-
-      // Restore original srcs
-      cardImgs.forEach((img, i) => { img.src = origSrcs[i] })
+      const dataUrl = await toPng(el, {
+        pixelRatio: 2,
+        cacheBust: true,
+        imagePlaceholder: TRANSPARENT_PIXEL,
+      })
 
       const link = document.createElement('a')
       const safeCardName = card ? card.card_name.replace(/[^a-z0-9]/gi, '-').toLowerCase() : ''
@@ -1630,8 +1646,14 @@ export default function StudioPageClient() {
     } catch (e: any) {
       console.error('Export failed:', e)
       alert(`Export failed: ${e.message || 'please try again'}`)
+    } finally {
+      // Always restore original srcs so the on-screen preview keeps working,
+      // even if toPng threw mid-flight.
+      allImgs.forEach((img, i) => {
+        if (origSrcs[i]) img.src = origSrcs[i]
+      })
+      setExporting(false)
     }
-    setExporting(false)
   }
 
   const needsCard   = ['insight', 'peak-distance', 'temperature', 'grade-compare'].includes(visualType)
