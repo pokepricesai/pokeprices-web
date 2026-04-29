@@ -32,9 +32,11 @@ export default function PokemonPageClient() {
   useEffect(() => {
     async function load() {
       // NOTE: Supabase / PostgREST caps responses at 1,000 rows by default.
-      // Both queries below explicitly request up to 2,000 to cover all 1,025
-      // current species (and a buffer for future generations).
-      const [speciesRes, countRes] = await Promise.all([
+      // We:
+      //   1. Pull a true row count via count:'exact' (head:true → no payload)
+      //   2. Pull the full species rows in pages of 1000 until we have them all.
+      // This is robust to future growth past the current ~1,025 species.
+      const [speciesRes, countRes, speciesCountRes] = await Promise.all([
         supabase
           .from('pokemon_species_stats')
           .select('species_name, species_id, card_count, max_raw_usd')
@@ -44,25 +46,41 @@ export default function PokemonPageClient() {
           .from('cards')
           .select('id', { count: 'exact', head: true })
           .eq('is_sealed', false),
+        supabase
+          .from('pokemon_species')
+          .select('id', { count: 'exact', head: true }),
       ])
 
       const totalCards = countRes.count ?? 0
+      const totalSpecies = speciesCountRes.count ?? 0
       const rows = speciesRes.data ?? []
 
-      // Fill in any species not yet in stats table (species_id 1-1025 with 0 cards)
-      // by also fetching the full species list
-      const { data: allSpecies } = await supabase
-        .from('pokemon_species')
-        .select('id, name')
-        .order('id', { ascending: true })
-        .range(0, 1999)
+      // Fetch the full species list in pages — guarantees we get every row
+      // even if PostgREST's per-request cap or a future change re-introduces
+      // the 1,000-row limit.
+      let allSpecies: { id: number; name: string }[] = []
+      const PAGE = 1000
+      let from = 0
+      while (true) {
+        const { data, error } = await supabase
+          .from('pokemon_species')
+          .select('id, name')
+          .order('id', { ascending: true })
+          .range(from, from + PAGE - 1)
+        if (error) break
+        if (!data || data.length === 0) break
+        allSpecies = allSpecies.concat(data)
+        if (data.length < PAGE) break
+        from += PAGE
+        if (allSpecies.length >= 5000) break // safety bound
+      }
 
       const statsMap: Record<string, { card_count: number; max_raw_usd: number | null }> = {}
       rows.forEach((r: any) => {
         statsMap[r.species_name] = { card_count: r.card_count, max_raw_usd: r.max_raw_usd }
       })
 
-      const entries: PokemonEntry[] = (allSpecies ?? []).map((s: any) => ({
+      const entries: PokemonEntry[] = allSpecies.map((s: any) => ({
         id: s.id,
         name: s.name,
         cardCount: statsMap[s.name]?.card_count ?? 0,
@@ -74,7 +92,14 @@ export default function PokemonPageClient() {
 
       setPokemon(entries)
       setFiltered(entries)
-      setStats({ totalPokemon: entries.length, totalCards, mostCards, mostExpensive })
+      // Prefer the server-confirmed count when it's higher than what we loaded
+      // (defends against silent row caps surfacing the wrong number to the user).
+      setStats({
+        totalPokemon: Math.max(entries.length, totalSpecies),
+        totalCards,
+        mostCards,
+        mostExpensive,
+      })
       setLoading(false)
     }
     load()

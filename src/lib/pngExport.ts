@@ -90,6 +90,20 @@ export async function captureElementToDataUrl(
   }
 }
 
+// Detect mobile / touch devices. We only want to show the Web Share UI on
+// phones and tablets — desktop Chrome supports navigator.share but invokes a
+// system share sheet that's confusing for users who just want a download.
+function isMobileDevice(): boolean {
+  if (typeof navigator === 'undefined') return false
+  const ua = navigator.userAgent || ''
+  if (/Mobi|Android|iPhone|iPad|iPod|Windows Phone|BlackBerry|IEMobile/i.test(ua)) return true
+  // iPadOS 13+ identifies as Mac; check for touch + small-ish viewport as a heuristic
+  if ((navigator as any).maxTouchPoints > 1 && /Macintosh/.test(ua) && typeof window !== 'undefined' && window.innerWidth < 1200) {
+    return true
+  }
+  return false
+}
+
 export async function shareOrDownloadPng(
   dataUrl: string,
   fileName: string,
@@ -97,20 +111,24 @@ export async function shareOrDownloadPng(
   shareText = 'Made with PokePrices',
 ): Promise<{ shared: boolean }> {
   let shared = false
-  try {
-    const blob = await (await fetch(dataUrl)).blob()
-    const file = new File([blob], fileName, { type: 'image/png' })
-    const nav: any = navigator
-    if (nav.canShare && nav.canShare({ files: [file] })) {
-      await nav.share({ files: [file], title: shareTitle, text: shareText })
-      shared = true
-    }
-  } catch (err: any) {
-    // AbortError = user dismissed the native share sheet — treat as success
-    if (err?.name === 'AbortError') {
-      shared = true
-    } else {
-      console.warn('[pngExport] share failed, falling back to download:', err)
+
+  // Only attempt Web Share on mobile. On desktop, always download.
+  if (isMobileDevice()) {
+    try {
+      const blob = await (await fetch(dataUrl)).blob()
+      const file = new File([blob], fileName, { type: 'image/png' })
+      const nav: any = navigator
+      if (nav.canShare && nav.canShare({ files: [file] })) {
+        await nav.share({ files: [file], title: shareTitle, text: shareText })
+        shared = true
+      }
+    } catch (err: any) {
+      // AbortError = user dismissed the native share sheet — treat as success
+      if (err?.name === 'AbortError') {
+        shared = true
+      } else {
+        console.warn('[pngExport] share failed, falling back to download:', err)
+      }
     }
   }
 
@@ -134,7 +152,11 @@ export async function exportElementAsPng(opts: {
   return shareOrDownloadPng(dataUrl, opts.fileName, opts.shareTitle, opts.shareText)
 }
 
+// True when both: (a) we're on a mobile device, AND (b) the browser actually
+// supports sharing files via the Web Share API. UI uses this to switch the
+// button label between "Save / Share" (mobile) and "Download" (desktop).
 export function canShareFiles(): boolean {
+  if (!isMobileDevice()) return false
   try {
     const nav: any = navigator
     if (!nav.canShare) return false

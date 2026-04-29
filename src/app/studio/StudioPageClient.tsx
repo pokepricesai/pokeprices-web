@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import FAQ from '@/components/FAQ'
 import { getStudioFaqItems } from '@/lib/faqs'
+import { canShareFiles as canShareFilesUtil } from '@/lib/pngExport'
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value)
@@ -1415,14 +1416,11 @@ export default function StudioPageClient() {
     return () => window.removeEventListener('resize', check)
   }, [])
 
-  // Detect Web Share API file-share support so we can label the button accordingly.
+  // Detect Web Share API file-share support — mobile devices only. On desktop
+  // we always download so users get the file in their Downloads folder rather
+  // than a confusing OS share sheet.
   useEffect(() => {
-    try {
-      const nav: any = navigator
-      if (!nav.canShare) return
-      const probe = new File([new Blob(['x'], { type: 'image/png' })], 'probe.png', { type: 'image/png' })
-      setCanShareFiles(!!nav.canShare({ files: [probe] }))
-    } catch { /* ignore */ }
+    setCanShareFiles(canShareFilesUtil())
   }, [])
 
   async function findByCriteria() {
@@ -1771,27 +1769,29 @@ export default function StudioPageClient() {
         : `pokeprices-${visualType}-${moversPeriod}.png`
 
       // On mobile, use Web Share API so users can save directly to Photos /
-      // camera roll via the native share sheet. Falls back to download on
-      // desktop browsers that don't support file sharing.
+      // camera roll via the native share sheet. Always download on desktop —
+      // canShareFilesUtil() handles the mobile-only gating.
       let shared = false
-      try {
-        const blob = await (await fetch(dataUrl)).blob()
-        const file = new File([blob], fileName, { type: 'image/png' })
-        const nav: any = navigator
-        if (nav.canShare && nav.canShare({ files: [file] })) {
-          await nav.share({
-            files: [file],
-            title: 'PokePrices',
-            text: 'Made with PokePrices Studio',
-          })
-          shared = true
-        }
-      } catch (err: any) {
-        // AbortError = user cancelled the share sheet — that's fine, treat as done.
-        if (err?.name === 'AbortError') {
-          shared = true
-        } else {
-          console.warn('[studio] share failed, falling back to download:', err)
+      if (canShareFilesUtil()) {
+        try {
+          const blob = await (await fetch(dataUrl)).blob()
+          const file = new File([blob], fileName, { type: 'image/png' })
+          const nav: any = navigator
+          if (nav.canShare && nav.canShare({ files: [file] })) {
+            await nav.share({
+              files: [file],
+              title: 'PokePrices',
+              text: 'Made with PokePrices Studio',
+            })
+            shared = true
+          }
+        } catch (err: any) {
+          // AbortError = user cancelled the share sheet — that's fine, treat as done.
+          if (err?.name === 'AbortError') {
+            shared = true
+          } else {
+            console.warn('[studio] share failed, falling back to download:', err)
+          }
         }
       }
 

@@ -1,5 +1,7 @@
-// PokemonInsightCard — 1080×1080 shareable "dossier" for a Pokémon species.
-// Rendered off-screen in PokemonSpeciesPageClient and captured to PNG via pngExport.
+// PokemonInsightCard — 1080×1080 shareable "Collector's Dossier" for a Pokémon
+// species. Rendered off-screen in PokemonSpeciesPageClient and captured to PNG
+// via pngExport. Designed for social media — bold typography, type-coloured
+// gradient, real Pokédex info + collector stats + battle stats + featured card.
 
 interface CardData {
   card_name: string
@@ -20,27 +22,25 @@ interface Props {
   mostExpensivePsa10: CardData | null
 }
 
-// Type-color palette: vibrant top → darker mid → near-black bottom for depth.
-// "text" is the foreground colour for elements that sit on the bg directly.
-const TYPE_COLORS: Record<string, { bg: string; bg2: string; text: string }> = {
-  fire:     { bg: '#FF6B35', bg2: '#C72D14', text: '#fff' },
-  water:    { bg: '#4A90D9', bg2: '#1D5494', text: '#fff' },
-  grass:    { bg: '#56C271', bg2: '#1F8A3E', text: '#fff' },
-  electric: { bg: '#F5C518', bg2: '#B8901A', text: '#1a1a1a' },
-  psychic:  { bg: '#E8538F', bg2: '#A82565', text: '#fff' },
-  ice:      { bg: '#74CEC0', bg2: '#3F8C82', text: '#1a1a1a' },
-  dragon:   { bg: '#6B5FA6', bg2: '#3B315F', text: '#fff' },
-  dark:     { bg: '#5C4A3B', bg2: '#2B1F16', text: '#fff' },
-  fairy:    { bg: '#F4A7C3', bg2: '#C16591', text: '#1a1a1a' },
-  fighting: { bg: '#C03028', bg2: '#7A1610', text: '#fff' },
-  poison:   { bg: '#9B59B6', bg2: '#5C2D77', text: '#fff' },
-  ground:   { bg: '#C49A3C', bg2: '#7A5A14', text: '#fff' },
-  rock:     { bg: '#B8A038', bg2: '#7A6920', text: '#fff' },
-  bug:      { bg: '#8CB820', bg2: '#5A7510', text: '#fff' },
-  ghost:    { bg: '#5B4F8A', bg2: '#312957', text: '#fff' },
-  steel:    { bg: '#9EB8D0', bg2: '#5A7A98', text: '#1a1a1a' },
-  normal:   { bg: '#A8A878', bg2: '#6E6E47', text: '#fff' },
-  flying:   { bg: '#8EC8F0', bg2: '#4F8AB8', text: '#1a1a1a' },
+const TYPE_COLORS: Record<string, { bg: string; bg2: string; text: string; accent: string }> = {
+  fire:     { bg: '#FF6B35', bg2: '#C72D14', text: '#fff',     accent: '#FFD166' },
+  water:    { bg: '#4A90D9', bg2: '#1D5494', text: '#fff',     accent: '#74CEC0' },
+  grass:    { bg: '#56C271', bg2: '#1F8A3E', text: '#fff',     accent: '#FFD166' },
+  electric: { bg: '#F5C518', bg2: '#B8901A', text: '#1a1a1a',  accent: '#fff'    },
+  psychic:  { bg: '#E8538F', bg2: '#A82565', text: '#fff',     accent: '#FFD166' },
+  ice:      { bg: '#74CEC0', bg2: '#3F8C82', text: '#1a1a1a',  accent: '#fff'    },
+  dragon:   { bg: '#6B5FA6', bg2: '#3B315F', text: '#fff',     accent: '#FFD166' },
+  dark:     { bg: '#5C4A3B', bg2: '#2B1F16', text: '#fff',     accent: '#FFD166' },
+  fairy:    { bg: '#F4A7C3', bg2: '#C16591', text: '#1a1a1a',  accent: '#fff'    },
+  fighting: { bg: '#C03028', bg2: '#7A1610', text: '#fff',     accent: '#FFD166' },
+  poison:   { bg: '#9B59B6', bg2: '#5C2D77', text: '#fff',     accent: '#FFD166' },
+  ground:   { bg: '#C49A3C', bg2: '#7A5A14', text: '#fff',     accent: '#FFD166' },
+  rock:     { bg: '#B8A038', bg2: '#7A6920', text: '#fff',     accent: '#FFD166' },
+  bug:      { bg: '#8CB820', bg2: '#5A7510', text: '#fff',     accent: '#FFD166' },
+  ghost:    { bg: '#5B4F8A', bg2: '#312957', text: '#fff',     accent: '#FFD166' },
+  steel:    { bg: '#9EB8D0', bg2: '#5A7A98', text: '#1a1a1a',  accent: '#fff'    },
+  normal:   { bg: '#A8A878', bg2: '#6E6E47', text: '#fff',     accent: '#FFD166' },
+  flying:   { bg: '#8EC8F0', bg2: '#4F8AB8', text: '#1a1a1a',  accent: '#fff'    },
 }
 
 const STAT_LABEL: Record<string, string> = {
@@ -57,6 +57,9 @@ function fmtPrice(cents: number | null | undefined): string {
   return `$${v.toFixed(2)}`
 }
 
+// Route external images through our proxy so they're same-origin from the
+// browser's view. This makes html-to-image's inlining step a same-origin fetch
+// (much more reliable than re-proxying a cross-origin URL during capture).
 function proxyImg(url: string | null): string | null {
   if (!url) return null
   return `/api/imgproxy?url=${encodeURIComponent(url)}`
@@ -75,112 +78,142 @@ export default function PokemonInsightCard({
 
   const types: string[] = pokeData.types.map((t: any) => t.type.name)
   const primaryType = types[0]
-  const tc = TYPE_COLORS[primaryType] ?? { bg: '#3b8fe8', bg2: '#1a5fad', text: '#fff' }
+  const tc = TYPE_COLORS[primaryType] ?? { bg: '#3b8fe8', bg2: '#1a5fad', text: '#fff', accent: '#FFD166' }
   const stats = pokeData.stats.map((s: any) => ({ name: s.stat.name, value: s.base_stat }))
+  const totalStats = stats.reduce((sum: number, s: any) => sum + s.value, 0)
   const dexNumber = String(pokeData.id).padStart(3, '0')
-  const artworkUrl = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${pokeData.id}.png`
+  const artworkUrl = proxyImg(`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${pokeData.id}.png`) || ''
   const isLegendary = !!speciesData?.is_legendary
   const isMythical  = !!speciesData?.is_mythical
   const genus = speciesData?.genera?.find((g: any) => g.language.name === 'en')?.genus
+  const heightM = (pokeData.height / 10).toFixed(1)
+  const weightKg = (pokeData.weight / 10).toFixed(1)
+  const abilities = pokeData.abilities
+    .map((a: any) => a.ability.name.split('-').map((w: string) => w[0].toUpperCase() + w.slice(1)).join(' '))
+    .slice(0, 3)
 
   const featured = mostExpensivePsa10?.psa10_usd ? mostExpensivePsa10 : mostExpensiveRaw
   const featuredPrice = featured?.psa10_usd ?? featured?.raw_usd ?? null
   const featuredGrade = featured?.psa10_usd ? 'PSA 10' : 'Raw'
-
   const headerStat = featured ? fmtPrice(featuredPrice) : '—'
   const headerStatLabel = featured ? `Max ${featuredGrade}` : 'Max value'
 
-  // Layout uses absolute positioning for header/footer so flex column for the
-  // rest can flow naturally without precise pixel maths.
+  // Auto-scale display name so long species names stay on one line
+  const nameLen = displayName.length
+  const nameSize = nameLen > 14 ? 64 : nameLen > 10 ? 78 : 92
+
   return (
     <div
       id="pokemon-insight-card"
       style={{
         width: 1080,
         height: 1080,
-        position: 'relative',
-        overflow: 'hidden',
         boxSizing: 'border-box',
-        background: `linear-gradient(165deg, ${tc.bg} 0%, ${tc.bg2} 55%, #0f0f1a 100%)`,
+        background: `linear-gradient(165deg, ${tc.bg} 0%, ${tc.bg2} 50%, #0c0c18 100%)`,
         color: tc.text,
         fontFamily: "'Figtree', sans-serif",
+        display: 'flex',
+        flexDirection: 'column',
+        position: 'relative',
+        overflow: 'hidden',
       }}
     >
-      {/* Decorative type-colored radial accent */}
+      {/* Decorative blur in top-right for visual interest */}
       <div
         aria-hidden
         style={{
           position: 'absolute',
-          top: -200, right: -160,
-          width: 600, height: 600,
+          top: -220, right: -180,
+          width: 720, height: 720,
           borderRadius: '50%',
-          background: `radial-gradient(circle, ${tc.bg}aa, transparent 70%)`,
-          filter: 'blur(40px)',
+          background: `radial-gradient(circle, ${tc.bg}aa, transparent 65%)`,
+          filter: 'blur(60px)',
           pointerEvents: 'none',
+          zIndex: 0,
         }}
       />
 
-      {/* HEADER */}
+      {/* HEADER bar */}
       <div style={{
-        position: 'absolute', top: 0, left: 0, right: 0,
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '32px 44px', zIndex: 2,
+        flexShrink: 0,
+        padding: '32px 52px 0',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        position: 'relative',
+        zIndex: 2,
       }}>
         <div>
-          <div style={{ fontSize: 13, fontWeight: 900, letterSpacing: 4, textTransform: 'uppercase', opacity: 0.85 }}>
+          <div style={{
+            fontSize: 16, fontWeight: 900, letterSpacing: 6,
+            opacity: 0.85, textTransform: 'uppercase',
+          }}>
             Pokémon Dossier
           </div>
-          <div style={{ fontSize: 13, fontWeight: 700, opacity: 0.65, marginTop: 2 }}>#{dexNumber}</div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{
-            width: 22, height: 22, borderRadius: '50%',
-            background: 'rgba(255,255,255,0.15)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            border: '2px solid rgba(255,255,255,0.4)',
-          }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: tc.text }} />
+          <div style={{ fontSize: 16, fontWeight: 700, opacity: 0.7, marginTop: 4 }}>
+            #{dexNumber}
           </div>
-          <span style={{ fontSize: 16, fontWeight: 900, letterSpacing: 1.5, fontFamily: "'Outfit', sans-serif" }}>
-            POKEPRICES.IO
-          </span>
+        </div>
+        <div style={{
+          fontSize: 24, fontWeight: 900, letterSpacing: 2,
+          fontFamily: "'Outfit', sans-serif",
+        }}>
+          POKEPRICES
         </div>
       </div>
 
-      {/* HERO: artwork + name + types */}
+      {/* HERO — artwork + name + types + dex info */}
       <div style={{
-        position: 'absolute', top: 96, left: 0, right: 0,
-        display: 'flex', flexDirection: 'column', alignItems: 'center',
-        padding: '0 40px',
+        flexShrink: 0,
+        padding: '12px 52px 8px',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        position: 'relative',
+        zIndex: 2,
       }}>
         <img
           src={artworkUrl}
           alt={displayName}
           style={{
             width: 320, height: 320, objectFit: 'contain',
-            filter: 'drop-shadow(0 16px 36px rgba(0,0,0,0.45))',
+            filter: 'drop-shadow(0 18px 40px rgba(0,0,0,0.5))',
             display: 'block',
           }}
         />
         <h1 style={{
           fontFamily: "'Outfit', sans-serif",
-          fontSize: 64, fontWeight: 900, letterSpacing: -1.5,
-          margin: '4px 0 4px', textTransform: 'capitalize',
-          textShadow: '0 4px 16px rgba(0,0,0,0.3)',
+          fontSize: nameSize,
+          fontWeight: 900,
+          letterSpacing: -2,
+          margin: '0',
+          textTransform: 'capitalize',
+          textShadow: '0 4px 16px rgba(0,0,0,0.35)',
+          lineHeight: 1,
+          textAlign: 'center',
         }}>
           {displayName}
         </h1>
         {genus && (
-          <p style={{ fontSize: 16, fontStyle: 'italic', opacity: 0.85, margin: '0 0 12px' }}>
+          <p style={{
+            fontSize: 19, fontStyle: 'italic',
+            opacity: 0.85, margin: '8px 0 14px',
+            fontWeight: 600,
+          }}>
             The {genus}
           </p>
         )}
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-          {types.map((t: string) => (
+        <div style={{
+          display: 'flex', gap: 10, flexWrap: 'wrap',
+          justifyContent: 'center', marginBottom: 12,
+        }}>
+          {types.map(t => (
             <span key={t} style={{
-              background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.25)',
-              padding: '6px 16px', borderRadius: 24,
-              fontSize: 13, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.4,
+              background: 'rgba(0,0,0,0.32)',
+              border: '2px solid rgba(255,255,255,0.3)',
+              padding: '8px 22px', borderRadius: 32,
+              fontSize: 16, fontWeight: 900,
+              textTransform: 'uppercase', letterSpacing: 2,
             }}>
               {t}
             </span>
@@ -188,106 +221,174 @@ export default function PokemonInsightCard({
           {isLegendary && (
             <span style={{
               background: '#FFD166', color: '#1a1a1a',
-              padding: '6px 16px', borderRadius: 24,
-              fontSize: 13, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1.4,
+              padding: '8px 22px', borderRadius: 32,
+              fontSize: 16, fontWeight: 900,
+              textTransform: 'uppercase', letterSpacing: 2,
             }}>
-              Legendary
+              ★ Legendary
             </span>
           )}
           {isMythical && (
             <span style={{
               background: '#C77DFF', color: '#fff',
-              padding: '6px 16px', borderRadius: 24,
-              fontSize: 13, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1.4,
+              padding: '8px 22px', borderRadius: 32,
+              fontSize: 16, fontWeight: 900,
+              textTransform: 'uppercase', letterSpacing: 2,
             }}>
-              Mythical
+              ✦ Mythical
             </span>
+          )}
+        </div>
+        {/* Pokédex info row — height, weight, abilities */}
+        <div style={{
+          display: 'flex', gap: 16, flexWrap: 'wrap',
+          justifyContent: 'center',
+          fontSize: 16, fontWeight: 700, opacity: 0.9,
+          fontFamily: "'Figtree', sans-serif",
+        }}>
+          <span><span style={{ opacity: 0.6 }}>HT</span> {heightM}m</span>
+          <span style={{ opacity: 0.4 }}>·</span>
+          <span><span style={{ opacity: 0.6 }}>WT</span> {weightKg}kg</span>
+          {abilities.length > 0 && (
+            <>
+              <span style={{ opacity: 0.4 }}>·</span>
+              <span><span style={{ opacity: 0.6 }}>ABILITY</span> {abilities[0]}</span>
+            </>
           )}
         </div>
       </div>
 
-      {/* COLLECTOR STATS (3 column) */}
+      {/* COLLECTOR STATS — Cards · Sets · Max value */}
       <div style={{
-        position: 'absolute', top: 600, left: 40, right: 40,
-        background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(8px)',
-        border: '1px solid rgba(255,255,255,0.15)',
-        borderRadius: 18,
-        padding: '20px 28px',
-        display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16,
+        flexShrink: 0,
+        margin: '14px 52px 0',
+        padding: '24px 28px',
+        background: 'rgba(0,0,0,0.4)',
+        backdropFilter: 'blur(8px)',
+        border: '1.5px solid rgba(255,255,255,0.18)',
+        borderRadius: 22,
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr 1fr',
+        gap: 16,
+        position: 'relative',
+        zIndex: 2,
       }}>
-        <Stat big={String(cards.length)}     small="Cards Tracked" />
-        <Stat big={String(uniqueSetCount)}   small="Sets Featured" />
-        <Stat big={headerStat}               small={headerStatLabel} />
+        <BigStat big={String(cards.length)} small="Cards Tracked" />
+        <BigStat big={String(uniqueSetCount)} small="Sets Featured" />
+        <BigStat big={headerStat} small={headerStatLabel} />
       </div>
 
-      {/* BATTLE STATS */}
+      {/* BATTLE STATS — flex:1 absorbs any leftover space */}
       <div style={{
-        position: 'absolute', top: 740, left: 40, right: 40,
-        padding: '0 4px',
+        flex: 1,
+        minHeight: 0,
+        padding: '20px 52px 0',
+        position: 'relative',
+        zIndex: 2,
+        display: 'flex',
+        flexDirection: 'column',
       }}>
         <div style={{
-          fontSize: 12, fontWeight: 900, letterSpacing: 3,
-          opacity: 0.85, marginBottom: 10, textTransform: 'uppercase',
+          fontSize: 14, fontWeight: 900, letterSpacing: 4,
+          opacity: 0.85, marginBottom: 14, textTransform: 'uppercase',
         }}>
-          Battle Stats · {stats.reduce((s: number, st: any) => s + st.value, 0)} total
+          Battle Stats <span style={{ opacity: 0.55, fontWeight: 700 }}>· {totalStats} total</span>
         </div>
         <div style={{
-          display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 28, rowGap: 8,
+          flex: 1,
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          columnGap: 36,
+          rowGap: 12,
+          alignContent: 'start',
         }}>
           {stats.map((s: any) => (
-            <StatBar key={s.name} name={STAT_LABEL[s.name] ?? s.name} value={s.value} accent={tc.bg} />
+            <StatBar
+              key={s.name}
+              name={STAT_LABEL[s.name] ?? s.name}
+              value={s.value}
+              accent={tc.bg}
+            />
           ))}
         </div>
       </div>
 
       {/* FEATURED CARD + FOOTER */}
       <div style={{
-        position: 'absolute', bottom: 0, left: 0, right: 0,
+        flexShrink: 0,
+        padding: '18px 52px 22px',
         background: 'rgba(0,0,0,0.55)',
         borderTop: '1px solid rgba(255,255,255,0.18)',
-        padding: '18px 40px',
+        position: 'relative',
+        zIndex: 2,
       }}>
         {featured ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 18, marginBottom: 12,
+          }}>
             {featured.image_url && (
               <img
                 crossOrigin="anonymous"
                 src={proxyImg(featured.image_url) || ''}
                 alt={featured.card_name}
                 style={{
-                  width: 70, height: 98, objectFit: 'contain', borderRadius: 6,
-                  flexShrink: 0, background: 'rgba(255,255,255,0.04)',
+                  width: 80, height: 110, objectFit: 'contain',
+                  borderRadius: 6, flexShrink: 0,
+                  background: 'rgba(255,255,255,0.04)',
+                  boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
                 }}
               />
             )}
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: 2, opacity: 0.7, textTransform: 'uppercase' }}>
+              <div style={{
+                fontSize: 12, fontWeight: 900, letterSpacing: 2.5,
+                opacity: 0.7, textTransform: 'uppercase',
+              }}>
                 Most Valuable Card
               </div>
-              <div style={{ fontSize: 19, fontWeight: 900, marginTop: 2, fontFamily: "'Outfit', sans-serif" }}>
+              <div style={{
+                fontSize: 26, fontWeight: 900, marginTop: 2,
+                fontFamily: "'Outfit', sans-serif",
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                lineHeight: 1.1,
+              }}>
                 {featured.card_name}
               </div>
-              <div style={{ fontSize: 12, opacity: 0.85, marginTop: 1 }}>
+              <div style={{
+                fontSize: 14, opacity: 0.85, marginTop: 4, fontWeight: 600,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>
                 {featured.set_name}
               </div>
             </div>
             <div style={{ textAlign: 'right', flexShrink: 0 }}>
-              <div style={{ fontSize: 24, fontWeight: 900, fontFamily: "'Outfit', sans-serif" }}>
+              <div style={{
+                fontSize: 36, fontWeight: 900,
+                fontFamily: "'Outfit', sans-serif", lineHeight: 1,
+                color: tc.accent,
+                textShadow: '0 2px 12px rgba(0,0,0,0.3)',
+              }}>
                 {fmtPrice(featuredPrice)}
               </div>
-              <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, letterSpacing: 1.5, textTransform: 'uppercase', marginTop: 2 }}>
+              <div style={{
+                fontSize: 12, fontWeight: 800, opacity: 0.75,
+                letterSpacing: 1.5, textTransform: 'uppercase', marginTop: 4,
+              }}>
                 {featuredGrade}
               </div>
             </div>
           </div>
         ) : (
-          <div style={{ textAlign: 'center', fontSize: 13, opacity: 0.7, padding: '14px 0' }}>
+          <div style={{
+            textAlign: 'center', fontSize: 14, opacity: 0.7,
+            padding: '14px 0',
+          }}>
             No card price data yet.
           </div>
         )}
         <div style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          fontSize: 11, opacity: 0.6, marginTop: 10, fontWeight: 700, letterSpacing: 1,
+          fontSize: 12, opacity: 0.6, fontWeight: 700, letterSpacing: 1,
         }}>
           <span>pokeprices.io</span>
           <span>Live prices · Updated daily</span>
@@ -297,18 +398,18 @@ export default function PokemonInsightCard({
   )
 }
 
-function Stat({ big, small }: { big: string; small: string }) {
+function BigStat({ big, small }: { big: string; small: string }) {
   return (
     <div style={{ textAlign: 'center' }}>
       <div style={{
-        fontSize: 38, fontWeight: 900, lineHeight: 1,
-        fontFamily: "'Outfit', sans-serif", letterSpacing: -0.5,
+        fontSize: 48, fontWeight: 900, lineHeight: 1,
+        fontFamily: "'Outfit', sans-serif", letterSpacing: -1,
       }}>
         {big}
       </div>
       <div style={{
-        fontSize: 11, fontWeight: 800, letterSpacing: 1.8,
-        opacity: 0.75, marginTop: 6, textTransform: 'uppercase',
+        fontSize: 12, fontWeight: 900, letterSpacing: 2,
+        opacity: 0.75, marginTop: 8, textTransform: 'uppercase',
       }}>
         {small}
       </div>
@@ -317,16 +418,37 @@ function Stat({ big, small }: { big: string; small: string }) {
 }
 
 function StatBar({ name, value, accent }: { name: string; value: number; accent: string }) {
-  const pct = Math.min(100, (value / 200) * 100) // 200 is a comfortable visual cap
+  // 200 is a comfortable visual cap (max base stat in main games is 255)
+  const pct = Math.min(100, (value / 200) * 100)
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '60px 38px 1fr', alignItems: 'center', gap: 10 }}>
-      <span style={{ fontSize: 11, fontWeight: 800, opacity: 0.85, letterSpacing: 1, textTransform: 'uppercase' }}>{name}</span>
-      <span style={{ fontSize: 16, fontWeight: 900, fontFamily: "'Outfit', sans-serif", textAlign: 'right' }}>{value}</span>
-      <div style={{ height: 8, background: 'rgba(0,0,0,0.35)', borderRadius: 99, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '78px 50px 1fr',
+      alignItems: 'center',
+      gap: 12,
+    }}>
+      <span style={{
+        fontSize: 14, fontWeight: 900, opacity: 0.9,
+        letterSpacing: 1, textTransform: 'uppercase',
+      }}>
+        {name}
+      </span>
+      <span style={{
+        fontSize: 22, fontWeight: 900,
+        fontFamily: "'Outfit', sans-serif",
+        textAlign: 'right',
+      }}>
+        {value}
+      </span>
+      <div style={{
+        height: 12, background: 'rgba(0,0,0,0.4)',
+        borderRadius: 99, overflow: 'hidden',
+        border: '1px solid rgba(255,255,255,0.12)',
+      }}>
         <div style={{
           height: '100%', width: `${pct}%`,
-          background: `linear-gradient(90deg, ${accent} 0%, #ffffff90 100%)`,
-          borderRadius: 99, transition: 'width 0.3s',
+          background: `linear-gradient(90deg, ${accent} 0%, rgba(255,255,255,0.6) 100%)`,
+          borderRadius: 99,
         }} />
       </div>
     </div>
