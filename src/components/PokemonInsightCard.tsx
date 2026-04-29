@@ -101,12 +101,15 @@ export default function PokemonInsightCard({
   const nameSize = nameLen > 14 ? 64 : nameLen > 10 ? 80 : 96
 
   // Section heights — total = 1080
+  // Hero shrunk by 20px so the collector-stats panel sits higher on the
+  // canvas. Featured section grew by 20px (~14%) so the most-valuable-card
+  // band has more breathing room and a bigger card thumbnail.
   const H_HEADER  = 90
-  const H_HERO    = 510
+  const H_HERO    = 490
   const H_STATS   = 130
   const H_BATTLE  = 210
-  const H_FOOTER  = 140
-  // 90 + 510 + 130 + 210 + 140 = 1080
+  const H_FOOTER  = 160
+  // 90 + 490 + 130 + 210 + 160 = 1080
 
   return (
     <div
@@ -236,8 +239,9 @@ export default function PokemonInsightCard({
             )}
           </div>
 
-          {/* CENTRE — artwork */}
+          {/* CENTRE — artwork (crossOrigin so canvas extraction works on iOS) */}
           <img
+            crossOrigin="anonymous"
             src={artworkUrl}
             alt={displayName}
             style={{
@@ -348,10 +352,10 @@ export default function PokemonInsightCard({
         </div>
       </div>
 
-      {/* FEATURED CARD + FOOTER — bigger card image, bigger title */}
+      {/* FEATURED CARD + FOOTER — taller band, bigger card thumbnail and text */}
       <div style={{
         position: 'relative', zIndex: 2,
-        padding: '12px 52px 14px',
+        padding: '14px 52px 16px',
         background: 'rgba(0,0,0,0.55)',
         borderTop: '1px solid rgba(255,255,255,0.18)',
         display: 'flex',
@@ -361,7 +365,7 @@ export default function PokemonInsightCard({
       }}>
         {featured ? (
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 18,
+            display: 'flex', alignItems: 'center', gap: 20,
             whiteSpace: 'nowrap',
           }}>
             {featured.image_url && (
@@ -370,8 +374,8 @@ export default function PokemonInsightCard({
                 src={proxyImg(featured.image_url) || ''}
                 alt={featured.card_name}
                 style={{
-                  width: 78, height: 108, objectFit: 'contain',
-                  borderRadius: 6, flexShrink: 0,
+                  width: 88, height: 122, objectFit: 'contain',
+                  borderRadius: 7, flexShrink: 0,
                   background: 'rgba(255,255,255,0.04)',
                   boxShadow: '0 6px 18px rgba(0,0,0,0.45)',
                 }}
@@ -379,14 +383,14 @@ export default function PokemonInsightCard({
             )}
             <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
               <div style={{
-                fontSize: 12, fontWeight: 900, letterSpacing: 2.5,
-                opacity: 0.7, textTransform: 'uppercase',
+                fontSize: 13, fontWeight: 900, letterSpacing: 2.5,
+                opacity: 0.72, textTransform: 'uppercase',
                 whiteSpace: 'nowrap',
               }}>
                 Most Valuable Card
               </div>
               <div style={{
-                fontSize: 28, fontWeight: 900, marginTop: 4,
+                fontSize: 30, fontWeight: 900, marginTop: 5,
                 fontFamily: "'Outfit', sans-serif",
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 lineHeight: 1.1,
@@ -395,7 +399,7 @@ export default function PokemonInsightCard({
                 {featured.card_name}
               </div>
               <div style={{
-                fontSize: 15, opacity: 0.85, marginTop: 4, fontWeight: 600,
+                fontSize: 16, opacity: 0.85, marginTop: 5, fontWeight: 600,
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               }}>
                 {featured.set_name}
@@ -403,16 +407,17 @@ export default function PokemonInsightCard({
             </div>
             <div style={{ textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap' }}>
               <div style={{
-                fontSize: 38, fontWeight: 900,
+                fontSize: 44, fontWeight: 900,
                 fontFamily: "'Outfit', sans-serif", lineHeight: 1,
                 color: tc.accent,
                 textShadow: '0 2px 12px rgba(0,0,0,0.3)',
+                letterSpacing: -1,
               }}>
                 {fmtPrice(featuredPrice)}
               </div>
               <div style={{
-                fontSize: 13, fontWeight: 800, opacity: 0.78,
-                letterSpacing: 1.5, textTransform: 'uppercase', marginTop: 5,
+                fontSize: 14, fontWeight: 800, opacity: 0.78,
+                letterSpacing: 1.5, textTransform: 'uppercase', marginTop: 6,
               }}>
                 {featuredGrade}
               </div>
