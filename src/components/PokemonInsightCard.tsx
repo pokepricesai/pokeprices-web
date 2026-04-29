@@ -314,7 +314,7 @@ export default function PokemonInsightCard({
           gridTemplateColumns: '1fr 1fr 1fr',
           gap: 16,
         }}>
-          <BigStat big={String(cards.length)}    small="Cards Tracked" />
+          <BigStat big={String(cards.length)}    small="Total Cards" />
           <BigStat big={String(uniqueSetCount)}  small="Sets Featured" />
           <BigStat big={headerStat}              small={headerStatLabel} />
         </div>
