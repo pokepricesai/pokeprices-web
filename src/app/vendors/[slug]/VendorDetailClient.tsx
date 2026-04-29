@@ -72,20 +72,38 @@ export default function VendorDetailClient({ vendor }: { vendor: any }) {
       </Link>
 
       {/* Header */}
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
-          <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 32, margin: 0, color: 'var(--text)' }}>
-            {vendor.name}
-          </h1>
-          {vendor.verified && (
-            <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--primary)', background: 'rgba(26,95,173,0.08)', padding: '3px 10px', borderRadius: 20, fontFamily: "'Figtree', sans-serif" }}>
-              ✓ VERIFIED
-            </span>
-          )}
-        </div>
-        <div style={{ fontSize: 14, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <span>{VENDOR_TYPE_LABELS[vendor.vendor_type] ?? vendor.vendor_type}</span>
-          {location && <span>📍 {location}</span>}
+      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+        {/* Logo (if present) — large, anchors the page identity */}
+        {vendor.logo_url && (
+          <div style={{
+            width: 96, height: 96, borderRadius: 16,
+            background: 'var(--bg-light)', border: '1px solid var(--border)',
+            overflow: 'hidden', flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <img
+              src={vendor.logo_url}
+              alt={`${vendor.name} logo`}
+              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+            />
+          </div>
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
+            <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 32, margin: 0, color: 'var(--text)' }}>
+              {vendor.name}
+            </h1>
+            {vendor.verified && (
+              <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--primary)', background: 'rgba(26,95,173,0.08)', padding: '3px 10px', borderRadius: 20, fontFamily: "'Figtree', sans-serif" }}>
+                ✓ VERIFIED
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 14, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <span>{VENDOR_TYPE_LABELS[vendor.vendor_type] ?? vendor.vendor_type}</span>
+            {location && <span>📍 {location}</span>}
+          </div>
         </div>
       </div>
 

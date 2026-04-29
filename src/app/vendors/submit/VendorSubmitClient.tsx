@@ -158,6 +158,33 @@ export default function VendorSubmitClient() {
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Logo upload state
+  const [logoFile,    setLogoFile]    = useState<File | null>(null)
+  const [logoPreview, setLogoPreview] = useState<string | null>(null)
+  const [logoError,   setLogoError]   = useState<string | null>(null)
+  const [uploadingLogo, setUploadingLogo] = useState(false)
+
+  function handleLogoSelect(file: File | null) {
+    setLogoError(null)
+    if (!file) {
+      setLogoFile(null)
+      setLogoPreview(null)
+      return
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setLogoError('Logo must be under 2 MB.')
+      return
+    }
+    if (!/^image\/(png|jpeg|webp|gif|svg\+xml)$/.test(file.type)) {
+      setLogoError('Please upload a PNG, JPG, WEBP, GIF or SVG.')
+      return
+    }
+    setLogoFile(file)
+    const reader = new FileReader()
+    reader.onload = () => setLogoPreview(reader.result as string)
+    reader.readAsDataURL(file)
+  }
+
   const isPhysical = ['physical_shop'].includes(form.vendor_type)
   const isRetailer = form.vendor_type === 'retailer'
   const isGrader = form.vendor_type === 'grading_service'
@@ -209,6 +236,29 @@ export default function VendorSubmitClient() {
     // Generate slug
     const slugBase = slugify(`${form.name} ${form.city || form.country}`)
 
+    // Upload logo first (if any). If upload fails we still submit the row,
+    // but flag it so the submitter sees what happened.
+    let logo_url: string | null = null
+    if (logoFile) {
+      setUploadingLogo(true)
+      try {
+        const fd = new FormData()
+        fd.append('file', logoFile)
+        fd.append('vendor_slug', slugBase)
+        const res = await fetch('/api/vendor-logo-upload', { method: 'POST', body: fd })
+        const json = await res.json().catch(() => ({}))
+        if (res.ok && json.url) {
+          logo_url = json.url
+        } else {
+          setLogoError(json.error || 'Logo upload failed — submission saved without logo.')
+        }
+      } catch {
+        setLogoError('Logo upload failed — submission saved without logo.')
+      } finally {
+        setUploadingLogo(false)
+      }
+    }
+
     const { error: err } = await supabase.from('vendors').insert({
       ...form,
       latitude,
@@ -216,6 +266,7 @@ export default function VendorSubmitClient() {
       slug: slugBase,
       active: false,
       verified: false,
+      logo_url,
     })
 
     if (err) {
@@ -295,6 +346,82 @@ export default function VendorSubmitClient() {
                 : isOnline ? 'Tell collectors what you sell and what makes you stand out...'
                 : 'Tell collectors what makes your store special...'
               } />
+          </div>
+
+          {/* Logo upload */}
+          <div>
+            <Label>Logo (optional)</Label>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 14,
+              padding: '14px', background: 'var(--bg-light)',
+              border: '1px dashed var(--border)', borderRadius: 10,
+            }}>
+              {/* Preview */}
+              <div style={{
+                width: 72, height: 72, borderRadius: 12,
+                background: 'var(--card)', border: '1px solid var(--border)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                overflow: 'hidden', flexShrink: 0,
+              }}>
+                {logoPreview
+                  ? <img src={logoPreview} alt="Logo preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                  : <span style={{ fontSize: 24, opacity: 0.4 }}>🖼</span>}
+              </div>
+
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <label style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '8px 14px', borderRadius: 8,
+                  border: '1px solid var(--border)', background: 'var(--card)',
+                  fontSize: 13, fontWeight: 700, color: 'var(--text)',
+                  fontFamily: "'Figtree', sans-serif", cursor: 'pointer',
+                }}>
+                  {logoFile ? 'Replace logo' : 'Choose logo'}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                    onChange={e => handleLogoSelect(e.target.files?.[0] ?? null)}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+                {logoFile && (
+                  <button
+                    onClick={() => handleLogoSelect(null)}
+                    style={{
+                      marginLeft: 10, padding: '8px 12px', borderRadius: 8,
+                      border: '1px solid var(--border)', background: 'transparent',
+                      color: 'var(--text-muted)', fontSize: 13, fontWeight: 600,
+                      cursor: 'pointer', fontFamily: "'Figtree', sans-serif",
+                    }}
+                  >
+                    Remove
+                  </button>
+                )}
+                <p style={{
+                  fontSize: 11, color: 'var(--text-muted)',
+                  fontFamily: "'Figtree', sans-serif",
+                  margin: '8px 0 0', lineHeight: 1.5,
+                }}>
+                  PNG, JPG, WEBP, GIF or SVG · max 2 MB. Square images look best — they'll display next to your name in the directory and on your detail page.
+                </p>
+                {logoFile && (
+                  <p style={{
+                    fontSize: 11, color: 'var(--text)',
+                    fontFamily: "'Figtree', sans-serif", margin: '4px 0 0',
+                  }}>
+                    {logoFile.name} · {(logoFile.size / 1024).toFixed(0)} KB
+                  </p>
+                )}
+                {logoError && (
+                  <p style={{
+                    fontSize: 11, color: '#ef4444',
+                    fontFamily: "'Figtree', sans-serif", margin: '4px 0 0',
+                  }}>
+                    {logoError}
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -525,7 +652,7 @@ export default function VendorSubmitClient() {
           cursor: submitting ? 'not-allowed' : 'pointer',
           transition: 'background 0.15s',
         }}>
-          {submitting ? 'Submitting...' : 'Submit for Review'}
+          {uploadingLogo ? 'Uploading logo…' : submitting ? 'Submitting...' : 'Submit for Review'}
         </button>
       )}
 

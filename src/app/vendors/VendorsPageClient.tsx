@@ -57,6 +57,7 @@ interface Vendor {
   store_finder_url: string | null
   grading_services: string[] | null
   distance_miles: number | null
+  logo_url: string | null
 }
 
 interface Suggestion {
@@ -104,7 +105,23 @@ function VendorCard({ vendor }: { vendor: Vendor }) {
         }}
       >
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          {/* Logo (or placeholder) — leaves room for the rest of the header */}
+          <div style={{
+            width: 56, height: 56, borderRadius: 10,
+            background: 'var(--bg-light)', border: '1px solid var(--border)',
+            flexShrink: 0, overflow: 'hidden',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {vendor.logo_url
+              ? <img src={vendor.logo_url} alt={`${vendor.name} logo`} loading="lazy"
+                  style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                  onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
+              : <span style={{ fontSize: 22, opacity: 0.35 }}>
+                  {(VENDOR_TYPE_LABELS[vendor.vendor_type] ?? '🏪').slice(0, 2).trim() || '🏪'}
+                </span>}
+          </div>
+
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3, flexWrap: 'wrap' }}>
               <h3 style={{
