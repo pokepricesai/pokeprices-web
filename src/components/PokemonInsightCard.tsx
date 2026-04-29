@@ -22,28 +22,29 @@ interface Props {
   mostExpensivePsa10: CardData | null
 }
 
-// Brightened palette — each type's bg/bg2 nudged ~5% lighter while
-// preserving hue and saturation. Keeps the type recognisable but lets
-// more vibrancy shine through on the dossier.
+// Vibrant palette tuned for white text everywhere. Previously-light types
+// (electric, ice, fairy, steel, flying, normal) have been deepened so white
+// text remains legible — combined with the text-shadow on the outer
+// container, every type reads cleanly without any dark-on-bright pairing.
 const TYPE_COLORS: Record<string, { bg: string; bg2: string; text: string; accent: string }> = {
-  fire:     { bg: '#FF7A47', bg2: '#DC4524', text: '#fff',     accent: '#FFD166' },
-  water:    { bg: '#5598E0', bg2: '#2A609F', text: '#fff',     accent: '#74CEC0' },
-  grass:    { bg: '#61CC7B', bg2: '#2A9748', text: '#fff',     accent: '#FFD166' },
-  electric: { bg: '#FFD32A', bg2: '#C9A028', text: '#1a1a1a',  accent: '#fff'    },
-  psychic:  { bg: '#ED6098', bg2: '#B33775', text: '#fff',     accent: '#FFD166' },
-  ice:      { bg: '#80D5C8', bg2: '#4D9A8F', text: '#1a1a1a',  accent: '#fff'    },
-  dragon:   { bg: '#756AAE', bg2: '#443978', text: '#fff',     accent: '#FFD166' },
-  dark:     { bg: '#6B5648', bg2: '#3A2A20', text: '#fff',     accent: '#FFD166' },
-  fairy:    { bg: '#F8B5CD', bg2: '#CD759F', text: '#1a1a1a',  accent: '#fff'    },
-  fighting: { bg: '#CC382F', bg2: '#8C1E18', text: '#fff',     accent: '#FFD166' },
-  poison:   { bg: '#A565BF', bg2: '#6A3787', text: '#fff',     accent: '#FFD166' },
-  ground:   { bg: '#CFA546', bg2: '#8A671E', text: '#fff',     accent: '#FFD166' },
-  rock:     { bg: '#C5AC42', bg2: '#8A782B', text: '#fff',     accent: '#FFD166' },
-  bug:      { bg: '#98C42A', bg2: '#66831D', text: '#fff',     accent: '#FFD166' },
-  ghost:    { bg: '#685B97', bg2: '#3C3265', text: '#fff',     accent: '#FFD166' },
-  steel:    { bg: '#ABC2D7', bg2: '#6885A3', text: '#1a1a1a',  accent: '#fff'    },
-  normal:   { bg: '#B3B385', bg2: '#7B7B53', text: '#fff',     accent: '#FFD166' },
-  flying:   { bg: '#99D0F3', bg2: '#5B96C3', text: '#1a1a1a',  accent: '#fff'    },
+  fire:     { bg: '#EE8130', bg2: '#9D4E13', text: '#fff', accent: '#FFD166' },
+  water:    { bg: '#5B8FF0', bg2: '#2A55B0', text: '#fff', accent: '#A8D8D2' },
+  grass:    { bg: '#5BBC3F', bg2: '#34701D', text: '#fff', accent: '#FFD166' },
+  electric: { bg: '#D9A410', bg2: '#9C7906', text: '#fff', accent: '#FFE366' },
+  psychic:  { bg: '#F03A77', bg2: '#A7245A', text: '#fff', accent: '#FFD166' },
+  ice:      { bg: '#4FB1AE', bg2: '#2D7574', text: '#fff', accent: '#A8E0DD' },
+  dragon:   { bg: '#6F35FC', bg2: '#3D14B5', text: '#fff', accent: '#FFD166' },
+  dark:     { bg: '#705746', bg2: '#3D2C20', text: '#fff', accent: '#FFD166' },
+  fairy:    { bg: '#D55E97', bg2: '#8C2C5F', text: '#fff', accent: '#FFD9EE' },
+  fighting: { bg: '#C22E28', bg2: '#7A1612', text: '#fff', accent: '#FFD166' },
+  poison:   { bg: '#A33EA1', bg2: '#5E1F5C', text: '#fff', accent: '#FFD166' },
+  ground:   { bg: '#C49635', bg2: '#7A5A14', text: '#fff', accent: '#FFD166' },
+  rock:     { bg: '#A8932F', bg2: '#6F5E1C', text: '#fff', accent: '#FFD166' },
+  bug:      { bg: '#9BAB14', bg2: '#5C6708', text: '#fff', accent: '#FFD166' },
+  ghost:    { bg: '#735797', bg2: '#41315A', text: '#fff', accent: '#FFD166' },
+  steel:    { bg: '#6F8295', bg2: '#3F4D5C', text: '#fff', accent: '#D5DDE8' },
+  normal:   { bg: '#8A8A60', bg2: '#5A5A33', text: '#fff', accent: '#FFD166' },
+  flying:   { bg: '#7461D3', bg2: '#3D2D8E', text: '#fff', accent: '#D5E4F4' },
 }
 
 const STAT_LABEL: Record<string, string> = {
@@ -121,12 +122,14 @@ export default function PokemonInsightCard({
         width: 1080,
         height: 1080,
         boxSizing: 'border-box',
-        // Push bg2 stop later (50→60) so more of the canvas stays in the
-        // bright type-colour zone; soften the end from #0c0c18 to #1a1a2a so
-        // the bottom fade isn't as harsh. The featured-card band is still
-        // solid #0c0c18 so the contrast against it remains crisp.
         background: `linear-gradient(165deg, ${tc.bg} 0%, ${tc.bg2} 60%, #1a1a2a 100%)`,
-        color: tc.text,
+        color: '#fff',
+        // Subtle drop shadow + tight halo on every text descendant. Makes
+        // white text legible on bright type backgrounds (Electric, Fairy,
+        // Ice, etc.) without resorting to dark text. Inherited by all
+        // descendants — the dark-banded sections still look fine because
+        // the shadow is subtle and adds depth rather than clutter.
+        textShadow: '0 2px 4px rgba(0,0,0,0.45), 0 0 1px rgba(0,0,0,0.6)',
         fontFamily: "'Figtree', sans-serif",
         display: 'grid',
         gridTemplateRows: `${H_HEADER}px ${H_HERO}px ${H_STATS}px ${H_BATTLE}px ${H_FOOTER}px`,
