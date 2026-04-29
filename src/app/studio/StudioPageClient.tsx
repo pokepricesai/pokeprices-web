@@ -1388,6 +1388,18 @@ export default function StudioPageClient() {
   const [exporting,    setExporting]    = useState(false)
   const [isMobile,     setIsMobile]     = useState(false)
   const [quickRisers,  setQuickRisers]  = useState<Mover[]>([])
+  const [canShareFiles, setCanShareFiles] = useState(false)
+
+  // Filter-by-criteria state (find cards by set / price / 30d move)
+  const [filterOpen,     setFilterOpen]     = useState(false)
+  const [filterSet,      setFilterSet]      = useState('')
+  const [filterMinPrice, setFilterMinPrice] = useState('')
+  const [filterMaxPrice, setFilterMaxPrice] = useState('')
+  const [filterMinRise,  setFilterMinRise]  = useState('')
+  const [filterGrade,    setFilterGrade]    = useState<'raw' | 'psa10'>('raw')
+  const [filterSort,     setFilterSort]     = useState<'pct_30d' | 'price_desc' | 'price_asc'>('pct_30d')
+  const [filtering,      setFiltering]      = useState(false)
+  const [filterResults,  setFilterResults]  = useState<any[] | null>(null)
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 900)
@@ -1395,6 +1407,77 @@ export default function StudioPageClient() {
     window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
   }, [])
+
+  // Detect Web Share API file-share support so we can label the button accordingly.
+  useEffect(() => {
+    try {
+      const nav: any = navigator
+      if (!nav.canShare) return
+      const probe = new File([new Blob(['x'], { type: 'image/png' })], 'probe.png', { type: 'image/png' })
+      setCanShareFiles(!!nav.canShare({ files: [probe] }))
+    } catch { /* ignore */ }
+  }, [])
+
+  async function findByCriteria() {
+    setFiltering(true)
+    setFilterResults(null)
+    try {
+      const priceCol = filterGrade === 'raw' ? 'current_raw' : 'current_psa10'
+      const minP = filterMinPrice.trim() ? parseFloat(filterMinPrice) * 100 : null
+      const maxP = filterMaxPrice.trim() ? parseFloat(filterMaxPrice) * 100 : null
+      const minR = filterMinRise.trim()  ? parseFloat(filterMinRise)        : null
+
+      let q: any = supabase.from('card_trends')
+        .select('card_slug, card_name, set_name, current_raw, current_psa10, raw_pct_30d')
+        .not(priceCol, 'is', null)
+
+      if (filterSet.trim())          q = q.ilike('set_name', `%${filterSet.trim()}%`)
+      if (minP != null && !Number.isNaN(minP)) q = q.gte(priceCol, minP)
+      if (maxP != null && !Number.isNaN(maxP)) q = q.lte(priceCol, maxP)
+      if (minR != null && !Number.isNaN(minR)) q = q.gte('raw_pct_30d', minR)
+
+      if (filterSort === 'pct_30d')        q = q.order('raw_pct_30d', { ascending: false, nullsFirst: false })
+      else if (filterSort === 'price_desc') q = q.order(priceCol, { ascending: false })
+      else                                  q = q.order(priceCol, { ascending: true })
+
+      const { data, error } = await q.limit(40)
+      if (error) throw error
+
+      if (!data || data.length === 0) {
+        setFilterResults([])
+        return
+      }
+
+      // Hydrate with card_url_slug + image_url + card_number from cards table
+      const slugs = data.map((r: any) => r.card_slug)
+      const { data: cardData } = await supabase.from('cards')
+        .select('card_slug, card_url_slug, image_url, card_number')
+        .in('card_slug', slugs)
+      const cardMap = new Map<string, any>((cardData || []).map((c: any) => [c.card_slug, c]))
+
+      const enriched = data.map((r: any) => {
+        const c = cardMap.get(r.card_slug) || {}
+        return {
+          card_slug: r.card_slug,
+          card_name: r.card_name,
+          set_name: r.set_name,
+          card_number: c.card_number || null,
+          image_url: c.image_url || null,
+          card_url_slug: c.card_url_slug || null,
+          _meta: {
+            price: filterGrade === 'raw' ? r.current_raw : r.current_psa10,
+            pct_30d: r.raw_pct_30d,
+          },
+        }
+      })
+      setFilterResults(enriched)
+    } catch (err) {
+      console.error('[studio] filter search failed', err)
+      setFilterResults([])
+    } finally {
+      setFiltering(false)
+    }
+  }
 
   // Load quick risers for sidebar
   useEffect(() => {
@@ -1635,14 +1718,42 @@ export default function StudioPageClient() {
         imagePlaceholder: TRANSPARENT_PIXEL,
       })
 
-      const link = document.createElement('a')
       const safeCardName = card ? card.card_name.replace(/[^a-z0-9]/gi, '-').toLowerCase() : ''
       const fileName = card
         ? `pokeprices-${safeCardName}-${visualType}-${cardLayout}.png`
         : `pokeprices-${visualType}-${moversPeriod}.png`
-      link.download = fileName
-      link.href = dataUrl
-      link.click()
+
+      // On mobile, use Web Share API so users can save directly to Photos /
+      // camera roll via the native share sheet. Falls back to download on
+      // desktop browsers that don't support file sharing.
+      let shared = false
+      try {
+        const blob = await (await fetch(dataUrl)).blob()
+        const file = new File([blob], fileName, { type: 'image/png' })
+        const nav: any = navigator
+        if (nav.canShare && nav.canShare({ files: [file] })) {
+          await nav.share({
+            files: [file],
+            title: 'PokePrices',
+            text: 'Made with PokePrices Studio',
+          })
+          shared = true
+        }
+      } catch (err: any) {
+        // AbortError = user cancelled the share sheet — that's fine, treat as done.
+        if (err?.name === 'AbortError') {
+          shared = true
+        } else {
+          console.warn('[studio] share failed, falling back to download:', err)
+        }
+      }
+
+      if (!shared) {
+        const link = document.createElement('a')
+        link.download = fileName
+        link.href = dataUrl
+        link.click()
+      }
     } catch (e: any) {
       console.error('Export failed:', e)
       alert(`Export failed: ${e.message || 'please try again'}`)
@@ -1724,8 +1835,8 @@ export default function StudioPageClient() {
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '280px 1fr 240px', gap: isMobile ? 14 : 24, alignItems: 'start' }}>
 
-        {/* LEFT: Controls */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {/* LEFT: Controls (rendered second on mobile via CSS order) */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, order: isMobile ? 2 : 0, minWidth: 0 }}>
 
           {/* Visual type selector */}
           <div style={panelStyle}>
@@ -1756,14 +1867,14 @@ export default function StudioPageClient() {
             ))}
           </div>
 
-          {/* Card search with autocomplete */}
+          {/* Card search with autocomplete + filter-by-criteria */}
           {(needsCard || (!needsMovers && !needsSet)) && (
             <div style={panelStyle}>
-              <span style={labelStyle}>Search Card</span>
+              <span style={labelStyle}>Find a Card</span>
               <div ref={searchRef} style={{ position: 'relative' }}>
                 <input
                   style={inputStyle}
-                  placeholder="e.g. Charizard, 6/102, Umbreon VMAX, Base Set..."
+                  placeholder="Search by name (e.g. Charizard, 6/102)"
                   value={cardSearch}
                   onChange={e => setCardSearch(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') { searchCard(cardSearch) } if (e.key === 'Escape') setShowSuggestions(false) }}
@@ -1789,6 +1900,142 @@ export default function StudioPageClient() {
                   </div>
                 )}
               </div>
+
+              {/* Filter-by-criteria toggle */}
+              <button
+                onClick={() => setFilterOpen(!filterOpen)}
+                style={{
+                  background: 'none', border: 'none', color: 'var(--text-muted)',
+                  fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: '8px 0 0',
+                  fontFamily: "'Figtree', sans-serif", display: 'flex', alignItems: 'center', gap: 4,
+                }}
+              >
+                {filterOpen ? '−' : '+'} Filter by criteria (set, price, 30d move)
+              </button>
+
+              {filterOpen && (
+                <div style={{
+                  marginTop: 10, padding: 12, background: 'var(--bg-light)',
+                  borderRadius: 10, border: '1px solid var(--border)',
+                  display: 'flex', flexDirection: 'column', gap: 8,
+                }}>
+                  <input
+                    style={{ ...inputStyle, fontSize: 12, padding: '8px 12px' }}
+                    placeholder="Set (e.g. Hidden Fates)"
+                    value={filterSet}
+                    onChange={e => setFilterSet(e.target.value)}
+                  />
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input
+                      style={{ ...inputStyle, fontSize: 12, padding: '8px 12px' }}
+                      placeholder="Min $"
+                      type="number"
+                      inputMode="decimal"
+                      value={filterMinPrice}
+                      onChange={e => setFilterMinPrice(e.target.value)}
+                    />
+                    <input
+                      style={{ ...inputStyle, fontSize: 12, padding: '8px 12px' }}
+                      placeholder="Max $"
+                      type="number"
+                      inputMode="decimal"
+                      value={filterMaxPrice}
+                      onChange={e => setFilterMaxPrice(e.target.value)}
+                    />
+                  </div>
+                  <input
+                    style={{ ...inputStyle, fontSize: 12, padding: '8px 12px' }}
+                    placeholder="Min 30d rise % (e.g. 20)"
+                    type="number"
+                    inputMode="decimal"
+                    value={filterMinRise}
+                    onChange={e => setFilterMinRise(e.target.value)}
+                  />
+
+                  <div style={{ display: 'flex', gap: 4, fontSize: 11 }}>
+                    <span style={{ color: 'var(--text-muted)', alignSelf: 'center', marginRight: 4, fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>Grade:</span>
+                    {(['raw', 'psa10'] as const).map(g => (
+                      <button key={g} onClick={() => setFilterGrade(g)} style={btnStyle(filterGrade === g)}>
+                        {g === 'raw' ? 'Raw' : 'PSA 10'}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 4, fontSize: 11, flexWrap: 'wrap' }}>
+                    <span style={{ color: 'var(--text-muted)', alignSelf: 'center', marginRight: 4, fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>Sort:</span>
+                    {([['pct_30d', 'Best 30d'], ['price_desc', '↓ Price'], ['price_asc', '↑ Price']] as const).map(([val, label]) => (
+                      <button key={val} onClick={() => setFilterSort(val)} style={btnStyle(filterSort === val)}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={findByCriteria}
+                    disabled={filtering}
+                    style={{
+                      marginTop: 4, padding: '10px', borderRadius: 8, border: 'none',
+                      background: 'var(--primary)', color: '#fff',
+                      fontSize: 12, fontWeight: 800, cursor: filtering ? 'wait' : 'pointer',
+                      fontFamily: "'Figtree', sans-serif", opacity: filtering ? 0.6 : 1,
+                    }}
+                  >
+                    {filtering ? 'Searching…' : 'Find cards'}
+                  </button>
+
+                  {filterResults != null && (
+                    <div style={{ marginTop: 6 }}>
+                      {filterResults.length === 0 ? (
+                        <p style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textAlign: 'center', margin: 0 }}>
+                          No cards match those filters. Try widening the range.
+                        </p>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 280, overflowY: 'auto', borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+                          <p style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 4px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                            {filterResults.length} result{filterResults.length === 1 ? '' : 's'}
+                          </p>
+                          {filterResults.map((r: any, i: number) => (
+                            <button key={i} onMouseDown={() => selectSuggestion(r)}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px',
+                                borderRadius: 6, border: '1px solid var(--border)',
+                                background: 'var(--card)', cursor: 'pointer', textAlign: 'left',
+                                fontFamily: "'Figtree', sans-serif",
+                              }}
+                              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-light)' }}
+                              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--card)' }}
+                            >
+                              {r.image_url
+                                ? <img src={r.image_url} alt="" style={{ width: 22, height: 30, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
+                                : <div style={{ width: 22, height: 30, background: 'var(--bg)', borderRadius: 3, flexShrink: 0 }} />}
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                  {r.card_name}{r.card_number ? ` #${r.card_number}` : ''}
+                                </div>
+                                <div style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                  {r.set_name}
+                                </div>
+                              </div>
+                              <div style={{ flexShrink: 0, textAlign: 'right' }}>
+                                {r._meta?.price != null && (
+                                  <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text)' }}>
+                                    ${(r._meta.price / 100).toFixed(r._meta.price >= 10000 ? 0 : 2)}
+                                  </div>
+                                )}
+                                {r._meta?.pct_30d != null && (
+                                  <div style={{ fontSize: 10, fontWeight: 700, color: r._meta.pct_30d >= 0 ? '#22c55e' : '#ef4444' }}>
+                                    {r._meta.pct_30d > 0 ? '+' : ''}{Number(r._meta.pct_30d).toFixed(1)}%
+                                  </div>
+                                )}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -1886,8 +2133,8 @@ export default function StudioPageClient() {
           </div>
         </div>
 
-        {/* CENTRE: Preview */}
-        <div>
+        {/* CENTRE: Preview (rendered first on mobile via CSS order) */}
+        <div style={{ order: isMobile ? 1 : 0, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: isMobile ? 'center' : 'flex-start' }}>
           <div id="studio-preview" style={{ width: 520, maxWidth: '100%' }}>
             {renderVisual()}
           </div>
@@ -1906,9 +2153,21 @@ export default function StudioPageClient() {
               boxShadow: canExport ? '0 4px 16px rgba(26,95,173,0.35)' : 'none',
             }}
           >
-            <span style={{ fontSize: 16 }}>v</span>
-            {exporting ? 'Generating PNG...' : 'Download PNG'}
+            <span style={{ fontSize: 16 }}>{canShareFiles ? '↗' : '↓'}</span>
+            {exporting
+              ? 'Generating PNG…'
+              : canShareFiles
+                ? 'Save / Share PNG'
+                : 'Download PNG'}
           </button>
+          {canShareFiles && (
+            <p style={{
+              fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif",
+              margin: '8px 0 0', textAlign: 'center', maxWidth: 520,
+            }}>
+              On iPhone: tap "Save Image" in the share sheet. On Android: pick "Photos" or "Save to Gallery".
+            </p>
+          )}
         </div>
 
         {/* RIGHT: Quick Risers */}
