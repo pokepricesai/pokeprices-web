@@ -1,7 +1,8 @@
-// PokemonInsightCard — 1080×1080 shareable "Collector's Dossier" for a Pokémon
-// species. Rendered off-screen in PokemonSpeciesPageClient and captured to PNG
-// via pngExport. Designed for social media — bold typography, type-coloured
-// gradient, real Pokédex info + collector stats + battle stats + featured card.
+// PokemonInsightCard — 1080×1080 shareable "Collector's Dossier".
+// Uses CSS grid with explicit row heights so html-to-image cannot collapse
+// or overlap sections. Text elements that must stay on one line use
+// whiteSpace: 'nowrap' (works around a flexbox quirk where align-items: center
+// on a column shrinks children to their min-content width).
 
 interface CardData {
   card_name: string
@@ -57,9 +58,6 @@ function fmtPrice(cents: number | null | undefined): string {
   return `$${v.toFixed(2)}`
 }
 
-// Route external images through our proxy so they're same-origin from the
-// browser's view. This makes html-to-image's inlining step a same-origin fetch
-// (much more reliable than re-proxying a cross-origin URL during capture).
 function proxyImg(url: string | null): string | null {
   if (!url) return null
   return `/api/imgproxy?url=${encodeURIComponent(url)}`
@@ -98,9 +96,18 @@ export default function PokemonInsightCard({
   const headerStat = featured ? fmtPrice(featuredPrice) : '—'
   const headerStatLabel = featured ? `Max ${featuredGrade}` : 'Max value'
 
-  // Auto-scale display name so long species names stay on one line
+  // Auto-scale display name. With whiteSpace: nowrap we don't need to fear
+  // wraps, but very long names would still overflow horizontally — so shrink.
   const nameLen = displayName.length
-  const nameSize = nameLen > 14 ? 64 : nameLen > 10 ? 78 : 92
+  const nameSize = nameLen > 14 ? 60 : nameLen > 10 ? 76 : 92
+
+  // Section heights — total = 1080
+  const H_HEADER  = 70
+  const H_HERO    = 540
+  const H_STATS   = 130
+  const H_BATTLE  = 210
+  const H_FOOTER  = 130
+  // = 70 + 540 + 130 + 210 + 130 = 1080
 
   return (
     <div
@@ -112,13 +119,13 @@ export default function PokemonInsightCard({
         background: `linear-gradient(165deg, ${tc.bg} 0%, ${tc.bg2} 50%, #0c0c18 100%)`,
         color: tc.text,
         fontFamily: "'Figtree', sans-serif",
-        display: 'flex',
-        flexDirection: 'column',
+        display: 'grid',
+        gridTemplateRows: `${H_HEADER}px ${H_HERO}px ${H_STATS}px ${H_BATTLE}px ${H_FOOTER}px`,
         position: 'relative',
         overflow: 'hidden',
       }}
     >
-      {/* Decorative blur in top-right for visual interest */}
+      {/* Decorative blur in top-right */}
       <div
         aria-hidden
         style={{
@@ -133,52 +140,54 @@ export default function PokemonInsightCard({
         }}
       />
 
-      {/* HEADER bar */}
+      {/* HEADER */}
       <div style={{
-        flexShrink: 0,
-        padding: '32px 52px 0',
+        position: 'relative', zIndex: 2,
+        padding: '0 52px',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        position: 'relative',
-        zIndex: 2,
+        whiteSpace: 'nowrap',
       }}>
-        <div>
+        <div style={{ whiteSpace: 'nowrap' }}>
           <div style={{
-            fontSize: 16, fontWeight: 900, letterSpacing: 6,
+            fontSize: 16, fontWeight: 900, letterSpacing: 5,
             opacity: 0.85, textTransform: 'uppercase',
+            whiteSpace: 'nowrap',
           }}>
-            Pokémon Dossier
+            POKÉMON DOSSIER
           </div>
-          <div style={{ fontSize: 16, fontWeight: 700, opacity: 0.7, marginTop: 4 }}>
+          <div style={{
+            fontSize: 14, fontWeight: 700, opacity: 0.7,
+            marginTop: 2, whiteSpace: 'nowrap',
+          }}>
             #{dexNumber}
           </div>
         </div>
         <div style={{
           fontSize: 24, fontWeight: 900, letterSpacing: 2,
           fontFamily: "'Outfit', sans-serif",
+          whiteSpace: 'nowrap',
         }}>
           POKEPRICES
         </div>
       </div>
 
-      {/* HERO — artwork + name + types + dex info */}
+      {/* HERO — uses block layout with text-align: center to avoid flex
+          shrinking children to min-content width. */}
       <div style={{
-        flexShrink: 0,
-        padding: '12px 52px 8px',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        position: 'relative',
-        zIndex: 2,
+        position: 'relative', zIndex: 2,
+        padding: '4px 40px 0',
+        textAlign: 'center',
+        overflow: 'hidden',
       }}>
         <img
           src={artworkUrl}
           alt={displayName}
           style={{
-            width: 320, height: 320, objectFit: 'contain',
-            filter: 'drop-shadow(0 18px 40px rgba(0,0,0,0.5))',
-            display: 'block',
+            width: 280, height: 280, objectFit: 'contain',
+            filter: 'drop-shadow(0 14px 36px rgba(0,0,0,0.5))',
+            display: 'block', margin: '0 auto',
           }}
         />
         <h1 style={{
@@ -186,34 +195,43 @@ export default function PokemonInsightCard({
           fontSize: nameSize,
           fontWeight: 900,
           letterSpacing: -2,
-          margin: '0',
+          margin: '6px 0 0',
           textTransform: 'capitalize',
           textShadow: '0 4px 16px rgba(0,0,0,0.35)',
           lineHeight: 1,
-          textAlign: 'center',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
         }}>
           {displayName}
         </h1>
         {genus && (
-          <p style={{
-            fontSize: 19, fontStyle: 'italic',
-            opacity: 0.85, margin: '8px 0 14px',
+          <div style={{
+            fontSize: 18, fontStyle: 'italic',
+            opacity: 0.85, marginTop: 8,
             fontWeight: 600,
+            whiteSpace: 'nowrap',
           }}>
             The {genus}
-          </p>
+          </div>
         )}
         <div style={{
-          display: 'flex', gap: 10, flexWrap: 'wrap',
-          justifyContent: 'center', marginBottom: 12,
+          marginTop: 12,
+          display: 'inline-flex',
+          gap: 10,
+          flexWrap: 'nowrap',
+          justifyContent: 'center',
+          alignItems: 'center',
+          whiteSpace: 'nowrap',
         }}>
           {types.map(t => (
             <span key={t} style={{
               background: 'rgba(0,0,0,0.32)',
               border: '2px solid rgba(255,255,255,0.3)',
-              padding: '8px 22px', borderRadius: 32,
-              fontSize: 16, fontWeight: 900,
+              padding: '7px 20px', borderRadius: 32,
+              fontSize: 15, fontWeight: 900,
               textTransform: 'uppercase', letterSpacing: 2,
+              whiteSpace: 'nowrap',
             }}>
               {t}
             </span>
@@ -221,9 +239,10 @@ export default function PokemonInsightCard({
           {isLegendary && (
             <span style={{
               background: '#FFD166', color: '#1a1a1a',
-              padding: '8px 22px', borderRadius: 32,
-              fontSize: 16, fontWeight: 900,
+              padding: '7px 18px', borderRadius: 32,
+              fontSize: 15, fontWeight: 900,
               textTransform: 'uppercase', letterSpacing: 2,
+              whiteSpace: 'nowrap',
             }}>
               ★ Legendary
             </span>
@@ -231,76 +250,77 @@ export default function PokemonInsightCard({
           {isMythical && (
             <span style={{
               background: '#C77DFF', color: '#fff',
-              padding: '8px 22px', borderRadius: 32,
-              fontSize: 16, fontWeight: 900,
+              padding: '7px 18px', borderRadius: 32,
+              fontSize: 15, fontWeight: 900,
               textTransform: 'uppercase', letterSpacing: 2,
+              whiteSpace: 'nowrap',
             }}>
               ✦ Mythical
             </span>
           )}
         </div>
-        {/* Pokédex info row — height, weight, abilities */}
         <div style={{
-          display: 'flex', gap: 16, flexWrap: 'wrap',
-          justifyContent: 'center',
-          fontSize: 16, fontWeight: 700, opacity: 0.9,
-          fontFamily: "'Figtree', sans-serif",
+          marginTop: 14,
+          fontSize: 15, fontWeight: 700,
+          opacity: 0.92,
+          whiteSpace: 'nowrap',
         }}>
-          <span><span style={{ opacity: 0.6 }}>HT</span> {heightM}m</span>
-          <span style={{ opacity: 0.4 }}>·</span>
-          <span><span style={{ opacity: 0.6 }}>WT</span> {weightKg}kg</span>
+          <span style={{ opacity: 0.6, marginRight: 4 }}>HT</span>{heightM}m
+          <span style={{ margin: '0 12px', opacity: 0.4 }}>·</span>
+          <span style={{ opacity: 0.6, marginRight: 4 }}>WT</span>{weightKg}kg
           {abilities.length > 0 && (
             <>
-              <span style={{ opacity: 0.4 }}>·</span>
-              <span><span style={{ opacity: 0.6 }}>ABILITY</span> {abilities[0]}</span>
+              <span style={{ margin: '0 12px', opacity: 0.4 }}>·</span>
+              <span style={{ opacity: 0.6, marginRight: 4 }}>ABILITY</span>{abilities[0]}
             </>
           )}
         </div>
       </div>
 
-      {/* COLLECTOR STATS — Cards · Sets · Max value */}
+      {/* COLLECTOR STATS */}
       <div style={{
-        flexShrink: 0,
-        margin: '14px 52px 0',
-        padding: '24px 28px',
-        background: 'rgba(0,0,0,0.4)',
-        backdropFilter: 'blur(8px)',
-        border: '1.5px solid rgba(255,255,255,0.18)',
-        borderRadius: 22,
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr 1fr',
-        gap: 16,
-        position: 'relative',
-        zIndex: 2,
+        position: 'relative', zIndex: 2,
+        padding: '0 52px',
+        display: 'flex',
+        alignItems: 'center',
       }}>
-        <BigStat big={String(cards.length)} small="Cards Tracked" />
-        <BigStat big={String(uniqueSetCount)} small="Sets Featured" />
-        <BigStat big={headerStat} small={headerStatLabel} />
+        <div style={{
+          width: '100%',
+          background: 'rgba(0,0,0,0.42)',
+          backdropFilter: 'blur(8px)',
+          border: '1.5px solid rgba(255,255,255,0.18)',
+          borderRadius: 22,
+          padding: '20px 28px',
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr 1fr',
+          gap: 16,
+        }}>
+          <BigStat big={String(cards.length)}    small="Cards Tracked" />
+          <BigStat big={String(uniqueSetCount)}  small="Sets Featured" />
+          <BigStat big={headerStat}              small={headerStatLabel} />
+        </div>
       </div>
 
-      {/* BATTLE STATS — flex:1 absorbs any leftover space */}
+      {/* BATTLE STATS */}
       <div style={{
-        flex: 1,
-        minHeight: 0,
-        padding: '20px 52px 0',
-        position: 'relative',
-        zIndex: 2,
-        display: 'flex',
-        flexDirection: 'column',
+        position: 'relative', zIndex: 2,
+        padding: '12px 52px 0',
+        overflow: 'hidden',
       }}>
         <div style={{
           fontSize: 14, fontWeight: 900, letterSpacing: 4,
           opacity: 0.85, marginBottom: 14, textTransform: 'uppercase',
+          whiteSpace: 'nowrap',
         }}>
           Battle Stats <span style={{ opacity: 0.55, fontWeight: 700 }}>· {totalStats} total</span>
         </div>
         <div style={{
-          flex: 1,
           display: 'grid',
           gridTemplateColumns: '1fr 1fr',
+          gridTemplateRows: 'repeat(3, 1fr)',
           columnGap: 36,
-          rowGap: 12,
-          alignContent: 'start',
+          rowGap: 10,
+          height: 145,
         }}>
           {stats.map((s: any) => (
             <StatBar
@@ -315,16 +335,19 @@ export default function PokemonInsightCard({
 
       {/* FEATURED CARD + FOOTER */}
       <div style={{
-        flexShrink: 0,
-        padding: '18px 52px 22px',
+        position: 'relative', zIndex: 2,
+        padding: '14px 52px 18px',
         background: 'rgba(0,0,0,0.55)',
         borderTop: '1px solid rgba(255,255,255,0.18)',
-        position: 'relative',
-        zIndex: 2,
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        overflow: 'hidden',
       }}>
         {featured ? (
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 18, marginBottom: 12,
+            display: 'flex', alignItems: 'center', gap: 16,
+            whiteSpace: 'nowrap',
           }}>
             {featured.image_url && (
               <img
@@ -332,22 +355,23 @@ export default function PokemonInsightCard({
                 src={proxyImg(featured.image_url) || ''}
                 alt={featured.card_name}
                 style={{
-                  width: 80, height: 110, objectFit: 'contain',
-                  borderRadius: 6, flexShrink: 0,
+                  width: 64, height: 90, objectFit: 'contain',
+                  borderRadius: 5, flexShrink: 0,
                   background: 'rgba(255,255,255,0.04)',
-                  boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.4)',
                 }}
               />
             )}
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
               <div style={{
-                fontSize: 12, fontWeight: 900, letterSpacing: 2.5,
+                fontSize: 11, fontWeight: 900, letterSpacing: 2.5,
                 opacity: 0.7, textTransform: 'uppercase',
+                whiteSpace: 'nowrap',
               }}>
                 Most Valuable Card
               </div>
               <div style={{
-                fontSize: 26, fontWeight: 900, marginTop: 2,
+                fontSize: 22, fontWeight: 900, marginTop: 2,
                 fontFamily: "'Outfit', sans-serif",
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 lineHeight: 1.1,
@@ -355,15 +379,15 @@ export default function PokemonInsightCard({
                 {featured.card_name}
               </div>
               <div style={{
-                fontSize: 14, opacity: 0.85, marginTop: 4, fontWeight: 600,
+                fontSize: 13, opacity: 0.85, marginTop: 4, fontWeight: 600,
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               }}>
                 {featured.set_name}
               </div>
             </div>
-            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+            <div style={{ textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap' }}>
               <div style={{
-                fontSize: 36, fontWeight: 900,
+                fontSize: 30, fontWeight: 900,
                 fontFamily: "'Outfit', sans-serif", lineHeight: 1,
                 color: tc.accent,
                 textShadow: '0 2px 12px rgba(0,0,0,0.3)',
@@ -371,7 +395,7 @@ export default function PokemonInsightCard({
                 {fmtPrice(featuredPrice)}
               </div>
               <div style={{
-                fontSize: 12, fontWeight: 800, opacity: 0.75,
+                fontSize: 11, fontWeight: 800, opacity: 0.75,
                 letterSpacing: 1.5, textTransform: 'uppercase', marginTop: 4,
               }}>
                 {featuredGrade}
@@ -379,16 +403,16 @@ export default function PokemonInsightCard({
             </div>
           </div>
         ) : (
-          <div style={{
-            textAlign: 'center', fontSize: 14, opacity: 0.7,
-            padding: '14px 0',
-          }}>
+          <div style={{ textAlign: 'center', fontSize: 14, opacity: 0.7 }}>
             No card price data yet.
           </div>
         )}
         <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          fontSize: 12, opacity: 0.6, fontWeight: 700, letterSpacing: 1,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          fontSize: 12, opacity: 0.55, fontWeight: 700, letterSpacing: 1,
+          whiteSpace: 'nowrap',
         }}>
           <span>pokeprices.io</span>
           <span>Live prices · Updated daily</span>
@@ -400,16 +424,18 @@ export default function PokemonInsightCard({
 
 function BigStat({ big, small }: { big: string; small: string }) {
   return (
-    <div style={{ textAlign: 'center' }}>
+    <div style={{ textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden' }}>
       <div style={{
-        fontSize: 48, fontWeight: 900, lineHeight: 1,
+        fontSize: 44, fontWeight: 900, lineHeight: 1,
         fontFamily: "'Outfit', sans-serif", letterSpacing: -1,
+        whiteSpace: 'nowrap',
       }}>
         {big}
       </div>
       <div style={{
-        fontSize: 12, fontWeight: 900, letterSpacing: 2,
-        opacity: 0.75, marginTop: 8, textTransform: 'uppercase',
+        fontSize: 12, fontWeight: 900, letterSpacing: 1.8,
+        opacity: 0.75, marginTop: 7, textTransform: 'uppercase',
+        whiteSpace: 'nowrap',
       }}>
         {small}
       </div>
@@ -418,30 +444,34 @@ function BigStat({ big, small }: { big: string; small: string }) {
 }
 
 function StatBar({ name, value, accent }: { name: string; value: number; accent: string }) {
-  // 200 is a comfortable visual cap (max base stat in main games is 255)
+  // 200 visual cap (max base stat in main games is 255, but anything above
+  // ~150 is essentially "full").
   const pct = Math.min(100, (value / 200) * 100)
   return (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: '78px 50px 1fr',
+      gridTemplateColumns: '78px 48px 1fr',
       alignItems: 'center',
       gap: 12,
+      whiteSpace: 'nowrap',
     }}>
       <span style={{
         fontSize: 14, fontWeight: 900, opacity: 0.9,
         letterSpacing: 1, textTransform: 'uppercase',
+        whiteSpace: 'nowrap',
       }}>
         {name}
       </span>
       <span style={{
-        fontSize: 22, fontWeight: 900,
+        fontSize: 20, fontWeight: 900,
         fontFamily: "'Outfit', sans-serif",
         textAlign: 'right',
+        whiteSpace: 'nowrap',
       }}>
         {value}
       </span>
       <div style={{
-        height: 12, background: 'rgba(0,0,0,0.4)',
+        height: 11, background: 'rgba(0,0,0,0.4)',
         borderRadius: 99, overflow: 'hidden',
         border: '1px solid rgba(255,255,255,0.12)',
       }}>
