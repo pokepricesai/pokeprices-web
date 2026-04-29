@@ -2,6 +2,8 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
+import FAQ from '@/components/FAQ'
+import { getCreatorsHubFaqItems } from '@/lib/faqs'
 
 const PLATFORM_ICONS: Record<string, string> = {
   YouTube: '▶',
@@ -276,6 +278,11 @@ export default function CreatorsClient({ creators }: { creators: Creator[] }) {
             )}
           </>
         )}
+      </section>
+
+      {/* FAQ — visible content + FAQPage schema */}
+      <section style={{ maxWidth: 760, margin: '0 auto', padding: '0 24px' }}>
+        <FAQ items={getCreatorsHubFaqItems()} />
       </section>
     </>
   )

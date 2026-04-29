@@ -2,6 +2,7 @@
 import { useEffect, useRef } from 'react'
 import Link from 'next/link'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
+import VendorSchema from '@/components/VendorSchema'
 
 const VENDOR_TYPE_LABELS: Record<string, string> = {
   physical_shop:    '🏪 Physical Shop',
@@ -65,6 +66,7 @@ export default function VendorDetailClient({ vendor }: { vendor: any }) {
         { name: 'Vendors', url: '/vendors' },
         { name: vendor.name },
       ]} />
+      <VendorSchema vendor={vendor} />
       <Link href="/vendors" style={{ color: 'var(--text-muted)', fontSize: 13, textDecoration: 'none', marginBottom: 16, display: 'inline-block', fontFamily: "'Figtree', sans-serif" }}>
         ← Back to directory
       </Link>

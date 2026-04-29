@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
+import CreatorSchema from '@/components/CreatorSchema'
 
 const PLATFORM_ICONS: Record<string, string> = {
   YouTube: '▶',
@@ -66,6 +67,7 @@ export default function CreatorProfilePage() {
         { name: 'Creators', url: '/creators' },
         { name: creator.name },
       ]} />
+      <CreatorSchema creator={creator} />
       <Link href="/creators" style={{
         fontSize: 13, color: 'var(--text-muted)', textDecoration: 'none',
         fontFamily: "'Figtree', sans-serif", display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 28,

@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 export default function ContactPageClient() {
   const [message, setMessage] = useState('')
@@ -34,6 +35,7 @@ export default function ContactPageClient() {
 
   return (
     <div style={{ maxWidth: 560, margin: '0 auto', padding: '48px 24px' }}>
+      <BreadcrumbSchema items={[{ name: 'Contact' }]} />
       <h1 style={{
         fontFamily: "'Outfit', sans-serif", fontSize: 32,
         margin: '0 0 8px', color: 'var(--text)',

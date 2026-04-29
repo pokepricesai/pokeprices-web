@@ -1,5 +1,6 @@
 // app/terms/page.tsx
 import Link from 'next/link'
+import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 export const metadata = {
   title: 'Terms of Service — PokePrices',
@@ -31,6 +32,7 @@ export default function TermsPage() {
 
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '48px 24px 80px' }}>
+      <BreadcrumbSchema items={[{ name: 'Terms of Service' }]} />
 
       {/* Header */}
       <div style={{ marginBottom: 40 }}>

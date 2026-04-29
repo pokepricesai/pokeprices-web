@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { supabase, formatPrice } from '@/lib/supabase'
 import { getSetAssets } from '@/lib/setAssets'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
+import FAQ from '@/components/FAQ'
+import { getBrowseFaqItems } from '@/lib/faqs'
 
 interface SetInfo {
   set_name: string
@@ -251,6 +253,22 @@ export default function BrowsePageClient() {
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 24px' }}>
       <BreadcrumbSchema items={[{ name: 'Sets' }]} />
+      {/* Dataset: catalog of all Pokémon TCG sets with price data */}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'Dataset',
+        '@id': 'https://www.pokeprices.io/browse#dataset',
+        name: 'Pokémon TCG — All Sets Card Price Dataset',
+        description: `Master catalog of every Pokémon TCG set with active price tracking on PokePrices${sets.length ? `, currently ${sets.length} sets` : ''}. Each set has full card-level raw, PSA 9 and PSA 10 prices plus PSA population data.`,
+        url: 'https://www.pokeprices.io/browse',
+        license: 'https://www.pokeprices.io/terms',
+        creator: { '@id': 'https://www.pokeprices.io/#org' },
+        publisher: { '@id': 'https://www.pokeprices.io/#org' },
+        isAccessibleForFree: true,
+        keywords: ['Pokémon TCG sets', 'card price guide', 'PSA 10 values', 'card list', 'Pokémon card market'],
+        variableMeasured: ['Card count per set', 'Average raw price', 'Total set value', 'Set release date'],
+        temporalCoverage: '1999/..',
+      }) }} />
       <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 30, margin: '0 0 6px', color: 'var(--text)' }}>Pokemon Card Sets</h1>
       <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 16px', fontFamily: "'Figtree', sans-serif" }}>
         Browse all {sets.length} sets in our database. Click any set to see prices, trends and grading data.
@@ -343,6 +361,9 @@ export default function BrowsePageClient() {
           No sets found matching &ldquo;{search}&rdquo;
         </p>
       )}
+
+      {/* FAQ — visible content + FAQPage schema */}
+      <FAQ items={getBrowseFaqItems(sets.length || null)} />
     </div>
   )
 }

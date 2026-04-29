@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import InlineChat from '@/components/InlineChat'
 import NewsletterSignup from '@/components/NewsletterSignup'
+import FAQ from '@/components/FAQ'
+import { getHomeFaqItems } from '@/lib/faqs'
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -286,14 +288,6 @@ const features = [
   { icon: '🎯', title: 'Grading insights',   desc: 'Is it worth grading? See the PSA 10 premium and gem rate' },
   { icon: '📈', title: 'Market trends',      desc: 'Price movements, drawdowns and momentum for every card' },
   { icon: '🔒', title: 'No data collection', desc: 'No login, no tracking, no email capture — ever' },
-]
-
-const faqs = [
-  { q: 'Where does the price data come from?',     a: 'We track sold listings from PriceCharting, updated nightly. Prices reflect what cards actually sell for, not asking prices.' },
-  { q: 'Is PokePrices really free?',               a: 'Yes. No login, no paywall, no hidden fees. The core price data is free forever. Future tools may include optional paid features but the card price guide will always be free.' },
-  { q: 'Do you sell my data?',                     a: 'No. We do not collect personal data, track users across sites, or run ads. The site uses basic analytics (page views) only.' },
-  { q: 'How do I know the PSA population data is accurate?', a: 'PSA population figures are scraped directly from PSA\'s public population reports and updated biweekly.' },
-  { q: 'Can I submit corrections?',                a: 'Yes. If you spot a data error, use the contact form — we read every submission.' },
 ]
 
 // ── Main ──────────────────────────────────────────────────────────────────
@@ -791,18 +785,9 @@ export default function HomeClient() {
         </div>
       </section>
 
-      {/* ── FAQ ── */}
-      <section style={{ padding: '44px 24px', maxWidth: 680, margin: '0 auto' }}>
-        <h2 style={{ fontSize: 24, textAlign: 'center', margin: '0 0 24px', fontFamily: "'Outfit', sans-serif" }}>Questions collectors ask</h2>
-        {faqs.map((faq, i) => (
-          <details key={i} style={{ background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)', marginBottom: 8, overflow: 'hidden' }}>
-            <summary style={{ padding: '14px 18px', fontSize: 14, fontWeight: 700, color: 'var(--text)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: "'Figtree', sans-serif" }}>
-              {faq.q}
-              <span style={{ color: 'var(--text-muted)', fontSize: 18, fontWeight: 300, marginLeft: 8 }}>+</span>
-            </summary>
-            <div style={{ padding: '0 18px 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif" }}>{faq.a}</div>
-          </details>
-        ))}
+      {/* ── FAQ (visible content + FAQPage schema) ── */}
+      <section style={{ padding: '24px 24px 44px', maxWidth: 680, margin: '0 auto' }}>
+        <FAQ items={getHomeFaqItems()} title="Questions collectors ask" />
       </section>
     </>
   )

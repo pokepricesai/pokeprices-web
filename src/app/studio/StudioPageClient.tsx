@@ -2,6 +2,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
+import FAQ from '@/components/FAQ'
+import { getStudioFaqItems } from '@/lib/faqs'
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value)
@@ -1672,6 +1674,24 @@ export default function StudioPageClient() {
   return (
     <div style={{ maxWidth: 1400, margin: '0 auto', padding: isMobile ? '20px 14px 110px' : '32px 24px' }}>
       <BreadcrumbSchema items={[{ name: 'Studio' }]} />
+      {/* SoftwareApplication: free Pokémon TCG visual generator */}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'SoftwareApplication',
+        '@id': 'https://www.pokeprices.io/studio#app',
+        name: 'PokePrices Studio',
+        description: 'Free web tool that turns Pokémon TCG market data into shareable PNG visuals — PSA gauges, market temperature, peak distance and chase-card graphics for any of 40,000+ tracked cards.',
+        url: 'https://www.pokeprices.io/studio',
+        applicationCategory: 'DesignApplication',
+        operatingSystem: 'Web',
+        publisher: { '@id': 'https://www.pokeprices.io/#org' },
+        offers: {
+          '@type': 'Offer',
+          price: '0',
+          priceCurrency: 'USD',
+        },
+        isAccessibleForFree: true,
+      }) }} />
 
       <div style={{ marginBottom: isMobile ? 18 : 28 }}>
         <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: isMobile ? 24 : 30, margin: '0 0 4px', color: 'var(--text)', fontWeight: 900 }}>PokePrices Studio</h1>
@@ -1898,6 +1918,11 @@ export default function StudioPageClient() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* FAQ — visible content + FAQPage schema */}
+      <div style={{ maxWidth: 720, margin: '0 auto' }}>
+        <FAQ items={getStudioFaqItems()} />
       </div>
     </div>
   )

@@ -3,6 +3,8 @@ import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
+import FAQ from '@/components/FAQ'
+import { getVendorsHubFaqItems } from '@/lib/faqs'
 
 const VENDOR_TYPE_LABELS: Record<string, string> = {
   physical_shop:    '🏪 Physical Shop',
@@ -554,6 +556,9 @@ export default function VendorsPageClient() {
           )}
         </>
       )}
+
+      {/* FAQ — visible content + FAQPage schema */}
+      <FAQ items={getVendorsHubFaqItems()} />
     </div>
   )
 }

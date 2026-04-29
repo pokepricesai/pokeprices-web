@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
+import FAQ from '@/components/FAQ'
+import { getInsightsHubFaqItems } from '@/lib/faqs'
 
 interface Insight {
   id: string
@@ -76,6 +78,35 @@ export default function InsightsPageClient() {
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '40px 24px' }}>
       <BreadcrumbSchema items={[{ name: 'Guides' }]} />
+      {/* Blog + ItemList of articles */}
+      {insights.length > 0 && (
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify({
+          '@context': 'https://schema.org',
+          '@graph': [
+            {
+              '@type': 'Blog',
+              '@id': 'https://www.pokeprices.io/insights#blog',
+              name: 'PokePrices Insights',
+              description: 'Practical Pokémon TCG guides on grading, market analysis, vintage cards, modern sets and collecting strategy. Grounded in real sold-listing data.',
+              url: 'https://www.pokeprices.io/insights',
+              publisher: { '@id': 'https://www.pokeprices.io/#org' },
+              inLanguage: 'en-GB',
+            },
+            {
+              '@type': 'ItemList',
+              '@id': 'https://www.pokeprices.io/insights#articles',
+              name: 'PokePrices Insights — Articles',
+              numberOfItems: insights.length,
+              itemListElement: insights.slice(0, 20).map((a, i) => ({
+                '@type': 'ListItem',
+                position: i + 1,
+                url: `https://www.pokeprices.io/insights/${a.slug}`,
+                name: a.headline,
+              })),
+            },
+          ],
+        }) }} />
+      )}
 
       {/* Header */}
       <div style={{ marginBottom: 24 }}>
@@ -157,7 +188,7 @@ export default function InsightsPageClient() {
 
           {/* Article grid */}
           {rest.length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12, marginBottom: 24 }}>
               {rest.map(ins => (
                 <Link key={ins.id} href={`/insights/${ins.slug}`} style={{ textDecoration: 'none', color: 'inherit' }}>
                   <div
@@ -193,6 +224,9 @@ export default function InsightsPageClient() {
           )}
         </>
       )}
+
+      {/* FAQ — visible content + FAQPage schema */}
+      <FAQ items={getInsightsHubFaqItems()} />
     </div>
   )
 }

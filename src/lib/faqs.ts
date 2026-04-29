@@ -210,3 +210,187 @@ export function getPokemonFaqItems({
 
   return items
 }
+
+// ── Homepage FAQs ────────────────────────────────────────────────────────────
+
+export function getHomeFaqItems(): FAQItem[] {
+  return [
+    {
+      question: 'Where does the Pokémon card price data come from?',
+      answer: 'PokePrices tracks sold listings from PriceCharting, updated nightly. Every price you see reflects what cards have actually sold for, not asking prices. PSA population data is scraped directly from PSA\'s public population reports and refreshed biweekly.',
+    },
+    {
+      question: 'Is PokePrices really free to use?',
+      answer: 'Yes. No login, no paywall, no hidden fees. The full Pokémon card price guide, PSA 10 values, grading data and AI assistant are free forever. Future tools may include optional paid features but the core card price data will always be free.',
+    },
+    {
+      question: 'Do you sell my data or run ads?',
+      answer: 'No. We do not collect personal data, track users across other sites, or run advertising. The site uses basic analytics (anonymous page views) only. There is no email capture or popup unless you explicitly opt in to a tool that needs it.',
+    },
+    {
+      question: 'How often are Pokémon card prices updated?',
+      answer: 'Raw, PSA 9 and PSA 10 prices for every tracked card refresh nightly. The 7-day, 30-day and 90-day percentage moves are recomputed at the same time. PSA population numbers are updated biweekly from PSA.com.',
+    },
+    {
+      question: 'How do I know the PSA population data is accurate?',
+      answer: 'PSA population figures come straight from PSA\'s public population reports. We save the source pages and parse them locally to keep numbers consistent. If you spot a discrepancy, the contact form gets read.',
+    },
+    {
+      question: 'Can I submit corrections or request a card I cannot find?',
+      answer: 'Yes. Use the contact form to flag a price you think is wrong, a missing card, or a set we have not added yet. Every submission is read.',
+    },
+    {
+      question: 'How is the grading calculator different from other tools?',
+      answer: 'PokePrices factors in the real PSA 10 gem rate for each card, a $25 grading fee, and the current raw and PSA 10 prices to estimate probability-weighted profit. Other tools assume every card grades a 10 — most do not.',
+    },
+  ]
+}
+
+// ── /browse hub FAQs ─────────────────────────────────────────────────────────
+
+export function getBrowseFaqItems(setCount?: number | null): FAQItem[] {
+  const total = setCount ? `${setCount}+ ` : ''
+  return [
+    {
+      question: 'How many Pokémon TCG sets are tracked on PokePrices?',
+      answer: `PokePrices tracks ${total}Pokémon TCG sets from Base Set (1999) through to the latest Scarlet & Violet releases. Each set page lists every card with current raw, PSA 9 and PSA 10 prices, plus grading and population data.`,
+    },
+    {
+      question: 'What does a "card list" page show me?',
+      answer: 'Each set page is a complete card list — every card from that set with its number, image, raw price, PSA 9 and PSA 10 prices, 30-day price change, and a link to the individual card page with the full grading and trend breakdown.',
+    },
+    {
+      question: 'How do I find the most valuable cards in a set?',
+      answer: 'Click any set, then sort by raw price (descending) or PSA 10 price. The top of the list will show the chase cards. Each card page also flags whether it is currently above or below its all-time high.',
+    },
+    {
+      question: 'Are sealed product prices tracked too?',
+      answer: 'Yes — booster boxes, ETBs, premium collections and other sealed products are tracked on the relevant set pages where data is available. Sealed listings appear in a separate "Sealed Product" section on each set page.',
+    },
+    {
+      question: 'How often do set prices update?',
+      answer: 'Every set page refreshes nightly with the latest sold-listing prices. The 7-day and 30-day percent moves and the chase-card rankings are recomputed at the same time.',
+    },
+  ]
+}
+
+// ── /pokemon hub FAQs ────────────────────────────────────────────────────────
+
+export function getPokemonHubFaqItems(speciesCount?: number | null): FAQItem[] {
+  const total = speciesCount ? `${speciesCount}` : '1,025'
+  return [
+    {
+      question: 'How many Pokémon species are tracked on PokePrices?',
+      answer: `All ${total} Pokémon species are listed. Each species page shows every Pokémon TCG card that species has appeared on, the current raw and PSA 10 prices, the most valuable card, and which sets it has been printed in.`,
+    },
+    {
+      question: 'How do I find every card a Pokémon has appeared on?',
+      answer: 'Search the Pokémon by name on the /pokemon page or click any species in the list. The species page shows every card across every Pokémon TCG set, sorted by price, set, name, or release order.',
+    },
+    {
+      question: 'Why are some species more valuable than others?',
+      answer: 'Card value depends on rarity, condition, age and demand — not just the species. Vintage holos, full arts and special illustrations command the highest prices. Species pages on PokePrices show both the most valuable card and the average raw price.',
+    },
+    {
+      question: 'Do species pages include Pokédex info or just card prices?',
+      answer: 'Both. Each species page combines Pokédex data (type, height, weight, abilities, base stats, flavour text) from PokeAPI with full card market data from our nightly price tracker. You get game info and TCG data on the same page.',
+    },
+    {
+      question: 'Are first-form and evolution cards tracked separately?',
+      answer: 'Each evolution stage has its own species page (e.g. Charmander, Charmeleon, Charizard each have separate pages). Cards belong to whichever species the card is named after.',
+    },
+  ]
+}
+
+// ── /insights hub FAQs ───────────────────────────────────────────────────────
+
+export function getInsightsHubFaqItems(): FAQItem[] {
+  return [
+    {
+      question: 'What kind of guides are on PokePrices Insights?',
+      answer: 'Practical guides on grading (when to grade, PSA vs CGC, gem rate analysis), market trends, set previews, chase card analysis, and price breakdowns. Every article is grounded in real sold-listing data, not speculation.',
+    },
+    {
+      question: 'How often are new articles published?',
+      answer: 'New articles are published regularly across themes including grading, market analysis, vintage cards, modern sets and collecting strategy. Use the theme filter to narrow to the topics you care about.',
+    },
+    {
+      question: 'Are these guides written for investors or collectors?',
+      answer: 'Collectors first. PokePrices is built for people who love the cards, not just the prices. Articles cover the realities of grading risk, fees, and the difference between hype and durable value.',
+    },
+    {
+      question: 'How are claims and figures fact-checked?',
+      answer: 'Every price figure comes from the live PokePrices dataset of sold listings and PSA population data. Articles link out to the relevant card and set pages so you can verify the underlying numbers yourself.',
+    },
+  ]
+}
+
+// ── /creators hub FAQs ───────────────────────────────────────────────────────
+
+export function getCreatorsHubFaqItems(): FAQItem[] {
+  return [
+    {
+      question: 'What is the PokePrices creator directory?',
+      answer: 'A curated list of YouTubers, streamers, podcasters and writers covering the Pokémon TCG. Each creator has a profile with their platforms, focus areas and links.',
+    },
+    {
+      question: 'How do I add my Pokémon TCG channel to the directory?',
+      answer: 'Use the "Submit your channel" link on the creators page. Submissions are reviewed manually — we look for genuine, ongoing Pokémon TCG content. There is no fee.',
+    },
+    {
+      question: 'How are creators ranked or featured?',
+      answer: 'Featured creators are picked editorially based on consistent output and community trust. There is no pay-to-feature. Featured slots rotate periodically.',
+    },
+    {
+      question: 'Does PokePrices have an affiliate or sponsorship deal with these creators?',
+      answer: 'No. The directory is editorial — listings are not sponsored. We may link to creator content from articles or feature collaborations separately, but inclusion in the directory is not paid placement.',
+    },
+  ]
+}
+
+// ── /vendors hub FAQs ────────────────────────────────────────────────────────
+
+export function getVendorsHubFaqItems(): FAQItem[] {
+  return [
+    {
+      question: 'What kinds of Pokémon card vendors are listed?',
+      answer: 'Physical card shops, online stores, eBay sellers, retailers, grading services, and specialist Pokémon TCG suppliers. Each vendor has a profile with location (where applicable), what they sell, and links.',
+    },
+    {
+      question: 'How do I add my Pokémon card shop?',
+      answer: 'Use the "Submit a vendor" link on the vendors page. We review submissions for legitimacy — physical shops need a real address; online sellers need a public storefront. Listings are free.',
+    },
+    {
+      question: 'Are these vendors verified by PokePrices?',
+      answer: 'Vendors marked "Verified" have been manually checked — we have confirmed the address, looked at customer feedback, and checked the storefront is live. Unverified listings are user submissions awaiting review.',
+    },
+    {
+      question: 'Does PokePrices take a cut from purchases?',
+      answer: 'No. Some links may be affiliate where the vendor offers a public affiliate program (this never affects which vendors are listed). Most listings have no commercial relationship with PokePrices at all.',
+    },
+  ]
+}
+
+// ── /studio FAQs ─────────────────────────────────────────────────────────────
+
+export function getStudioFaqItems(): FAQItem[] {
+  return [
+    {
+      question: 'What is PokePrices Studio?',
+      answer: 'A free tool that turns Pokémon TCG market data into shareable visuals — PSA gauges, market temperature charts, peak-distance graphics and more. Designed for posting to Twitter, Reddit, Discord or YouTube.',
+    },
+    {
+      question: 'Do I need an account to use Studio?',
+      answer: 'No. Studio is free and public — pick a card, choose a visual, export as PNG. No login, no watermark, no paywall.',
+    },
+    {
+      question: 'Can I use the visuals commercially?',
+      answer: 'Yes, for editorial and personal use including monetised YouTube videos and creator content. Please credit PokePrices when sharing. Reach out via the contact form if you want to use them in paid advertising.',
+    },
+    {
+      question: 'What card and set data is available in Studio?',
+      answer: 'Every card and set tracked on PokePrices is available — that is 40,000+ cards across 156+ sets. Visuals refresh against the latest nightly price update.',
+    },
+  ]
+}
+

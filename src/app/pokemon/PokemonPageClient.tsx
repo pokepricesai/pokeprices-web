@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
+import FAQ from '@/components/FAQ'
+import { getPokemonHubFaqItems } from '@/lib/faqs'
 
 const PAGE_SIZE = 100
 
@@ -96,6 +98,22 @@ export default function PokemonPageClient() {
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
       <BreadcrumbSchema items={[{ name: 'Pokémon' }]} />
+      {/* Dataset: catalog of all Pokémon species with TCG card data */}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'Dataset',
+        '@id': 'https://www.pokeprices.io/pokemon#dataset',
+        name: 'Pokémon Card Prices by Species — Master Dataset',
+        description: `All ${pokemon.length || '1,025'} Pokémon species cross-referenced against every Pokémon TCG card they appear on, with raw and PSA 10 prices, PSA population data, and Pokédex info.`,
+        url: 'https://www.pokeprices.io/pokemon',
+        license: 'https://www.pokeprices.io/terms',
+        creator: { '@id': 'https://www.pokeprices.io/#org' },
+        publisher: { '@id': 'https://www.pokeprices.io/#org' },
+        isAccessibleForFree: true,
+        keywords: ['Pokémon by species', 'Pokémon card value', 'PSA 10 prices', 'Pokémon TCG database'],
+        variableMeasured: ['Card count per species', 'Max card price per species', 'Pokédex info', 'Type, abilities, base stats'],
+        temporalCoverage: '1999/..',
+      }) }} />
       <div style={{ marginBottom: 28 }}>
         <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 32, margin: '0 0 6px', color: 'var(--text)' }}>
           Pokémon
@@ -210,6 +228,9 @@ export default function PokemonPageClient() {
           )}
         </>
       )}
+
+      {/* FAQ — visible content + FAQPage schema */}
+      <FAQ items={getPokemonHubFaqItems(pokemon.length || null)} />
     </div>
   )
 }
