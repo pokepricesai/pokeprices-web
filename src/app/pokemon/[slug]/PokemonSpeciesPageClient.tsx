@@ -4,6 +4,8 @@ import Link from 'next/link'
 import { supabase, formatPrice } from '@/lib/supabase'
 import PokemonStructuredData from '@/components/PokemonStructuredData'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
+import FAQ from '@/components/FAQ'
+import { getPokemonFaqItems } from '@/lib/faqs'
 
 const TYPE_COLORS: Record<string, { bg: string; text: string; light: string }> = {
   fire:     { bg: '#FF6B35', text: '#fff', light: 'rgba(255,107,53,0.1)' },
@@ -385,6 +387,23 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
           </Link>
         </div>
       </div>
+
+      {/* FAQ — visible content + FAQPage schema */}
+      {regularCards.length > 0 && (
+        <FAQ items={getPokemonFaqItems({
+          name: displayName,
+          cards: regularCards.map(c => ({
+            card_name: c.card_name,
+            set_name: c.set_name,
+            raw_usd: c.raw_usd,
+            psa10_usd: c.psa10_usd,
+          })),
+          uniqueSets: uniqueSets.length,
+          primaryType,
+          isLegendary,
+          isMythical,
+        })} />
+      )}
 
     </div>
   )

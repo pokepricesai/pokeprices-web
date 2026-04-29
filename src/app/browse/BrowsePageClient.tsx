@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { supabase, formatPrice } from '@/lib/supabase'
 import { getSetAssets } from '@/lib/setAssets'
+import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 interface SetInfo {
   set_name: string
@@ -249,6 +250,7 @@ export default function BrowsePageClient() {
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 24px' }}>
+      <BreadcrumbSchema items={[{ name: 'Sets' }]} />
       <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 30, margin: '0 0 6px', color: 'var(--text)' }}>Pokemon Card Sets</h1>
       <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 16px', fontFamily: "'Figtree', sans-serif" }}>
         Browse all {sets.length} sets in our database. Click any set to see prices, trends and grading data.

@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useRef } from 'react'
 import Link from 'next/link'
+import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 const VENDOR_TYPE_LABELS: Record<string, string> = {
   physical_shop:    '🏪 Physical Shop',
@@ -60,6 +61,10 @@ export default function VendorDetailClient({ vendor }: { vendor: any }) {
 
   return (
     <div style={{ maxWidth: 820, margin: '0 auto', padding: '36px 24px' }}>
+      <BreadcrumbSchema items={[
+        { name: 'Vendors', url: '/vendors' },
+        { name: vendor.name },
+      ]} />
       <Link href="/vendors" style={{ color: 'var(--text-muted)', fontSize: 13, textDecoration: 'none', marginBottom: 16, display: 'inline-block', fontFamily: "'Figtree', sans-serif" }}>
         ← Back to directory
       </Link>

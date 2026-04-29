@@ -5,9 +5,10 @@ import { supabase, formatPrice, formatPct } from '@/lib/supabase'
 import InlineChat from '@/components/InlineChat'
 import PriceChart from '@/components/PriceChart'
 import CardStructuredData from '@/components/CardStructuredData'
-import CardFaqSchema from '@/components/CardFaqSchema'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import CardQuickActions from '@/components/CardQuickActions'
+import FAQ from '@/components/FAQ'
+import { getCardFaqItems } from '@/lib/faqs'
 import { getSetAssets } from '@/lib/setAssets'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -551,12 +552,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 24px' }}>
       <CardStructuredData card={card} />
-      <CardFaqSchema
-        card={card}
-        gemRate={gemRate}
-        psa10Multiple={psa10Multiple ?? undefined}
-        gradingProfitCents={gradingProfitCents ?? undefined}
-      />
       <BreadcrumbSchema items={[
         { name: 'Sets', url: '/browse' },
         { name: card.set_name, url: `/set/${encodeURIComponent(card.set_name)}` },
@@ -871,6 +866,14 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
 
       {/* Explore more: same set */}
       <ExploreMoreSet setName={card.set_name} currentUrlSlug={cardUrlSlug} />
+
+      {/* FAQ — visible content + FAQPage schema */}
+      <FAQ items={getCardFaqItems({
+        card,
+        gemRate,
+        psa10Multiple: psa10Multiple ?? undefined,
+        gradingProfitCents: gradingProfitCents ?? undefined,
+      })} />
     </div>
   )
 }

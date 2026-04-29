@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 interface Insight {
   id: string
@@ -74,6 +75,7 @@ export default function InsightsPageClient() {
 
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '40px 24px' }}>
+      <BreadcrumbSchema items={[{ name: 'Guides' }]} />
 
       {/* Header */}
       <div style={{ marginBottom: 24 }}>

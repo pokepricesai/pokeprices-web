@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
+import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value)
@@ -1670,6 +1671,7 @@ export default function StudioPageClient() {
 
   return (
     <div style={{ maxWidth: 1400, margin: '0 auto', padding: isMobile ? '20px 14px 110px' : '32px 24px' }}>
+      <BreadcrumbSchema items={[{ name: 'Studio' }]} />
 
       <div style={{ marginBottom: isMobile ? 18 : 28 }}>
         <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: isMobile ? 24 : 30, margin: '0 0 4px', color: 'var(--text)', fontWeight: 900 }}>PokePrices Studio</h1>

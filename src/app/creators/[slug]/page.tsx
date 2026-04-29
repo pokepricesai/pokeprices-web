@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 const PLATFORM_ICONS: Record<string, string> = {
   YouTube: '▶',
@@ -61,6 +62,10 @@ export default function CreatorProfilePage() {
 
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '40px 24px 60px' }}>
+      <BreadcrumbSchema items={[
+        { name: 'Creators', url: '/creators' },
+        { name: creator.name },
+      ]} />
       <Link href="/creators" style={{
         fontSize: 13, color: 'var(--text-muted)', textDecoration: 'none',
         fontFamily: "'Figtree', sans-serif", display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 28,

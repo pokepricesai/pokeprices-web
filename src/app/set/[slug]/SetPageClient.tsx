@@ -7,6 +7,8 @@ import PriceChart from '@/components/PriceChart'
 import { getSetAssets } from '@/lib/setAssets'
 import SetStructuredData from '@/components/SetStructuredData'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
+import FAQ from '@/components/FAQ'
+import { getSetFaqItems } from '@/lib/faqs'
 
 interface Card {
   card_slug: string
@@ -332,7 +334,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 24px' }}>
-      <SetStructuredData setName={setName} slug={encodeURIComponent(setName)} cards={regularCards} />
+      <SetStructuredData setName={setName} slug={encodeURIComponent(setName)} cards={regularCards} releaseDate={releaseDate} />
       <BreadcrumbSchema items={[{ name: 'Sets', url: '/browse' }, { name: setName }]} />
       <SetHeader setName={setName} releaseDate={releaseDate} />
 
@@ -484,6 +486,17 @@ export default function SetPageClient({ slug }: { slug: string }) {
           <CardGrid cards={regularCards} setName={setName} />
           <SealedSection sealedCards={sealedCards} setName={setName} />
         </>
+      )}
+
+      {/* FAQ — visible content + FAQPage schema */}
+      {!loading && regularCards.length > 0 && (
+        <FAQ items={getSetFaqItems({
+          setName,
+          cards: regularCards,
+          releaseDate,
+          totalSetValueCents: totalSetValue,
+          cardsTracked: regularCards.length,
+        })} />
       )}
     </div>
   )

@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import Link from 'next/link'
+import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 const PLATFORM_ICONS: Record<string, string> = {
   YouTube: '▶',
@@ -178,6 +179,7 @@ export default function CreatorsClient({ creators }: { creators: Creator[] }) {
 
   return (
     <>
+      <BreadcrumbSchema items={[{ name: 'Creators' }]} />
       {/* Hero */}
       <section style={{
         background: 'linear-gradient(135deg, #1a5fad, #2874c8)',

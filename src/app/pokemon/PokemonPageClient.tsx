@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 const PAGE_SIZE = 100
 
@@ -94,6 +95,7 @@ export default function PokemonPageClient() {
 
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
+      <BreadcrumbSchema items={[{ name: 'Pokémon' }]} />
       <div style={{ marginBottom: 28 }}>
         <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 32, margin: '0 0 6px', color: 'var(--text)' }}>
           Pokémon

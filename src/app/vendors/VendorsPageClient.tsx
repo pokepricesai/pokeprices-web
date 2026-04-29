@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 const VENDOR_TYPE_LABELS: Record<string, string> = {
   physical_shop:    '🏪 Physical Shop',
@@ -355,6 +356,7 @@ export default function VendorsPageClient() {
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 24px' }}>
+      <BreadcrumbSchema items={[{ name: 'Vendors' }]} />
 
       {/* Header */}
       <div style={{ marginBottom: 28 }}>
