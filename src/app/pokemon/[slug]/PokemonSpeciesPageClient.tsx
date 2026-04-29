@@ -85,10 +85,27 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
   const [cardSort,    setCardSort]    = useState<'set' | 'price_desc' | 'price_asc' | 'name'>('price_desc')
   const [exporting,   setExporting]   = useState(false)
   const [shareMode,   setShareMode]   = useState(false)
+  const [prevSpecies, setPrevSpecies] = useState<{ id: number; name: string } | null>(null)
+  const [nextSpecies, setNextSpecies] = useState<{ id: number; name: string } | null>(null)
 
   useEffect(() => {
     setShareMode(canShareFiles())
   }, [])
+
+  // Fetch prev/next Pokédex neighbours once we know the current id
+  useEffect(() => {
+    if (!pokeData?.id) return
+    const id = pokeData.id
+    supabase
+      .from('pokemon_species')
+      .select('id, name')
+      .in('id', [id - 1, id + 1])
+      .then(({ data }) => {
+        if (!data) return
+        setPrevSpecies(data.find((d: any) => d.id === id - 1) ?? null)
+        setNextSpecies(data.find((d: any) => d.id === id + 1) ?? null)
+      })
+  }, [pokeData?.id])
 
   async function handleDownloadInsight() {
     if (exporting) return
@@ -236,11 +253,71 @@ export default function PokemonSpeciesPageClient({ slug }: { slug: string }) {
       <PokemonStructuredData name={displayName} slug={slug} cards={regularCards.slice(0, 10)} />
       <BreadcrumbSchema items={[{ name: 'Pokémon', url: '/pokemon' }, { name: displayName }]} />
 
-      {/* Breadcrumb */}
-      <div style={{ marginBottom: 20 }}>
-        <Link href="/pokemon" style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textDecoration: 'none' }}>
-          ← All Pokémon
-        </Link>
+      {/* Breadcrumb + Pokédex prev/next navigation */}
+      <div style={{
+        marginBottom: 20,
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: 10,
+        flexWrap: 'wrap',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <Link
+            href="/pokemon"
+            style={{
+              fontSize: 13, color: 'var(--text-muted)',
+              fontFamily: "'Figtree', sans-serif", textDecoration: 'none',
+              padding: '6px 12px', borderRadius: 18,
+              border: '1px solid var(--border)', background: 'var(--card)',
+              fontWeight: 600, transition: 'border-color 0.15s, color 0.15s',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--primary)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--primary)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-muted)' }}
+          >
+            ← All Pokémon
+          </Link>
+          {prevSpecies && (
+            <Link
+              href={`/pokemon/${prevSpecies.name}`}
+              style={{
+                fontSize: 13, color: 'var(--text)',
+                fontFamily: "'Figtree', sans-serif", textDecoration: 'none',
+                padding: '6px 12px', borderRadius: 18,
+                border: '1px solid var(--border)', background: 'var(--card)',
+                fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6,
+                transition: 'border-color 0.15s, color 0.15s',
+                whiteSpace: 'nowrap',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--primary)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--primary)' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text)' }}
+            >
+              <span style={{ opacity: 0.55 }}>←</span>
+              <span style={{ opacity: 0.6 }}>#{String(prevSpecies.id).padStart(3, '0')}</span>
+              <span style={{ textTransform: 'capitalize' }}>{prevSpecies.name.replace(/-/g, ' ')}</span>
+            </Link>
+          )}
+        </div>
+        {nextSpecies && (
+          <Link
+            href={`/pokemon/${nextSpecies.name}`}
+            style={{
+              fontSize: 13, color: 'var(--text)',
+              fontFamily: "'Figtree', sans-serif", textDecoration: 'none',
+              padding: '6px 12px', borderRadius: 18,
+              border: '1px solid var(--border)', background: 'var(--card)',
+              fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6,
+              transition: 'border-color 0.15s, color 0.15s',
+              whiteSpace: 'nowrap',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--primary)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--primary)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text)' }}
+          >
+            <span style={{ opacity: 0.6 }}>#{String(nextSpecies.id).padStart(3, '0')}</span>
+            <span style={{ textTransform: 'capitalize' }}>{nextSpecies.name.replace(/-/g, ' ')}</span>
+            <span style={{ opacity: 0.55 }}>→</span>
+          </Link>
+        )}
       </div>
 
       {/* Hero */}
