@@ -3,13 +3,13 @@ import NewsletterSignup from '@/components/NewsletterSignup'
 
 const topSets = [
   'Base Set',
-  'Jungle',
   'Fossil',
   'Team Rocket',
-  'Neo Genesis',
-  'Celestial Storm',
   'Hidden Fates',
+  'Crown Zenith',
   'Evolving Skies',
+  'Ascended Heroes',
+  'Destined Rivals',
 ]
 
 export default function Footer() {

@@ -163,6 +163,89 @@ export default function ContactPageClient() {
           </button>
         </div>
       )}
+
+      {/* Find us elsewhere */}
+      <div style={{ marginTop: 28, textAlign: 'center' }}>
+        <p style={{
+          fontSize: 11, fontWeight: 800, letterSpacing: 2,
+          color: 'var(--text-muted)', textTransform: 'uppercase',
+          margin: '0 0 12px', fontFamily: "'Figtree', sans-serif",
+        }}>
+          Find us elsewhere
+        </p>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <a
+            href="https://x.com/PokePricesIO"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              padding: '10px 16px', borderRadius: 12,
+              border: '1px solid var(--border)', background: 'var(--card)',
+              color: 'var(--text)', textDecoration: 'none',
+              fontSize: 13, fontWeight: 700,
+              fontFamily: "'Figtree', sans-serif",
+              transition: 'border-color 0.15s, transform 0.15s',
+            }}
+            onMouseEnter={e => {
+              const el = e.currentTarget as HTMLAnchorElement
+              el.style.borderColor = 'var(--primary)'
+              el.style.transform = 'translateY(-1px)'
+            }}
+            onMouseLeave={e => {
+              const el = e.currentTarget as HTMLAnchorElement
+              el.style.borderColor = 'var(--border)'
+              el.style.transform = ''
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.748l7.73-8.835L1.254 2.25H8.08l4.253 5.622 5.911-5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+            </svg>
+            X / Twitter
+          </a>
+          <a
+            href="https://instagram.com/pokeprices.io"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              padding: '10px 16px', borderRadius: 12,
+              border: '1px solid var(--border)', background: 'var(--card)',
+              color: 'var(--text)', textDecoration: 'none',
+              fontSize: 13, fontWeight: 700,
+              fontFamily: "'Figtree', sans-serif",
+              transition: 'border-color 0.15s, transform 0.15s',
+            }}
+            onMouseEnter={e => {
+              const el = e.currentTarget as HTMLAnchorElement
+              el.style.borderColor = '#e1306c'
+              el.style.transform = 'translateY(-1px)'
+            }}
+            onMouseLeave={e => {
+              const el = e.currentTarget as HTMLAnchorElement
+              el.style.borderColor = 'var(--border)'
+              el.style.transform = ''
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+              <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+              <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
+            </svg>
+            Instagram
+          </a>
+        </div>
+        <p style={{
+          fontSize: 11, color: 'var(--text-muted)',
+          fontFamily: "'Figtree', sans-serif",
+          margin: '14px 0 0',
+        }}>
+          DMs open · email{' '}
+          <a href="mailto:contact@pokeprices.io" style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 700 }}>
+            contact@pokeprices.io
+          </a>
+        </p>
+      </div>
     </div>
   )
 }
