@@ -72,11 +72,11 @@ function proxyImg(url: string | null): string | null {
   return `/api/imgproxy?url=${encodeURIComponent(url)}`
 }
 
-// Card-look surface shared across all panels: a mid-dark slate that's
-// noticeably NOT white (the previous version washed out against the
-// pastel canvas) but also nowhere near "black bars". White text reads
-// crisp; type-coloured accents on the labels keep it on-brand.
-const PANEL_BG = 'rgba(45, 49, 66, 0.94)'
+// Card-look surface shared across all panels: a mid slate (20% lighter
+// than the previous pass — was rgb(45,49,66), now rgb(87,90,104)). White
+// text still reads crisp; type-coloured accents on the labels keep it
+// on-brand.
+const PANEL_BG = 'rgba(87, 90, 104, 0.94)'
 
 function panelStyle(bg: string): React.CSSProperties {
   return {
@@ -139,9 +139,10 @@ export default function PokemonInsightCard({
         width: 1080,
         height: 1080,
         boxSizing: 'border-box',
-        // Soft pastel gradient — type tint at top-left fading to a near-white
-        // neutral. Reads as "this Pokémon's vibe" without overwhelming.
-        background: `linear-gradient(155deg, ${tc.pastel} 0%, #f7f7fb 70%, #ffffff 100%)`,
+        // Soft pastel gradient, ~10% darker than the last pass (was fading
+        // to #f7f7fb / #fff). Brings the canvas down a notch so the slate
+        // panels don't shout against blown-out white.
+        background: `linear-gradient(155deg, ${tc.pastel} 0%, #e8e8ee 70%, #dadce4 100%)`,
         color: tc.ink,
         // White halo on every text descendant so dark text reads cleanly on
         // the pastel-tinted areas. Replaces the old dark drop-shadow that
@@ -166,6 +167,19 @@ export default function PokemonInsightCard({
           filter: 'blur(60px)',
           pointerEvents: 'none',
           zIndex: 0,
+        }}
+      />
+
+      {/* Vignette — transparent at centre, ~15% darker at the corners. Pulls
+          the eye toward the centred Pokémon artwork in the hero band. */}
+      <div
+        aria-hidden
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,0.15) 100%)',
+          pointerEvents: 'none',
+          zIndex: 1,
         }}
       />
 
