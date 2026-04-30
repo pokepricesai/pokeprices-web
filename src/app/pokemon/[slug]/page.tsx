@@ -507,38 +507,6 @@ export default async function PokemonSpeciesPage({
         </div>
       )}
 
-      {/* HERO: most valuable card spotlight (now under the Pokédex block) */}
-      {topCards[0] && (
-        <Link href={`/set/${encodeURIComponent(topCards[0].set_name)}/card/${topCards[0].card_url_slug}`}
-          style={{ textDecoration: 'none', display: 'block', marginBottom: 20 }}>
-          <div style={{ display: 'flex', gap: 24, padding: '24px 28px', background: typeColor.light, border: '1px solid var(--border)', borderRadius: 20, alignItems: 'center', flexWrap: 'wrap' }}>
-            {topCards[0].image_url && (
-              <img src={topCards[0].image_url} alt={topCards[0].card_name}
-                style={{ width: 140, height: 196, objectFit: 'contain', borderRadius: 8, flexShrink: 0, filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.18))' }} />
-            )}
-            <div style={{ flex: 1, minWidth: 220 }}>
-              <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.2, color: typeColor.bg, fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>
-                Most valuable {displayName} card
-              </div>
-              <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, margin: '0 0 4px', color: 'var(--text)', lineHeight: 1.2 }}>
-                {topCards[0].card_name}
-              </h2>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 14 }}>
-                {topCards[0].set_name}
-              </div>
-              <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
-                {topCards[0].current_raw && topCards[0].current_raw > 0 && (
-                  <Stat label="Raw" value={fmtUsdRaw(topCards[0].current_raw)} />
-                )}
-                {topCards[0].current_psa10 && topCards[0].current_psa10 > 0 && (
-                  <Stat label="PSA 10" value={fmtUsdRaw(topCards[0].current_psa10)} highlight={typeColor.bg} />
-                )}
-              </div>
-            </div>
-          </div>
-        </Link>
-      )}
-
       {/* Quick stats row */}
       {sp && sp.total_cards > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10, marginBottom: 24 }}>
