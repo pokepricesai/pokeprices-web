@@ -1,11 +1,12 @@
 // PokemonInsightCard — 1080×1080 shareable "Collector's Dossier".
 // Layout uses CSS grid with explicit row heights so html-to-image cannot
-// collapse or overlap sections, and a 3-column hero with type chips on the
-// left, artwork centred, and Pokédex info (HT/WT/ABILITY) on the right.
+// collapse or overlap sections. Same 5-row structure as before:
+// HEADER / HERO / STATS / BATTLE / FOOTER. Only visuals change in this pass.
 //
-// Design: light/pastel type-coloured background, white panels with
-// type-coloured borders, dark text with white halo for legibility.
-// Replaces the older "white text on black panels" look.
+// Design language: deep saturated type gradient, glassy slate panels with
+// shadows + subtle borders, Pokémon image right-aligned with a cyan glow
+// halo, yellow-gold price highlight, type-coloured pill chips, faint
+// Pokéball corner accent for designed-not-generated feel.
 
 interface CardData {
   card_name: string
@@ -26,15 +27,10 @@ interface Props {
   mostExpensivePsa10: CardData | null
 }
 
-// Each entry has:
-//   bg      — saturated type colour, used for borders / icons / accents
-//   bg2     — deeper saturated type colour, for value highlights and headers
-//   bgLight — bg mixed with white ~50%, for label text on slate panels
-//             (saturated tc.bg felt heavy on the slate; this reads brighter)
-//   pastel  — type tint for the outer canvas. More saturated than the previous
-//             pass — was washed-out off-white, now reads as a real type colour
-//             at low intensity.
-//   ink     — dark text colour tuned to the type, mostly the same dark navy
+// bg / bg2 drive the saturated background gradient. bgLight is bg mixed
+// ~50% with white — used for label text and stat-bar highlights so they
+// pop against the dark canvas. Pastel/ink retained for back-compat in
+// case other code references them.
 const TYPE_COLORS: Record<string, { bg: string; bg2: string; bgLight: string; pastel: string; ink: string }> = {
   fire:     { bg: '#E07623', bg2: '#A04D14', bgLight: '#F0BB91', pastel: '#FCC79C', ink: '#3A1A05' },
   water:    { bg: '#3F76D9', bg2: '#22458C', bgLight: '#9FBBEC', pastel: '#ACC2EE', ink: '#0F2347' },
@@ -61,6 +57,16 @@ const STAT_LABEL: Record<string, string> = {
   'special-attack': 'Sp.ATK', 'special-defense': 'Sp.DEF', speed: 'SPD',
 }
 
+// Brand gold used for price/value highlights, regardless of type. Same
+// "money colour" across every dossier so collectors know where to look.
+const GOLD = '#FFD84D'
+
+// Slate panel base — used for collector stats + featured card containers.
+// Dark-but-not-black so it pops against the saturated canvas without
+// reading as "black bars".
+const PANEL_BG = 'rgba(28, 32, 48, 0.72)'
+const PANEL_BORDER = '1px solid rgba(255, 255, 255, 0.10)'
+
 function fmtPrice(cents: number | null | undefined): string {
   if (!cents) return '—'
   const v = cents / 100
@@ -73,21 +79,6 @@ function fmtPrice(cents: number | null | undefined): string {
 function proxyImg(url: string | null): string | null {
   if (!url) return null
   return `/api/imgproxy?url=${encodeURIComponent(url)}`
-}
-
-// Card-look surface shared across all panels: a mid slate (20% lighter
-// than the previous pass — was rgb(45,49,66), now rgb(87,90,104)). White
-// text still reads crisp; type-coloured accents on the labels keep it
-// on-brand.
-const PANEL_BG = 'rgba(87, 90, 104, 0.94)'
-
-function panelStyle(bg: string): React.CSSProperties {
-  return {
-    background: PANEL_BG,
-    border: `2px solid ${bg}55`,
-    borderRadius: 22,
-    boxShadow: '0 8px 28px rgba(0,0,0,0.18), 0 1px 3px rgba(0,0,0,0.08)',
-  }
 }
 
 export default function PokemonInsightCard({
@@ -124,9 +115,10 @@ export default function PokemonInsightCard({
   const headerStat = featured ? fmtPrice(featuredPrice) : '—'
   const headerStatLabel = featured ? `Max ${featuredGrade}` : 'Max value'
 
-  // Auto-scale display name. Long names shrink so they always fit on one line.
+  // Auto-scale display name. ~25% larger than the previous pass overall;
+  // long names still shrink so they fit on one line.
   const nameLen = displayName.length
-  const nameSize = nameLen > 14 ? 64 : nameLen > 10 ? 80 : 96
+  const nameSize = nameLen > 14 ? 78 : nameLen > 10 ? 100 : 118
 
   // Section heights — total = 1080
   const H_HEADER  = 90
@@ -142,15 +134,14 @@ export default function PokemonInsightCard({
         width: 1080,
         height: 1080,
         boxSizing: 'border-box',
-        // Soft pastel gradient, ~10% darker than the last pass (was fading
-        // to #f7f7fb / #fff). Brings the canvas down a notch so the slate
-        // panels don't shout against blown-out white.
-        background: `linear-gradient(155deg, ${tc.pastel} 0%, #e8e8ee 70%, #dadce4 100%)`,
-        color: tc.ink,
-        // White halo on every text descendant so dark text reads cleanly on
-        // the pastel-tinted areas. Replaces the old dark drop-shadow that
-        // was paired with white text.
-        textShadow: '0 1px 2px rgba(255,255,255,0.85), 0 0 1px rgba(255,255,255,0.6)',
+        // Saturated type gradient. Same colour family across the canvas
+        // so the dossier feels on-brand for the species without reading
+        // as a generic dark mode panel.
+        background: `linear-gradient(165deg, ${tc.bg} 0%, ${tc.bg2} 100%)`,
+        color: '#fff',
+        // Subtle dark halo on every text descendant — keeps white text
+        // legible against any type's saturation level.
+        textShadow: '0 2px 4px rgba(0,0,0,0.45), 0 0 1px rgba(0,0,0,0.6)',
         fontFamily: "'Figtree', sans-serif",
         display: 'grid',
         gridTemplateRows: `${H_HEADER}px ${H_HERO}px ${H_STATS}px ${H_BATTLE}px ${H_FOOTER}px`,
@@ -158,7 +149,7 @@ export default function PokemonInsightCard({
         overflow: 'hidden',
       }}
     >
-      {/* Decorative blur in top-right — soft, low-opacity type accent */}
+      {/* Soft type accent in the top-right — quieter than before */}
       <div
         aria-hidden
         style={{
@@ -166,190 +157,228 @@ export default function PokemonInsightCard({
           top: -220, right: -180,
           width: 720, height: 720,
           borderRadius: '50%',
-          background: `radial-gradient(circle, ${tc.bg}33, transparent 65%)`,
+          background: `radial-gradient(circle, ${tc.bgLight}33, transparent 65%)`,
           filter: 'blur(60px)',
           pointerEvents: 'none',
           zIndex: 0,
         }}
       />
 
-      {/* Vignette — transparent at centre, ~15% darker at the corners. Pulls
-          the eye toward the centred Pokémon artwork in the hero band. */}
+      {/* Vignette — slightly stronger so the corners frame the saturated bg */}
       <div
         aria-hidden
         style={{
           position: 'absolute',
           inset: 0,
-          background: 'radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,0.15) 100%)',
+          background: 'radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.20) 100%)',
           pointerEvents: 'none',
           zIndex: 1,
         }}
       />
 
-      {/* Highlight glow behind the artwork — bright soft halo at ~50% x, 30% y
-          where the Pokémon image sits in the hero band. Adds depth and a
-          subtle stage-light effect without touching the rest of the layout. */}
+      {/* Cyan glow halo behind the Pokémon (right side of hero, around y=300) */}
       <div
         aria-hidden
         style={{
           position: 'absolute',
-          inset: 0,
-          background: 'radial-gradient(circle at 50% 30%, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.18) 18%, transparent 40%)',
+          top: 130, right: 30,
+          width: 480, height: 480,
+          borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(0,200,255,0.30) 0%, rgba(0,200,255,0.10) 35%, transparent 65%)',
+          filter: 'blur(40px)',
           pointerEvents: 'none',
           zIndex: 1,
         }}
       />
+
+      {/* Faint Pokéball corner accent — designed-not-generated touch */}
+      <svg
+        aria-hidden
+        viewBox="0 0 100 100"
+        style={{
+          position: 'absolute',
+          bottom: -28, left: -28,
+          width: 240, height: 240,
+          opacity: 0.07,
+          pointerEvents: 'none',
+          zIndex: 1,
+        }}
+      >
+        <circle cx="50" cy="50" r="46" fill="none" stroke="#fff" strokeWidth="3" />
+        <line x1="4" y1="50" x2="96" y2="50" stroke="#fff" strokeWidth="3" />
+        <circle cx="50" cy="50" r="14" fill="none" stroke="#fff" strokeWidth="3" />
+        <circle cx="50" cy="50" r="7"  fill="none" stroke="#fff" strokeWidth="3" />
+      </svg>
 
       {/* HEADER */}
       <div style={{
         position: 'relative', zIndex: 2,
-        padding: '20px 52px 0',
+        padding: '22px 52px 0',
         display: 'flex',
         justifyContent: 'space-between',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         whiteSpace: 'nowrap',
       }}>
         <div style={{ whiteSpace: 'nowrap' }}>
           <div style={{
             fontSize: 22, fontWeight: 900, letterSpacing: 6,
-            color: tc.bg2, textTransform: 'uppercase',
+            color: '#fff', opacity: 0.85,
+            textTransform: 'uppercase',
             whiteSpace: 'nowrap', lineHeight: 1,
           }}>
             POKÉMON DOSSIER
           </div>
           <div style={{
             fontFamily: "'Outfit', sans-serif",
-            fontSize: 32, fontWeight: 900, color: tc.ink, opacity: 0.55,
+            fontSize: 32, fontWeight: 900,
+            color: '#fff', opacity: 0.6,
             marginTop: 6, whiteSpace: 'nowrap', lineHeight: 1,
             letterSpacing: -0.5,
           }}>
             #{dexNumber}
           </div>
         </div>
-        <div style={{
-          fontSize: 30, fontWeight: 900, letterSpacing: 2.5,
-          fontFamily: "'Outfit', sans-serif",
-          whiteSpace: 'nowrap',
-          color: tc.bg2,
-        }}>
-          POKEPRICES
+        <div style={{ textAlign: 'right' }}>
+          <div style={{
+            fontSize: 30, fontWeight: 900, letterSpacing: 2.5,
+            fontFamily: "'Outfit', sans-serif",
+            whiteSpace: 'nowrap',
+            color: GOLD,
+            textShadow: '0 2px 6px rgba(0,0,0,0.45)',
+          }}>
+            POKEPRICES
+          </div>
+          <div style={{
+            fontSize: 13, fontWeight: 700, letterSpacing: 2.2,
+            color: '#fff', opacity: 0.7,
+            marginTop: 6, whiteSpace: 'nowrap',
+            textTransform: 'uppercase',
+          }}>
+            Live market data
+          </div>
         </div>
       </div>
 
-      {/* HERO — 3-col row (types | artwork | dex info), then name + genus */}
+      {/* HERO — type chips + dex info on left, big artwork on right.
+          Name + genus span the full width below. */}
       <div style={{
         position: 'relative', zIndex: 2,
-        padding: '8px 40px 0',
+        padding: '12px 48px 0',
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'stretch',
         overflow: 'hidden',
       }}>
         <div style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: 20,
-          height: 290,
+          gap: 16,
+          height: 320,
         }}>
-          {/* LEFT — type chips: white card, coloured border + text */}
+          {/* LEFT — type chips (top) + dex info (bottom), stacked */}
           <div style={{
-            width: 200,
+            width: 260, height: '100%',
             display: 'flex',
             flexDirection: 'column',
-            gap: 10,
-            alignItems: 'stretch',
+            justifyContent: 'space-between',
+            gap: 12,
           }}>
-            {types.map(t => {
-              const ttc = TYPE_COLORS[t] ?? tc
-              return (
-                <div key={t} style={{
-                  background: '#fff',
-                  border: `2.5px solid ${ttc.bg}`,
-                  padding: '10px 18px',
-                  borderRadius: 14,
-                  fontSize: 18, fontWeight: 900,
-                  textTransform: 'uppercase', letterSpacing: 1.8,
+            {/* Type pills */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {types.map(t => {
+                const ttc = TYPE_COLORS[t] ?? tc
+                return (
+                  <div key={t} style={{
+                    background: ttc.bg,
+                    color: '#fff',
+                    padding: '11px 22px',
+                    borderRadius: 999,
+                    fontSize: 18, fontWeight: 900,
+                    textTransform: 'uppercase', letterSpacing: 2,
+                    textAlign: 'center', whiteSpace: 'nowrap',
+                    boxShadow: `0 0 16px ${ttc.bg}88, inset 0 1px 2px rgba(255,255,255,0.32), inset 0 -2px 4px rgba(0,0,0,0.22)`,
+                    border: '1px solid rgba(255,255,255,0.18)',
+                    textShadow: '0 1px 2px rgba(0,0,0,0.35)',
+                  }}>
+                    {t}
+                  </div>
+                )
+              })}
+              {isLegendary && (
+                <div style={{
+                  background: GOLD, color: '#3a2900',
+                  padding: '11px 22px', borderRadius: 999,
+                  fontSize: 16, fontWeight: 900,
+                  textTransform: 'uppercase', letterSpacing: 1.6,
                   textAlign: 'center', whiteSpace: 'nowrap',
-                  color: ttc.bg2,
+                  boxShadow: `0 0 16px ${GOLD}77, inset 0 1px 2px rgba(255,255,255,0.45)`,
                   textShadow: 'none',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
                 }}>
-                  {t}
+                  ★ Legendary
                 </div>
-              )
-            })}
-            {isLegendary && (
-              <div style={{
-                background: '#FFF2BF', border: '2.5px solid #E0B821',
-                color: '#5A3D02',
-                padding: '10px 18px', borderRadius: 14,
-                fontSize: 16, fontWeight: 900,
-                textTransform: 'uppercase', letterSpacing: 1.6,
-                textAlign: 'center', whiteSpace: 'nowrap',
-                textShadow: 'none',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-              }}>
-                ★ Legendary
-              </div>
-            )}
-            {isMythical && (
-              <div style={{
-                background: '#EAD9FB', border: '2.5px solid #9B5BD8',
-                color: '#3D0E63',
-                padding: '10px 18px', borderRadius: 14,
-                fontSize: 16, fontWeight: 900,
-                textTransform: 'uppercase', letterSpacing: 1.6,
-                textAlign: 'center', whiteSpace: 'nowrap',
-                textShadow: 'none',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-              }}>
-                ✦ Mythical
-              </div>
-            )}
+              )}
+              {isMythical && (
+                <div style={{
+                  background: '#C77DFF', color: '#fff',
+                  padding: '11px 22px', borderRadius: 999,
+                  fontSize: 16, fontWeight: 900,
+                  textTransform: 'uppercase', letterSpacing: 1.6,
+                  textAlign: 'center', whiteSpace: 'nowrap',
+                  boxShadow: '0 0 16px rgba(199,125,255,0.55), inset 0 1px 2px rgba(255,255,255,0.32)',
+                  textShadow: '0 1px 2px rgba(0,0,0,0.35)',
+                }}>
+                  ✦ Mythical
+                </div>
+              )}
+            </div>
+
+            {/* Dex info — height/weight/ability stacked under chips */}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+            }}>
+              <InfoBlock label="Height" value={`${heightM}m`} />
+              <InfoBlock label="Weight" value={`${weightKg}kg`} />
+              <InfoBlock label="Ability" value={primaryAbility} />
+            </div>
           </div>
 
-          {/* CENTRE — artwork */}
-          <img
-            crossOrigin="anonymous"
-            src={artworkUrl}
-            alt={displayName}
-            style={{
-              width: 280, height: 280, objectFit: 'contain',
-              filter: 'drop-shadow(0 14px 36px rgba(0,0,0,0.18))',
-              display: 'block',
-              flexShrink: 0,
-            }}
-          />
-
-          {/* RIGHT — Pokédex info */}
+          {/* RIGHT — big artwork. The cyan glow div above sits behind. */}
           <div style={{
-            width: 200,
+            flex: 1,
+            height: '100%',
             display: 'flex',
-            flexDirection: 'column',
-            gap: 18,
-            textAlign: 'right',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            paddingRight: 4,
           }}>
-            <InfoBlock label="Height" value={`${heightM}m`} accent={tc.bg2} ink={tc.ink} />
-            <InfoBlock label="Weight" value={`${weightKg}kg`} accent={tc.bg2} ink={tc.ink} />
-            <InfoBlock label="Ability" value={primaryAbility} accent={tc.bg2} ink={tc.ink} />
+            <img
+              crossOrigin="anonymous"
+              src={artworkUrl}
+              alt={displayName}
+              style={{
+                width: 380, height: 380, objectFit: 'contain',
+                filter: 'drop-shadow(0 18px 40px rgba(0,0,0,0.55))',
+                display: 'block',
+                flexShrink: 0,
+              }}
+            />
           </div>
         </div>
 
-        {/* Name + genus */}
-        <div style={{ textAlign: 'center', marginTop: 10 }}>
+        {/* Name + genus, centred under the row */}
+        <div style={{ textAlign: 'center', marginTop: 6 }}>
           <h1 style={{
             fontFamily: "'Outfit', sans-serif",
             fontSize: nameSize,
             fontWeight: 900,
-            letterSpacing: -2,
+            letterSpacing: -2.5,
             margin: 0,
             textTransform: 'capitalize',
-            // Light halo around the dark display name keeps it crisp on the
-            // pastel canvas without resorting to a black background panel.
-            textShadow: '0 2px 0 rgba(255,255,255,0.9), 0 0 12px rgba(255,255,255,0.6)',
-            color: tc.ink,
-            lineHeight: 1,
+            textShadow: '0 4px 18px rgba(0,0,0,0.45), 0 0 1px rgba(0,0,0,0.5)',
+            color: '#fff',
+            lineHeight: 0.95,
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -358,11 +387,11 @@ export default function PokemonInsightCard({
           </h1>
           {genus && (
             <div style={{
-              fontSize: 22, fontStyle: 'italic',
-              color: tc.bg2, marginTop: 8,
-              fontWeight: 700,
+              fontSize: 20, fontStyle: 'italic',
+              color: '#fff', opacity: 0.7,
+              marginTop: 6, fontWeight: 600,
               whiteSpace: 'nowrap',
-              textShadow: 'none',
+              textShadow: '0 1px 3px rgba(0,0,0,0.45)',
             }}>
               The {genus}
             </div>
@@ -370,7 +399,7 @@ export default function PokemonInsightCard({
         </div>
       </div>
 
-      {/* COLLECTOR STATS panel — slate card, white numbers, type-coloured labels */}
+      {/* COLLECTOR STATS panel — slate, big shadow, faint white border */}
       <div style={{
         position: 'relative', zIndex: 2,
         padding: '0 52px',
@@ -378,62 +407,72 @@ export default function PokemonInsightCard({
         alignItems: 'center',
       }}>
         <div style={{
-          ...panelStyle(tc.bg),
           width: '100%',
+          background: PANEL_BG,
+          border: PANEL_BORDER,
+          borderRadius: 22,
           padding: '20px 28px',
           display: 'grid',
           gridTemplateColumns: '1fr 1fr 1fr',
           gap: 16,
           color: '#fff',
+          boxShadow: '0 12px 30px rgba(0,0,0,0.25)',
         }}>
-          <BigStat big={String(cards.length)}    small="Total Cards"    accent={tc.bgLight} ink="#fff" />
-          <BigStat big={String(uniqueSetCount)}  small="Sets Featured"  accent={tc.bgLight} ink="#fff" />
-          <BigStat big={headerStat}              small={headerStatLabel} accent={tc.bgLight} ink="#fff" />
+          <BigStat big={String(cards.length)}    small="Total Cards"     accent={tc.bgLight} />
+          <BigStat big={String(uniqueSetCount)}  small="Sets Featured"   accent={tc.bgLight} />
+          <BigStat big={headerStat}              small={headerStatLabel} accent={tc.bgLight} />
         </div>
       </div>
 
-      {/* BATTLE STATS — dark text on pastel bg, type-coloured bars */}
+      {/* BATTLE STATS — same panel treatment, type-coloured gradient bars */}
       <div style={{
         position: 'relative', zIndex: 2,
         padding: '14px 52px 0',
         overflow: 'hidden',
-        color: tc.ink,
+        color: '#fff',
       }}>
         <div style={{
-          fontSize: 16, fontWeight: 900, letterSpacing: 4,
-          color: tc.bg2, marginBottom: 16, textTransform: 'uppercase',
-          whiteSpace: 'nowrap',
-          textShadow: 'none',
+          background: PANEL_BG,
+          border: PANEL_BORDER,
+          borderRadius: 22,
+          padding: '16px 26px 14px',
+          boxShadow: '0 8px 20px rgba(0,0,0,0.20)',
+          height: '100%',
+          boxSizing: 'border-box',
         }}>
-          Battle Stats <span style={{ opacity: 0.55, fontWeight: 700 }}>· {totalStats} total</span>
-        </div>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gridTemplateRows: 'repeat(3, 1fr)',
-          columnGap: 40,
-          rowGap: 12,
-          height: 138,
-        }}>
-          {stats.map((s: any) => (
-            <StatBar
-              key={s.name}
-              name={STAT_LABEL[s.name] ?? s.name}
-              value={s.value}
-              accent={tc.bg}
-              ink={tc.ink}
-            />
-          ))}
+          <div style={{
+            fontSize: 14, fontWeight: 900, letterSpacing: 3.5,
+            color: tc.bgLight,
+            marginBottom: 12, textTransform: 'uppercase',
+            whiteSpace: 'nowrap',
+          }}>
+            Battle Stats <span style={{ opacity: 0.6, fontWeight: 700, color: '#fff' }}>· {totalStats} total</span>
+          </div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gridTemplateRows: 'repeat(3, 1fr)',
+            columnGap: 36,
+            rowGap: 8,
+            height: 124,
+          }}>
+            {stats.map((s: any) => (
+              <StatBar
+                key={s.name}
+                name={STAT_LABEL[s.name] ?? s.name}
+                value={s.value}
+                accentStart={tc.bg}
+                accentEnd={tc.bgLight}
+              />
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* FEATURED CARD + FOOTER — slate band, white text, type-coloured price */}
+      {/* FEATURED CARD — slate panel, gold price, big shadow */}
       <div style={{
         position: 'relative', zIndex: 2,
         padding: '14px 52px 16px',
-        background: PANEL_BG,
-        borderTop: `2px solid ${tc.bg}55`,
-        color: '#fff',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
@@ -441,8 +480,17 @@ export default function PokemonInsightCard({
       }}>
         {featured ? (
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 20,
+            background: PANEL_BG,
+            border: PANEL_BORDER,
+            borderRadius: 22,
+            padding: '16px 22px',
+            boxShadow: '0 8px 20px rgba(0,0,0,0.20)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 20,
             whiteSpace: 'nowrap',
+            color: '#fff',
+            flex: 1,
           }}>
             {featured.image_url && (
               <img
@@ -453,7 +501,8 @@ export default function PokemonInsightCard({
                   width: 88, height: 122, objectFit: 'contain',
                   borderRadius: 7, flexShrink: 0,
                   background: 'rgba(255,255,255,0.06)',
-                  boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
+                  boxShadow: '0 6px 18px rgba(0,0,0,0.40)',
+                  border: '1px solid rgba(255,255,255,0.08)',
                 }}
               />
             )}
@@ -462,7 +511,6 @@ export default function PokemonInsightCard({
                 fontSize: 13, fontWeight: 900, letterSpacing: 2.5,
                 color: tc.bgLight, textTransform: 'uppercase',
                 whiteSpace: 'nowrap',
-                textShadow: 'none',
               }}>
                 Most Valuable Card
               </div>
@@ -473,39 +521,45 @@ export default function PokemonInsightCard({
                 lineHeight: 1.1,
                 letterSpacing: -0.3,
                 color: '#fff',
-                textShadow: 'none',
               }}>
                 {featured.card_name}
               </div>
               <div style={{
                 fontSize: 16, color: 'rgba(255,255,255,0.75)', marginTop: 5, fontWeight: 600,
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                textShadow: 'none',
               }}>
                 {featured.set_name}
               </div>
             </div>
             <div style={{ textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap' }}>
               <div style={{
-                fontSize: 44, fontWeight: 900,
+                fontSize: 56, fontWeight: 900,
                 fontFamily: "'Outfit', sans-serif", lineHeight: 1,
-                color: tc.bgLight,
-                letterSpacing: -1,
-                textShadow: '0 2px 6px rgba(0,0,0,0.35)',
+                color: GOLD,
+                letterSpacing: -1.5,
+                textShadow: '0 2px 8px rgba(255,216,77,0.40), 0 4px 14px rgba(0,0,0,0.35)',
               }}>
                 {fmtPrice(featuredPrice)}
               </div>
               <div style={{
-                fontSize: 14, fontWeight: 800, color: tc.bgLight, opacity: 0.95,
+                fontSize: 14, fontWeight: 800, color: GOLD, opacity: 0.92,
                 letterSpacing: 1.5, textTransform: 'uppercase', marginTop: 6,
-                textShadow: 'none',
+                textShadow: '0 1px 3px rgba(0,0,0,0.4)',
               }}>
                 {featuredGrade}
               </div>
             </div>
           </div>
         ) : (
-          <div style={{ textAlign: 'center', fontSize: 14, color: 'rgba(255,255,255,0.7)' }}>
+          <div style={{
+            background: PANEL_BG,
+            border: PANEL_BORDER,
+            borderRadius: 22,
+            padding: '20px',
+            boxShadow: '0 8px 20px rgba(0,0,0,0.20)',
+            textAlign: 'center', fontSize: 14, color: 'rgba(255,255,255,0.7)',
+            flex: 1,
+          }}>
             No card price data yet.
           </div>
         )}
@@ -513,9 +567,9 @@ export default function PokemonInsightCard({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          fontSize: 13, color: 'rgba(255,255,255,0.65)', fontWeight: 700, letterSpacing: 1,
+          fontSize: 13, color: 'rgba(255,255,255,0.6)', fontWeight: 700, letterSpacing: 1,
           whiteSpace: 'nowrap',
-          textShadow: 'none',
+          marginTop: 10,
         }}>
           <span>pokeprices.io</span>
           <span>Live prices · Updated daily</span>
@@ -525,27 +579,25 @@ export default function PokemonInsightCard({
   )
 }
 
-function InfoBlock({ label, value, accent, ink }: { label: string; value: string; accent: string; ink: string }) {
+function InfoBlock({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ whiteSpace: 'nowrap' }}>
       <div style={{
-        fontSize: 12, fontWeight: 900, color: accent, opacity: 0.85,
+        fontSize: 11, fontWeight: 900, color: '#fff', opacity: 0.55,
         letterSpacing: 2, textTransform: 'uppercase',
         whiteSpace: 'nowrap',
-        textShadow: 'none',
       }}>
         {label}
       </div>
       <div style={{
-        fontSize: 24, fontWeight: 900,
+        fontSize: 22, fontWeight: 900,
         fontFamily: "'Outfit', sans-serif",
         marginTop: 2,
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         letterSpacing: -0.3,
-        color: ink,
-        textShadow: 'none',
+        color: '#fff',
       }}>
         {value}
       </div>
@@ -553,23 +605,22 @@ function InfoBlock({ label, value, accent, ink }: { label: string; value: string
   )
 }
 
-function BigStat({ big, small, accent, ink }: { big: string; small: string; accent: string; ink: string }) {
+function BigStat({ big, small, accent }: { big: string; small: string; accent: string }) {
   return (
     <div style={{ textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden' }}>
       <div style={{
         fontSize: 52, fontWeight: 900, lineHeight: 1,
         fontFamily: "'Outfit', sans-serif", letterSpacing: -1.2,
         whiteSpace: 'nowrap',
-        color: ink,
-        textShadow: 'none',
+        color: '#fff',
+        textShadow: '0 2px 8px rgba(0,0,0,0.35)',
       }}>
         {big}
       </div>
       <div style={{
         fontSize: 13, fontWeight: 900, letterSpacing: 1.8,
-        color: accent, opacity: 0.9, marginTop: 8, textTransform: 'uppercase',
+        color: accent, marginTop: 8, textTransform: 'uppercase',
         whiteSpace: 'nowrap',
-        textShadow: 'none',
       }}>
         {small}
       </div>
@@ -577,7 +628,9 @@ function BigStat({ big, small, accent, ink }: { big: string; small: string; acce
   )
 }
 
-function StatBar({ name, value, accent, ink }: { name: string; value: number; accent: string; ink: string }) {
+function StatBar({ name, value, accentStart, accentEnd }: {
+  name: string; value: number; accentStart: string; accentEnd: string
+}) {
   const pct = Math.min(100, (value / 200) * 100)
   return (
     <div style={{
@@ -588,10 +641,9 @@ function StatBar({ name, value, accent, ink }: { name: string; value: number; ac
       whiteSpace: 'nowrap',
     }}>
       <span style={{
-        fontSize: 17, fontWeight: 900, color: ink, opacity: 0.85,
+        fontSize: 16, fontWeight: 900, color: '#fff', opacity: 0.92,
         letterSpacing: 1, textTransform: 'uppercase',
         whiteSpace: 'nowrap',
-        textShadow: 'none',
       }}>
         {name}
       </span>
@@ -601,20 +653,21 @@ function StatBar({ name, value, accent, ink }: { name: string; value: number; ac
         textAlign: 'right',
         whiteSpace: 'nowrap',
         letterSpacing: -0.5,
-        color: ink,
-        textShadow: 'none',
+        color: '#fff',
+        textShadow: '0 1px 3px rgba(0,0,0,0.35)',
       }}>
         {value}
       </span>
       <div style={{
-        height: 14, background: 'rgba(0,0,0,0.08)',
-        borderRadius: 99, overflow: 'hidden',
-        border: '1px solid rgba(0,0,0,0.06)',
+        height: 14, background: 'rgba(0,0,0,0.32)',
+        borderRadius: 999, overflow: 'hidden',
+        border: '1px solid rgba(255,255,255,0.10)',
       }}>
         <div style={{
           height: '100%', width: `${pct}%`,
-          background: accent,
-          borderRadius: 99,
+          background: `linear-gradient(90deg, ${accentStart} 0%, ${accentEnd} 100%)`,
+          borderRadius: 999,
+          boxShadow: `0 0 12px ${accentStart}66`,
         }} />
       </div>
     </div>
