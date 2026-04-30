@@ -4,6 +4,13 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase, CHAT_ENDPOINT } from '@/lib/supabase'
 import DashboardNav from '../DashboardNav'
+import {
+  HOLDING_TYPES as ALL_HOLDING_TYPES,
+  GRADE_LABELS as ALL_GRADE_LABELS,
+  isManualGrade,
+  NO_MARKET_DATA_NOTE,
+  type HoldingType,
+} from '@/lib/portfolioGrades'
 
 const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
@@ -67,20 +74,20 @@ interface PortfolioSummary {
   items: PortfolioItem[]
 }
 
-const HOLDING_TYPES = [
-  { value: 'raw',   label: 'Raw (Ungraded)' },
-  { value: 'psa7',  label: 'PSA 7' },
-  { value: 'psa8',  label: 'PSA 8' },
-  { value: 'psa9',  label: 'PSA 9' },
-  { value: 'psa10', label: 'PSA 10' },
-  { value: 'cgc95', label: 'CGC 9.5' },
-  { value: 'cgc10', label: 'CGC 10' },
-]
+// HOLDING_TYPES and GRADE_LABELS now live in src/lib/portfolioGrades.ts
+// (shared with CardQuickActions). Re-export for in-file convenience.
+const HOLDING_TYPES = ALL_HOLDING_TYPES
+const GRADE_LABELS = ALL_GRADE_LABELS
 
-const GRADE_LABELS: Record<string, string> = {
-  raw: 'Raw', psa7: 'PSA 7', psa8: 'PSA 8', psa9: 'PSA 9',
-  psa10: 'PSA 10', cgc95: 'CGC 9.5', cgc10: 'CGC 10',
-}
+// Group grades by company for the dropdown.
+const GRADE_GROUPS: { company: string; types: HoldingType[] }[] = (() => {
+  const map = new Map<string, HoldingType[]>()
+  for (const t of HOLDING_TYPES) {
+    if (!map.has(t.company)) map.set(t.company, [])
+    map.get(t.company)!.push(t)
+  }
+  return Array.from(map.entries()).map(([company, types]) => ({ company, types }))
+})()
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -199,7 +206,15 @@ function EditHoldingModal({
           <div>
             <label style={labelStyle}>Grade</label>
             <select value={holdingType} onChange={e => setHoldingType(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
-              {HOLDING_TYPES.map(h => <option key={h.value} value={h.value}>{h.label}</option>)}
+              {GRADE_GROUPS.map(g => (
+                <optgroup key={g.company} label={g.company}>
+                  {g.types.map(t => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}{t.manual ? ' (manual value)' : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
             </select>
           </div>
           <div>
@@ -207,6 +222,17 @@ function EditHoldingModal({
             <input type="number" min={1} value={quantity} onChange={e => setQuantity(parseInt(e.target.value) || 1)} style={inputStyle} />
           </div>
         </div>
+
+        {isManualGrade(holdingType) && (
+          <div style={{ padding: '12px 14px', background: 'rgba(255,165,0,0.08)', border: '1px solid rgba(255,165,0,0.25)', borderRadius: 10, marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: '#b8741f', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6, fontFamily: "'Figtree', sans-serif" }}>
+              ⚠ Manual value required
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--text)', margin: 0, lineHeight: 1.55, fontFamily: "'Figtree', sans-serif" }}>
+              {NO_MARKET_DATA_NOTE} Tick "Override current value manually" below.
+            </p>
+          </div>
+        )}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
           <div>
@@ -282,9 +308,13 @@ function AddCardModal({ onAdd, onClose, currency }: { onAdd: (item: any) => Prom
   const [purchasePrice, setPurchasePrice] = useState('')
   const [purchaseDate, setPurchaseDate] = useState('')
   const [notes, setNotes] = useState('')
+  const [manualValue, setManualValue] = useState('')
   const [searching, setSearching] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  const isManual = isManualGrade(holdingType)
+  const symbol  = currency === 'USD' ? '$' : '£'
 
   useEffect(() => {
     if (query.length < 2) { setResults([]); return }
@@ -316,7 +346,11 @@ function AddCardModal({ onAdd, onClose, currency }: { onAdd: (item: any) => Prom
     setError('')
     try {
       const cps = currency === 'USD' ? 100 : 127
-      const priceCents = purchasePrice ? Math.round(parseFloat(purchasePrice) * cps) : null
+      const priceCents  = purchasePrice ? Math.round(parseFloat(purchasePrice) * cps) : null
+      const manualCents = isManual && manualValue ? Math.round(parseFloat(manualValue) * cps) : null
+      if (isManual && !manualCents) {
+        throw new Error('Please enter a current value — we don\'t have live market data for this grade.')
+      }
       await onAdd({
         card_slug: selected.url_slug,
         card_name_snapshot: selected.name,
@@ -328,6 +362,8 @@ function AddCardModal({ onAdd, onClose, currency }: { onAdd: (item: any) => Prom
         purchase_currency: currency,
         purchase_date: purchaseDate || null,
         notes: notes || null,
+        manual_value_cents: manualCents,
+        manual_value_updated_at: manualCents != null ? new Date().toISOString() : null,
       })
       onClose()
     } catch (e: any) {
@@ -404,7 +440,15 @@ function AddCardModal({ onAdd, onClose, currency }: { onAdd: (item: any) => Prom
               <div>
                 <label style={labelStyle}>Grade</label>
                 <select value={holdingType} onChange={e => setHoldingType(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
-                  {HOLDING_TYPES.map(h => <option key={h.value} value={h.value}>{h.label}</option>)}
+                  {GRADE_GROUPS.map(g => (
+                    <optgroup key={g.company} label={g.company}>
+                      {g.types.map(t => (
+                        <option key={t.value} value={t.value}>
+                          {t.label}{t.manual ? ' (manual value)' : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
                 </select>
               </div>
               <div>
@@ -413,9 +457,26 @@ function AddCardModal({ onAdd, onClose, currency }: { onAdd: (item: any) => Prom
               </div>
             </div>
 
+            {isManual && (
+              <>
+                <div style={{ padding: '12px 14px', background: 'rgba(255,165,0,0.08)', border: '1px solid rgba(255,165,0,0.25)', borderRadius: 10, marginBottom: 14 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: '#b8741f', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6, fontFamily: "'Figtree', sans-serif" }}>
+                    ⚠ Manual value required
+                  </div>
+                  <p style={{ fontSize: 12, color: 'var(--text)', margin: 0, lineHeight: 1.55, fontFamily: "'Figtree', sans-serif" }}>
+                    {NO_MARKET_DATA_NOTE}
+                  </p>
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={labelStyle}>Current value per card ({symbol}) <span style={{ color: '#ef4444', fontWeight: 700 }}>*</span></label>
+                  <input type="number" step="0.01" min="0" value={manualValue} onChange={e => setManualValue(e.target.value)} placeholder="0.00" style={inputStyle} />
+                </div>
+              </>
+            )}
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
               <div>
-                <label style={labelStyle}>Purchase Price ({currency === 'USD' ? '$' : '£'}) <span style={{ fontWeight: 400 }}>optional</span></label>
+                <label style={labelStyle}>Purchase Price ({symbol}) <span style={{ fontWeight: 400 }}>optional</span></label>
                 <input type="number" step="0.01" value={purchasePrice} onChange={e => setPurchasePrice(e.target.value)} placeholder="0.00" style={inputStyle} />
               </div>
               <div>
@@ -510,6 +571,147 @@ function PortfolioDNA({ items, totalValue }: { items: PortfolioItem[]; totalValu
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Portfolio Splits (sealed/cards · raw/graded · era) ──────────────────────
+
+type Slice = { label: string; value: number; color: string }
+
+function DonutChart({ slices, size = 160 }: { slices: Slice[]; size?: number }) {
+  const total = slices.reduce((s, x) => s + x.value, 0)
+  if (total <= 0) return null
+
+  // Render the donut with sequential SVG arcs.
+  const radius   = size / 2 - 12
+  const cx       = size / 2
+  const cy       = size / 2
+  const stroke   = 22
+  const circumference = 2 * Math.PI * radius
+  let cumulative = 0
+
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <circle cx={cx} cy={cy} r={radius} fill="none" stroke="var(--bg-light)" strokeWidth={stroke} />
+      {slices.map((s, i) => {
+        if (s.value <= 0) return null
+        const dash = (s.value / total) * circumference
+        const dashArray = `${dash} ${circumference - dash}`
+        const dashOffset = -cumulative
+        cumulative += dash
+        return (
+          <circle
+            key={i}
+            cx={cx}
+            cy={cy}
+            r={radius}
+            fill="none"
+            stroke={s.color}
+            strokeWidth={stroke}
+            strokeDasharray={dashArray}
+            strokeDashoffset={dashOffset}
+            strokeLinecap="butt"
+            transform={`rotate(-90 ${cx} ${cy})`}
+          />
+        )
+      })}
+    </svg>
+  )
+}
+
+function SplitsPanel({
+  items, sealedMap, totalValue, currency,
+}: {
+  items: PortfolioItem[]
+  sealedMap: Record<string, boolean>
+  totalValue: number
+  currency: Currency
+}) {
+  if (!items.length || totalValue <= 0) return null
+
+  // ── Sealed vs cards ──
+  const sealedValue = items
+    .filter(i => sealedMap[i.card_slug])
+    .reduce((s, i) => s + (i.position_value_cents || 0), 0)
+  const cardsValue = totalValue - sealedValue
+  const sealedSlices: Slice[] = [
+    { label: 'Cards',  value: cardsValue,  color: '#3b82f6' },
+    { label: 'Sealed', value: sealedValue, color: '#a78bfa' },
+  ]
+
+  // ── Raw vs graded ──
+  const rawValue    = items.filter(i => i.holding_type === 'raw').reduce((s, i) => s + (i.position_value_cents || 0), 0)
+  const gradedValue = totalValue - rawValue
+  const rawSlices: Slice[] = [
+    { label: 'Raw',    value: rawValue,    color: '#f59e0b' },
+    { label: 'Graded', value: gradedValue, color: '#22c55e' },
+  ]
+
+  // ── By era ──
+  const eraTotals: Record<string, number> = {}
+  for (const i of items) {
+    const era = inferEra(i.set_name)
+    eraTotals[era] = (eraTotals[era] || 0) + (i.position_value_cents || 0)
+  }
+  const ERA_COLORS: Record<string, string> = {
+    'vintage':   '#FFD166',
+    'ex-era':    '#FF7A47',
+    'dp-era':    '#74CEC0',
+    'bw-xy-era': '#A565BF',
+    'sm-era':    '#5BBC3F',
+    'swsh-era':  '#5598E0',
+    'sv-era':    '#E8538F',
+    'other':     '#94a3b8',
+  }
+  const eraSlices: Slice[] = Object.entries(eraTotals)
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([era, value]) => ({
+      label: ERA_LABELS[era] || era,
+      value,
+      color: ERA_COLORS[era] || '#94a3b8',
+    }))
+
+  function pct(v: number) {
+    return totalValue > 0 ? Math.round((v / totalValue) * 100) : 0
+  }
+
+  function ChartBlock({ title, slices }: { title: string; slices: Slice[] }) {
+    return (
+      <div style={{
+        background: 'var(--card)', border: '1px solid var(--border)',
+        borderRadius: 14, padding: '16px 18px',
+        display: 'flex', gap: 16, alignItems: 'center', minWidth: 0,
+      }}>
+        <div style={{ flexShrink: 0 }}>
+          <DonutChart slices={slices} size={120} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.2,
+            color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 8,
+          }}>{title}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {slices.filter(s => s.value > 0).map(s => (
+              <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontFamily: "'Figtree', sans-serif" }}>
+                <div style={{ width: 10, height: 10, borderRadius: 2, background: s.color, flexShrink: 0 }} />
+                <span style={{ flex: 1, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.label}</span>
+                <span style={{ color: 'var(--text-muted)', fontWeight: 700 }}>{pct(s.value)}%</span>
+                <span style={{ color: 'var(--text)', fontWeight: 800, minWidth: 60, textAlign: 'right' }}>{fmt(s.value, currency)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
+      <ChartBlock title="Cards vs Sealed" slices={sealedSlices} />
+      <ChartBlock title="Raw vs Graded"   slices={rawSlices} />
+      {eraSlices.length > 0 && <ChartBlock title="By Era" slices={eraSlices} />}
     </div>
   )
 }
@@ -630,6 +832,8 @@ export default function PortfolioDashboard() {
   const [editingItem, setEditingItem] = useState<PortfolioItem | null>(null)
   const [currency, setCurrency] = useState<Currency>('GBP')
   const [manualOverrides, setManualOverrides] = useState<Record<string, number | null>>({})
+  const [manualValueUpdatedAt, setManualValueUpdatedAt] = useState<Record<string, string | null>>({})
+  const [sealedMap, setSealedMap] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -657,7 +861,10 @@ export default function PortfolioDashboard() {
       const [summaryRes, prefsRes, manualsRes] = await Promise.all([
         supabase.rpc('get_portfolio_summary', { p_portfolio_id: pid }),
         supabase.from('user_email_preferences').select('display_currency').eq('user_id', user.id).maybeSingle(),
-        supabase.from('portfolio_items').select('id, manual_value_cents').eq('portfolio_id', pid),
+        supabase
+          .from('portfolio_items')
+          .select('id, card_slug, manual_value_cents, manual_value_updated_at')
+          .eq('portfolio_id', pid),
       ])
 
       if (summaryRes.data && !summaryRes.data.error) {
@@ -676,10 +883,32 @@ export default function PortfolioDashboard() {
       if (cur === 'USD' || cur === 'GBP') setCurrency(cur)
 
       const manualMap: Record<string, number | null> = {}
+      const stampMap: Record<string, string | null> = {}
+      const cardSlugs = new Set<string>()
       ;(manualsRes.data || []).forEach((r: any) => {
         manualMap[r.id] = r.manual_value_cents ?? null
+        stampMap[r.id] = r.manual_value_updated_at ?? null
+        if (r.card_slug) cardSlugs.add(r.card_slug)
       })
       setManualOverrides(manualMap)
+      setManualValueUpdatedAt(stampMap)
+
+      // Look up is_sealed for each portfolio card so the insights tab can
+      // show a Sealed vs Cards split. Uses card_url_slug since portfolio
+      // items store the URL slug (not bare numeric).
+      if (cardSlugs.size > 0) {
+        const { data: cardRows } = await supabase
+          .from('cards')
+          .select('card_url_slug, is_sealed')
+          .in('card_url_slug', Array.from(cardSlugs))
+        const sealed: Record<string, boolean> = {}
+        ;(cardRows || []).forEach((c: any) => {
+          if (c.card_url_slug) sealed[c.card_url_slug] = !!c.is_sealed
+        })
+        setSealedMap(sealed)
+      } else {
+        setSealedMap({})
+      }
     }
     setLoading(false)
   }, [user])
@@ -703,7 +932,13 @@ export default function PortfolioDashboard() {
 
   async function handleEditSave(itemId: string, patch: any, manualValueCents: number | null) {
     await supabase.from('portfolio_items')
-      .update({ ...patch, manual_value_cents: manualValueCents })
+      .update({
+        ...patch,
+        manual_value_cents: manualValueCents,
+        // Stamp the timestamp whenever we set/clear a manual value so the
+        // dashboard can flag stale entries (>60 days) and nudge the user.
+        manual_value_updated_at: manualValueCents != null ? new Date().toISOString() : null,
+      })
       .eq('id', itemId)
     await loadPortfolio()
   }
@@ -844,6 +1079,8 @@ export default function PortfolioDashboard() {
                   // If user has set a manual override, prefer that for the
                   // per-card current value (and recompute position value).
                   const manualPerCard = manualOverrides[item.id]
+                  const manualStamp   = manualValueUpdatedAt[item.id]
+                  const isManual      = isManualGrade(item.holding_type) || manualPerCard != null
                   const effPerCard    = manualPerCard ?? item.current_value_cents
                   const posVal        = manualPerCard != null
                     ? manualPerCard * item.quantity
@@ -853,6 +1090,14 @@ export default function PortfolioDashboard() {
                     : null
                   const cardUrl  = `/set/${encodeURIComponent(item.set_name)}/card/${item.card_slug}`
                   const grade    = GRADE_LABELS[item.holding_type] || item.holding_type
+                  // Manual values that haven't been touched in 60+ days
+                  // get a soft "refresh?" nudge.
+                  const stale = manualStamp
+                    ? (Date.now() - new Date(manualStamp).getTime()) > 60 * 24 * 60 * 60 * 1000
+                    : false
+                  const stampLabel = manualStamp
+                    ? new Date(manualStamp).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+                    : null
 
                   return (
                     <div key={item.id} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
@@ -868,7 +1113,42 @@ export default function PortfolioDashboard() {
                         </Link>
                         <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
                           {item.set_name} · {grade}{item.quantity > 1 ? ` × ${item.quantity}` : ''}
-                          {manualPerCard != null && <span style={{ marginLeft: 6, color: 'var(--accent-text, #b8741f)', fontWeight: 700 }}>· manual value</span>}
+                          {isManual && manualPerCard != null && (
+                            <span
+                              style={{
+                                marginLeft: 6, color: '#b8741f', fontWeight: 700,
+                                background: 'rgba(255,165,0,0.12)',
+                                padding: '1px 7px', borderRadius: 6,
+                              }}
+                              title={stampLabel ? `Last updated ${stampLabel}` : ''}
+                            >
+                              manual value{stampLabel ? ` · ${stampLabel}` : ''}
+                            </span>
+                          )}
+                          {isManual && manualPerCard == null && (
+                            <span
+                              style={{
+                                marginLeft: 6, color: '#ef4444', fontWeight: 700,
+                                background: 'rgba(239,68,68,0.1)',
+                                padding: '1px 7px', borderRadius: 6,
+                              }}
+                              title="Click Edit to set a value"
+                            >
+                              no value set
+                            </span>
+                          )}
+                          {stale && (
+                            <span
+                              style={{
+                                marginLeft: 6, color: '#b8741f', fontWeight: 700,
+                                background: 'rgba(255,165,0,0.18)',
+                                padding: '1px 7px', borderRadius: 6,
+                              }}
+                              title="Manual value is over 60 days old — open Edit to refresh"
+                            >
+                              ↻ refresh
+                            </span>
+                          )}
                         </div>
                         {pnl !== null && (
                           <div style={{ fontSize: 11, color: pnl >= 0 ? '#22c55e' : '#ef4444', fontFamily: "'Figtree', sans-serif", marginTop: 2, fontWeight: 600 }}>
@@ -931,6 +1211,23 @@ export default function PortfolioDashboard() {
           {/* ── Insights tab ── */}
           {activeTab === 'insights' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+              {/* Splits / charts */}
+              <SplitsPanel items={items} sealedMap={sealedMap} totalValue={totalValue} currency={currency} />
+
+              {/* Coming-soon note for non-PSA grading data */}
+              <div style={{
+                background: 'rgba(255,165,0,0.06)',
+                border: '1px solid rgba(255,165,0,0.18)',
+                borderRadius: 12, padding: '12px 16px',
+                fontSize: 12, fontFamily: "'Figtree', sans-serif",
+                color: 'var(--text)', lineHeight: 1.55,
+              }}>
+                <strong style={{ color: '#b8741f' }}>Heads up:</strong>{' '}
+                live market data for BGS, CGC, SGC, ACE and TAG is coming soon. For
+                now, those grades require a manual value — you can update yours
+                from the Edit screen any time.
+              </div>
 
               {/* AI summary */}
               <AIInsightPanel items={items} totalValue={totalValue} currency={currency} />
