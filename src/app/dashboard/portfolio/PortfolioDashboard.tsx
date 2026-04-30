@@ -106,6 +106,33 @@ function fmtPct(pct: number | null): { text: string; color: string } {
   return { text: `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%`, color }
 }
 
+// Pattern-based sealed-product detection. Used as a fallback when
+// cards.is_sealed isn't populated for the portfolio item — which we've
+// observed is intermittent. A holding is treated as "sealed" if either
+// the DB flag says so OR the card name contains one of these terms.
+const SEALED_NAME_PATTERNS: RegExp[] = [
+  /\bbooster\s+(box|bundle|pack|display)\b/i,
+  /\betb\b/i,
+  /\belite\s+trainer\s+box\b/i,
+  /\bpremium\s+(collection|box|trainer)\b/i,
+  /\b(top|ultra|deluxe)\s+trainer\b/i,
+  /\bcollection\s+box\b/i,
+  /\bgift\s+(box|set)\b/i,
+  /\b(theme|starter|battle)\s+deck\b/i,
+  /\b(mini\s+)?tin\b/i,
+  /\bblister\b/i,
+  /\bbuild\s*&\s*battle\b/i,
+  /\bbox\s+set\b/i,
+  /\bbinder\s+collection\b/i,
+  /\bhidden\s+potential\b/i,
+  /\bsealed\b/i,
+]
+
+export function isSealedByName(name: string | null | undefined): boolean {
+  if (!name) return false
+  return SEALED_NAME_PATTERNS.some(p => p.test(name))
+}
+
 function inferEra(setName: string): string {
   const s = setName.toLowerCase()
   if (/base set|jungle|fossil|team rocket|gym|neo|legendary collection/.test(s)) return 'vintage'
@@ -631,8 +658,12 @@ function SplitsPanel({
   if (!items.length || totalValue <= 0) return null
 
   // ── Sealed vs cards ──
+  // cards.is_sealed isn't always populated, so we OR it with a pattern
+  // match on the card name (booster box / ETB / tin / theme deck / …).
+  const isSealedItem = (i: PortfolioItem): boolean =>
+    sealedMap[i.card_slug] === true || isSealedByName(i.card_name)
   const sealedValue = items
-    .filter(i => sealedMap[i.card_slug])
+    .filter(isSealedItem)
     .reduce((s, i) => s + (i.position_value_cents || 0), 0)
   const cardsValue = totalValue - sealedValue
   const sealedSlices: Slice[] = [
