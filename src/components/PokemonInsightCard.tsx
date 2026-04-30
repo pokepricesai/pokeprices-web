@@ -32,26 +32,29 @@ interface Props {
 // pop against the dark canvas. Pastel/ink retained for back-compat in
 // case other code references them.
 const TYPE_COLORS: Record<string, { bg: string; bg2: string; bgLight: string; pastel: string; ink: string }> = {
-  // bg + bg2 each lifted ~10% toward white (channel + 0.1 * (255 - channel))
-  // for a brighter saturated canvas. bgLight / pastel / ink unchanged.
-  fire:     { bg: '#E38439', bg2: '#AA5F2C', bgLight: '#F0BB91', pastel: '#FCC79C', ink: '#3A1A05' },
-  water:    { bg: '#5284DD', bg2: '#385898', bgLight: '#9FBBEC', pastel: '#ACC2EE', ink: '#0F2347' },
-  grass:    { bg: '#52AB3A', bg2: '#386B29', bgLight: '#9FD192', pastel: '#AEDCA0', ink: '#10330A' },
-  electric: { bg: '#C89723', bg2: '#876B1D', bgLight: '#E1C585', pastel: '#EBD387', ink: '#3A2A02' },
-  psychic:  { bg: '#E03F7B', bg2: '#982D57', bgLight: '#EE95B6', pastel: '#F4A6BD', ink: '#3D0A1F' },
-  ice:      { bg: '#50A6A3', bg2: '#356F6D', bgLight: '#9ECECC', pastel: '#A6D5D2', ink: '#0E2C2B' },
-  dragon:   { bg: '#6C3BE3', bg2: '#472C91', bgLight: '#AE92F0', pastel: '#B299F4', ink: '#1A0A4A' },
-  dark:     { bg: '#6B5548', bg2: '#42352F', bgLight: '#ACA19A', pastel: '#BFB1A8', ink: '#1F140C' },
-  fairy:    { bg: '#C86193', bg2: '#873D63', bgLight: '#E1A7C3', pastel: '#E5A8C2', ink: '#3D0F2A' },
-  fighting: { bg: '#B13A36', bg2: '#6C2825', bgLight: '#D49290', pastel: '#DEA3A1', ink: '#2A0907' },
-  poison:   { bg: '#964395', bg2: '#5F2C5D', bgLight: '#C597C4', pastel: '#C8A1C7', ink: '#290D29' },
-  ground:   { bg: '#B18B3D', bg2: '#6F5928', bgLight: '#D4BF93', pastel: '#D8C290', ink: '#2D1F08' },
-  rock:     { bg: '#95863B', bg2: '#655A29', bgLight: '#C4BC92', pastel: '#C9BD89', ink: '#241D08' },
-  bug:      { bg: '#879428', bg2: '#545C1F', bgLight: '#BDC488', pastel: '#C2CC8A', ink: '#1F2305' },
-  ghost:    { bg: '#6B5686', bg2: '#473956', bgLight: '#ACA1BC', pastel: '#B6A8C8', ink: '#1A1126' },
-  steel:    { bg: '#677585', bg2: '#414A58', bgLight: '#ABB3BB', pastel: '#ACBAC7', ink: '#15202B' },
-  normal:   { bg: '#7D7D5A', bg2: '#52523C', bgLight: '#B7B7A4', pastel: '#B7B79A', ink: '#1F1F0E' },
-  flying:   { bg: '#695ABD', bg2: '#433A81', bgLight: '#ACA4DB', pastel: '#A89FDB', ink: '#180F4A' },
+  // Vibrant saturated palette across all 18 types — Pokemon-Showdown-style.
+  // Previous pass had pulled the colours toward muddy mid-tones (washed-out
+  // blue, dark mustard yellow, brown-green); these are properly saturated
+  // versions that read as "type colour" first, "muted bg" never. bgLight
+  // is bg blended 50% with white for label/accent text on slate panels.
+  fire:     { bg: '#F87038', bg2: '#C24818', bgLight: '#FCB89C', pastel: '#FCC79C', ink: '#3A1A05' },
+  water:    { bg: '#4080F0', bg2: '#2856B0', bgLight: '#A0C0F8', pastel: '#ACC2EE', ink: '#0F2347' },
+  grass:    { bg: '#58C840', bg2: '#348018', bgLight: '#ACE4A0', pastel: '#AEDCA0', ink: '#10330A' },
+  electric: { bg: '#F8C520', bg2: '#A07800', bgLight: '#FCE28C', pastel: '#FCE28C', ink: '#3A2A02' },
+  psychic:  { bg: '#F03090', bg2: '#A0185C', bgLight: '#F898C8', pastel: '#F898C8', ink: '#3D0A1F' },
+  ice:      { bg: '#5CCDD0', bg2: '#287888', bgLight: '#AEE6E8', pastel: '#AEE6E8', ink: '#0E2C2B' },
+  dragon:   { bg: '#7838F8', bg2: '#4818B0', bgLight: '#BC9CFC', pastel: '#BC9CFC', ink: '#1A0A4A' },
+  dark:     { bg: '#6E4A40', bg2: '#3D2820', bgLight: '#B7A5A0', pastel: '#B7A5A0', ink: '#1F140C' },
+  fairy:    { bg: '#F098B8', bg2: '#B05080', bgLight: '#F8CCDC', pastel: '#F8CCDC', ink: '#3D0F2A' },
+  fighting: { bg: '#D03028', bg2: '#801010', bgLight: '#E89894', pastel: '#E89894', ink: '#2A0907' },
+  poison:   { bg: '#B848C8', bg2: '#702070', bgLight: '#DCA4E4', pastel: '#DCA4E4', ink: '#290D29' },
+  ground:   { bg: '#E0B838', bg2: '#8C6C18', bgLight: '#F0DC9C', pastel: '#F0DC9C', ink: '#2D1F08' },
+  rock:     { bg: '#C8B040', bg2: '#705828', bgLight: '#E4D89E', pastel: '#E4D89E', ink: '#241D08' },
+  bug:      { bg: '#A8C828', bg2: '#586818', bgLight: '#D4E494', pastel: '#D4E494', ink: '#1F2305' },
+  ghost:    { bg: '#7050A8', bg2: '#382850', bgLight: '#B8A8D4', pastel: '#B8A8D4', ink: '#1A1126' },
+  steel:    { bg: '#889CB8', bg2: '#4A5868', bgLight: '#C4CEDC', pastel: '#C4CEDC', ink: '#15202B' },
+  normal:   { bg: '#C8B888', bg2: '#807040', bgLight: '#E4DCC4', pastel: '#E4DCC4', ink: '#1F1F0E' },
+  flying:   { bg: '#A890F0', bg2: '#5848A8', bgLight: '#D4C8F8', pastel: '#D4C8F8', ink: '#180F4A' },
 }
 
 const STAT_LABEL: Record<string, string> = {
