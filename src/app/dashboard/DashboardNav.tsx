@@ -9,7 +9,7 @@ export default function DashboardNav({
   current,
   email,
 }: {
-  current?: 'portfolio' | 'watchlist' | 'alerts' | 'settings'
+  current?: 'portfolio' | 'watchlist' | 'sets' | 'grading' | 'alerts' | 'settings'
   email?: string | null
 }) {
   const router = useRouter()
@@ -22,6 +22,8 @@ export default function DashboardNav({
   const tools = [
     { id: 'portfolio', label: 'Portfolio', href: '/dashboard/portfolio' },
     { id: 'watchlist', label: 'Watchlist', href: '/dashboard/watchlist' },
+    { id: 'sets',      label: 'Sets',      href: '/dashboard/sets' },
+    { id: 'grading',   label: 'Grading',   href: '/dashboard/grading' },
     { id: 'alerts',    label: 'Alerts',    href: '/dashboard/alerts', soon: true },
     { id: 'settings',  label: 'Settings',  href: '/dashboard/settings' },
   ] as const
