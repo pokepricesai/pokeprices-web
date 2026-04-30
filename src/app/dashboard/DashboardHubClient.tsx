@@ -97,10 +97,11 @@ export default function DashboardHubClient() {
       desc: 'Get notified when a card hits your target price.',
       href: '/dashboard/alerts',
       count: null,
-      countLabel: 'coming soon',
+      countLabel: '',
       icon: '🔔',
       colour: '#94a3b8',
       highlight: false,
+      comingSoon: true,
     },
     {
       id: 'settings',
@@ -164,6 +165,16 @@ export default function DashboardHubClient() {
                 el.style.borderColor = t.highlight ? t.colour : 'var(--border)'
               }}
             >
+              {(t as any).comingSoon && (
+                <span style={{
+                  position: 'absolute', top: 12, right: 12,
+                  fontSize: 9, fontWeight: 800,
+                  padding: '3px 8px', borderRadius: 12,
+                  background: 'rgba(245,158,11,0.14)', color: '#b45309',
+                  textTransform: 'uppercase', letterSpacing: 0.7,
+                  fontFamily: "'Figtree', sans-serif",
+                }}>Coming soon</span>
+              )}
               <div style={{ fontSize: 26, marginBottom: 10, lineHeight: 1 }}>{t.icon}</div>
               <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 18, margin: '0 0 6px', color: 'var(--text)' }}>
                 {t.title}

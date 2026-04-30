@@ -943,16 +943,18 @@ export default function PortfolioDashboard() {
           new Map(rawItems.map(i => [i.id, i])).values()
         )
 
-        // FALLBACK PRICING: get_portfolio_summary occasionally misses prices
-        // for sealed products (booster boxes / ETBs / tins), where the
-        // card_name + set_name join doesn't match exactly. For any item
-        // missing position_value_cents, try card_trends directly here.
-        const missing = dedupedById.filter(
-          i => !i.position_value_cents || i.position_value_cents === 0,
-        )
-        if (missing.length) {
-          const names = Array.from(new Set(missing.map(i => i.card_name).filter(Boolean)))
-          const sets  = Array.from(new Set(missing.map(i => i.set_name).filter(Boolean)))
+        // RECOMPUTE PRICING from card_trends (source of truth used by card
+        // pages). This covers two failure modes of get_portfolio_summary:
+        //   (a) Sealed/booster items where the RPC's join didn't match,
+        //       leaving position_value_cents null.
+        //   (b) Cartesian inflation when card_trends has multiple matches
+        //       for a (card_name, set_name) pair — per-item values come
+        //       back inflated.
+        // We ALWAYS overwrite from the trends lookup when a match exists,
+        // so the holdings list, totals and splits are internally consistent.
+        if (dedupedById.length) {
+          const names = Array.from(new Set(dedupedById.map(i => i.card_name).filter(Boolean)))
+          const sets  = Array.from(new Set(dedupedById.map(i => i.set_name).filter(Boolean)))
           const { data: trendRows } = await supabase
             .from('card_trends')
             .select('card_name, set_name, current_raw, current_psa9, current_psa10, raw_pct_7d, raw_pct_30d')
@@ -963,35 +965,49 @@ export default function PortfolioDashboard() {
             trendMap[`${r.card_name}::${r.set_name}`] = r
           }
           dedupedById = dedupedById.map(i => {
-            if (i.position_value_cents) return i
             const trend = trendMap[`${i.card_name}::${i.set_name}`]
             if (!trend) return i
             const tier = i.holding_type === 'psa10' ? trend.current_psa10
                        : i.holding_type === 'psa9'  ? trend.current_psa9
                        : trend.current_raw
             if (!tier) return i
+            const qty = Math.max(1, i.quantity || 1)
             return {
               ...i,
-              current_raw:           i.current_raw   ?? trend.current_raw,
-              current_psa9:          i.current_psa9  ?? trend.current_psa9,
-              current_psa10:         i.current_psa10 ?? trend.current_psa10,
-              current_value_cents:   tier,
-              position_value_cents:  tier * (i.quantity || 1),
-              pct_7d:                i.pct_7d  ?? trend.raw_pct_7d  ?? null,
-              pct_30d:               i.pct_30d ?? trend.raw_pct_30d ?? null,
+              current_raw:          trend.current_raw  ?? i.current_raw,
+              current_psa9:         trend.current_psa9 ?? i.current_psa9,
+              current_psa10:        trend.current_psa10 ?? i.current_psa10,
+              current_value_cents:  tier,
+              position_value_cents: tier * qty,
+              pct_7d:               trend.raw_pct_7d  ?? i.pct_7d  ?? null,
+              pct_30d:              trend.raw_pct_30d ?? i.pct_30d ?? null,
             }
           })
         }
 
-        // Recompute totalValue from patched items so the splits panel and
-        // headline value reflect the fallback prices we just filled in.
+        // Always recompute the headline aggregates from the deduped items.
+        // The RPC's totals can be inflated when:
+        //   (a) the unique index migration hasn't run and duplicate rows
+        //       exist (sums × dupes), or
+        //   (b) the LEFT JOIN to card_trends has multiple matches per
+        //       (card_name, set_name) and the SUM is over the cartesian.
+        // Either way, deduped items are the source of truth here.
         const recomputedTotal = dedupedById.reduce(
           (s, i) => s + (i.position_value_cents || 0), 0,
         )
+        const recomputedQty = dedupedById.reduce(
+          (s, i) => s + (i.quantity || 0), 0,
+        )
+        const recomputedUnique = new Set(
+          dedupedById.map(i => i.card_slug).filter(Boolean),
+        ).size
+
         setSummary({
           ...summaryRes.data,
           items: dedupedById,
-          total_value_cents: Math.max(summaryRes.data.total_value_cents || 0, recomputedTotal),
+          total_value_cents: recomputedTotal,
+          item_count: recomputedQty,
+          unique_cards: recomputedUnique,
         })
       }
 
