@@ -298,8 +298,11 @@ export default function CreatorsClient({ creators }: { creators: Creator[] }) {
     return matchSearch && matchPlatform && matchSpecialism
   })
 
-  const featured = filtered.filter(c => c.featured)
-  const regular = filtered.filter(c => !c.featured)
+  // Featured creators always appear in the spotlight regardless of filters —
+  // they're hand-picked editorial. Regular grid still respects filters and
+  // excludes featured (so they're not double-shown).
+  const featured = creators.filter(c => c.featured)
+  const regular  = filtered.filter(c => !c.featured)
 
   return (
     <>
@@ -383,7 +386,7 @@ export default function CreatorsClient({ creators }: { creators: Creator[] }) {
 
       {/* Grid */}
       <section style={{ padding: '0 24px 48px', maxWidth: 1100, margin: '0 auto' }}>
-        {filtered.length === 0 ? (
+        {(featured.length === 0 && regular.length === 0) ? (
           <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
             No creators found.{' '}
             <Link href="/creators/submit" style={{ color: 'var(--primary)' }}>Be the first to submit!</Link>
@@ -433,6 +436,26 @@ export default function CreatorsClient({ creators }: { creators: Creator[] }) {
                   {regular.map(c => <CreatorCard key={c.id} creator={c} />)}
                 </div>
               </>
+            )}
+            {regular.length === 0 && featured.length > 0 && (search || activePlatform || activeSpecialism) && (
+              <p style={{
+                textAlign: 'center', padding: '32px 16px',
+                color: 'var(--text-muted)', fontSize: 13,
+                fontFamily: "'Figtree', sans-serif",
+              }}>
+                No other creators match your filters — featured creators always show above.{' '}
+                <button
+                  onClick={() => { setSearch(''); setActivePlatform(null); setActiveSpecialism(null) }}
+                  style={{
+                    background: 'none', border: 'none', color: 'var(--primary)',
+                    fontWeight: 700, cursor: 'pointer', padding: 0,
+                    fontSize: 13, fontFamily: "'Figtree', sans-serif",
+                    textDecoration: 'underline',
+                  }}
+                >
+                  Clear filters
+                </button>
+              </p>
             )}
           </>
         )}
