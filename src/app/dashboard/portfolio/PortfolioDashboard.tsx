@@ -2,8 +2,38 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
+import { supabase, CHAT_ENDPOINT } from '@/lib/supabase'
 import DashboardNav from '../DashboardNav'
+
+const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+
+type Currency = 'GBP' | 'USD'
+
+// Currency-aware money formatters. cents are stored as USD cents in the DB
+// (the *127 conversion in handleAddCard implies GBP * 127 ≈ USD cents).
+function fmt(cents: number | null | undefined, currency: Currency = 'GBP', decimals = 2): string {
+  if (!cents || cents <= 0) return '—'
+  if (currency === 'USD') {
+    const v = cents / 100
+    if (v >= 10000) return `$${(v / 1000).toFixed(1)}k`
+    return `$${v.toFixed(decimals)}`
+  }
+  const v = cents / 127
+  if (v >= 10000) return `£${(v / 1000).toFixed(1)}k`
+  return `£${v.toFixed(decimals)}`
+}
+function fmtBig(cents: number, currency: Currency = 'GBP'): string {
+  if (currency === 'USD') {
+    const v = cents / 100
+    if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`
+    if (v >= 1000)      return `$${(v / 1000).toFixed(1)}k`
+    return `$${v.toFixed(2)}`
+  }
+  const v = cents / 127
+  if (v >= 1_000_000) return `£${(v / 1_000_000).toFixed(2)}M`
+  if (v >= 1000)      return `£${(v / 1000).toFixed(1)}k`
+  return `£${v.toFixed(2)}`
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -54,18 +84,13 @@ const GRADE_LABELS: Record<string, string> = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// Back-compat wrappers — most internal call sites still use these. The
+// real implementations live above (fmt / fmtBig) and accept a currency.
 function fmtGbp(cents: number | null | undefined, decimals = 2): string {
-  if (!cents || cents <= 0) return '—'
-  const gbp = cents / 127
-  if (gbp >= 10000) return `£${(gbp / 1000).toFixed(1)}k`
-  return `£${gbp.toFixed(decimals)}`
+  return fmt(cents, 'GBP', decimals)
 }
-
 function fmtLarge(cents: number): string {
-  const gbp = cents / 127
-  if (gbp >= 1000000) return `£${(gbp / 1000000).toFixed(2)}M`
-  if (gbp >= 1000) return `£${(gbp / 1000).toFixed(1)}k`
-  return `£${gbp.toFixed(2)}`
+  return fmtBig(cents, 'GBP')
 }
 
 function fmtPct(pct: number | null): { text: string; color: string } {
@@ -92,9 +117,163 @@ const ERA_LABELS: Record<string, string> = {
   'sv-era': 'Scarlet & Violet', 'other': 'Other',
 }
 
+// ── Edit Holding Modal ────────────────────────────────────────────────────────
+
+function EditHoldingModal({
+  item, currency, onSave, onClose,
+}: {
+  item: PortfolioItem
+  currency: Currency
+  onSave: (patch: any, manualValueCents: number | null) => Promise<void>
+  onClose: () => void
+}) {
+  const symbol = currency === 'USD' ? '$' : '£'
+  const cps   = currency === 'USD' ? 100 : 127  // cents per unit of currency
+  const fromCents = (cents: number | null | undefined) =>
+    cents != null ? (cents / cps).toFixed(2) : ''
+
+  const [holdingType,    setHoldingType]    = useState(item.holding_type)
+  const [quantity,       setQuantity]       = useState(item.quantity)
+  const [purchasePrice,  setPurchasePrice]  = useState(fromCents(item.purchase_price_cents))
+  const [purchaseDate,   setPurchaseDate]   = useState(item.purchase_date || '')
+  const [notes,          setNotes]          = useState(item.notes || '')
+  // The current per-card value the user sees. Empty = use market price.
+  const [manualValue,    setManualValue]    = useState(fromCents(item.current_value_cents))
+  const [overrideValue,  setOverrideValue]  = useState(false)
+  const [saving,         setSaving]         = useState(false)
+  const [error,          setError]          = useState('')
+
+  // If they leave the value field empty, treat as "use market". Otherwise
+  // store the override.
+  async function handleSave() {
+    setSaving(true)
+    setError('')
+    try {
+      const patch: any = {
+        holding_type: holdingType,
+        quantity: Math.max(1, quantity),
+        purchase_price_cents: purchasePrice ? Math.round(parseFloat(purchasePrice) * cps) : null,
+        purchase_date: purchaseDate || null,
+        notes: notes || null,
+      }
+      const manualCents = overrideValue && manualValue
+        ? Math.round(parseFloat(manualValue) * cps)
+        : null
+      await onSave(patch, manualCents)
+      onClose()
+    } catch (e: any) {
+      setError(e?.message || 'Failed to save')
+      setSaving(false)
+    }
+  }
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%', padding: '10px 14px', fontSize: 14, borderRadius: 10,
+    border: '1px solid var(--border)', background: 'var(--bg-light)',
+    color: 'var(--text)', fontFamily: "'Figtree', sans-serif", outline: 'none',
+    boxSizing: 'border-box',
+  }
+  const labelStyle: React.CSSProperties = {
+    fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase',
+    letterSpacing: 1, display: 'block', marginBottom: 6, fontFamily: "'Figtree', sans-serif",
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ background: 'var(--card)', borderRadius: 20, border: '1px solid var(--border)', width: '100%', maxWidth: 520, maxHeight: '90vh', overflowY: 'auto', padding: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, margin: 0, color: 'var(--text)' }}>Edit holding</h2>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: 'var(--text-muted)' }}>×</button>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 14px', background: 'var(--bg-light)', borderRadius: 12, marginBottom: 18 }}>
+          {item.image_url && <img src={item.image_url} alt={item.card_name} style={{ width: 40, height: 56, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>{item.card_name}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>{item.set_name}</div>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+          <div>
+            <label style={labelStyle}>Grade</label>
+            <select value={holdingType} onChange={e => setHoldingType(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
+              {HOLDING_TYPES.map(h => <option key={h.value} value={h.value}>{h.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={labelStyle}>Quantity</label>
+            <input type="number" min={1} value={quantity} onChange={e => setQuantity(parseInt(e.target.value) || 1)} style={inputStyle} />
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+          <div>
+            <label style={labelStyle}>Purchase price ({symbol})</label>
+            <input type="number" step="0.01" value={purchasePrice} onChange={e => setPurchasePrice(e.target.value)} placeholder="0.00" style={inputStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>Purchase date</label>
+            <input type="date" value={purchaseDate} onChange={e => setPurchaseDate(e.target.value)} style={inputStyle} />
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Notes</label>
+          <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. Great centering" style={inputStyle} />
+        </div>
+
+        {/* Manual value override */}
+        <div style={{
+          padding: 14, background: 'var(--bg-light)',
+          border: '1px solid var(--border)', borderRadius: 10, marginBottom: 18,
+        }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={overrideValue}
+              onChange={e => setOverrideValue(e.target.checked)}
+              style={{ marginTop: 3, cursor: 'pointer' }}
+            />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>
+                Override current value manually
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 2 }}>
+                Useful if market data is wrong or missing for this card.
+              </div>
+            </div>
+          </label>
+          {overrideValue && (
+            <div style={{ marginTop: 10 }}>
+              <label style={labelStyle}>Custom value per card ({symbol})</label>
+              <input
+                type="number"
+                step="0.01"
+                value={manualValue}
+                onChange={e => setManualValue(e.target.value)}
+                placeholder="0.00"
+                style={inputStyle}
+              />
+            </div>
+          )}
+        </div>
+
+        {error && <p style={{ fontSize: 12, color: '#ef4444', fontFamily: "'Figtree', sans-serif", marginBottom: 10 }}>{error}</p>}
+
+        <button onClick={handleSave} disabled={saving}
+          style={{ width: '100%', padding: '12px', borderRadius: 10, border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 14, fontWeight: 700, fontFamily: "'Figtree', sans-serif", cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1 }}>
+          {saving ? 'Saving…' : 'Save changes'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── Add Card Modal ────────────────────────────────────────────────────────────
 
-function AddCardModal({ onAdd, onClose }: { onAdd: (item: any) => Promise<void>; onClose: () => void }) {
+function AddCardModal({ onAdd, onClose, currency }: { onAdd: (item: any) => Promise<void>; onClose: () => void; currency: Currency }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<any[]>([])
   const [selected, setSelected] = useState<any>(null)
@@ -112,9 +291,22 @@ function AddCardModal({ onAdd, onClose }: { onAdd: (item: any) => Promise<void>;
     const timer = setTimeout(async () => {
       setSearching(true)
       const { data } = await supabase.rpc('search_global', { query })
-      setResults((data || []).filter((r: any) => r.result_type === 'card').slice(0, 8))
+      // De-duplicate by url_slug + subtitle so the user never sees the same
+      // card listed twice. Search RPCs occasionally return overlap when a
+      // term matches via multiple indexes (name AND set, etc).
+      const cardRows = (data || []).filter((r: any) => r.result_type === 'card')
+      const seen = new Set<string>()
+      const unique: any[] = []
+      for (const r of cardRows) {
+        const key = `${r.url_slug}|${r.subtitle || ''}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        unique.push(r)
+        if (unique.length >= 12) break
+      }
+      setResults(unique)
       setSearching(false)
-    }, 250)
+    }, 200)
     return () => clearTimeout(timer)
   }, [query])
 
@@ -123,7 +315,8 @@ function AddCardModal({ onAdd, onClose }: { onAdd: (item: any) => Promise<void>;
     setSaving(true)
     setError('')
     try {
-      const priceCents = purchasePrice ? Math.round(parseFloat(purchasePrice) * 127) : null
+      const cps = currency === 'USD' ? 100 : 127
+      const priceCents = purchasePrice ? Math.round(parseFloat(purchasePrice) * cps) : null
       await onAdd({
         card_slug: selected.url_slug,
         card_name_snapshot: selected.name,
@@ -132,7 +325,7 @@ function AddCardModal({ onAdd, onClose }: { onAdd: (item: any) => Promise<void>;
         holding_type: holdingType,
         quantity,
         purchase_price_cents: priceCents,
-        purchase_currency: 'GBP',
+        purchase_currency: currency,
         purchase_date: purchaseDate || null,
         notes: notes || null,
       })
@@ -178,10 +371,16 @@ function AddCardModal({ onAdd, onClose }: { onAdd: (item: any) => Promise<void>;
                     onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = 'transparent'}>
                     {r.image_url ? <img src={r.image_url} alt={r.name} style={{ width: 32, height: 44, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} /> : <div style={{ width: 32, height: 44, background: 'var(--bg)', borderRadius: 4, flexShrink: 0 }} />}
                     <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>{r.subtitle}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {r.name}{r.card_number_display ? ` · ${r.card_number_display}` : ''}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.subtitle}</div>
                     </div>
-                    {r.price_usd && <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--primary)', fontFamily: "'Figtree', sans-serif", flexShrink: 0 }}>£{((r.price_usd / 100) / 1.27).toFixed(0)}</div>}
+                    {r.price_usd && (
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--primary)', fontFamily: "'Figtree', sans-serif", flexShrink: 0 }}>
+                        {fmt(r.price_usd, currency, 0)}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -216,7 +415,7 @@ function AddCardModal({ onAdd, onClose }: { onAdd: (item: any) => Promise<void>;
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
               <div>
-                <label style={labelStyle}>Purchase Price (£) <span style={{ fontWeight: 400 }}>optional</span></label>
+                <label style={labelStyle}>Purchase Price ({currency === 'USD' ? '$' : '£'}) <span style={{ fontWeight: 400 }}>optional</span></label>
                 <input type="number" step="0.01" value={purchasePrice} onChange={e => setPurchasePrice(e.target.value)} placeholder="0.00" style={inputStyle} />
               </div>
               <div>
@@ -317,7 +516,7 @@ function PortfolioDNA({ items, totalValue }: { items: PortfolioItem[]; totalValu
 
 // ── AI Insight Panel ──────────────────────────────────────────────────────────
 
-function AIInsightPanel({ items, totalValue }: { items: PortfolioItem[]; totalValue: number }) {
+function AIInsightPanel({ items, totalValue, currency }: { items: PortfolioItem[]; totalValue: number; currency: Currency }) {
   const [insight, setInsight] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [generated, setGenerated] = useState(false)
@@ -326,45 +525,59 @@ function AIInsightPanel({ items, totalValue }: { items: PortfolioItem[]; totalVa
     if (!items.length) return
     setLoading(true)
 
+    // Build a compact, redacted summary. We give the model card names + sets
+    // + grades + numeric performance — no user identity, no email, etc.
+    const fmtCurNum = (cents: number | null | undefined) =>
+      cents ? Number((cents / (currency === 'USD' ? 100 : 127)).toFixed(0)) : null
+    const symbol = currency === 'USD' ? '$' : '£'
+
     const portfolioSummary = {
-      total_value_gbp: (totalValue / 127).toFixed(0),
+      currency,
+      total_value: `${symbol}${fmtCurNum(totalValue)}`,
       card_count: items.length,
       top_cards: items.slice(0, 5).map(i => ({
         name: i.card_name,
         set: i.set_name,
         grade: GRADE_LABELS[i.holding_type] || i.holding_type,
-        value_gbp: ((i.position_value_cents || 0) / 127).toFixed(0),
+        value: fmtCurNum(i.position_value_cents),
         pct_30d: i.pct_30d,
         pct_365d: i.pct_365d,
-        purchase_price_gbp: i.purchase_price_cents ? (i.purchase_price_cents / 127).toFixed(0) : null,
+        purchase_price: fmtCurNum(i.purchase_price_cents),
       })),
-      risers: items.filter(i => i.pct_30d && i.pct_30d > 10).map(i => ({ name: i.card_name, pct_30d: i.pct_30d })),
+      risers:  items.filter(i => i.pct_30d && i.pct_30d > 10).map(i => ({ name: i.card_name, pct_30d: i.pct_30d })),
       fallers: items.filter(i => i.pct_30d && i.pct_30d < -10).map(i => ({ name: i.card_name, pct_30d: i.pct_30d })),
     }
 
+    // Route through the existing pokeprices-chat Supabase Edge Function. The
+    // direct browser-to-Anthropic fetch the previous version used could not
+    // work — Anthropic's API blocks browser CORS and we'd never expose an
+    // API key client-side. The chat endpoint already wraps Claude Haiku
+    // server-side and returns { answer }.
+    const message = `[Portfolio analysis]
+Give me a 2-3 sentence summary of how this Pokémon TCG portfolio is performing and what to watch. Plain prose only — no bullets, no bold, no headers. Sound like a knowledgeable collector friend, not a financial advisor. Use real card names. End with "Not financial advice."
+
+Portfolio:
+${JSON.stringify(portfolioSummary, null, 2)}`
+
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch(CHAT_ENDPOINT, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${ANON_KEY}`,
+        },
         body: JSON.stringify({
-          model: 'claude-haiku-4-5',
-          max_tokens: 200,
-          system: `You are a Pokemon TCG market analyst writing a brief portfolio summary for a collector. 
-Write 2-3 sentences in plain prose — no bullet points, no bold, no headers. 
-Be direct and specific. Use the actual card names and numbers. 
-Sound like a knowledgeable collector friend, not a financial advisor.
-Mention what's moving, what to watch, and one actionable observation.
-Always end with "Not financial advice."`,
-          messages: [{
-            role: 'user',
-            content: `Here is my Pokemon card portfolio: ${JSON.stringify(portfolioSummary)}. Give me a brief summary of how it's performing and what to watch.`
-          }]
-        })
+          message,
+          session_id: 'portfolio-summary-' + Math.random().toString(36).slice(2, 10),
+          history: [],
+        }),
       })
       const data = await res.json()
-      setInsight(data.content?.[0]?.text || null)
+      const answer = (data?.answer || '').trim()
+      setInsight(answer || 'No summary returned. Try again in a moment.')
       setGenerated(true)
-    } catch {
+    } catch (err) {
+      console.error('[portfolio AI insight] failed:', err)
       setInsight('Unable to generate insight right now. Try again later.')
     }
     setLoading(false)
@@ -414,6 +627,9 @@ export default function PortfolioDashboard() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [sortBy, setSortBy] = useState<'value' | 'pct_30d' | 'name'>('value')
   const [activeTab, setActiveTab] = useState<'holdings' | 'insights'>('holdings')
+  const [editingItem, setEditingItem] = useState<PortfolioItem | null>(null)
+  const [currency, setCurrency] = useState<Currency>('GBP')
+  const [manualOverrides, setManualOverrides] = useState<Record<string, number | null>>({})
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -438,8 +654,32 @@ export default function PortfolioDashboard() {
     }
     setPortfolioId(pid)
     if (pid) {
-      const { data } = await supabase.rpc('get_portfolio_summary', { p_portfolio_id: pid })
-      if (data && !data.error) setSummary(data)
+      const [summaryRes, prefsRes, manualsRes] = await Promise.all([
+        supabase.rpc('get_portfolio_summary', { p_portfolio_id: pid }),
+        supabase.from('user_email_preferences').select('display_currency').eq('user_id', user.id).maybeSingle(),
+        supabase.from('portfolio_items').select('id, manual_value_cents').eq('portfolio_id', pid),
+      ])
+
+      if (summaryRes.data && !summaryRes.data.error) {
+        // DEFENSIVE DEDUPE: if the get_portfolio_summary RPC has a
+        // join that produces cartesian rows (e.g. one item × many price
+        // variants), we end up with the same id repeated. Keep the first
+        // occurrence so the UI shows each holding once.
+        const rawItems: PortfolioItem[] = summaryRes.data.items || []
+        const dedupedById = Array.from(
+          new Map(rawItems.map(i => [i.id, i])).values()
+        )
+        setSummary({ ...summaryRes.data, items: dedupedById })
+      }
+
+      const cur = prefsRes.data?.display_currency
+      if (cur === 'USD' || cur === 'GBP') setCurrency(cur)
+
+      const manualMap: Record<string, number | null> = {}
+      ;(manualsRes.data || []).forEach((r: any) => {
+        manualMap[r.id] = r.manual_value_cents ?? null
+      })
+      setManualOverrides(manualMap)
     }
     setLoading(false)
   }, [user])
@@ -454,9 +694,17 @@ export default function PortfolioDashboard() {
     await loadPortfolio()
   }
 
-  async function handleRemove(itemId: string) {
-    if (!confirm('Remove this card from your portfolio?')) return
+  async function handleRemove(itemId: string, cardName?: string) {
+    const label = cardName ? `Remove "${cardName}" from your portfolio?` : 'Remove this card from your portfolio?'
+    if (!confirm(label)) return
     await supabase.from('portfolio_items').delete().eq('id', itemId)
+    await loadPortfolio()
+  }
+
+  async function handleEditSave(itemId: string, patch: any, manualValueCents: number | null) {
+    await supabase.from('portfolio_items')
+      .update({ ...patch, manual_value_cents: manualValueCents })
+      .eq('id', itemId)
     await loadPortfolio()
   }
 
@@ -502,8 +750,22 @@ export default function PortfolioDashboard() {
   // Dead weight — no price data or flat for 90d
   const deadWeight = items.filter(i => !i.current_value_cents || (!i.pct_90d && !i.pct_30d))
 
-  // Sell signals — cards up > 50% in 90 days (potential take profit)
-  const sellSignals = items.filter(i => i.pct_90d && i.pct_90d > 50)
+  // Recommended to sell — combines fast-rising signal (30d) with sustained
+  // appreciation (90d). Each card gets a score; we surface the top candidates.
+  // No volume signal yet (no per-item volume on portfolio_summary), but the
+  // 30d cut excludes thin-tape moves the way users would intuit.
+  const sellRecommendations = items
+    .map(i => {
+      const p30 = i.pct_30d ?? 0
+      const p90 = i.pct_90d ?? 0
+      // Score: 90-day weight 1.0, 30-day weight 0.6 (recent breakouts also count)
+      const score = (p90 >= 30 ? p90 : 0) + 0.6 * (p30 >= 20 ? p30 : 0)
+      return { item: i, score, p30, p90 }
+    })
+    .filter(r => r.score >= 30 && r.item.current_value_cents)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map(r => r.item)
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 16px' }}>
@@ -540,9 +802,9 @@ export default function PortfolioDashboard() {
           {/* Summary stats */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 10, marginBottom: 20 }}>
             {[
-              { label: 'Collection Value', value: fmtLarge(totalValue), sub: `${summary?.unique_cards || 0} unique cards`, highlight: true },
+              { label: 'Collection Value', value: fmtBig(totalValue, currency), sub: `${summary?.unique_cards || 0} unique cards`, highlight: true },
               { label: 'Total Cards', value: String(summary?.item_count || 0), sub: `${summary?.unique_cards || 0} unique` },
-              ...(totalPnl !== null ? [{ label: 'Total P&L', value: `${totalPnl >= 0 ? '+' : ''}${fmtGbp(totalPnl)}`, sub: totalPnlPct ? `${totalPnlPct >= 0 ? '+' : ''}${totalPnlPct.toFixed(1)}%` : '', color: totalPnl >= 0 ? '#22c55e' : '#ef4444' }] : []),
+              ...(totalPnl !== null ? [{ label: 'Total P&L', value: `${totalPnl >= 0 ? '+' : ''}${fmt(totalPnl, currency)}`, sub: totalPnlPct ? `${totalPnlPct >= 0 ? '+' : ''}${totalPnlPct.toFixed(1)}%` : '', color: totalPnl >= 0 ? '#22c55e' : '#ef4444' }] : []),
               ...(topMover?.pct_30d ? [{ label: 'Best 30d', value: fmtPct(topMover.pct_30d).text, sub: topMover.card_name, color: '#22c55e' }] : []),
               ...(items.filter(i => i.pct_30d && i.pct_30d > 0).length > 0 ? [{ label: 'Cards Rising', value: String(items.filter(i => (i.pct_30d || 0) > 0).length), sub: 'in last 30 days', color: '#22c55e' }] : []),
             ].map((stat, i) => (
@@ -559,7 +821,7 @@ export default function PortfolioDashboard() {
             {(['holdings', 'insights'] as const).map(tab => (
               <button key={tab} onClick={() => setActiveTab(tab)}
                 style={{ padding: '8px 18px', borderRadius: 20, border: activeTab === tab ? '1px solid var(--primary)' : '1px solid var(--border)', background: activeTab === tab ? 'rgba(26,95,173,0.08)' : 'transparent', color: activeTab === tab ? 'var(--primary)' : 'var(--text-muted)', fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif", cursor: 'pointer', textTransform: 'capitalize' }}>
-                {tab === 'holdings' ? `Holdings (${items.length})` : `Insights${(gradingOpps.length + sellSignals.length) > 0 ? ` · ${gradingOpps.length + sellSignals.length}` : ''}`}
+                {tab === 'holdings' ? `Holdings (${items.length})` : `Insights${(gradingOpps.length + sellRecommendations.length) > 0 ? ` · ${gradingOpps.length + sellRecommendations.length}` : ''}`}
               </button>
             ))}
           </div>
@@ -579,8 +841,16 @@ export default function PortfolioDashboard() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {sortedItems.map(item => {
                   const pct30    = fmtPct(item.pct_30d)
-                  const posVal   = item.position_value_cents
-                  const pnl      = item.purchase_price_cents && item.current_value_cents ? (item.current_value_cents - item.purchase_price_cents) * item.quantity : null
+                  // If user has set a manual override, prefer that for the
+                  // per-card current value (and recompute position value).
+                  const manualPerCard = manualOverrides[item.id]
+                  const effPerCard    = manualPerCard ?? item.current_value_cents
+                  const posVal        = manualPerCard != null
+                    ? manualPerCard * item.quantity
+                    : item.position_value_cents
+                  const pnl      = item.purchase_price_cents && effPerCard
+                    ? (effPerCard - item.purchase_price_cents) * item.quantity
+                    : null
                   const cardUrl  = `/set/${encodeURIComponent(item.set_name)}/card/${item.card_slug}`
                   const grade    = GRADE_LABELS[item.holding_type] || item.holding_type
 
@@ -598,21 +868,59 @@ export default function PortfolioDashboard() {
                         </Link>
                         <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
                           {item.set_name} · {grade}{item.quantity > 1 ? ` × ${item.quantity}` : ''}
+                          {manualPerCard != null && <span style={{ marginLeft: 6, color: 'var(--accent-text, #b8741f)', fontWeight: 700 }}>· manual value</span>}
                         </div>
                         {pnl !== null && (
                           <div style={{ fontSize: 11, color: pnl >= 0 ? '#22c55e' : '#ef4444', fontFamily: "'Figtree', sans-serif", marginTop: 2, fontWeight: 600 }}>
-                            {pnl >= 0 ? '+' : ''}{fmtGbp(pnl)} P&L
+                            {pnl >= 0 ? '+' : ''}{fmt(pnl, currency)} P&L
                           </div>
                         )}
                       </div>
                       <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>{fmtGbp(posVal)}</div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>{fmt(posVal, currency)}</div>
                         <div style={{ fontSize: 11, color: pct30.color, fontFamily: "'Figtree', sans-serif", fontWeight: 700 }}>{pct30.text} 30d</div>
                       </div>
-                      <button onClick={() => handleRemove(item.id)}
-                        style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.2)', background: 'rgba(239,68,68,0.05)', color: '#ef4444', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>
-                        🗑
-                      </button>
+                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                        <button
+                          onClick={() => setEditingItem(item)}
+                          aria-label="Edit holding"
+                          title="Edit holding"
+                          style={{
+                            width: 32, height: 32, borderRadius: 8,
+                            border: '1px solid var(--border)', background: 'var(--card)',
+                            color: 'var(--text-muted)', cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            transition: 'border-color 0.15s, color 0.15s',
+                          }}
+                          onMouseEnter={e => { const el = e.currentTarget as HTMLButtonElement; el.style.borderColor = 'var(--primary)'; el.style.color = 'var(--primary)' }}
+                          onMouseLeave={e => { const el = e.currentTarget as HTMLButtonElement; el.style.borderColor = 'var(--border)'; el.style.color = 'var(--text-muted)' }}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 20h9" />
+                            <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4z" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => handleRemove(item.id, item.card_name)}
+                          aria-label="Remove from portfolio"
+                          title="Remove from portfolio"
+                          style={{
+                            width: 32, height: 32, borderRadius: 8,
+                            border: '1px solid rgba(239,68,68,0.25)',
+                            background: 'rgba(239,68,68,0.06)',
+                            color: '#ef4444', cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            transition: 'background 0.15s, border-color 0.15s',
+                          }}
+                          onMouseEnter={e => { const el = e.currentTarget as HTMLButtonElement; el.style.background = 'rgba(239,68,68,0.18)'; el.style.borderColor = 'rgba(239,68,68,0.5)' }}
+                          onMouseLeave={e => { const el = e.currentTarget as HTMLButtonElement; el.style.background = 'rgba(239,68,68,0.06)'; el.style.borderColor = 'rgba(239,68,68,0.25)' }}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                   )
                 })}
@@ -625,26 +933,52 @@ export default function PortfolioDashboard() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
               {/* AI summary */}
-              <AIInsightPanel items={items} totalValue={totalValue} />
+              <AIInsightPanel items={items} totalValue={totalValue} currency={currency} />
 
               {/* Portfolio DNA */}
               <PortfolioDNA items={items} totalValue={totalValue} />
 
-              {/* Sell signals */}
-              {sellSignals.length > 0 && (
-                <div style={{ background: 'rgba(34,197,94,0.05)', border: '1px solid rgba(34,197,94,0.2)', borderLeft: '3px solid #22c55e', borderRadius: 12, padding: '16px 18px' }}>
-                  <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, color: '#22c55e', fontFamily: "'Figtree', sans-serif", marginBottom: 10 }}>🔥 Consider Taking Profit</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {sellSignals.map(item => (
-                      <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>{item.card_name}</div>
-                          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>Up {item.pct_90d?.toFixed(1)}% in 90 days · now {fmtGbp(item.current_value_cents)}</div>
-                        </div>
-                        <Link href={`/set/${encodeURIComponent(item.set_name)}/card/${item.card_slug}`} style={{ fontSize: 12, color: 'var(--primary)', fontFamily: "'Figtree', sans-serif", textDecoration: 'none', fontWeight: 600 }}>View →</Link>
-                      </div>
-                    ))}
+              {/* Recommended to Sell — fast-rising + sustained appreciation */}
+              {sellRecommendations.length > 0 && (
+                <div style={{ background: 'rgba(34,197,94,0.05)', border: '1px solid rgba(34,197,94,0.25)', borderLeft: '3px solid #22c55e', borderRadius: 12, padding: '16px 18px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, gap: 10, flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.2, color: '#22c55e', fontFamily: "'Figtree', sans-serif" }}>
+                      🔥 Recommended to sell
+                    </div>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+                      Fast risers + sustained 90-day moves · {sellRecommendations.length} candidate{sellRecommendations.length === 1 ? '' : 's'}
+                    </span>
                   </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {sellRecommendations.map(item => {
+                      const p30 = item.pct_30d ?? 0
+                      const p90 = item.pct_90d ?? 0
+                      const aboveBuy = item.purchase_price_cents && item.current_value_cents
+                        ? item.current_value_cents > item.purchase_price_cents * 1.5
+                        : false
+                      return (
+                        <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>{item.card_name}</div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 2 }}>
+                              {item.set_name} · now {fmt(item.current_value_cents, currency)}
+                              {aboveBuy && <span style={{ marginLeft: 6, color: '#22c55e', fontWeight: 700 }}>· well above your buy price</span>}
+                            </div>
+                            <div style={{ display: 'flex', gap: 12, marginTop: 4, fontSize: 11, fontFamily: "'Figtree', sans-serif" }}>
+                              {p30 >= 20 && <span style={{ color: '#22c55e', fontWeight: 700 }}>↑ 30d +{p30.toFixed(1)}%</span>}
+                              {p90 >= 30 && <span style={{ color: '#16a34a', fontWeight: 700 }}>↑ 90d +{p90.toFixed(1)}%</span>}
+                            </div>
+                          </div>
+                          <Link href={`/set/${encodeURIComponent(item.set_name)}/card/${item.card_slug}`} style={{ fontSize: 12, color: 'var(--primary)', fontFamily: "'Figtree', sans-serif", textDecoration: 'none', fontWeight: 700, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                            View →
+                          </Link>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <p style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '12px 0 0', lineHeight: 1.5 }}>
+                    Suggestions only — based on price momentum (30d ≥ 20% or 90d ≥ 30%). Not financial advice.
+                  </p>
                 </div>
               )}
 
@@ -656,7 +990,7 @@ export default function PortfolioDashboard() {
                     <div>
                       <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", marginBottom: 3 }}>{topMover.card_name}</div>
                       <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-                        +{topMover.pct_30d.toFixed(1)}% in 30 days · {fmtGbp(topMover.current_value_cents)} per card
+                        +{topMover.pct_30d.toFixed(1)}% in 30 days · {fmt(topMover.current_value_cents, currency)} per card
                         {topMover.purchase_price_cents && topMover.current_value_cents && topMover.current_value_cents > topMover.purchase_price_cents * 1.3 ? ' · significantly above your buy price' : ''}
                       </div>
                     </div>
@@ -673,7 +1007,7 @@ export default function PortfolioDashboard() {
                     <div>
                       <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", marginBottom: 3 }}>{biggestDrop.card_name}</div>
                       <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-                        {biggestDrop.pct_30d.toFixed(1)}% in 30 days · now {fmtGbp(biggestDrop.current_value_cents)}
+                        {biggestDrop.pct_30d.toFixed(1)}% in 30 days · now {fmt(biggestDrop.current_value_cents, currency)}
                         {biggestDrop.purchase_price_cents && biggestDrop.current_value_cents && biggestDrop.current_value_cents < biggestDrop.purchase_price_cents ? ' · below your purchase price' : ''}
                       </div>
                     </div>
@@ -695,7 +1029,7 @@ export default function PortfolioDashboard() {
                           <div>
                             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", marginBottom: 2 }}>{item.card_name}</div>
                             <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-                              {fmtGbp(item.current_raw)} raw → {fmtGbp(item.current_psa10)} PSA 10
+                              {fmt(item.current_raw, currency)} raw → {fmt(item.current_psa10, currency)} PSA 10
                               {upside && parseInt(upside) > 0 ? ` · ~£${upside} upside if PSA 10` : ''}
                             </div>
                           </div>
@@ -726,7 +1060,7 @@ export default function PortfolioDashboard() {
               )}
 
               {/* Empty insights state */}
-              {gradingOpps.length === 0 && sellSignals.length === 0 && (!topMover?.pct_30d) && (!biggestDrop?.pct_30d) && deadWeight.length === 0 && (
+              {gradingOpps.length === 0 && sellRecommendations.length === 0 && (!topMover?.pct_30d) && (!biggestDrop?.pct_30d) && deadWeight.length === 0 && (
                 <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '32px 24px', textAlign: 'center' }}>
                   <p style={{ color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, fontSize: 14 }}>
                     Add more cards with purchase prices to unlock portfolio insights
@@ -739,7 +1073,15 @@ export default function PortfolioDashboard() {
         </>
       )}
 
-      {showAddModal && <AddCardModal onAdd={handleAddCard} onClose={() => setShowAddModal(false)} />}
+      {showAddModal && <AddCardModal onAdd={handleAddCard} onClose={() => setShowAddModal(false)} currency={currency} />}
+      {editingItem && (
+        <EditHoldingModal
+          item={editingItem}
+          currency={currency}
+          onSave={(patch, manualValueCents) => handleEditSave(editingItem.id, patch, manualValueCents)}
+          onClose={() => setEditingItem(null)}
+        />
+      )}
     </div>
   )
 }

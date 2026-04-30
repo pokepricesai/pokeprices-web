@@ -8,6 +8,7 @@ interface Prefs {
   weekly_digest_enabled: boolean
   alert_emails_enabled: boolean
   alert_cadence: 'instant' | 'daily'
+  display_currency: 'GBP' | 'USD'
   unsubscribe_token: string
   last_digest_sent_at: string | null
 }
@@ -39,10 +40,10 @@ export default function SettingsClient() {
       await supabase.rpc('ensure_email_preferences')
       const { data } = await supabase
         .from('user_email_preferences')
-        .select('weekly_digest_enabled, alert_emails_enabled, alert_cadence, unsubscribe_token, last_digest_sent_at')
+        .select('weekly_digest_enabled, alert_emails_enabled, alert_cadence, display_currency, unsubscribe_token, last_digest_sent_at')
         .eq('user_id', user.id)
         .maybeSingle()
-      if (data) setPrefs(data as Prefs)
+      if (data) setPrefs({ ...(data as any), display_currency: (data as any).display_currency ?? 'GBP' } as Prefs)
       setLoading(false)
     }
     load()
@@ -84,6 +85,40 @@ export default function SettingsClient() {
         <div className="skeleton" style={{ height: 200, borderRadius: 16 }} />
       ) : (
         <>
+          {/* Display preferences */}
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: 22, marginBottom: 16 }}>
+            <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 17, margin: '0 0 4px', color: 'var(--text)' }}>Display preferences</h2>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 18px' }}>
+              How prices appear across your dashboard.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, padding: '8px 0' }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>Currency</div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 3, lineHeight: 1.5 }}>
+                  Card prices and your portfolio totals are displayed in this currency. Conversion is approximate (USD ↔ GBP at 1.27 / 0.79).
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                {(['GBP', 'USD'] as const).map(c => (
+                  <button
+                    key={c}
+                    onClick={() => update('display_currency', c)}
+                    style={{
+                      padding: '7px 14px', borderRadius: 10,
+                      border: prefs.display_currency === c ? '1px solid var(--primary)' : '1px solid var(--border)',
+                      background: prefs.display_currency === c ? 'rgba(26,95,173,0.08)' : 'transparent',
+                      color: prefs.display_currency === c ? 'var(--primary)' : 'var(--text)',
+                      fontSize: 13, fontWeight: 800, fontFamily: "'Figtree', sans-serif",
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {c === 'GBP' ? '£ GBP' : '$ USD'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
           {/* Email preferences card */}
           <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: 22, marginBottom: 16 }}>
             <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 17, margin: '0 0 4px', color: 'var(--text)' }}>Email preferences</h2>
