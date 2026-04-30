@@ -494,8 +494,10 @@ export default function PokemonInsightCard({
                 src={proxyImg(featured.image_url) || ''}
                 alt={featured.card_name}
                 style={{
-                  width: 88, height: 122, objectFit: 'contain',
-                  borderRadius: 7, flexShrink: 0,
+                  // 70x96 (down from 88x122) so it fits the panel inner height
+                  // and doesn't bleed below the slate boundary.
+                  width: 70, height: 96, objectFit: 'contain',
+                  borderRadius: 6, flexShrink: 0,
                   background: 'rgba(255,255,255,0.06)',
                   boxShadow: '0 6px 18px rgba(0,0,0,0.40)',
                   border: '1px solid rgba(255,255,255,0.08)',
@@ -527,19 +529,32 @@ export default function PokemonInsightCard({
                 {featured.set_name}
               </div>
             </div>
-            <div style={{ textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap' }}>
+            <div style={{
+              // Fixed width so both children right-align to the same edge.
+              // textAlign:right alone wasn't reliable because the negative
+              // letterSpacing on the price was pulling its glyph bounds past
+              // the column's right edge, while PSA 10 (with positive letter-
+              // spacing) sat short of it. Making the column a fixed width
+              // and right-aligning text within it removes the ambiguity.
+              width: 168,
+              textAlign: 'right',
+              flexShrink: 0,
+              whiteSpace: 'nowrap',
+              paddingRight: 4,
+              boxSizing: 'border-box',
+            }}>
               <div style={{
-                fontSize: 56, fontWeight: 900,
+                fontSize: 50, fontWeight: 900,
                 fontFamily: "'Outfit', sans-serif", lineHeight: 1,
                 color: GOLD,
-                letterSpacing: -1.5,
-                textShadow: '0 2px 8px rgba(255,216,77,0.40), 0 4px 14px rgba(0,0,0,0.35)',
+                letterSpacing: -0.5,
+                textShadow: '0 2px 6px rgba(255,216,77,0.35), 0 3px 10px rgba(0,0,0,0.30)',
               }}>
                 {fmtPrice(featuredPrice)}
               </div>
               <div style={{
-                fontSize: 14, fontWeight: 800, color: GOLD, opacity: 0.92,
-                letterSpacing: 1.5, textTransform: 'uppercase', marginTop: 6,
+                fontSize: 13, fontWeight: 800, color: GOLD, opacity: 0.92,
+                letterSpacing: 1.4, textTransform: 'uppercase', marginTop: 4,
                 textShadow: '0 1px 3px rgba(0,0,0,0.4)',
               }}>
                 {featuredGrade}
