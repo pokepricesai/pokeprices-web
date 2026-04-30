@@ -887,6 +887,9 @@ export default function PortfolioDashboard() {
   const [manualOverrides, setManualOverrides] = useState<Record<string, number | null>>({})
   const [manualValueUpdatedAt, setManualValueUpdatedAt] = useState<Record<string, string | null>>({})
   const [sealedMap, setSealedMap] = useState<Record<string, boolean>>({})
+  // sales_30d for each portfolio card_slug — used to flag thinly-traded
+  // holdings with an asterisk and prompt the user to enter a manual value.
+  const [volumeMap, setVolumeMap] = useState<Record<string, number>>({})
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -936,10 +939,60 @@ export default function PortfolioDashboard() {
         // variants), we end up with the same id repeated. Keep the first
         // occurrence so the UI shows each holding once.
         const rawItems: PortfolioItem[] = summaryRes.data.items || []
-        const dedupedById = Array.from(
+        let dedupedById = Array.from(
           new Map(rawItems.map(i => [i.id, i])).values()
         )
-        setSummary({ ...summaryRes.data, items: dedupedById })
+
+        // FALLBACK PRICING: get_portfolio_summary occasionally misses prices
+        // for sealed products (booster boxes / ETBs / tins), where the
+        // card_name + set_name join doesn't match exactly. For any item
+        // missing position_value_cents, try card_trends directly here.
+        const missing = dedupedById.filter(
+          i => !i.position_value_cents || i.position_value_cents === 0,
+        )
+        if (missing.length) {
+          const names = Array.from(new Set(missing.map(i => i.card_name).filter(Boolean)))
+          const sets  = Array.from(new Set(missing.map(i => i.set_name).filter(Boolean)))
+          const { data: trendRows } = await supabase
+            .from('card_trends')
+            .select('card_name, set_name, current_raw, current_psa9, current_psa10, raw_pct_7d, raw_pct_30d')
+            .in('card_name', names)
+            .in('set_name', sets)
+          const trendMap: Record<string, any> = {}
+          for (const r of (trendRows || [])) {
+            trendMap[`${r.card_name}::${r.set_name}`] = r
+          }
+          dedupedById = dedupedById.map(i => {
+            if (i.position_value_cents) return i
+            const trend = trendMap[`${i.card_name}::${i.set_name}`]
+            if (!trend) return i
+            const tier = i.holding_type === 'psa10' ? trend.current_psa10
+                       : i.holding_type === 'psa9'  ? trend.current_psa9
+                       : trend.current_raw
+            if (!tier) return i
+            return {
+              ...i,
+              current_raw:           i.current_raw   ?? trend.current_raw,
+              current_psa9:          i.current_psa9  ?? trend.current_psa9,
+              current_psa10:         i.current_psa10 ?? trend.current_psa10,
+              current_value_cents:   tier,
+              position_value_cents:  tier * (i.quantity || 1),
+              pct_7d:                i.pct_7d  ?? trend.raw_pct_7d  ?? null,
+              pct_30d:               i.pct_30d ?? trend.raw_pct_30d ?? null,
+            }
+          })
+        }
+
+        // Recompute totalValue from patched items so the splits panel and
+        // headline value reflect the fallback prices we just filled in.
+        const recomputedTotal = dedupedById.reduce(
+          (s, i) => s + (i.position_value_cents || 0), 0,
+        )
+        setSummary({
+          ...summaryRes.data,
+          items: dedupedById,
+          total_value_cents: Math.max(summaryRes.data.total_value_cents || 0, recomputedTotal),
+        })
       }
 
       const cur = prefsRes.data?.display_currency
@@ -956,21 +1009,36 @@ export default function PortfolioDashboard() {
       setManualOverrides(manualMap)
       setManualValueUpdatedAt(stampMap)
 
-      // Look up is_sealed for each portfolio card so the insights tab can
-      // show a Sealed vs Cards split. Uses card_url_slug since portfolio
-      // items store the URL slug (not bare numeric).
+      // Look up is_sealed and recent sales volume for each portfolio card.
+      // is_sealed feeds the Cards-vs-Sealed split. sales_30d powers the
+      // "low-volume *" asterisk on holdings (prompt to enter manual value).
       if (cardSlugs.size > 0) {
-        const { data: cardRows } = await supabase
-          .from('cards')
-          .select('card_url_slug, is_sealed')
-          .in('card_url_slug', Array.from(cardSlugs))
+        const slugList = Array.from(cardSlugs)
+        const [cardsRes, volRes] = await Promise.all([
+          supabase
+            .from('cards')
+            .select('card_url_slug, is_sealed')
+            .in('card_url_slug', slugList),
+          supabase
+            .from('card_volume')
+            .select('card_slug, sales_30d')
+            .in('card_slug', slugList)
+            .eq('grade', 'Ungraded'),
+        ])
         const sealed: Record<string, boolean> = {}
-        ;(cardRows || []).forEach((c: any) => {
+        ;(cardsRes.data || []).forEach((c: any) => {
           if (c.card_url_slug) sealed[c.card_url_slug] = !!c.is_sealed
         })
         setSealedMap(sealed)
+
+        const vol: Record<string, number> = {}
+        ;(volRes.data || []).forEach((v: any) => {
+          if (v.card_slug) vol[v.card_slug] = v.sales_30d ?? 0
+        })
+        setVolumeMap(vol)
       } else {
         setSealedMap({})
+        setVolumeMap({})
       }
     }
     setLoading(false)
@@ -1222,10 +1290,31 @@ export default function PortfolioDashboard() {
                           </div>
                         )}
                       </div>
-                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>{fmt(posVal, currency)}</div>
-                        <div style={{ fontSize: 11, color: pct30.color, fontFamily: "'Figtree', sans-serif", fontWeight: 700 }}>{pct30.text} 30d</div>
-                      </div>
+                      {(() => {
+                        // Low recent sales = unreliable market price. Skip the
+                        // hint when the user already entered a manual value.
+                        const sales30d = volumeMap[item.card_slug]
+                        const lowVolume = sales30d != null && sales30d < 5 && manualPerCard == null
+                        return (
+                          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>
+                              {fmt(posVal, currency)}
+                              {lowVolume && (
+                                <span
+                                  title={`Low recent sales (${sales30d} in 30d) — market price may be unreliable. Tap Edit to enter your own value.`}
+                                  style={{ color: '#b8741f', marginLeft: 3, cursor: 'help' }}
+                                >*</span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: 11, color: pct30.color, fontFamily: "'Figtree', sans-serif", fontWeight: 700 }}>{pct30.text} 30d</div>
+                            {lowVolume && (
+                              <div style={{ fontSize: 10, color: '#b8741f', fontFamily: "'Figtree', sans-serif", fontWeight: 600, marginTop: 2 }}>
+                                * thinly traded
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
                       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                         <button
                           onClick={() => setEditingItem(item)}
