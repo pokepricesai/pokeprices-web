@@ -22,7 +22,7 @@ export default function DashboardNav({
   const tools = [
     { id: 'portfolio', label: 'Portfolio', href: '/dashboard/portfolio' },
     { id: 'watchlist', label: 'Watchlist', href: '/dashboard/watchlist' },
-    { id: 'alerts',    label: 'Alerts',    href: '/dashboard/alerts' },
+    { id: 'alerts',    label: 'Alerts',    href: '/dashboard/alerts', soon: true },
     { id: 'settings',  label: 'Settings',  href: '/dashboard/settings' },
   ] as const
 
@@ -63,6 +63,7 @@ export default function DashboardNav({
           const active = current === t.id
           return (
             <Link key={t.id} href={t.href} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
               padding: '7px 14px', borderRadius: 20,
               border: active ? '1px solid var(--primary)' : '1px solid var(--border)',
               background: active ? 'rgba(26,95,173,0.08)' : 'transparent',
@@ -72,6 +73,13 @@ export default function DashboardNav({
               textDecoration: 'none',
             }}>
               {t.label}
+              {(t as any).soon && (
+                <span style={{
+                  fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 10,
+                  background: 'rgba(245, 158, 11, 0.14)', color: '#b45309',
+                  textTransform: 'uppercase', letterSpacing: 0.6,
+                }}>soon</span>
+              )}
             </Link>
           )
         })}

@@ -372,9 +372,6 @@ export default function WatchlistClient() {
                       <button onClick={() => setPortfolioAddItem(item)}
                         style={{ fontSize: 11, padding: '4px 10px', borderRadius: 8, border: '1px solid var(--primary)', background: 'rgba(26,95,173,0.08)', color: 'var(--primary)', cursor: 'pointer', fontFamily: "'Figtree', sans-serif", fontWeight: 700 }}
                       >+ Add to portfolio</button>
-                      <Link href={`/dashboard/alerts?new=${encodeURIComponent(item.card_slug)}`}
-                        style={{ fontSize: 11, padding: '4px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textDecoration: 'none', fontWeight: 600 }}
-                      >🔔 Alert</Link>
                       <button onClick={() => handleRemove(item.id)}
                         style={{ fontSize: 11, padding: '4px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: "'Figtree', sans-serif", fontWeight: 600 }}
                       >Remove</button>
