@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import DashboardNav from '../DashboardNav'
+import { CardPortfolioAddModal } from '@/components/CardQuickActions'
 
 interface WatchItem {
   id: string
@@ -122,6 +123,11 @@ function AddWatchModal({ onAdd, onClose }: { onAdd: (card: any) => Promise<void>
                   {r.card_number_display && ` · ${r.card_number_display}`}
                 </div>
               </div>
+              {r.price_usd != null && r.price_usd > 0 && (
+                <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--primary)', flexShrink: 0, fontFamily: "'Figtree', sans-serif" }}>
+                  {fmtUsd(r.price_usd)}
+                </div>
+              )}
             </button>
           ))}
           {!searching && query.length >= 2 && results.length === 0 && (
@@ -144,6 +150,7 @@ export default function WatchlistClient() {
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [sortBy, setSortBy] = useState<'added' | 'pct_30d' | 'pct_since' | 'value' | 'name'>('added')
+  const [portfolioAddItem, setPortfolioAddItem] = useState<WatchItem | null>(null)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -361,7 +368,10 @@ export default function WatchlistClient() {
                         Since added: <span style={{ color: sinceFmt.color, fontWeight: 700 }}>{sinceFmt.text}</span>
                       </div>
                     )}
-                    <div style={{ display: 'flex', gap: 6 }}>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      <button onClick={() => setPortfolioAddItem(item)}
+                        style={{ fontSize: 11, padding: '4px 10px', borderRadius: 8, border: '1px solid var(--primary)', background: 'rgba(26,95,173,0.08)', color: 'var(--primary)', cursor: 'pointer', fontFamily: "'Figtree', sans-serif", fontWeight: 700 }}
+                      >+ Add to portfolio</button>
                       <Link href={`/dashboard/alerts?new=${encodeURIComponent(item.card_slug)}`}
                         style={{ fontSize: 11, padding: '4px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textDecoration: 'none', fontWeight: 600 }}
                       >🔔 Alert</Link>
@@ -378,6 +388,24 @@ export default function WatchlistClient() {
       )}
 
       {showAdd && <AddWatchModal onAdd={handleAdd} onClose={() => setShowAdd(false)} />}
+
+      {portfolioAddItem && user && (
+        <CardPortfolioAddModal
+          card={{
+            card_slug: portfolioAddItem.card_slug,
+            card_name: portfolioAddItem.card_name,
+            set_name: portfolioAddItem.set_name,
+            card_url_slug: portfolioAddItem.card_url_slug,
+            image_url: portfolioAddItem.image_url,
+            card_number: portfolioAddItem.card_number,
+            raw_usd: portfolioAddItem.current_raw,
+            psa10_usd: portfolioAddItem.current_psa10,
+          }}
+          cardSlug={(portfolioAddItem.card_url_slug || portfolioAddItem.card_slug).replace(/^pc-/, '')}
+          user={user}
+          onClose={() => setPortfolioAddItem(null)}
+        />
+      )}
     </div>
   )
 }

@@ -38,11 +38,22 @@ export default function SettingsClient() {
     async function load() {
       // Ensure prefs row exists, then fetch
       await supabase.rpc('ensure_email_preferences')
-      const { data } = await supabase
+      // Try with display_currency; if the column hasn't been migrated yet,
+      // PostgREST returns an error (data === null) — retry without it so the
+      // settings page still loads.
+      let { data, error } = await supabase
         .from('user_email_preferences')
         .select('weekly_digest_enabled, alert_emails_enabled, alert_cadence, display_currency, unsubscribe_token, last_digest_sent_at')
         .eq('user_id', user.id)
         .maybeSingle()
+      if (error || !data) {
+        const fallback = await supabase
+          .from('user_email_preferences')
+          .select('weekly_digest_enabled, alert_emails_enabled, alert_cadence, unsubscribe_token, last_digest_sent_at')
+          .eq('user_id', user.id)
+          .maybeSingle()
+        data = fallback.data as any
+      }
       if (data) setPrefs({ ...(data as any), display_currency: (data as any).display_currency ?? 'GBP' } as Prefs)
       setLoading(false)
     }

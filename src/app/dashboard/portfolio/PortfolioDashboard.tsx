@@ -378,7 +378,9 @@ function AddCardModal({ onAdd, onClose, currency }: { onAdd: (item: any) => Prom
       if (isManual && !manualCents) {
         throw new Error('Please enter a current value — we don\'t have live market data for this grade.')
       }
-      await onAdd({
+      // Only include manual-value columns when set — keeps the write working
+      // even if the 2026-04-30 portfolio-improvements migration hasn't run.
+      const payload: Record<string, any> = {
         card_slug: selected.url_slug,
         card_name_snapshot: selected.name,
         set_name_snapshot: selected.subtitle || '',
@@ -389,9 +391,12 @@ function AddCardModal({ onAdd, onClose, currency }: { onAdd: (item: any) => Prom
         purchase_currency: currency,
         purchase_date: purchaseDate || null,
         notes: notes || null,
-        manual_value_cents: manualCents,
-        manual_value_updated_at: manualCents != null ? new Date().toISOString() : null,
-      })
+      }
+      if (manualCents != null) {
+        payload.manual_value_cents = manualCents
+        payload.manual_value_updated_at = new Date().toISOString()
+      }
+      await onAdd(payload)
       onClose()
     } catch (e: any) {
       setError(e.message || 'Failed to add card')
@@ -610,36 +615,53 @@ function DonutChart({ slices, size = 160 }: { slices: Slice[]; size?: number }) 
   const total = slices.reduce((s, x) => s + x.value, 0)
   if (total <= 0) return null
 
-  // Render the donut with sequential SVG arcs.
-  const radius   = size / 2 - 12
-  const cx       = size / 2
-  const cy       = size / 2
-  const stroke   = 22
-  const circumference = 2 * Math.PI * radius
-  let cumulative = 0
+  const radius = size / 2 - 12
+  const cx     = size / 2
+  const cy     = size / 2
+  const stroke = 22
 
+  // Single non-zero slice — draw a plain stroked circle (no path math, no seam).
+  const nonZero = slices.filter(s => s.value > 0)
+  if (nonZero.length === 1) {
+    return (
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={cx} cy={cy} r={radius} fill="none" stroke={nonZero[0].color} strokeWidth={stroke} />
+      </svg>
+    )
+  }
+
+  // Multi-slice: render each slice as an explicit SVG arc path. This avoids
+  // the sub-pixel gaps and visible "seam" you get with stroke-dasharray when
+  // float math doesn't line dashes up exactly.
+  const polar = (deg: number) => {
+    const rad = (deg - 90) * Math.PI / 180
+    return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) }
+  }
+  const arcPath = (startDeg: number, endDeg: number) => {
+    const a = polar(startDeg)
+    const b = polar(endDeg)
+    const largeArc = endDeg - startDeg > 180 ? 1 : 0
+    return `M ${a.x} ${a.y} A ${radius} ${radius} 0 ${largeArc} 1 ${b.x} ${b.y}`
+  }
+
+  let cumulativeDeg = 0
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      <circle cx={cx} cy={cy} r={radius} fill="none" stroke="var(--bg-light)" strokeWidth={stroke} />
       {slices.map((s, i) => {
         if (s.value <= 0) return null
-        const dash = (s.value / total) * circumference
-        const dashArray = `${dash} ${circumference - dash}`
-        const dashOffset = -cumulative
-        cumulative += dash
+        const sweep = (s.value / total) * 360
+        // Tiny overlap (0.5°) between adjacent arcs hides any 1px subpixel gap.
+        const start = Math.max(0, cumulativeDeg - 0.25)
+        const end   = Math.min(360, cumulativeDeg + sweep + 0.25)
+        cumulativeDeg += sweep
         return (
-          <circle
+          <path
             key={i}
-            cx={cx}
-            cy={cy}
-            r={radius}
+            d={arcPath(start, end)}
             fill="none"
             stroke={s.color}
             strokeWidth={stroke}
-            strokeDasharray={dashArray}
-            strokeDashoffset={dashOffset}
             strokeLinecap="butt"
-            transform={`rotate(-90 ${cx} ${cy})`}
           />
         )
       })}
@@ -891,11 +913,21 @@ export default function PortfolioDashboard() {
     if (pid) {
       const [summaryRes, prefsRes, manualsRes] = await Promise.all([
         supabase.rpc('get_portfolio_summary', { p_portfolio_id: pid }),
-        supabase.from('user_email_preferences').select('display_currency').eq('user_id', user.id).maybeSingle(),
+        // Defensive: try-with-display_currency, then fall back if column missing
+        supabase.from('user_email_preferences').select('display_currency').eq('user_id', user.id).maybeSingle()
+          .then((res: any) => res.error ? { data: null } : res),
+        // Defensive: try-with-manual-columns, then fall back if migration not run
         supabase
           .from('portfolio_items')
           .select('id, card_slug, manual_value_cents, manual_value_updated_at')
-          .eq('portfolio_id', pid),
+          .eq('portfolio_id', pid)
+          .then(async (res: any) => {
+            if (!res.error) return res
+            return await supabase
+              .from('portfolio_items')
+              .select('id, card_slug')
+              .eq('portfolio_id', pid)
+          }),
       ])
 
       if (summaryRes.data && !summaryRes.data.error) {
@@ -962,15 +994,18 @@ export default function PortfolioDashboard() {
   }
 
   async function handleEditSave(itemId: string, patch: any, manualValueCents: number | null) {
-    await supabase.from('portfolio_items')
-      .update({
-        ...patch,
-        manual_value_cents: manualValueCents,
-        // Stamp the timestamp whenever we set/clear a manual value so the
-        // dashboard can flag stale entries (>60 days) and nudge the user.
-        manual_value_updated_at: manualValueCents != null ? new Date().toISOString() : null,
-      })
-      .eq('id', itemId)
+    // Try the full update first. If the manual_value_* columns aren't in the
+    // schema yet (migration not run), retry without them so other edits still
+    // save and the user sees a clear failure for the manual-value field.
+    const fullPatch: Record<string, any> = {
+      ...patch,
+      manual_value_cents: manualValueCents,
+      manual_value_updated_at: manualValueCents != null ? new Date().toISOString() : null,
+    }
+    const { error } = await supabase.from('portfolio_items').update(fullPatch).eq('id', itemId)
+    if (error && /manual_value/.test(error.message || '')) {
+      await supabase.from('portfolio_items').update(patch).eq('id', itemId)
+    }
     await loadPortfolio()
   }
 

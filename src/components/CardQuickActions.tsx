@@ -139,7 +139,7 @@ export default function CardQuickActions({ card }: { card: Card }) {
 
 // ── Quick-add to portfolio modal ─────────────────────────────────────────────
 
-function CardPortfolioAddModal({
+export function CardPortfolioAddModal({
   card, cardSlug, user, onClose,
 }: {
   card: Card
@@ -204,7 +204,10 @@ function CardPortfolioAddModal({
       const purchaseCents = purchasePrice ? Math.round(parseFloat(purchasePrice) * cps) : null
       const manualCents   = manual && manualValue ? Math.round(parseFloat(manualValue) * cps) : null
 
-      const { error: err } = await supabase.from('portfolio_items').upsert([{
+      // Only include the manual-value columns when actually setting them, so
+      // PostgREST doesn't fail with "column not found in schema cache" if the
+      // 2026-04-30-portfolio-improvements migration hasn't been applied yet.
+      const payload: Record<string, any> = {
         portfolio_id,
         user_id: user.id,
         card_slug: cardSlug,
@@ -217,9 +220,15 @@ function CardPortfolioAddModal({
         purchase_currency: currency,
         purchase_date: purchaseDate || null,
         notes: notes || null,
-        manual_value_cents: manualCents,
-        manual_value_updated_at: manualCents != null ? new Date().toISOString() : null,
-      }], { onConflict: 'portfolio_id,card_slug,holding_type' })
+      }
+      if (manualCents != null) {
+        payload.manual_value_cents = manualCents
+        payload.manual_value_updated_at = new Date().toISOString()
+      }
+
+      const { error: err } = await supabase.from('portfolio_items').upsert([payload], {
+        onConflict: 'portfolio_id,card_slug,holding_type',
+      })
 
       if (err) throw err
       setDone(true)
