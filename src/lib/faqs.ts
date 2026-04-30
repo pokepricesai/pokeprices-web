@@ -167,6 +167,9 @@ export function getPokemonFaqItems({
   primaryType,
   isLegendary,
   isMythical,
+  firstAppearedSet,
+  firstAppearedYear,
+  topRiser,
 }: {
   name: string
   cards: Array<{ card_name: string; set_name: string; raw_usd: number | null; psa10_usd: number | null }>
@@ -174,39 +177,69 @@ export function getPokemonFaqItems({
   primaryType?: string | null
   isLegendary?: boolean
   isMythical?: boolean
+  firstAppearedSet?: string | null
+  firstAppearedYear?: number | null
+  topRiser?: { card_name: string; set_name: string; raw_pct_30d: number | null } | null
 }): FAQItem[] {
   const items: FAQItem[] = []
   const withPrice = cards.filter(c => c.raw_usd && c.raw_usd > 0)
 
+  // 1. How many cards exist?
   items.push({
-    question: `How many ${name} cards are there?`,
-    answer: `PokePrices tracks ${cards.length} ${name} cards across ${uniqueSets} ${uniqueSets === 1 ? 'set' : 'different sets'} of the Pokémon TCG. ${withPrice.length} have current price data.`,
+    question: `How many ${name} Pokémon cards are there?`,
+    answer: `PokePrices tracks ${cards.length} ${name} cards across ${uniqueSets} ${uniqueSets === 1 ? 'set' : 'different sets'} of the Pokémon TCG. ${withPrice.length} have current price data from recent sold listings.`,
   })
 
+  // 2. What is the most valuable card?
   if (withPrice.length > 0) {
     const top = [...withPrice].sort((a, b) => (b.raw_usd ?? 0) - (a.raw_usd ?? 0))[0]
     const topPsa10 = [...cards].filter(c => c.psa10_usd).sort((a, b) => (b.psa10_usd ?? 0) - (a.psa10_usd ?? 0))[0]
     const psa10Bit = topPsa10 && topPsa10.psa10_usd
-      ? ` In PSA 10, the most valuable ${name} card is ${topPsa10.card_name} (${topPsa10.set_name}) at ${fmtUsd(topPsa10.psa10_usd)}.`
+      ? ` In PSA 10 condition, the most valuable ${name} card is ${topPsa10.card_name} from ${topPsa10.set_name} at ${fmtUsd(topPsa10.psa10_usd)}.`
       : ''
     items.push({
       question: `What is the most valuable ${name} card?`,
-      answer: `The most valuable ${name} card by raw price is ${top.card_name} from ${top.set_name} at ${fmtUsd(top.raw_usd)} based on recent sold listings.${psa10Bit}`,
+      answer: `The most valuable ${name} card by current raw price is ${top.card_name} from ${top.set_name} at ${fmtUsd(top.raw_usd)} based on recent sold listings.${psa10Bit}`,
     })
   }
 
-  if (primaryType) {
+  // 3. What is the cheapest card?
+  if (withPrice.length > 0) {
+    const cheap = [...withPrice].sort((a, b) => (a.raw_usd ?? Infinity) - (b.raw_usd ?? Infinity))[0]
+    items.push({
+      question: `What is the cheapest ${name} card?`,
+      answer: `The cheapest ${name} card with current price data is ${cheap.card_name} from ${cheap.set_name} at ${fmtUsd(cheap.raw_usd)}. Modern bulk and reverse-holo printings are usually the most affordable way to add a ${name} to a collection.`,
+    })
+  }
+
+  // 4. When was the first card released?
+  if (firstAppearedSet && firstAppearedYear) {
+    items.push({
+      question: `When was the first ${name} Pokémon card released?`,
+      answer: `The first ${name} card appeared in ${firstAppearedSet} in ${firstAppearedYear}. Since then, ${name} has been printed across ${uniqueSets} ${uniqueSets === 1 ? 'set' : 'different sets'} with a wide range of artwork, rarity tiers and special editions.`,
+    })
+  }
+
+  // 5. Are these cards a good investment? (NB: careful framing)
+  if (withPrice.length > 0) {
+    const top = [...withPrice].sort((a, b) => (b.raw_usd ?? 0) - (a.raw_usd ?? 0))[0]
+    const riserBit = topRiser && topRiser.raw_pct_30d != null && topRiser.raw_pct_30d > 0
+      ? ` Over the last 30 days, ${topRiser.card_name} (${topRiser.set_name}) has moved ${topRiser.raw_pct_30d > 0 ? '+' : ''}${topRiser.raw_pct_30d.toFixed(1)}%.`
+      : ''
+    items.push({
+      question: `Are ${name} cards a good investment?`,
+      answer: `It depends entirely on the specific card. Vintage holos and graded copies of cards like ${top.card_name} have appreciated significantly, while modern reprints typically sit near bulk. Card values can fall as well as rise.${riserBit} Always check current sold listings and not financial advice.`,
+    })
+  }
+
+  // 6. Type info — only when none of the above answered enough yet
+  if (primaryType && items.length < 5) {
     const lineage = isLegendary ? 'a Legendary' : isMythical ? 'a Mythical' : null
     items.push({
       question: `What type is ${name}?`,
       answer: `${name} is ${lineage ? `${lineage} ` : 'a '}${primaryType.charAt(0).toUpperCase() + primaryType.slice(1)}-type Pokémon. In the TCG, ${name} cards are typically printed as ${primaryType.charAt(0).toUpperCase() + primaryType.slice(1)} energy types.`,
     })
   }
-
-  items.push({
-    question: `How are ${name} card prices tracked?`,
-    answer: `Prices for every ${name} card come from real sold listings tracked nightly. Raw, PSA 9 and PSA 10 prices update daily, and PSA population data is sourced from PSA's public reports. No asking prices, only confirmed sales.`,
-  })
 
   return items
 }
