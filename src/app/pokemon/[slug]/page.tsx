@@ -16,6 +16,7 @@ import PokemonStructuredData from '@/components/PokemonStructuredData'
 import FAQ from '@/components/FAQ'
 import { getPokemonFaqItems } from '@/lib/faqs'
 import SpeciesInteractiveSection from './SpeciesInteractiveSection'
+import DossierButton from './DossierButton'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -388,7 +389,7 @@ export default async function PokemonSpeciesPage({
       </div>
 
       {/* H1 + subtitle */}
-      <header style={{ marginBottom: 24 }}>
+      <header style={{ marginBottom: 20 }}>
         <div style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 4 }}>
           {sp ? `#${String(sp.id).padStart(3, '0')}` : ''}
           {sp?.generation ? ` · Gen ${sp.generation}` : ''}
@@ -402,7 +403,111 @@ export default async function PokemonSpeciesPage({
         </p>
       </header>
 
-      {/* HERO: most valuable card spotlight (above the fold, captures the chase-card query intent) */}
+      {/* Pokédex hero — moved to TOP. Keeps type badges, base stats, flavor,
+          plus the prominent dossier export button (was lost in the rewrite). */}
+      {pokeData && (
+        <div style={{ background: typeColor.light, border: '1px solid var(--border)', borderRadius: 20, padding: '24px 28px', marginBottom: 16, display: 'flex', gap: 28, flexWrap: 'wrap', alignItems: 'center' }}>
+          {artworkUrl && (
+            <img src={artworkUrl} alt={displayName}
+              style={{ width: 160, height: 160, objectFit: 'contain', filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.15))' }} />
+          )}
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, margin: '0 0 8px', color: 'var(--text)' }}>
+              About {displayName}
+            </h2>
+            {genus && <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 12px' }}>The {genus}</p>}
+            <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+              {types.map((t: string) => {
+                const tc = typeColors[t] ?? { bg: 'var(--bg-light)', text: 'var(--text)', light: '' }
+                return (
+                  <span key={t} style={{ padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, background: tc.bg, color: tc.text, fontFamily: "'Figtree', sans-serif" }}>
+                    {t}
+                  </span>
+                )
+              })}
+            </div>
+            {flavorText && (
+              <p style={{ fontSize: 14, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.7, margin: '0 0 14px', fontStyle: 'italic', maxWidth: 480 }}>
+                "{flavorText}"
+              </p>
+            )}
+            <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
+              {heightM && <Stat label="Height" value={`${heightM}m`} />}
+              {weightKg && <Stat label="Weight" value={`${weightKg}kg`} />}
+              {abilities.length > 0 && <Stat label="Abilities" value={abilities.join(', ')} />}
+            </div>
+            {/* Dossier button — back in the hero where it lived before the rewrite */}
+            {cards.length > 0 && (
+              <DossierButton
+                slug={slug}
+                displayName={displayName}
+                pokeData={pokeData}
+                speciesData={speciesData}
+                cards={cards.map(c => ({
+                  card_name: c.card_name, set_name: c.set_name, card_url_slug: c.card_url_slug,
+                  image_url: c.image_url, raw_usd: c.current_raw, psa10_usd: c.current_psa10,
+                  card_number: c.card_number, is_sealed: false,
+                }))}
+                uniqueSetCount={bySet.length}
+                mostExpensiveRaw={topCards[0] ? {
+                  card_name: topCards[0].card_name, set_name: topCards[0].set_name,
+                  card_url_slug: topCards[0].card_url_slug, image_url: topCards[0].image_url,
+                  raw_usd: topCards[0].current_raw, psa10_usd: topCards[0].current_psa10,
+                  card_number: topCards[0].card_number, is_sealed: false,
+                } : null}
+                mostExpensivePsa10={(() => {
+                  const c = [...topCards].filter(t => t.current_psa10 && t.current_psa10 > 0)
+                    .sort((a, b) => (b.current_psa10 ?? 0) - (a.current_psa10 ?? 0))[0]
+                  return c ? {
+                    card_name: c.card_name, set_name: c.set_name, card_url_slug: c.card_url_slug,
+                    image_url: c.image_url, raw_usd: c.current_raw, psa10_usd: c.current_psa10,
+                    card_number: c.card_number, is_sealed: false,
+                  } : null
+                })()}
+                accentBg={`linear-gradient(135deg, ${typeColor.bg}, ${typeColor.bg})`}
+                accentText={typeColor.text}
+              />
+            )}
+          </div>
+          {stats.length > 0 && (
+            <div style={{ flex: '0 0 auto', minWidth: 220, background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)', padding: '14px 18px' }}>
+              <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.5, color: 'var(--text-muted)', marginBottom: 12, fontFamily: "'Figtree', sans-serif" }}>
+                Base Stats · {totalStats} total
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {stats.map((s: any) => (
+                  <div key={s.name} style={{ display: 'grid', gridTemplateColumns: '70px 36px 1fr', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase', letterSpacing: 0.8 }}>{s.name.replace(/-/g, ' ')}</span>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", textAlign: 'right' }}>{s.value}</span>
+                    <div style={{ height: 6, background: 'var(--bg-light)', borderRadius: 99, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${Math.min(100, (s.value / 255) * 100)}%`, background: typeColor.bg, borderRadius: 99 }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Jump straight to all cards — same-page anchor, server-rendered, no JS */}
+      {cards.length > 0 && (
+        <div style={{ marginBottom: 24, textAlign: 'center' }}>
+          <a href="#all-cards"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              padding: '11px 22px', borderRadius: 12,
+              background: 'var(--card)', border: '1px solid var(--border)',
+              color: 'var(--text)', fontSize: 14, fontWeight: 700,
+              fontFamily: "'Figtree', sans-serif", textDecoration: 'none',
+              transition: 'border-color 0.15s, color 0.15s',
+            }}>
+            Jump to all {cards.length} cards <span aria-hidden style={{ fontSize: 12, opacity: 0.6 }}>↓</span>
+          </a>
+        </div>
+      )}
+
+      {/* HERO: most valuable card spotlight (now under the Pokédex block) */}
       {topCards[0] && (
         <Link href={`/set/${encodeURIComponent(topCards[0].set_name)}/card/${topCards[0].card_url_slug}`}
           style={{ textDecoration: 'none', display: 'block', marginBottom: 20 }}>
@@ -444,60 +549,6 @@ export default async function PokemonSpeciesPage({
         </div>
       )}
 
-      {/* Pokédex hero — keeps the existing visual richness (type badges + base stats + flavor) */}
-      {pokeData && (
-        <div style={{ background: typeColor.light, border: '1px solid var(--border)', borderRadius: 20, padding: '24px 28px', marginBottom: 28, display: 'flex', gap: 28, flexWrap: 'wrap', alignItems: 'center' }}>
-          {artworkUrl && (
-            <img src={artworkUrl} alt={displayName}
-              style={{ width: 160, height: 160, objectFit: 'contain', filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.15))' }} />
-          )}
-          <div style={{ flex: 1, minWidth: 240 }}>
-            <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, margin: '0 0 8px', color: 'var(--text)' }}>
-              About {displayName}
-            </h2>
-            {genus && <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 12px' }}>The {genus}</p>}
-            <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-              {types.map((t: string) => {
-                const tc = typeColors[t] ?? { bg: 'var(--bg-light)', text: 'var(--text)', light: '' }
-                return (
-                  <span key={t} style={{ padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, background: tc.bg, color: tc.text, fontFamily: "'Figtree', sans-serif" }}>
-                    {t}
-                  </span>
-                )
-              })}
-            </div>
-            {flavorText && (
-              <p style={{ fontSize: 14, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.7, margin: '0 0 14px', fontStyle: 'italic', maxWidth: 480 }}>
-                "{flavorText}"
-              </p>
-            )}
-            <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
-              {heightM && <Stat label="Height" value={`${heightM}m`} />}
-              {weightKg && <Stat label="Weight" value={`${weightKg}kg`} />}
-              {abilities.length > 0 && <Stat label="Abilities" value={abilities.join(', ')} />}
-            </div>
-          </div>
-          {stats.length > 0 && (
-            <div style={{ flex: '0 0 auto', minWidth: 220, background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)', padding: '14px 18px' }}>
-              <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.5, color: 'var(--text-muted)', marginBottom: 12, fontFamily: "'Figtree', sans-serif" }}>
-                Base Stats · {totalStats} total
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {stats.map((s: any) => (
-                  <div key={s.name} style={{ display: 'grid', gridTemplateColumns: '70px 36px 1fr', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase', letterSpacing: 0.8 }}>{s.name.replace(/-/g, ' ')}</span>
-                    <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", textAlign: 'right' }}>{s.value}</span>
-                    <div style={{ height: 6, background: 'var(--bg-light)', borderRadius: 99, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${Math.min(100, (s.value / 255) * 100)}%`, background: typeColor.bg, borderRadius: 99 }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* SECTION: Most Valuable Cards listicle (target: "most expensive [name] cards") */}
       {topCards.length > 0 && (
         <section style={{ marginBottom: 32 }}>
@@ -507,11 +558,11 @@ export default async function PokemonSpeciesPage({
           <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 14px' }}>
             Top 10 by combined raw and PSA 10 value. Click any card for full price history and grading data.
           </p>
-          <ol style={{ display: 'flex', flexDirection: 'column', gap: 8, listStyle: 'none', padding: 0, margin: 0, counterReset: 'rank' }}>
+          <ol style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 10, listStyle: 'none', padding: 0, margin: 0, counterReset: 'rank' }}>
             {topCards.map((c, i) => (
               <li key={c.card_slug} style={{ counterIncrement: 'rank' }}>
                 <Link href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`}
-                  style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 14, padding: '12px 14px', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12 }}>
+                  style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 14, padding: '12px 14px', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, height: '100%', boxSizing: 'border-box' }}>
                   <span style={{ fontSize: 18, fontWeight: 900, color: i < 3 ? typeColor.bg : 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", minWidth: 28 }}>
                     {i + 1}
                   </span>
@@ -565,32 +616,13 @@ export default async function PokemonSpeciesPage({
         </section>
       )}
 
-      {/* SECTION: All cards (sortable grid - client island) */}
+      {/* SECTION: All cards (sortable grid - client island).
+          The id="all-cards" anchor target lives inside the component so
+          the Jump-to-cards button at the top scrolls cleanly here. */}
       {cards.length > 0 && (
         <SpeciesInteractiveSection
           cards={cards}
-          slug={slug}
           displayName={displayName}
-          dossierData={pokeData ? {
-            pokeData,
-            speciesData,
-            cards: cards.map(c => ({
-              card_name: c.card_name,
-              set_name: c.set_name,
-              card_url_slug: c.card_url_slug,
-              image_url: c.image_url,
-              raw_usd: c.current_raw,
-              psa10_usd: c.current_psa10,
-              card_number: c.card_number,
-              is_sealed: false,
-            })),
-            uniqueSetCount: bySet.length,
-            mostExpensiveRaw: topCards[0] ? { card_name: topCards[0].card_name, set_name: topCards[0].set_name, raw_usd: topCards[0].current_raw, psa10_usd: topCards[0].current_psa10, card_number: topCards[0].card_number, image_url: topCards[0].image_url, card_url_slug: topCards[0].card_url_slug, is_sealed: false } : null,
-            mostExpensivePsa10: (() => {
-              const c = [...topCards].filter(t => t.current_psa10 && t.current_psa10 > 0).sort((a, b) => (b.current_psa10 ?? 0) - (a.current_psa10 ?? 0))[0]
-              return c ? { card_name: c.card_name, set_name: c.set_name, raw_usd: c.current_raw, psa10_usd: c.current_psa10, card_number: c.card_number, image_url: c.image_url, card_url_slug: c.card_url_slug, is_sealed: false } : null
-            })(),
-          } : null}
         />
       )}
 
