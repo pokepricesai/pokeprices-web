@@ -70,6 +70,128 @@ function PlatformBadge({ platform }: { platform: Platform }) {
   )
 }
 
+// Featured spotlight — horizontal layout with bigger image and full
+// description visible, designed to make featured creators stand out
+// against the regular grid below. Wraps to vertical on narrow viewports.
+function FeaturedCreatorCard({ creator }: { creator: Creator }) {
+  return (
+    <Link href={`/creators/${creator.slug}`} style={{ textDecoration: 'none' }}>
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(255,203,5,0.10), rgba(255,255,255,0.02))',
+        border: '2px solid rgba(255,203,5,0.45)',
+        borderRadius: 18,
+        overflow: 'hidden',
+        boxShadow: '0 6px 28px rgba(255,203,5,0.14), 0 2px 8px rgba(0,0,0,0.06)',
+        cursor: 'pointer',
+        transition: 'transform 0.18s, box-shadow 0.18s, border-color 0.18s',
+        display: 'flex',
+        flexWrap: 'wrap',
+        minHeight: 240,
+      }}
+        onMouseEnter={e => {
+          const el = e.currentTarget as HTMLDivElement
+          el.style.transform = 'translateY(-3px)'
+          el.style.boxShadow = '0 12px 36px rgba(255,203,5,0.22), 0 4px 12px rgba(0,0,0,0.1)'
+          el.style.borderColor = 'rgba(255,203,5,0.7)'
+        }}
+        onMouseLeave={e => {
+          const el = e.currentTarget as HTMLDivElement
+          el.style.transform = ''
+          el.style.boxShadow = '0 6px 28px rgba(255,203,5,0.14), 0 2px 8px rgba(0,0,0,0.06)'
+          el.style.borderColor = 'rgba(255,203,5,0.45)'
+        }}
+      >
+        {/* Image — left on wide, top on narrow */}
+        <div style={{
+          width: 240, minWidth: 240, flexGrow: 1, flexBasis: 240,
+          maxWidth: '100%',
+          height: 240,
+          background: 'linear-gradient(135deg, #1a5fad, #3b8fe8)',
+          position: 'relative',
+          overflow: 'hidden',
+        }}>
+          {creator.image_url ? (
+            <img src={creator.image_url} alt={creator.name}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              loading="lazy"
+              onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
+          ) : (
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 64, opacity: 0.3 }}>
+              👤
+            </div>
+          )}
+          <div style={{
+            position: 'absolute', top: 12, left: 12,
+            background: 'var(--accent)', color: '#000',
+            fontSize: 10, fontWeight: 900,
+            padding: '4px 10px', borderRadius: 12, letterSpacing: 1.5,
+            fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+          }}>★ Featured</div>
+          {creator.country && (
+            <div style={{
+              position: 'absolute', bottom: 12, left: 12,
+              background: 'rgba(0,0,0,0.65)', color: '#fff', fontSize: 12,
+              padding: '3px 10px', borderRadius: 12,
+              fontFamily: "'Figtree', sans-serif",
+              backdropFilter: 'blur(4px)',
+            }}>{creator.country}</div>
+          )}
+        </div>
+
+        {/* Content — right on wide, bottom on narrow */}
+        <div style={{
+          flex: '2 1 280px',
+          minWidth: 0,
+          padding: '20px 24px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+        }}>
+          <h3 style={{
+            margin: 0, fontSize: 22, fontWeight: 800,
+            color: 'var(--text)',
+            fontFamily: "'Outfit', sans-serif",
+            letterSpacing: -0.3,
+          }}>
+            {creator.name}
+          </h3>
+          {creator.description && (
+            <p style={{
+              margin: 0, fontSize: 14, color: 'var(--text-muted)',
+              lineHeight: 1.6, fontFamily: "'Figtree', sans-serif",
+              display: '-webkit-box', WebkitLineClamp: 4,
+              WebkitBoxOrient: 'vertical' as any, overflow: 'hidden',
+            }}>{creator.description}</p>
+          )}
+
+          {/* Specialisms — show all (no +N truncation on the spotlight) */}
+          {creator.specialisms?.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+              {creator.specialisms.map(s => (
+                <span key={s} style={{
+                  fontSize: 11, fontWeight: 700, color: 'var(--primary)',
+                  background: 'rgba(26,95,173,0.08)',
+                  border: '1px solid rgba(26,95,173,0.2)',
+                  padding: '3px 9px', borderRadius: 10,
+                  fontFamily: "'Figtree', sans-serif",
+                }}>{s}</span>
+              ))}
+            </div>
+          )}
+
+          {/* Platforms — pushed to bottom of card */}
+          {creator.platforms?.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 'auto', paddingTop: 4 }}>
+              {creator.platforms.map((p, i) => <PlatformBadge key={i} platform={p} />)}
+            </div>
+          )}
+        </div>
+      </div>
+    </Link>
+  )
+}
+
 function CreatorCard({ creator }: { creator: Creator }) {
   return (
     <Link href={`/creators/${creator.slug}`} style={{ textDecoration: 'none' }}>
@@ -221,6 +343,13 @@ export default function CreatorsClient({ creators }: { creators: Creator[] }) {
       <section style={{ padding: '20px 24px 0', maxWidth: 1100, margin: '0 auto' }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', alignSelf: 'center', fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase', letterSpacing: 1 }}>Platform:</span>
+          <button onClick={() => setActivePlatform(null)} style={{
+            padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            fontFamily: "'Figtree', sans-serif", border: '1px solid var(--border)',
+            background: activePlatform === null ? 'var(--primary)' : 'var(--card)',
+            color: activePlatform === null ? '#fff' : 'var(--text)',
+            transition: 'all 0.15s',
+          }}>All</button>
           {ALL_PLATFORMS.map(p => (
             <button key={p} onClick={() => setActivePlatform(activePlatform === p ? null : p)} style={{
               padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: 'pointer',
@@ -233,6 +362,13 @@ export default function CreatorsClient({ creators }: { creators: Creator[] }) {
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', alignSelf: 'center', fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase', letterSpacing: 1 }}>Focus:</span>
+          <button onClick={() => setActiveSpecialism(null)} style={{
+            padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            fontFamily: "'Figtree', sans-serif", border: '1px solid var(--border)',
+            background: activeSpecialism === null ? 'var(--primary)' : 'var(--card)',
+            color: activeSpecialism === null ? '#fff' : 'var(--text)',
+            transition: 'all 0.15s',
+          }}>All</button>
           {ALL_SPECIALISMS.map(s => (
             <button key={s} onClick={() => setActiveSpecialism(activeSpecialism === s ? null : s)} style={{
               padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: 'pointer',
@@ -256,11 +392,33 @@ export default function CreatorsClient({ creators }: { creators: Creator[] }) {
           <>
             {featured.length > 0 && (
               <>
-                <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: 1.5, textTransform: 'uppercase', margin: '0 0 12px', fontFamily: "'Figtree', sans-serif" }}>
-                  Featured
-                </p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16, marginBottom: 32 }}>
-                  {featured.map(c => <CreatorCard key={c.id} creator={c} />)}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '0 0 16px', flexWrap: 'wrap' }}>
+                  <span style={{
+                    fontSize: 11, fontWeight: 900, color: '#000',
+                    background: 'var(--accent)',
+                    letterSpacing: 1.6, textTransform: 'uppercase',
+                    padding: '4px 10px', borderRadius: 8,
+                    fontFamily: "'Figtree', sans-serif",
+                  }}>★ Spotlight</span>
+                  <h2 style={{
+                    fontSize: 22, fontWeight: 800, margin: 0,
+                    fontFamily: "'Outfit', sans-serif", color: 'var(--text)',
+                    letterSpacing: -0.3,
+                  }}>Featured creators</h2>
+                  <span style={{
+                    fontSize: 12, color: 'var(--text-muted)',
+                    fontFamily: "'Figtree', sans-serif",
+                  }}>· {featured.length} hand-picked</span>
+                </div>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: featured.length === 1
+                    ? '1fr'
+                    : 'repeat(auto-fill, minmax(460px, 1fr))',
+                  gap: 18,
+                  marginBottom: 36,
+                }}>
+                  {featured.map(c => <FeaturedCreatorCard key={c.id} creator={c} />)}
                 </div>
               </>
             )}
