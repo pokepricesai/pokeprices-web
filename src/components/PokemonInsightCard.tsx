@@ -32,24 +32,26 @@ interface Props {
 // pop against the dark canvas. Pastel/ink retained for back-compat in
 // case other code references them.
 const TYPE_COLORS: Record<string, { bg: string; bg2: string; bgLight: string; pastel: string; ink: string }> = {
-  fire:     { bg: '#E07623', bg2: '#A04D14', bgLight: '#F0BB91', pastel: '#FCC79C', ink: '#3A1A05' },
-  water:    { bg: '#3F76D9', bg2: '#22458C', bgLight: '#9FBBEC', pastel: '#ACC2EE', ink: '#0F2347' },
-  grass:    { bg: '#3FA224', bg2: '#225A11', bgLight: '#9FD192', pastel: '#AEDCA0', ink: '#10330A' },
-  electric: { bg: '#C28B0A', bg2: '#7A5A04', bgLight: '#E1C585', pastel: '#EBD387', ink: '#3A2A02' },
-  psychic:  { bg: '#DC2A6C', bg2: '#8C1644', bgLight: '#EE95B6', pastel: '#F4A6BD', ink: '#3D0A1F' },
-  ice:      { bg: '#3D9C99', bg2: '#1F5F5D', bgLight: '#9ECECC', pastel: '#A6D5D2', ink: '#0E2C2B' },
-  dragon:   { bg: '#5C25E0', bg2: '#321485', bgLight: '#AE92F0', pastel: '#B299F4', ink: '#1A0A4A' },
-  dark:     { bg: '#5A4234', bg2: '#2D1F18', bgLight: '#ACA19A', pastel: '#BFB1A8', ink: '#1F140C' },
-  fairy:    { bg: '#C24F87', bg2: '#7A2752', bgLight: '#E1A7C3', pastel: '#E5A8C2', ink: '#3D0F2A' },
-  fighting: { bg: '#A82420', bg2: '#5C100D', bgLight: '#D49290', pastel: '#DEA3A1', ink: '#2A0907' },
-  poison:   { bg: '#8A2E89', bg2: '#4D154B', bgLight: '#C597C4', pastel: '#C8A1C7', ink: '#290D29' },
-  ground:   { bg: '#A87E27', bg2: '#5F4710', bgLight: '#D4BF93', pastel: '#D8C290', ink: '#2D1F08' },
-  rock:     { bg: '#897925', bg2: '#544811', bgLight: '#C4BC92', pastel: '#C9BD89', ink: '#241D08' },
-  bug:      { bg: '#7A8810', bg2: '#414A06', bgLight: '#BDC488', pastel: '#C2CC8A', ink: '#1F2305' },
-  ghost:    { bg: '#5A4378', bg2: '#332343', bgLight: '#ACA1BC', pastel: '#B6A8C8', ink: '#1A1126' },
-  steel:    { bg: '#566677', bg2: '#2C3645', bgLight: '#ABB3BB', pastel: '#ACBAC7', ink: '#15202B' },
-  normal:   { bg: '#6E6E48', bg2: '#3F3F26', bgLight: '#B7B7A4', pastel: '#B7B79A', ink: '#1F1F0E' },
-  flying:   { bg: '#5848B6', bg2: '#2E2473', bgLight: '#ACA4DB', pastel: '#A89FDB', ink: '#180F4A' },
+  // bg + bg2 each lifted ~10% toward white (channel + 0.1 * (255 - channel))
+  // for a brighter saturated canvas. bgLight / pastel / ink unchanged.
+  fire:     { bg: '#E38439', bg2: '#AA5F2C', bgLight: '#F0BB91', pastel: '#FCC79C', ink: '#3A1A05' },
+  water:    { bg: '#5284DD', bg2: '#385898', bgLight: '#9FBBEC', pastel: '#ACC2EE', ink: '#0F2347' },
+  grass:    { bg: '#52AB3A', bg2: '#386B29', bgLight: '#9FD192', pastel: '#AEDCA0', ink: '#10330A' },
+  electric: { bg: '#C89723', bg2: '#876B1D', bgLight: '#E1C585', pastel: '#EBD387', ink: '#3A2A02' },
+  psychic:  { bg: '#E03F7B', bg2: '#982D57', bgLight: '#EE95B6', pastel: '#F4A6BD', ink: '#3D0A1F' },
+  ice:      { bg: '#50A6A3', bg2: '#356F6D', bgLight: '#9ECECC', pastel: '#A6D5D2', ink: '#0E2C2B' },
+  dragon:   { bg: '#6C3BE3', bg2: '#472C91', bgLight: '#AE92F0', pastel: '#B299F4', ink: '#1A0A4A' },
+  dark:     { bg: '#6B5548', bg2: '#42352F', bgLight: '#ACA19A', pastel: '#BFB1A8', ink: '#1F140C' },
+  fairy:    { bg: '#C86193', bg2: '#873D63', bgLight: '#E1A7C3', pastel: '#E5A8C2', ink: '#3D0F2A' },
+  fighting: { bg: '#B13A36', bg2: '#6C2825', bgLight: '#D49290', pastel: '#DEA3A1', ink: '#2A0907' },
+  poison:   { bg: '#964395', bg2: '#5F2C5D', bgLight: '#C597C4', pastel: '#C8A1C7', ink: '#290D29' },
+  ground:   { bg: '#B18B3D', bg2: '#6F5928', bgLight: '#D4BF93', pastel: '#D8C290', ink: '#2D1F08' },
+  rock:     { bg: '#95863B', bg2: '#655A29', bgLight: '#C4BC92', pastel: '#C9BD89', ink: '#241D08' },
+  bug:      { bg: '#879428', bg2: '#545C1F', bgLight: '#BDC488', pastel: '#C2CC8A', ink: '#1F2305' },
+  ghost:    { bg: '#6B5686', bg2: '#473956', bgLight: '#ACA1BC', pastel: '#B6A8C8', ink: '#1A1126' },
+  steel:    { bg: '#677585', bg2: '#414A58', bgLight: '#ABB3BB', pastel: '#ACBAC7', ink: '#15202B' },
+  normal:   { bg: '#7D7D5A', bg2: '#52523C', bgLight: '#B7B7A4', pastel: '#B7B79A', ink: '#1F1F0E' },
+  flying:   { bg: '#695ABD', bg2: '#433A81', bgLight: '#ACA4DB', pastel: '#A89FDB', ink: '#180F4A' },
 }
 
 const STAT_LABEL: Record<string, string> = {
