@@ -64,7 +64,7 @@ const GOLD = '#FFD84D'
 // Slate panel base — used for collector stats + featured card containers.
 // Dark-but-not-black so it pops against the saturated canvas without
 // reading as "black bars".
-const PANEL_BG = 'rgba(28, 32, 48, 0.72)'
+const PANEL_BG = 'rgba(51, 54, 69, 0.62)'
 const PANEL_BORDER = '1px solid rgba(255, 255, 255, 0.10)'
 
 function fmtPrice(cents: number | null | undefined): string {
