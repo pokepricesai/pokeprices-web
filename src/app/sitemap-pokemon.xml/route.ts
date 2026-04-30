@@ -10,6 +10,10 @@ export async function GET() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
+  // Filter to species that actually have cards in our DB. Including the
+  // ~200 species with no TCG presence is a soft-404 risk — Google crawls
+  // them, finds an empty-state page, and dilutes our crawl budget. The
+  // empty-state pages still resolve for direct visits, just not indexed.
   let allSpecies: any[] = []
   let offset = 0
   const PAGE_SIZE = 1000
@@ -17,8 +21,9 @@ export async function GET() {
   while (true) {
     const { data, error } = await supabase
       .from('pokemon_species')
-      .select('name')
-      .order('id')
+      .select('name, total_cards')
+      .gt('total_cards', 0)
+      .order('total_cards', { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1)
 
     if (error) { console.error('sitemap-pokemon error:', error); break }
@@ -39,7 +44,7 @@ export async function GET() {
     .map((s: any) => pokeSlug(s.name))
     .filter((slug: string) => slug.length > 0)
     .map((slug: string) =>
-      '  <url>\n    <loc>' + BASE_URL + '/pokemon/' + slug + '</loc>\n    <lastmod>' + now + '</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.7</priority>\n  </url>'
+      '  <url>\n    <loc>' + BASE_URL + '/pokemon/' + slug + '</loc>\n    <lastmod>' + now + '</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>'
     ).join('\n')
 
   const xml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + urls + '\n</urlset>'

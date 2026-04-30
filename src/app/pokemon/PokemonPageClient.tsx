@@ -13,6 +13,9 @@ interface PokemonEntry {
   name: string
   cardCount: number
   maxPrice: number | null
+  totalValue: number
+  typePrimary: string | null
+  generation: number | null
 }
 
 export default function PokemonPageClient() {
@@ -20,7 +23,7 @@ export default function PokemonPageClient() {
   const [filtered, setFiltered] = useState<PokemonEntry[]>([])
   const [visible, setVisible] = useState(PAGE_SIZE)
   const [search, setSearch] = useState('')
-  const [sort, setSort] = useState<'id' | 'cards' | 'price' | 'name'>('id')
+  const [sort, setSort] = useState<'id' | 'cards' | 'price' | 'value' | 'name'>('id')
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState<{
     totalPokemon: number
@@ -31,72 +34,45 @@ export default function PokemonPageClient() {
 
   useEffect(() => {
     async function load() {
-      // NOTE: Supabase / PostgREST caps responses at 1,000 rows by default.
-      // We:
-      //   1. Pull a true row count via count:'exact' (head:true → no payload)
-      //   2. Pull the full species rows in pages of 1000 until we have them all.
-      // This is robust to future growth past the current ~1,025 species.
-      const [speciesRes, countRes, speciesCountRes] = await Promise.all([
-        supabase
-          .from('pokemon_species_stats')
-          .select('species_name, species_id, card_count, max_raw_usd')
-          .order('species_id', { ascending: true })
-          .range(0, 1999),
-        supabase
-          .from('cards')
-          .select('id', { count: 'exact', head: true })
-          .eq('is_sealed', false),
-        supabase
-          .from('pokemon_species')
-          .select('id', { count: 'exact', head: true }),
-      ])
-
-      const totalCards = countRes.count ?? 0
-      const totalSpecies = speciesCountRes.count ?? 0
-      const rows = speciesRes.data ?? []
-
-      // Fetch the full species list in pages — guarantees we get every row
-      // even if PostgREST's per-request cap or a future change re-introduces
-      // the 1,000-row limit.
-      let allSpecies: { id: number; name: string }[] = []
-      const PAGE = 1000
-      let from = 0
+      // get_pokemon_species_list is paged at the RPC level — call it
+      // multiple times to get every species, regardless of the PostgREST
+      // 1,000-row cap.
+      let all: any[] = []
+      const PAGE = 500
+      let offset = 0
       while (true) {
-        const { data, error } = await supabase
-          .from('pokemon_species')
-          .select('id, name')
-          .order('id', { ascending: true })
-          .range(from, from + PAGE - 1)
-        if (error) break
-        if (!data || data.length === 0) break
-        allSpecies = allSpecies.concat(data)
+        const { data, error } = await supabase.rpc('get_pokemon_species_list', {
+          p_lim: PAGE, p_offset: offset,
+        })
+        if (error || !data || data.length === 0) break
+        all = all.concat(data)
         if (data.length < PAGE) break
-        from += PAGE
-        if (allSpecies.length >= 5000) break // safety bound
+        offset += PAGE
+        if (all.length >= 5000) break
       }
 
-      const statsMap: Record<string, { card_count: number; max_raw_usd: number | null }> = {}
-      rows.forEach((r: any) => {
-        statsMap[r.species_name] = { card_count: r.card_count, max_raw_usd: r.max_raw_usd }
-      })
+      const [countRes] = await Promise.all([
+        supabase.from('cards').select('id', { count: 'exact', head: true }).eq('is_sealed', false),
+      ])
 
-      const entries: PokemonEntry[] = allSpecies.map((s: any) => ({
-        id: s.id,
-        name: s.name,
-        cardCount: statsMap[s.name]?.card_count ?? 0,
-        maxPrice: statsMap[s.name]?.max_raw_usd ?? null,
+      const entries: PokemonEntry[] = all.map((r: any) => ({
+        id:           r.id,
+        name:         r.name,
+        cardCount:    r.total_cards ?? 0,
+        maxPrice:     r.highest_card_price_cents ?? null,
+        totalValue:   Number(r.total_market_value_cents ?? 0),
+        typePrimary:  r.type_primary ?? null,
+        generation:   r.generation ?? null,
       }))
 
-      const mostCards = [...entries].sort((a, b) => b.cardCount - a.cardCount)[0] ?? null
+      const mostCards     = [...entries].sort((a, b) => b.cardCount - a.cardCount)[0] ?? null
       const mostExpensive = [...entries].sort((a, b) => (b.maxPrice ?? 0) - (a.maxPrice ?? 0))[0] ?? null
 
       setPokemon(entries)
       setFiltered(entries)
-      // Prefer the server-confirmed count when it's higher than what we loaded
-      // (defends against silent row caps surfacing the wrong number to the user).
       setStats({
-        totalPokemon: Math.max(entries.length, totalSpecies),
-        totalCards,
+        totalPokemon: entries.length,
+        totalCards:   countRes.count ?? 0,
         mostCards,
         mostExpensive,
       })
@@ -116,6 +92,7 @@ export default function PokemonPageClient() {
     if (sort === 'id')    result.sort((a, b) => a.id - b.id)
     if (sort === 'cards') result.sort((a, b) => b.cardCount - a.cardCount)
     if (sort === 'price') result.sort((a, b) => (b.maxPrice ?? 0) - (a.maxPrice ?? 0))
+    if (sort === 'value') result.sort((a, b) => b.totalValue - a.totalValue)
     if (sort === 'name')  result.sort((a, b) => a.name.localeCompare(b.name))
     setFiltered(result)
     setVisible(PAGE_SIZE)
@@ -179,15 +156,63 @@ export default function PokemonPageClient() {
           style={{ flex: 1, minWidth: 200, padding: '10px 16px', fontSize: 14, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--card)', color: 'var(--text)', fontFamily: "'Figtree', sans-serif", outline: 'none' }}
         />
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {(['id', 'cards', 'price', 'name'] as const).map(s => (
+          {(['id', 'cards', 'value', 'price', 'name'] as const).map(s => (
             <button key={s} onClick={() => setSort(s)}
               className={`sort-btn ${sort === s ? 'active' : ''}`}
               style={{ fontFamily: "'Figtree', sans-serif" }}>
-              {s === 'id' ? 'Pokédex #' : s === 'cards' ? 'Most Cards' : s === 'price' ? 'Highest Value' : 'A–Z'}
+              {s === 'id' ? 'Pokédex #' : s === 'cards' ? 'Most Cards' : s === 'value' ? 'Total Value' : s === 'price' ? 'Highest Single Card' : 'A–Z'}
             </button>
           ))}
         </div>
       </div>
+
+      {/* Top species by total market value — internal-link booster for the
+          most valuable species pages. Hidden when searching/sorting so it
+          doesn't double up with the user's chosen view. */}
+      {!loading && !search.trim() && sort === 'id' && (() => {
+        const topByValue = [...pokemon]
+          .filter(p => p.totalValue > 0)
+          .sort((a, b) => b.totalValue - a.totalValue)
+          .slice(0, 12)
+        if (topByValue.length === 0) return null
+        return (
+          <div style={{ marginBottom: 28 }}>
+            <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 18, margin: '0 0 6px', color: 'var(--text)' }}>
+              Most Valuable Pokémon by Total Card Market
+            </h2>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 12px' }}>
+              Sum of every card's current value across raw + PSA 10. Click any species to see all cards and prices.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 10 }}>
+              {topByValue.map((p, i) => (
+                <Link key={p.id} href={`/pokemon/${p.name}`} style={{ textDecoration: 'none' }}>
+                  <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, transition: 'border-color 0.15s, transform 0.15s' }}
+                    onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--primary)'; el.style.transform = 'translateY(-2px)' }}
+                    onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--border)'; el.style.transform = 'translateY(0)' }}>
+                    <span style={{ fontSize: 14, fontWeight: 900, color: i < 3 ? 'var(--primary)' : 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", minWidth: 22 }}>
+                      {i + 1}
+                    </span>
+                    <img
+                      src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.id}.png`}
+                      alt={capitalize(p.name)}
+                      style={{ width: 44, height: 44, objectFit: 'contain', flexShrink: 0 }}
+                      loading="lazy"
+                    />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {capitalize(p.name)}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+                        {p.cardCount} cards · ${p.totalValue >= 1_000_000 ? `${(p.totalValue / 1_000_000 / 100).toFixed(1)}M` : p.totalValue >= 100_000 ? `${(p.totalValue / 100_000 / 10).toFixed(0)}k` : `${(p.totalValue / 100).toFixed(0)}`}
+                      </div>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Grid */}
       {loading ? (
