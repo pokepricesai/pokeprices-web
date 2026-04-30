@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -944,6 +945,20 @@ export default function DealerPageClient() {
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 16px' }}>
+
+      {/* Back to dashboard — matches the chip pattern used on /dashboard sub-pages */}
+      <div style={{ marginBottom: 16 }}>
+        <Link href="/dashboard" style={{
+          display: 'inline-flex', alignItems: 'center', gap: 8,
+          fontSize: 13, fontWeight: 700, color: 'var(--text-muted)',
+          textDecoration: 'none', fontFamily: "'Figtree', sans-serif",
+          padding: '7px 14px', borderRadius: 20,
+          border: '1px solid var(--border)', background: 'var(--card)',
+        }}>
+          <span style={{ fontSize: 14 }}>←</span>
+          Dashboard
+        </Link>
+      </div>
 
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
