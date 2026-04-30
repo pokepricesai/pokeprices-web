@@ -27,30 +27,33 @@ interface Props {
 }
 
 // Each entry has:
-//   bg     — saturated type colour, used for borders / icons / accents
-//   bg2    — deeper saturated type colour, for value highlights and headers
-//   pastel — very soft type tint, used for the outer canvas gradient
-//   ink    — dark text colour tuned to the type (mostly the same dark navy,
-//            but a couple of types pick a custom dark to feel on-brand)
-const TYPE_COLORS: Record<string, { bg: string; bg2: string; pastel: string; ink: string }> = {
-  fire:     { bg: '#E07623', bg2: '#A04D14', pastel: '#FCE2CC', ink: '#3A1A05' },
-  water:    { bg: '#3F76D9', bg2: '#22458C', pastel: '#D8E4F8', ink: '#0F2347' },
-  grass:    { bg: '#3FA224', bg2: '#225A11', pastel: '#D7ECCC', ink: '#10330A' },
-  electric: { bg: '#C28B0A', bg2: '#7A5A04', pastel: '#F4E5BC', ink: '#3A2A02' },
-  psychic:  { bg: '#DC2A6C', bg2: '#8C1644', pastel: '#FAD0DE', ink: '#3D0A1F' },
-  ice:      { bg: '#3D9C99', bg2: '#1F5F5D', pastel: '#CFE8E6', ink: '#0E2C2B' },
-  dragon:   { bg: '#5C25E0', bg2: '#321485', pastel: '#D4C5FA', ink: '#1A0A4A' },
-  dark:     { bg: '#5A4234', bg2: '#2D1F18', pastel: '#DBD2CD', ink: '#1F140C' },
-  fairy:    { bg: '#C24F87', bg2: '#7A2752', pastel: '#F1D0DF', ink: '#3D0F2A' },
-  fighting: { bg: '#A82420', bg2: '#5C100D', pastel: '#EDCDCC', ink: '#2A0907' },
-  poison:   { bg: '#8A2E89', bg2: '#4D154B', pastel: '#E0CADF', ink: '#290D29' },
-  ground:   { bg: '#A87E27', bg2: '#5F4710', pastel: '#E8DABF', ink: '#2D1F08' },
-  rock:     { bg: '#897925', bg2: '#544811', pastel: '#E1D9B5', ink: '#241D08' },
-  bug:      { bg: '#7A8810', bg2: '#414A06', pastel: '#DDE2B5', ink: '#1F2305' },
-  ghost:    { bg: '#5A4378', bg2: '#332343', pastel: '#D6CDDF', ink: '#1A1126' },
-  steel:    { bg: '#566677', bg2: '#2C3645', pastel: '#D6DCE3', ink: '#15202B' },
-  normal:   { bg: '#6E6E48', bg2: '#3F3F26', pastel: '#DDDDC9', ink: '#1F1F0E' },
-  flying:   { bg: '#5848B6', bg2: '#2E2473', pastel: '#D0CCEC', ink: '#180F4A' },
+//   bg      — saturated type colour, used for borders / icons / accents
+//   bg2     — deeper saturated type colour, for value highlights and headers
+//   bgLight — bg mixed with white ~50%, for label text on slate panels
+//             (saturated tc.bg felt heavy on the slate; this reads brighter)
+//   pastel  — type tint for the outer canvas. More saturated than the previous
+//             pass — was washed-out off-white, now reads as a real type colour
+//             at low intensity.
+//   ink     — dark text colour tuned to the type, mostly the same dark navy
+const TYPE_COLORS: Record<string, { bg: string; bg2: string; bgLight: string; pastel: string; ink: string }> = {
+  fire:     { bg: '#E07623', bg2: '#A04D14', bgLight: '#F0BB91', pastel: '#FCC79C', ink: '#3A1A05' },
+  water:    { bg: '#3F76D9', bg2: '#22458C', bgLight: '#9FBBEC', pastel: '#ACC2EE', ink: '#0F2347' },
+  grass:    { bg: '#3FA224', bg2: '#225A11', bgLight: '#9FD192', pastel: '#AEDCA0', ink: '#10330A' },
+  electric: { bg: '#C28B0A', bg2: '#7A5A04', bgLight: '#E1C585', pastel: '#EBD387', ink: '#3A2A02' },
+  psychic:  { bg: '#DC2A6C', bg2: '#8C1644', bgLight: '#EE95B6', pastel: '#F4A6BD', ink: '#3D0A1F' },
+  ice:      { bg: '#3D9C99', bg2: '#1F5F5D', bgLight: '#9ECECC', pastel: '#A6D5D2', ink: '#0E2C2B' },
+  dragon:   { bg: '#5C25E0', bg2: '#321485', bgLight: '#AE92F0', pastel: '#B299F4', ink: '#1A0A4A' },
+  dark:     { bg: '#5A4234', bg2: '#2D1F18', bgLight: '#ACA19A', pastel: '#BFB1A8', ink: '#1F140C' },
+  fairy:    { bg: '#C24F87', bg2: '#7A2752', bgLight: '#E1A7C3', pastel: '#E5A8C2', ink: '#3D0F2A' },
+  fighting: { bg: '#A82420', bg2: '#5C100D', bgLight: '#D49290', pastel: '#DEA3A1', ink: '#2A0907' },
+  poison:   { bg: '#8A2E89', bg2: '#4D154B', bgLight: '#C597C4', pastel: '#C8A1C7', ink: '#290D29' },
+  ground:   { bg: '#A87E27', bg2: '#5F4710', bgLight: '#D4BF93', pastel: '#D8C290', ink: '#2D1F08' },
+  rock:     { bg: '#897925', bg2: '#544811', bgLight: '#C4BC92', pastel: '#C9BD89', ink: '#241D08' },
+  bug:      { bg: '#7A8810', bg2: '#414A06', bgLight: '#BDC488', pastel: '#C2CC8A', ink: '#1F2305' },
+  ghost:    { bg: '#5A4378', bg2: '#332343', bgLight: '#ACA1BC', pastel: '#B6A8C8', ink: '#1A1126' },
+  steel:    { bg: '#566677', bg2: '#2C3645', bgLight: '#ABB3BB', pastel: '#ACBAC7', ink: '#15202B' },
+  normal:   { bg: '#6E6E48', bg2: '#3F3F26', bgLight: '#B7B7A4', pastel: '#B7B79A', ink: '#1F1F0E' },
+  flying:   { bg: '#5848B6', bg2: '#2E2473', bgLight: '#ACA4DB', pastel: '#A89FDB', ink: '#180F4A' },
 }
 
 const STAT_LABEL: Record<string, string> = {
@@ -100,7 +103,7 @@ export default function PokemonInsightCard({
 
   const types: string[] = pokeData.types.map((t: any) => t.type.name)
   const primaryType = types[0]
-  const tc = TYPE_COLORS[primaryType] ?? { bg: '#3b8fe8', bg2: '#1a5fad', pastel: '#D9E5F5', ink: '#0F2347' }
+  const tc = TYPE_COLORS[primaryType] ?? { bg: '#3b8fe8', bg2: '#1a5fad', bgLight: '#A4C5EE', pastel: '#A8C2EC', ink: '#0F2347' }
   const stats = pokeData.stats.map((s: any) => ({ name: s.stat.name, value: s.base_stat }))
   const totalStats = stats.reduce((sum: number, s: any) => sum + s.value, 0)
   const dexNumber = String(pokeData.id).padStart(3, '0')
@@ -178,6 +181,20 @@ export default function PokemonInsightCard({
           position: 'absolute',
           inset: 0,
           background: 'radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,0.15) 100%)',
+          pointerEvents: 'none',
+          zIndex: 1,
+        }}
+      />
+
+      {/* Highlight glow behind the artwork — bright soft halo at ~50% x, 30% y
+          where the Pokémon image sits in the hero band. Adds depth and a
+          subtle stage-light effect without touching the rest of the layout. */}
+      <div
+        aria-hidden
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'radial-gradient(circle at 50% 30%, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.18) 18%, transparent 40%)',
           pointerEvents: 'none',
           zIndex: 1,
         }}
@@ -369,9 +386,9 @@ export default function PokemonInsightCard({
           gap: 16,
           color: '#fff',
         }}>
-          <BigStat big={String(cards.length)}    small="Total Cards"    accent={tc.bg} ink="#fff" />
-          <BigStat big={String(uniqueSetCount)}  small="Sets Featured"  accent={tc.bg} ink="#fff" />
-          <BigStat big={headerStat}              small={headerStatLabel} accent={tc.bg} ink="#fff" />
+          <BigStat big={String(cards.length)}    small="Total Cards"    accent={tc.bgLight} ink="#fff" />
+          <BigStat big={String(uniqueSetCount)}  small="Sets Featured"  accent={tc.bgLight} ink="#fff" />
+          <BigStat big={headerStat}              small={headerStatLabel} accent={tc.bgLight} ink="#fff" />
         </div>
       </div>
 
@@ -443,7 +460,7 @@ export default function PokemonInsightCard({
             <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
               <div style={{
                 fontSize: 13, fontWeight: 900, letterSpacing: 2.5,
-                color: tc.bg, textTransform: 'uppercase',
+                color: tc.bgLight, textTransform: 'uppercase',
                 whiteSpace: 'nowrap',
                 textShadow: 'none',
               }}>
@@ -472,14 +489,14 @@ export default function PokemonInsightCard({
               <div style={{
                 fontSize: 44, fontWeight: 900,
                 fontFamily: "'Outfit', sans-serif", lineHeight: 1,
-                color: tc.bg,
+                color: tc.bgLight,
                 letterSpacing: -1,
                 textShadow: '0 2px 6px rgba(0,0,0,0.35)',
               }}>
                 {fmtPrice(featuredPrice)}
               </div>
               <div style={{
-                fontSize: 14, fontWeight: 800, color: tc.bg, opacity: 0.95,
+                fontSize: 14, fontWeight: 800, color: tc.bgLight, opacity: 0.95,
                 letterSpacing: 1.5, textTransform: 'uppercase', marginTop: 6,
                 textShadow: 'none',
               }}>
