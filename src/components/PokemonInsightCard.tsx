@@ -115,10 +115,18 @@ export default function PokemonInsightCard({
   const headerStat = featured ? fmtPrice(featuredPrice) : '—'
   const headerStatLabel = featured ? `Max ${featuredGrade}` : 'Max value'
 
-  // Auto-scale display name. ~25% larger than the previous pass overall;
-  // long names still shrink so they fit on one line.
+  // Auto-scale display name to fit the 480px left column without showing
+  // an ellipsis. Granular breakpoints because the previous pass had a big
+  // gap (10 -> 118) that broke 9-letter names like Wartortle, Bulbasaur,
+  // Charizard. Average glyph advance at the chosen sizes is ~55-65px so
+  // 9 chars × 55 ≈ 495 still fits at 92px.
   const nameLen = displayName.length
-  const nameSize = nameLen > 14 ? 78 : nameLen > 10 ? 100 : 118
+  const nameSize =
+      nameLen <= 6  ? 118
+    : nameLen <= 8  ? 108
+    : nameLen <= 10 ? 92
+    : nameLen <= 13 ? 78
+    :                 64
 
   // Section heights — total = 1080
   const H_HEADER  = 90
@@ -311,8 +319,11 @@ export default function PokemonInsightCard({
               color: '#fff',
               lineHeight: 0.92,
               whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
+              // No textOverflow: 'ellipsis'. The granular nameSize picks an
+              // appropriate font for the character count, so we shouldn't
+              // need to clip — and "Wart..." looks worse than just letting
+              // a very long edge-case name extend slightly.
+              overflow: 'visible',
             }}>
               {displayName}
             </h1>
@@ -531,16 +542,14 @@ export default function PokemonInsightCard({
             </div>
             <div style={{
               // Fixed width so both children right-align to the same edge.
-              // textAlign:right alone wasn't reliable because the negative
-              // letterSpacing on the price was pulling its glyph bounds past
-              // the column's right edge, while PSA 10 (with positive letter-
-              // spacing) sat short of it. Making the column a fixed width
-              // and right-aligning text within it removes the ambiguity.
-              width: 168,
+              // paddingRight bumped 4 -> 18 so the price block sits visibly
+              // inset from the panel's right edge instead of pressing
+              // against it.
+              width: 180,
               textAlign: 'right',
               flexShrink: 0,
               whiteSpace: 'nowrap',
-              paddingRight: 4,
+              paddingRight: 18,
               boxSizing: 'border-box',
             }}>
               <div style={{
