@@ -176,16 +176,17 @@ export default function PokemonInsightCard({
         }}
       />
 
-      {/* Cyan glow halo behind the Pokémon (right side of hero, around y=300) */}
+      {/* Cyan glow halo behind the Pokémon — boosted opacity so it actually
+          shows through the saturated canvas. Sized ~120% of artwork. */}
       <div
         aria-hidden
         style={{
           position: 'absolute',
-          top: 130, right: 30,
-          width: 480, height: 480,
+          top: 110, right: 10,
+          width: 560, height: 560,
           borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(0,200,255,0.30) 0%, rgba(0,200,255,0.10) 35%, transparent 65%)',
-          filter: 'blur(40px)',
+          background: 'radial-gradient(circle, rgba(0,210,255,0.55) 0%, rgba(120,230,255,0.28) 30%, rgba(0,210,255,0.08) 55%, transparent 75%)',
+          filter: 'blur(36px)',
           pointerEvents: 'none',
           zIndex: 1,
         }}
@@ -209,6 +210,24 @@ export default function PokemonInsightCard({
         <circle cx="50" cy="50" r="14" fill="none" stroke="#fff" strokeWidth="3" />
         <circle cx="50" cy="50" r="7"  fill="none" stroke="#fff" strokeWidth="3" />
       </svg>
+
+      {/* FLOATING POKÉMON ARTWORK — positioned absolutely at the root canvas
+          (rather than inside the hero) so the bottom can overlap slightly
+          into the collector-stats panel. zIndex stacks above the panel. */}
+      <img
+        crossOrigin="anonymous"
+        src={artworkUrl}
+        alt={displayName}
+        style={{
+          position: 'absolute',
+          top: 110, right: 28,
+          width: 480, height: 480,
+          objectFit: 'contain',
+          filter: 'drop-shadow(0 22px 50px rgba(0,0,0,0.55)) drop-shadow(0 0 24px rgba(0,210,255,0.20))',
+          zIndex: 4,
+          pointerEvents: 'none',
+        }}
+      />
 
       {/* HEADER */}
       <div style={{
@@ -259,144 +278,121 @@ export default function PokemonInsightCard({
         </div>
       </div>
 
-      {/* HERO — type chips + dex info on left, big artwork on right.
-          Name + genus span the full width below. */}
+      {/* HERO — left column has the name + chips + dex info packed top-to-
+          bottom; the right column is empty because the floating artwork
+          (rendered at root above) overlays it. No more dead vertical space
+          between the chip and the dex info. */}
       <div style={{
         position: 'relative', zIndex: 2,
-        padding: '12px 48px 0',
+        padding: '14px 0 0 52px',
         display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
+        flexDirection: 'row',
+        height: '100%',
+        boxSizing: 'border-box',
       }}>
+        {/* LEFT — name + chips + dex info, stacked tightly from top */}
         <div style={{
+          width: 480,
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 16,
-          height: 320,
+          flexDirection: 'column',
+          gap: 22,
+          paddingRight: 16,
         }}>
-          {/* LEFT — type chips (top) + dex info (bottom), stacked */}
+          {/* Name + genus */}
+          <div>
+            <h1 style={{
+              fontFamily: "'Outfit', sans-serif",
+              fontSize: nameSize,
+              fontWeight: 900,
+              letterSpacing: -2.5,
+              margin: 0,
+              textTransform: 'capitalize',
+              textShadow: '0 6px 22px rgba(0,0,0,0.55), 0 2px 0 rgba(0,0,0,0.35)',
+              color: '#fff',
+              lineHeight: 0.92,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}>
+              {displayName}
+            </h1>
+            {genus && (
+              <div style={{
+                fontSize: 19, fontStyle: 'italic',
+                color: tc.bgLight,
+                marginTop: 8, fontWeight: 700,
+                whiteSpace: 'nowrap',
+                letterSpacing: 0.5,
+                textShadow: '0 1px 3px rgba(0,0,0,0.45)',
+              }}>
+                The {genus}
+              </div>
+            )}
+          </div>
+
+          {/* Type chips — horizontal flex so single chips don't stretch */}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            {types.map(t => {
+              const ttc = TYPE_COLORS[t] ?? tc
+              return (
+                <div key={t} style={{
+                  background: ttc.bg,
+                  color: '#fff',
+                  padding: '10px 26px',
+                  borderRadius: 999,
+                  fontSize: 18, fontWeight: 900,
+                  textTransform: 'uppercase', letterSpacing: 2,
+                  textAlign: 'center', whiteSpace: 'nowrap',
+                  boxShadow: `0 0 18px ${ttc.bg}AA, inset 0 1px 2px rgba(255,255,255,0.40), inset 0 -2px 4px rgba(0,0,0,0.25)`,
+                  border: '1px solid rgba(255,255,255,0.22)',
+                  textShadow: '0 1px 2px rgba(0,0,0,0.40)',
+                }}>
+                  {t}
+                </div>
+              )
+            })}
+            {isLegendary && (
+              <div style={{
+                background: GOLD, color: '#3a2900',
+                padding: '10px 22px', borderRadius: 999,
+                fontSize: 16, fontWeight: 900,
+                textTransform: 'uppercase', letterSpacing: 1.6,
+                textAlign: 'center', whiteSpace: 'nowrap',
+                boxShadow: `0 0 18px ${GOLD}99, inset 0 1px 2px rgba(255,255,255,0.55)`,
+                textShadow: 'none',
+              }}>
+                ★ Legendary
+              </div>
+            )}
+            {isMythical && (
+              <div style={{
+                background: '#C77DFF', color: '#fff',
+                padding: '10px 22px', borderRadius: 999,
+                fontSize: 16, fontWeight: 900,
+                textTransform: 'uppercase', letterSpacing: 1.6,
+                textAlign: 'center', whiteSpace: 'nowrap',
+                boxShadow: '0 0 18px rgba(199,125,255,0.65), inset 0 1px 2px rgba(255,255,255,0.32)',
+                textShadow: '0 1px 2px rgba(0,0,0,0.35)',
+              }}>
+                ✦ Mythical
+              </div>
+            )}
+          </div>
+
+          {/* Dex info — packed tight, no more dead space */}
           <div style={{
-            width: 260, height: '100%',
             display: 'flex',
             flexDirection: 'column',
-            justifyContent: 'space-between',
-            gap: 12,
+            gap: 14,
           }}>
-            {/* Type pills */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {types.map(t => {
-                const ttc = TYPE_COLORS[t] ?? tc
-                return (
-                  <div key={t} style={{
-                    background: ttc.bg,
-                    color: '#fff',
-                    padding: '11px 22px',
-                    borderRadius: 999,
-                    fontSize: 18, fontWeight: 900,
-                    textTransform: 'uppercase', letterSpacing: 2,
-                    textAlign: 'center', whiteSpace: 'nowrap',
-                    boxShadow: `0 0 16px ${ttc.bg}88, inset 0 1px 2px rgba(255,255,255,0.32), inset 0 -2px 4px rgba(0,0,0,0.22)`,
-                    border: '1px solid rgba(255,255,255,0.18)',
-                    textShadow: '0 1px 2px rgba(0,0,0,0.35)',
-                  }}>
-                    {t}
-                  </div>
-                )
-              })}
-              {isLegendary && (
-                <div style={{
-                  background: GOLD, color: '#3a2900',
-                  padding: '11px 22px', borderRadius: 999,
-                  fontSize: 16, fontWeight: 900,
-                  textTransform: 'uppercase', letterSpacing: 1.6,
-                  textAlign: 'center', whiteSpace: 'nowrap',
-                  boxShadow: `0 0 16px ${GOLD}77, inset 0 1px 2px rgba(255,255,255,0.45)`,
-                  textShadow: 'none',
-                }}>
-                  ★ Legendary
-                </div>
-              )}
-              {isMythical && (
-                <div style={{
-                  background: '#C77DFF', color: '#fff',
-                  padding: '11px 22px', borderRadius: 999,
-                  fontSize: 16, fontWeight: 900,
-                  textTransform: 'uppercase', letterSpacing: 1.6,
-                  textAlign: 'center', whiteSpace: 'nowrap',
-                  boxShadow: '0 0 16px rgba(199,125,255,0.55), inset 0 1px 2px rgba(255,255,255,0.32)',
-                  textShadow: '0 1px 2px rgba(0,0,0,0.35)',
-                }}>
-                  ✦ Mythical
-                </div>
-              )}
-            </div>
-
-            {/* Dex info — height/weight/ability stacked under chips */}
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 12,
-            }}>
-              <InfoBlock label="Height" value={`${heightM}m`} />
-              <InfoBlock label="Weight" value={`${weightKg}kg`} />
-              <InfoBlock label="Ability" value={primaryAbility} />
-            </div>
-          </div>
-
-          {/* RIGHT — big artwork. The cyan glow div above sits behind. */}
-          <div style={{
-            flex: 1,
-            height: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'flex-end',
-            paddingRight: 4,
-          }}>
-            <img
-              crossOrigin="anonymous"
-              src={artworkUrl}
-              alt={displayName}
-              style={{
-                width: 380, height: 380, objectFit: 'contain',
-                filter: 'drop-shadow(0 18px 40px rgba(0,0,0,0.55))',
-                display: 'block',
-                flexShrink: 0,
-              }}
-            />
+            <InfoBlock label="Height"  value={`${heightM}m`} />
+            <InfoBlock label="Weight"  value={`${weightKg}kg`} />
+            <InfoBlock label="Ability" value={primaryAbility} />
           </div>
         </div>
 
-        {/* Name + genus, centred under the row */}
-        <div style={{ textAlign: 'center', marginTop: 6 }}>
-          <h1 style={{
-            fontFamily: "'Outfit', sans-serif",
-            fontSize: nameSize,
-            fontWeight: 900,
-            letterSpacing: -2.5,
-            margin: 0,
-            textTransform: 'capitalize',
-            textShadow: '0 4px 18px rgba(0,0,0,0.45), 0 0 1px rgba(0,0,0,0.5)',
-            color: '#fff',
-            lineHeight: 0.95,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}>
-            {displayName}
-          </h1>
-          {genus && (
-            <div style={{
-              fontSize: 20, fontStyle: 'italic',
-              color: '#fff', opacity: 0.7,
-              marginTop: 6, fontWeight: 600,
-              whiteSpace: 'nowrap',
-              textShadow: '0 1px 3px rgba(0,0,0,0.45)',
-            }}>
-              The {genus}
-            </div>
-          )}
-        </div>
+        {/* RIGHT — empty placeholder; artwork is the floating element above */}
+        <div style={{ flex: 1 }} />
       </div>
 
       {/* COLLECTOR STATS panel — slate, big shadow, faint white border */}
