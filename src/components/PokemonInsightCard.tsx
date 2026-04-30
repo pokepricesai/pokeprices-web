@@ -72,15 +72,18 @@ function proxyImg(url: string | null): string | null {
   return `/api/imgproxy?url=${encodeURIComponent(url)}`
 }
 
-// Card-look surface shared across all panels: white with subtle shadow
-// and a tint of the type colour at the border. Reads cleanly on the
-// pastel background.
+// Card-look surface shared across all panels: a mid-dark slate that's
+// noticeably NOT white (the previous version washed out against the
+// pastel canvas) but also nowhere near "black bars". White text reads
+// crisp; type-coloured accents on the labels keep it on-brand.
+const PANEL_BG = 'rgba(45, 49, 66, 0.94)'
+
 function panelStyle(bg: string): React.CSSProperties {
   return {
-    background: 'rgba(255,255,255,0.85)',
-    border: `2px solid ${bg}33`,
+    background: PANEL_BG,
+    border: `2px solid ${bg}55`,
     borderRadius: 22,
-    boxShadow: '0 6px 24px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.05)',
+    boxShadow: '0 8px 28px rgba(0,0,0,0.18), 0 1px 3px rgba(0,0,0,0.08)',
   }
 }
 
@@ -336,7 +339,7 @@ export default function PokemonInsightCard({
         </div>
       </div>
 
-      {/* COLLECTOR STATS panel — white card, type-coloured border */}
+      {/* COLLECTOR STATS panel — slate card, white numbers, type-coloured labels */}
       <div style={{
         position: 'relative', zIndex: 2,
         padding: '0 52px',
@@ -350,11 +353,11 @@ export default function PokemonInsightCard({
           display: 'grid',
           gridTemplateColumns: '1fr 1fr 1fr',
           gap: 16,
-          color: tc.ink,
+          color: '#fff',
         }}>
-          <BigStat big={String(cards.length)}    small="Total Cards"    accent={tc.bg2} ink={tc.ink} />
-          <BigStat big={String(uniqueSetCount)}  small="Sets Featured"  accent={tc.bg2} ink={tc.ink} />
-          <BigStat big={headerStat}              small={headerStatLabel} accent={tc.bg2} ink={tc.ink} />
+          <BigStat big={String(cards.length)}    small="Total Cards"    accent={tc.bg} ink="#fff" />
+          <BigStat big={String(uniqueSetCount)}  small="Sets Featured"  accent={tc.bg} ink="#fff" />
+          <BigStat big={headerStat}              small={headerStatLabel} accent={tc.bg} ink="#fff" />
         </div>
       </div>
 
@@ -393,13 +396,13 @@ export default function PokemonInsightCard({
         </div>
       </div>
 
-      {/* FEATURED CARD + FOOTER — white card, type-coloured price */}
+      {/* FEATURED CARD + FOOTER — slate band, white text, type-coloured price */}
       <div style={{
         position: 'relative', zIndex: 2,
         padding: '14px 52px 16px',
-        background: 'rgba(255,255,255,0.82)',
-        borderTop: `2px solid ${tc.bg}33`,
-        color: tc.ink,
+        background: PANEL_BG,
+        borderTop: `2px solid ${tc.bg}55`,
+        color: '#fff',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
@@ -418,15 +421,15 @@ export default function PokemonInsightCard({
                 style={{
                   width: 88, height: 122, objectFit: 'contain',
                   borderRadius: 7, flexShrink: 0,
-                  background: '#fff',
-                  boxShadow: '0 6px 18px rgba(0,0,0,0.18)',
+                  background: 'rgba(255,255,255,0.06)',
+                  boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
                 }}
               />
             )}
             <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
               <div style={{
                 fontSize: 13, fontWeight: 900, letterSpacing: 2.5,
-                color: tc.bg2, textTransform: 'uppercase',
+                color: tc.bg, textTransform: 'uppercase',
                 whiteSpace: 'nowrap',
                 textShadow: 'none',
               }}>
@@ -438,13 +441,13 @@ export default function PokemonInsightCard({
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 lineHeight: 1.1,
                 letterSpacing: -0.3,
-                color: tc.ink,
+                color: '#fff',
                 textShadow: 'none',
               }}>
                 {featured.card_name}
               </div>
               <div style={{
-                fontSize: 16, color: tc.ink, opacity: 0.7, marginTop: 5, fontWeight: 600,
+                fontSize: 16, color: 'rgba(255,255,255,0.75)', marginTop: 5, fontWeight: 600,
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 textShadow: 'none',
               }}>
@@ -455,15 +458,14 @@ export default function PokemonInsightCard({
               <div style={{
                 fontSize: 44, fontWeight: 900,
                 fontFamily: "'Outfit', sans-serif", lineHeight: 1,
-                color: tc.bg2,
+                color: tc.bg,
                 letterSpacing: -1,
-                textShadow: 'none',
-                WebkitTextStroke: `1px ${tc.bg2}`,
+                textShadow: '0 2px 6px rgba(0,0,0,0.35)',
               }}>
                 {fmtPrice(featuredPrice)}
               </div>
               <div style={{
-                fontSize: 14, fontWeight: 800, color: tc.bg2, opacity: 0.85,
+                fontSize: 14, fontWeight: 800, color: tc.bg, opacity: 0.95,
                 letterSpacing: 1.5, textTransform: 'uppercase', marginTop: 6,
                 textShadow: 'none',
               }}>
@@ -472,7 +474,7 @@ export default function PokemonInsightCard({
             </div>
           </div>
         ) : (
-          <div style={{ textAlign: 'center', fontSize: 14, color: tc.ink, opacity: 0.7 }}>
+          <div style={{ textAlign: 'center', fontSize: 14, color: 'rgba(255,255,255,0.7)' }}>
             No card price data yet.
           </div>
         )}
@@ -480,7 +482,7 @@ export default function PokemonInsightCard({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          fontSize: 13, color: tc.ink, opacity: 0.55, fontWeight: 700, letterSpacing: 1,
+          fontSize: 13, color: 'rgba(255,255,255,0.65)', fontWeight: 700, letterSpacing: 1,
           whiteSpace: 'nowrap',
           textShadow: 'none',
         }}>
