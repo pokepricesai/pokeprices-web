@@ -481,7 +481,11 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   const ebayUsSold    = buildEbayUrl(card.card_name, card.set_name, card.card_number, 'US', 'sold')
 
   const { logoUrl, symbolUrl } = getSetAssets(card.set_name)
-  const speciesSlug = extractSpeciesSlug(card.card_name)
+  // Prefer the DB-backed primary species slug (set by the backfill against
+  // pokemon_species and exposed via get_card_detail_by_url_slug). Falls back
+  // to the legacy heuristic for cards that haven't been backfilled or for
+  // species the matcher missed (Energy / Trainer / "Nidoran" without gender).
+  const speciesSlug = card.primary_pokemon_slug || extractSpeciesSlug(card.card_name)
   const displayInsight = insight || generateFallbackInsight(card, trend, metrics, psaPop)
 
   // ── Collector Intel tiles ─────────────────────────────────────────────────
