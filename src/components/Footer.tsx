@@ -34,6 +34,7 @@ export default function Footer() {
           { label: 'Pokémon',          href: '/pokemon'   },
           { label: 'Insights',         href: '/insights'  },
           { label: 'Studio',           href: '/studio'    },
+          { label: 'Pokémon Card Shows', href: '/card-shows' },
           { label: 'Creators',         href: '/creators'  },
           { label: 'Vendor Directory', href: '/vendors'   },
           { label: 'Contact',          href: '/contact'   },

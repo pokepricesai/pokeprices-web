@@ -16,13 +16,14 @@ interface SearchResult {
 }
 
 const navLinks = [
-  { label: 'Cards & Sets', href: '/browse'    },
-  { label: 'Pokémon',      href: '/pokemon'   },
-  { label: 'Insights',     href: '/insights'  },
-  { label: 'Studio',       href: '/studio'    },
-  { label: 'Creators',     href: '/creators'  },
-  { label: 'Vendors',      href: '/vendors'   },
-  { label: 'Contact',      href: '/contact'   },
+  { label: 'Cards & Sets', href: '/browse'      },
+  { label: 'Pokémon',      href: '/pokemon'     },
+  { label: 'Insights',     href: '/insights'    },
+  { label: 'Studio',       href: '/studio'      },
+  { label: 'Card Shows',   href: '/card-shows'  },
+  { label: 'Creators',     href: '/creators'    },
+  { label: 'Vendors',      href: '/vendors'     },
+  { label: 'Contact',      href: '/contact'     },
 ]
 
 function formatPrice(cents: number | null) {
