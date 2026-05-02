@@ -112,6 +112,17 @@ export default function DashboardHubClient() {
       colour: '#f59e0b',
     },
     {
+      id: 'card-shows',
+      title: 'Card Show Planner',
+      desc: 'Star upcoming Pokémon card shows + TCG events. Sort by nearest to your city.',
+      href: '/dashboard/card-shows',
+      count: null,
+      countLabel: '',
+      icon: '📍',
+      colour: '#0ea5e9',
+      highlight: false,
+    },
+    {
       id: 'trade',
       title: 'Trade Evaluator',
       desc: 'Build two stacks side-by-side, see fair value with cash / trade / blended modes.',

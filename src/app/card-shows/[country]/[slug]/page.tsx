@@ -8,6 +8,7 @@ import {
   COUNTRY_LABEL,
   type CardShow,
 } from '@/data/cardShows'
+import StarButton from '../../StarButton'
 
 type Country = 'uk' | 'us'
 
@@ -156,12 +157,17 @@ export default async function CardShowDetailPage(
             }}>★ Featured</span>
           )}
         </div>
-        <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 32, margin: '0 0 6px', color: 'var(--text)', letterSpacing: -0.4, lineHeight: 1.15 }}>
-          {show.name}
-        </h1>
-        <p style={{ fontSize: 16, color: 'var(--primary)', fontFamily: "'Figtree', sans-serif", margin: 0, fontWeight: 800 }}>
-          {formatShowDate(show)}
-        </p>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 32, margin: '0 0 6px', color: 'var(--text)', letterSpacing: -0.4, lineHeight: 1.15 }}>
+              {show.name}
+            </h1>
+            <p style={{ fontSize: 16, color: 'var(--primary)', fontFamily: "'Figtree', sans-serif", margin: 0, fontWeight: 800 }}>
+              {formatShowDate(show)}
+            </p>
+          </div>
+          <StarButton showId={show.id} size="lg" />
+        </div>
       </header>
 
       {/* Detail rows */}
