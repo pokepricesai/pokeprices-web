@@ -10,10 +10,10 @@ import {
 } from '@/data/cardShows'
 import StarButton from '../../StarButton'
 
-type Country = 'uk' | 'us'
+type Country = 'uk' | 'us' | 'ca'
 
 function isValidCountry(c: string): c is Country {
-  return c === 'uk' || c === 'us'
+  return c === 'uk' || c === 'us' || c === 'ca'
 }
 
 export async function generateMetadata(
@@ -115,7 +115,7 @@ export default async function CardShowDetailPage(
         color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif",
         textDecoration: 'none', marginBottom: 18,
       }}>
-        ← Back to {country === 'uk' ? 'UK' : 'US'} card shows
+        ← Back to {country === 'uk' ? 'UK' : country === 'ca' ? 'Canada' : 'US'} card shows
       </Link>
 
       {cancelled && (

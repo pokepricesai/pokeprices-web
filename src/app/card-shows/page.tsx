@@ -18,12 +18,12 @@ import {
 export const metadata: Metadata = {
   title: 'Pokémon Card Shows & TCG Events | PokePrices',
   description:
-    'Find upcoming Pokémon card shows, TCG fairs and collector events across the UK and US. Updated event listings for Pokémon card fans and vendors.',
+    'Find upcoming Pokémon card shows, TCG fairs and collector events across the UK, US and Canada. Updated event listings for Pokémon card fans and vendors.',
   alternates: { canonical: 'https://www.pokeprices.io/card-shows' },
   openGraph: {
     title: 'Pokémon Card Shows & TCG Events | PokePrices',
     description:
-      'Find upcoming Pokémon card shows, TCG fairs and collector events across the UK and US.',
+      'Find upcoming Pokémon card shows, TCG fairs and collector events across the UK, US and Canada.',
     url: 'https://www.pokeprices.io/card-shows',
     siteName: 'PokePrices',
     type: 'website',
@@ -35,6 +35,7 @@ export default function CardShowsLandingPage() {
   const featured = getFeaturedCardShows()
   const ukCount = upcoming.filter(s => s.country === 'uk').length
   const usCount = upcoming.filter(s => s.country === 'us').length
+  const caCount = upcoming.filter(s => s.country === 'ca').length
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 24px' }}>
@@ -45,14 +46,15 @@ export default function CardShowsLandingPage() {
           Pokémon Card Shows &amp; TCG Events
         </h1>
         <p style={{ fontSize: 14, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, lineHeight: 1.6, maxWidth: 720 }}>
-          Find upcoming Pokémon card shows, TCG fairs, collector events and trading card conventions across the United Kingdom and the United States.
+          Find upcoming Pokémon card shows, TCG fairs, collector events and trading card conventions across the United Kingdom, United States and Canada.
         </p>
       </header>
 
       {/* Country CTAs */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 36 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14, marginBottom: 36 }}>
         <CountryCta country="uk" count={ukCount} />
         <CountryCta country="us" count={usCount} />
+        <CountryCta country="ca" count={caCount} />
       </div>
 
       {/* Featured */}
@@ -114,8 +116,9 @@ export default function CardShowsLandingPage() {
   )
 }
 
-function CountryCta({ country, count }: { country: 'uk' | 'us'; count: number }) {
-  const flag = country === 'uk' ? '🇬🇧' : '🇺🇸'
+function CountryCta({ country, count }: { country: 'uk' | 'us' | 'ca'; count: number }) {
+  const flag = country === 'uk' ? '🇬🇧' : country === 'ca' ? '🇨🇦' : '🇺🇸'
+  const title = country === 'uk' ? 'UK Card Shows' : country === 'ca' ? 'Canada Card Shows' : 'US Card Shows'
   return (
     <Link href={`/card-shows/${country}`} style={{ textDecoration: 'none' }}>
       <div style={{
@@ -132,7 +135,7 @@ function CountryCta({ country, count }: { country: 'uk' | 'us'; count: number })
         <div style={{ fontSize: 44, lineHeight: 1, flexShrink: 0 }}>{flag}</div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, margin: '0 0 4px', color: 'var(--text)', letterSpacing: -0.3 }}>
-            {country === 'uk' ? 'UK Card Shows' : 'US Card Shows'}
+            {title}
           </h2>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0 }}>
             {count} upcoming event{count === 1 ? '' : 's'} · {COUNTRY_LABEL[country]}

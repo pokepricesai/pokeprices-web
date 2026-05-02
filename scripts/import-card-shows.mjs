@@ -17,7 +17,7 @@
  *   node scripts/import-card-shows.mjs path/to/events.csv > output.ts
  *
  * Validation:
- *   - country must be uk or us (rows with anything else are skipped + logged)
+ *   - country must be uk, us or ca (rows with anything else are skipped + logged)
  *   - startDate, name, city are required
  *   - status defaults to "upcoming"
  *   - lastChecked defaults to today
@@ -128,8 +128,8 @@ for (let i = 0; i < dataRows.length; i++) {
   if (!name)      { errors.push(`Row ${i + 2}: missing name — skipped`); continue }
   if (!city)      { errors.push(`Row ${i + 2}: missing city — skipped`); continue }
   if (!startDate) { errors.push(`Row ${i + 2}: missing startDate — skipped`); continue }
-  if (country !== 'uk' && country !== 'us') {
-    errors.push(`Row ${i + 2}: country must be uk or us, got "${country}" — skipped`)
+  if (country !== 'uk' && country !== 'us' && country !== 'ca') {
+    errors.push(`Row ${i + 2}: country must be uk, us or ca, got "${country}" — skipped`)
     continue
   }
 

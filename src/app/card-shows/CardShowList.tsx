@@ -30,7 +30,7 @@ export default function CardShowList({
 }: {
   shows: CardShow[]
   regions: string[]
-  country: 'uk' | 'us'
+  country: 'uk' | 'us' | 'ca'
 }) {
   // Filters
   const [query, setQuery] = useState('')
@@ -70,7 +70,8 @@ export default function CardShowList({
       // Nominatim: free, no API key, asks for a contact in User-Agent which
       // the browser sends automatically. Country bias the search so "Springfield"
       // stays in the right hemisphere.
-      const cc = country === 'uk' ? 'gb' : 'us'
+      // Nominatim wants ISO 3166-1 alpha-2 — UK is "gb", US is "us", Canada is "ca".
+      const cc = country === 'uk' ? 'gb' : country === 'ca' ? 'ca' : 'us'
       const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1&countrycodes=${cc}`
       const res = await fetch(url, { headers: { 'Accept-Language': 'en' } })
       if (!res.ok) throw new Error('Lookup failed')
@@ -146,7 +147,11 @@ export default function CardShowList({
         <input
           value={locInput}
           onChange={e => setLocInput(e.target.value)}
-          placeholder={country === 'uk' ? 'e.g. Manchester or SW1A 1AA' : 'e.g. Atlanta GA or 90210'}
+          placeholder={
+            country === 'uk' ? 'e.g. Manchester or SW1A 1AA'
+            : country === 'ca' ? 'e.g. Toronto or M5V 2T6'
+            : 'e.g. Atlanta GA or 90210'
+          }
           style={{
             flex: 1, minWidth: 200,
             padding: '8px 12px', fontSize: 13, borderRadius: 10,
@@ -235,7 +240,7 @@ export default function CardShowList({
               show={s}
               country={country}
               distanceKm={s._km ?? null}
-              isUk={country === 'uk'}
+              metric={country === 'uk' || country === 'ca'}
               starred={starredIds.has(s.id)}
               onToggleLocal={(nowStarred: boolean) => {
                 setStarredIds(prev => {
@@ -261,19 +266,19 @@ export default function CardShowList({
 }
 
 function ShowCard({
-  show, country, distanceKm, isUk, starred, onToggleLocal,
+  show, country, distanceKm, metric, starred, onToggleLocal,
 }: {
   show: CardShow
-  country: 'uk' | 'us'
+  country: 'uk' | 'us' | 'ca'
   distanceKm: number | null
-  isUk: boolean
+  metric: boolean
   starred: boolean
   onToggleLocal: (nowStarred: boolean) => void
 }) {
-  // UK shows distance in km, US in miles, because that's what users expect.
+  // Metric (UK + Canada) shows km; US shows miles. That's what users expect.
   const distLabel = distanceKm == null
     ? null
-    : (isUk
+    : (metric
       ? `${Math.round(distanceKm)} km away`
       : `${Math.round(distanceKm * 0.621371)} mi away`)
 

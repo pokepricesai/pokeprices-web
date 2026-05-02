@@ -19,7 +19,7 @@ export interface CardShow {
   id: string
   name: string
   slug: string
-  country: 'uk' | 'us'
+  country: 'uk' | 'us' | 'ca' | 'ca'
   region: string
   city: string
   venue?: string
@@ -895,6 +895,170 @@ export const cardShows: CardShow[] = [
     lastChecked: '2026-05-02',
     status: 'upcoming',
   },
+
+  // ─── Canada ───────────────────────────────────────────────────────────────
+  {
+    id: 'ca-sport-card-expo-toronto-2026-04',
+    name: 'Sport Card Expo Toronto',
+    slug: 'sport-card-expo-toronto-mississauga-2026-04',
+    country: 'ca',
+    region: 'Ontario',
+    city: 'Mississauga',
+    venue: 'The International Centre',
+    address: '6900 Airport Rd, Mississauga, ON',
+    postcode: 'L4V 1E8',
+    startDate: '2026-04-30',
+    endDate: '2026-05-03',
+    eventType: 'mixed',
+    description: "Canada's largest and longest-running show for cards and collectibles. Sports, entertainment and Pokémon / TCG vendors, grading services, and meet-and-greets across four days.",
+    organiserName: 'Sport Card & Memorabilia Expo',
+    websiteUrl: 'https://sportcardexpotoronto.com/',
+    ticketUrl: 'https://sportcardexpotoronto.com/tickets/',
+    instagramUrl: 'https://www.instagram.com/sportcardexpo/',
+    facebookUrl: 'https://www.facebook.com/sportcardexpo/',
+    imageUrl: 'https://sportcardexpotoronto.b-cdn.net/wp-content/uploads/scme-toronto-nav-logo.svg',
+    latitude: 43.6783, longitude: -79.6253,
+    featured: true,
+    lastChecked: '2026-05-02',
+    status: 'upcoming',
+  },
+  {
+    id: 'ca-woodstock-pokemon-tcg-show-2026-05',
+    name: 'Woodstock Pokémon & TCG Show',
+    slug: 'woodstock-pokemon-tcg-show-woodstock-2026-05',
+    country: 'ca',
+    region: 'Ontario',
+    city: 'Woodstock',
+    venue: 'Market/Mutual Buildings, Woodstock Fairgrounds',
+    address: '875 Nellis St, Woodstock, ON',
+    startDate: '2026-05-03',
+    eventType: 'pokemon',
+    description: 'Pokémon and TCG-focused regional show in Woodstock, Ontario. Singles, sealed product, slabs and trade.',
+    organiserName: 'Collector Shows',
+    websiteUrl: 'https://collectorshows.ca/',
+    latitude: 43.1308, longitude: -80.7464,
+    lastChecked: '2026-05-02',
+    status: 'upcoming',
+  },
+  {
+    id: 'ca-vault-card-show-vancouver-2026-05',
+    name: 'The Vault Card Show Vancouver',
+    slug: 'vault-card-show-vancouver-2026-05',
+    country: 'ca',
+    region: 'British Columbia',
+    city: 'Vancouver',
+    startDate: '2026-05-03',
+    eventType: 'card-show',
+    description: 'Vancouver card show featuring Pokémon, sports cards and other TCGs. Buy / sell / trade with local collectors.',
+    organiserName: 'The Vault Card Show',
+    facebookUrl: 'https://www.facebook.com/Thevaultcardshow/',
+    latitude: 49.2827, longitude: -123.1207,
+    lastChecked: '2026-05-02',
+    status: 'upcoming',
+  },
+  {
+    id: 'ca-calgary-sports-card-show-2026-05',
+    name: 'Calgary Sports Card Show',
+    slug: 'calgary-sports-card-show-calgary-2026-05',
+    country: 'ca',
+    region: 'Alberta',
+    city: 'Calgary',
+    venue: 'Thorncliffe Greenview Community Association',
+    startDate: '2026-05-09',
+    eventType: 'card-show',
+    description: "Calgary's biggest card show with 100+ tables. Sports, Pokémon, TCG vendors and on-site dealers.",
+    organiserName: 'Maple Leaf Calgary',
+    facebookUrl: 'https://www.facebook.com/mapleleafcalgary',
+    latitude: 51.0447, longitude: -114.0719,
+    lastChecked: '2026-05-02',
+    status: 'upcoming',
+  },
+  {
+    id: 'ca-expo-cartes-sports-montreal-2026-05',
+    name: 'Expo Cartes Sports Montréal',
+    slug: 'expo-cartes-sports-montreal-laval-2026-05',
+    country: 'ca',
+    region: 'Quebec',
+    city: 'Laval',
+    venue: 'Complexe Multi-Sports de Laval',
+    startDate: '2026-05-15',
+    eventType: 'card-show',
+    description: 'Greater Montréal sports + Pokémon / TCG card expo with regional vendors and dealers.',
+    latitude: 45.6066, longitude: -73.7124,
+    lastChecked: '2026-05-02',
+    status: 'upcoming',
+  },
+  {
+    id: 'ca-london-pokemon-tcg-show-2026-05',
+    name: 'London Pokémon & TCG Show (May)',
+    slug: 'london-pokemon-tcg-show-london-on-2026-05',
+    country: 'ca',
+    region: 'Ontario',
+    city: 'London',
+    venue: 'Centennial Hall',
+    address: '550 Wellington St, London, ON',
+    startDate: '2026-05-18',
+    eventType: 'pokemon',
+    description: 'Victoria Day Monday Pokémon and TCG show at Centennial Hall in London, Ontario. Vendors, singles, sealed and trade.',
+    organiserName: 'Collector Shows',
+    websiteUrl: 'https://collectorshows.ca/',
+    latitude: 42.9849, longitude: -81.2453,
+    lastChecked: '2026-05-02',
+    status: 'upcoming',
+  },
+  {
+    id: 'ca-ancaster-pokemon-tcg-show-2026-06',
+    name: 'Ancaster Pokémon & TCG Show',
+    slug: 'ancaster-pokemon-tcg-show-ancaster-2026-06',
+    country: 'ca',
+    region: 'Ontario',
+    city: 'Ancaster',
+    venue: 'The Ancaster Fairgrounds',
+    startDate: '2026-06-28',
+    eventType: 'pokemon',
+    description: 'Pokémon and TCG show at the Ancaster Fairgrounds with vendors, singles and sealed product.',
+    organiserName: 'Collector Shows',
+    websiteUrl: 'https://collectorshows.ca/',
+    latitude: 43.2189, longitude: -79.9889,
+    lastChecked: '2026-05-02',
+    status: 'upcoming',
+  },
+  {
+    id: 'ca-london-pokemon-tcg-show-2026-07',
+    name: 'London Pokémon & TCG Show (July)',
+    slug: 'london-pokemon-tcg-show-london-on-2026-07',
+    country: 'ca',
+    region: 'Ontario',
+    city: 'London',
+    venue: 'Centennial Hall',
+    address: '550 Wellington St, London, ON',
+    startDate: '2026-07-19',
+    eventType: 'pokemon',
+    description: 'Summer Pokémon and TCG show at Centennial Hall, London ON.',
+    organiserName: 'Collector Shows',
+    websiteUrl: 'https://collectorshows.ca/',
+    latitude: 42.9849, longitude: -81.2453,
+    lastChecked: '2026-05-02',
+    status: 'upcoming',
+  },
+  {
+    id: 'ca-london-pokemon-tcg-show-2026-08',
+    name: 'London Pokémon & TCG Show (August)',
+    slug: 'london-pokemon-tcg-show-london-on-2026-08',
+    country: 'ca',
+    region: 'Ontario',
+    city: 'London',
+    venue: 'Centennial Hall',
+    address: '550 Wellington St, London, ON',
+    startDate: '2026-08-16',
+    eventType: 'pokemon',
+    description: 'Mid-August Pokémon and TCG show at Centennial Hall, London ON.',
+    organiserName: 'Collector Shows',
+    websiteUrl: 'https://collectorshows.ca/',
+    latitude: 42.9849, longitude: -81.2453,
+    lastChecked: '2026-05-02',
+    status: 'upcoming',
+  },
 ]
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -913,13 +1077,13 @@ export function getUpcomingCardShows(): CardShow[] {
   return cardShows.filter(s => isUpcoming(s)).sort(byStartDateAsc)
 }
 
-export function getCardShowsByCountry(country: 'uk' | 'us'): CardShow[] {
+export function getCardShowsByCountry(country: 'uk' | 'us' | 'ca'): CardShow[] {
   return cardShows
     .filter(s => s.country === country && isUpcoming(s))
     .sort(byStartDateAsc)
 }
 
-export function getCardShowBySlug(country: 'uk' | 'us', slug: string): CardShow | null {
+export function getCardShowBySlug(country: 'uk' | 'us' | 'ca', slug: string): CardShow | null {
   return cardShows.find(s => s.country === country && s.slug === slug) ?? null
 }
 
@@ -929,14 +1093,14 @@ export function getFeaturedCardShows(): CardShow[] {
     .sort(byStartDateAsc)
 }
 
-export function getCardShowsByCity(country: 'uk' | 'us', city: string): CardShow[] {
+export function getCardShowsByCity(country: 'uk' | 'us' | 'ca', city: string): CardShow[] {
   const norm = city.trim().toLowerCase()
   return cardShows
     .filter(s => s.country === country && s.city.toLowerCase() === norm && isUpcoming(s))
     .sort(byStartDateAsc)
 }
 
-export function getRegionsForCountry(country: 'uk' | 'us'): string[] {
+export function getRegionsForCountry(country: 'uk' | 'us' | 'ca'): string[] {
   const set = new Set<string>()
   for (const s of cardShows) {
     if (s.country === country && isUpcoming(s) && s.region) set.add(s.region)
@@ -985,4 +1149,5 @@ export const EVENT_TYPE_LABEL: Record<CardShow['eventType'], string> = {
 export const COUNTRY_LABEL: Record<CardShow['country'], string> = {
   uk: 'United Kingdom',
   us: 'United States',
+  ca: 'Canada',
 }
