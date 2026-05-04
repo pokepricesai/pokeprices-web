@@ -8,6 +8,7 @@ import CardStructuredData from '@/components/CardStructuredData'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import CardQuickActions from '@/components/CardQuickActions'
 import FAQ from '@/components/FAQ'
+import EbayLiveListings from '@/components/EbayLiveListings'
 import { getCardFaqItems } from '@/lib/faqs'
 import { getSetAssets } from '@/lib/setAssets'
 
@@ -45,20 +46,9 @@ function extractVariant(cardName: string): string | null {
   return match ? match[1] : null
 }
 
-function buildEbayUrl(cardName: string, setName: string, cardNumber: string | null, region: 'UK' | 'US', mode: 'sold' | 'forsale') {
+function buildEbaySearchQuery(cardName: string, setName: string, cardNumber: string | null) {
   const numberSuffix = cardNumber && !cardName.includes(`#${cardNumber}`) ? ` #${cardNumber}` : ''
-  const q = encodeURIComponent(`${cardName}${numberSuffix} ${setName} pokemon card`)
-  if (region === 'UK') {
-    const base = 'https://www.ebay.co.uk/sch/i.html'
-    return mode === 'sold'
-      ? `${base}?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sacat=2536`
-      : `${base}?_nkw=${q}&LH_BIN=1&_sacat=2536`
-  } else {
-    const base = 'https://www.ebay.com/sch/i.html'
-    return mode === 'sold'
-      ? `${base}?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sacat=2536`
-      : `${base}?_nkw=${q}&LH_BIN=1&_sacat=2536`
-  }
+  return `${cardName}${numberSuffix} ${setName} pokemon card`
 }
 
 function extractSpeciesSlug(cardName: string): string | null {
@@ -233,17 +223,6 @@ function Panel({ children, style = {} }: { children: React.ReactNode; style?: Re
     <div style={{ background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)', padding: '18px 20px', marginTop: 20, ...style }}>
       {children}
     </div>
-  )
-}
-
-function EbayButton({ href, label, flag, variant = 'secondary' }: { href: string; label: string; flag: string; variant?: 'primary' | 'secondary' }) {
-  return (
-    <a href={href} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 10, textDecoration: 'none', fontSize: 12, fontWeight: 700, fontFamily: "'Figtree', sans-serif", border: '1px solid var(--border)', background: variant === 'primary' ? 'var(--primary)' : 'var(--bg-light)', color: variant === 'primary' ? '#fff' : 'var(--text)', whiteSpace: 'nowrap', transition: 'opacity 0.15s' }}
-      onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.opacity = '0.8' }}
-      onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.opacity = '1' }}
-    >
-      <span style={{ fontSize: 13 }}>{flag}</span>{label}
-    </a>
   )
 }
 
@@ -475,10 +454,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   const numberForMessage = cardNumberFormatted ? ` ${cardNumberFormatted}` : ''
   const prefillMessage = `I'm looking at ${card.card_name}${numberForMessage} from ${card.set_name}`
 
-  const ebayUkForSale = buildEbayUrl(card.card_name, card.set_name, card.card_number, 'UK', 'forsale')
-  const ebayUkSold    = buildEbayUrl(card.card_name, card.set_name, card.card_number, 'UK', 'sold')
-  const ebayUsForSale = buildEbayUrl(card.card_name, card.set_name, card.card_number, 'US', 'forsale')
-  const ebayUsSold    = buildEbayUrl(card.card_name, card.set_name, card.card_number, 'US', 'sold')
+  const ebaySearchQuery = buildEbaySearchQuery(card.card_name, card.set_name, card.card_number)
 
   const { logoUrl, symbolUrl } = getSetAssets(card.set_name)
   // Prefer the DB-backed primary species slug (set by the backfill against
@@ -792,27 +768,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
 
       {/* eBay Search */}
       <Panel>
-        <SectionLabel>Search eBay</SectionLabel>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
-          <div>
-            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-muted)', marginBottom: 7, fontFamily: "'Figtree', sans-serif" }}>🇬🇧 eBay UK</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <EbayButton href={ebayUkForSale} label="For Sale"      flag="🛒" variant="primary" />
-              <EbayButton href={ebayUkSold}    label="Sold Listings" flag="✅" />
-            </div>
-          </div>
-          <div style={{ width: 1, background: 'var(--border)', alignSelf: 'stretch', margin: '0 4px' }} />
-          <div>
-            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-muted)', marginBottom: 7, fontFamily: "'Figtree', sans-serif" }}>🇺🇸 eBay US</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <EbayButton href={ebayUsForSale} label="For Sale"      flag="🛒" variant="primary" />
-              <EbayButton href={ebayUsSold}    label="Sold Listings" flag="✅" />
-            </div>
-          </div>
-        </div>
-        <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '12px 0 0', fontFamily: "'Figtree', sans-serif" }}>
-          Opens eBay pre-searched for this card. Always verify the listing matches before buying.
-        </p>
+        <EbayLiveListings searchQuery={ebaySearchQuery} customId={card.card_slug} />
       </Panel>
 
       {/* Live Deals / Listings */}
