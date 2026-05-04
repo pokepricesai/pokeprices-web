@@ -8,7 +8,8 @@ import { getSetAssets } from '@/lib/setAssets'
 import SetStructuredData from '@/components/SetStructuredData'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import FAQ from '@/components/FAQ'
-import EbayLiveListings from '@/components/EbayLiveListings'
+import EbayLiveListings, { EbayInlineLink } from '@/components/EbayLiveListings'
+import { buildCardEbayQuery } from '@/lib/ebayAffiliate'
 import { getSetFaqItems } from '@/lib/faqs'
 
 interface Card {
@@ -25,6 +26,7 @@ interface Card {
 }
 
 interface TrendCard {
+  card_slug: string
   card_name: string
   card_url_slug: string | null
   raw_usd: number
@@ -79,13 +81,15 @@ function Panel({ children, style = {} }: { children: React.ReactNode; style?: Re
 
 function MoverRow({ card, setName, positive }: { card: TrendCard; setName: string; positive: boolean }) {
   const href = card.card_url_slug ? `/set/${encodeURIComponent(setName)}/card/${card.card_url_slug}` : '#'
+  const ebayQuery = buildCardEbayQuery(card.card_name, setName, null)
+  const ebayCustomId = `mover-${(card.card_slug || '').toString().replace(/^pc-/, '') || card.card_url_slug || ''}`
   return (
-    <Link href={href} style={{ textDecoration: 'none' }}>
-      <div
-        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 6px', borderRadius: 8, transition: 'background 0.15s' }}
-        onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-light)' }}
-        onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
-      >
+    <div
+      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 8, transition: 'background 0.15s' }}
+      onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-light)' }}
+      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
+    >
+      <Link href={href} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
         {card.image_url
           ? <img src={card.image_url} alt={card.card_name} style={{ width: 26, height: 36, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
           : <div style={{ width: 26, height: 36, background: 'var(--bg)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, flexShrink: 0, color: 'var(--border)' }}>🃏</div>}
@@ -103,8 +107,9 @@ function MoverRow({ card, setName, positive }: { card: TrendCard; setName: strin
             {card.raw_pct_30d > 0 ? '+' : ''}{card.raw_pct_30d.toFixed(1)}%
           </span>
         )}
-      </div>
-    </Link>
+      </Link>
+      <EbayInlineLink searchQuery={ebayQuery} customId={ebayCustomId} />
+    </div>
   )
 }
 
@@ -296,6 +301,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
             return vol && vol.sales_30d >= 1
           })
           .map((t: any) => ({
+            card_slug: t.card_slug,
             card_name: t.card_name,
             card_url_slug: imgMap[t.card_slug]?.card_url_slug ?? null,
             raw_usd: t.current_raw / 100,

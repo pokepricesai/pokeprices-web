@@ -14,7 +14,8 @@ import Link from 'next/link'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import PokemonStructuredData from '@/components/PokemonStructuredData'
 import FAQ from '@/components/FAQ'
-import EbayLiveListings from '@/components/EbayLiveListings'
+import EbayLiveListings, { EbayInlineLink } from '@/components/EbayLiveListings'
+import { buildCardEbayQuery } from '@/lib/ebayAffiliate'
 import { getPokemonFaqItems } from '@/lib/faqs'
 import SpeciesInteractiveSection from './SpeciesInteractiveSection'
 import DossierButton from './DossierButton'
@@ -725,25 +726,32 @@ function MoverPanel({ title, cards, positive }: { title: string; cards: CardRow[
         {title}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {cards.map(c => (
-          <Link key={c.card_slug} href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`}
-            style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 10 }}>
-            {c.image_url
-              ? <img src={c.image_url} alt={c.card_name} style={{ width: 30, height: 42, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
-              : <div style={{ width: 30, height: 42, background: 'var(--bg-light)', borderRadius: 3, flexShrink: 0 }} />}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {c.card_name}
-              </div>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-                {c.set_name}
-              </div>
+        {cards.map(c => {
+          const ebayQuery = buildCardEbayQuery(c.card_name, c.set_name, c.card_number ?? null)
+          const ebayCustomId = `mover-${(c.card_slug || '').toString().replace(/^pc-/, '')}`
+          return (
+            <div key={c.card_slug} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Link href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`}
+                style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+                {c.image_url
+                  ? <img src={c.image_url} alt={c.card_name} style={{ width: 30, height: 42, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
+                  : <div style={{ width: 30, height: 42, background: 'var(--bg-light)', borderRadius: 3, flexShrink: 0 }} />}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {c.card_name}
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+                    {c.set_name}
+                  </div>
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 800, color: accent, fontFamily: "'Figtree', sans-serif" }}>
+                  {c.raw_pct_30d != null ? `${c.raw_pct_30d > 0 ? '+' : ''}${c.raw_pct_30d.toFixed(1)}%` : '—'}
+                </div>
+              </Link>
+              <EbayInlineLink searchQuery={ebayQuery} customId={ebayCustomId} />
             </div>
-            <div style={{ fontSize: 12, fontWeight: 800, color: accent, fontFamily: "'Figtree', sans-serif" }}>
-              {c.raw_pct_30d != null ? `${c.raw_pct_30d > 0 ? '+' : ''}${c.raw_pct_30d.toFixed(1)}%` : '—'}
-            </div>
-          </Link>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

@@ -59,6 +59,46 @@ export default function EbayLiveListings({
   )
 }
 
+// Compact, single-link variant for inline use inside dense rows (top movers,
+// risers, fallers). Defaults to UK since the site is UK-focused.
+export function EbayInlineLink({
+  searchQuery,
+  customId,
+  label = 'See listings →',
+}: {
+  searchQuery: string
+  customId: string
+  label?: string
+}) {
+  const url = getEbayUkUrl(searchQuery, customId)
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="sponsored noopener noreferrer"
+      style={{
+        fontSize: 10,
+        color: 'var(--text-muted)',
+        textDecoration: 'none',
+        fontFamily: "'Figtree', sans-serif",
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+        padding: '2px 4px',
+      }}
+      onMouseEnter={e => {
+        ;(e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline'
+        ;(e.currentTarget as HTMLAnchorElement).style.color = 'var(--text)'
+      }}
+      onMouseLeave={e => {
+        ;(e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none'
+        ;(e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-muted)'
+      }}
+    >
+      {label}
+    </a>
+  )
+}
+
 function RegionButton({
   href,
   flag,
