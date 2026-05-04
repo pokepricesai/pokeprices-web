@@ -8,6 +8,7 @@ import { getSetAssets } from '@/lib/setAssets'
 import SetStructuredData from '@/components/SetStructuredData'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import FAQ from '@/components/FAQ'
+import EbayLiveListings from '@/components/EbayLiveListings'
 import { getSetFaqItems } from '@/lib/faqs'
 
 interface Card {
@@ -337,6 +338,15 @@ export default function SetPageClient({ slug }: { slug: string }) {
       <SetStructuredData setName={setName} slug={encodeURIComponent(setName)} cards={regularCards} releaseDate={releaseDate} />
       <BreadcrumbSchema items={[{ name: 'Sets', url: '/browse' }, { name: setName }]} />
       <SetHeader setName={setName} releaseDate={releaseDate} />
+
+      {/* ── eBay live listings (set-level) ── */}
+      <Panel style={{ marginBottom: 14 }}>
+        <EbayLiveListings
+          searchQuery={setName}
+          customId={`set-${setName}`}
+          label={`See live listings for ${setName}`}
+        />
+      </Panel>
 
       {/* ── Section jump links ── */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
