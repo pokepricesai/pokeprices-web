@@ -8,6 +8,7 @@ import {
   NO_MARKET_DATA_NOTE,
   type HoldingType,
 } from '@/lib/portfolioGrades'
+import { getEbayUkUrl, getEbayUsUrl, buildCardEbayQuery } from '@/lib/ebayAffiliate'
 
 interface Card {
   card_slug: string
@@ -99,6 +100,22 @@ export default function CardQuickActions({ card }: { card: Card }) {
     color: '#16a34a',
   }
 
+  const ebayQuery = buildCardEbayQuery(card.card_name, card.set_name, card.card_number ?? null)
+  const ebayCustomId = (card.card_slug || '').toString().replace(/^pc-/, '')
+  const ebayUk = getEbayUkUrl(ebayQuery, ebayCustomId)
+  const ebayUs = getEbayUsUrl(ebayQuery, ebayCustomId)
+
+  const ebayChips = (
+    <>
+      <a href={ebayUk} target="_blank" rel="sponsored noopener noreferrer" style={baseBtn}>
+        <span>🇬🇧</span> See UK Listings
+      </a>
+      <a href={ebayUs} target="_blank" rel="sponsored noopener noreferrer" style={baseBtn}>
+        <span>🇺🇸</span> See US Listings
+      </a>
+    </>
+  )
+
   if (!user) {
     return (
       <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
@@ -108,6 +125,7 @@ export default function CardQuickActions({ card }: { card: Card }) {
         <Link href="/dashboard/login" style={baseBtn}>
           <span>📊</span> Add to portfolio
         </Link>
+        {ebayChips}
         <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", alignSelf: 'center' }}>
           Free — no card required to register.
         </span>
@@ -124,6 +142,7 @@ export default function CardQuickActions({ card }: { card: Card }) {
         <button onClick={() => setShowPortfolioModal(true)} style={baseBtn}>
           <span>📊</span> Add to portfolio
         </button>
+        {ebayChips}
       </div>
       {showPortfolioModal && (
         <CardPortfolioAddModal

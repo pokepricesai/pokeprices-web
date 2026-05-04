@@ -9,6 +9,7 @@ import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import CardQuickActions from '@/components/CardQuickActions'
 import FAQ from '@/components/FAQ'
 import EbayLiveListings from '@/components/EbayLiveListings'
+import { buildCardEbayQuery } from '@/lib/ebayAffiliate'
 import { getCardFaqItems } from '@/lib/faqs'
 import { getSetAssets } from '@/lib/setAssets'
 
@@ -44,11 +45,6 @@ function formatCardNumber(
 function extractVariant(cardName: string): string | null {
   const match = cardName.match(/\[([^\]]+)\]/)
   return match ? match[1] : null
-}
-
-function buildEbaySearchQuery(cardName: string, setName: string, cardNumber: string | null) {
-  const numberSuffix = cardNumber && !cardName.includes(`#${cardNumber}`) ? ` #${cardNumber}` : ''
-  return `${cardName}${numberSuffix} ${setName} pokemon card`
 }
 
 function extractSpeciesSlug(cardName: string): string | null {
@@ -454,7 +450,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   const numberForMessage = cardNumberFormatted ? ` ${cardNumberFormatted}` : ''
   const prefillMessage = `I'm looking at ${card.card_name}${numberForMessage} from ${card.set_name}`
 
-  const ebaySearchQuery = buildEbaySearchQuery(card.card_name, card.set_name, card.card_number)
+  const ebaySearchQuery = buildCardEbayQuery(card.card_name, card.set_name, card.card_number)
 
   const { logoUrl, symbolUrl } = getSetAssets(card.set_name)
   // Prefer the DB-backed primary species slug (set by the backfill against

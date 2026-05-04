@@ -40,3 +40,14 @@ export function getEbayUsUrl(searchQuery: string, customId?: string): string {
   const campid = process.env.NEXT_PUBLIC_EBAY_CAMPID_US ?? ''
   return buildUrl(US_BASE, searchQuery, campid, US_MKRID, '0', { customId })
 }
+
+// Build the canonical eBay search string for a card: name + #number (if not already
+// embedded in the name) + set + "pokemon card". Works for sealed product too.
+export function buildCardEbayQuery(
+  cardName: string,
+  setName: string,
+  cardNumber: string | null,
+): string {
+  const numberSuffix = cardNumber && !cardName.includes(`#${cardNumber}`) ? ` #${cardNumber}` : ''
+  return `${cardName}${numberSuffix} ${setName} pokemon card`
+}
