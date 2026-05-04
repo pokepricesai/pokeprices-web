@@ -14,6 +14,7 @@ import Link from 'next/link'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import PokemonStructuredData from '@/components/PokemonStructuredData'
 import FAQ from '@/components/FAQ'
+import EbayLiveListings from '@/components/EbayLiveListings'
 import { getPokemonFaqItems } from '@/lib/faqs'
 import SpeciesInteractiveSection from './SpeciesInteractiveSection'
 import DossierButton from './DossierButton'
@@ -487,6 +488,17 @@ export default async function PokemonSpeciesPage({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* eBay live listings (species-level) */}
+      {sp && sp.total_cards > 0 && (
+        <div style={{ background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)', padding: '18px 20px', marginBottom: 16 }}>
+          <EbayLiveListings
+            searchQuery={displayName}
+            customId={`pokemon-${slug}`}
+            label={`See live ${displayName} listings`}
+          />
         </div>
       )}
 
