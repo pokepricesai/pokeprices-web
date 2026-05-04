@@ -8,8 +8,8 @@ import { getSetAssets } from '@/lib/setAssets'
 import SetStructuredData from '@/components/SetStructuredData'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import FAQ from '@/components/FAQ'
-import EbayLiveListings, { EbayInlineLink } from '@/components/EbayLiveListings'
-import { buildCardEbayQuery } from '@/lib/ebayAffiliate'
+import { EbayInlineLink } from '@/components/EbayLiveListings'
+import { buildCardEbayQuery, getEbayUkUrl, getEbayUsUrl } from '@/lib/ebayAffiliate'
 import { getSetFaqItems } from '@/lib/faqs'
 
 interface Card {
@@ -345,17 +345,8 @@ export default function SetPageClient({ slug }: { slug: string }) {
       <BreadcrumbSchema items={[{ name: 'Sets', url: '/browse' }, { name: setName }]} />
       <SetHeader setName={setName} releaseDate={releaseDate} />
 
-      {/* ── eBay live listings (set-level) ── */}
-      <Panel style={{ marginBottom: 14 }}>
-        <EbayLiveListings
-          searchQuery={setName}
-          customId={`set-${setName}`}
-          label={`See live listings for ${setName}`}
-        />
-      </Panel>
-
-      {/* ── Section jump links ── */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+      {/* ── Section jump links + eBay listing chips ── */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
         <a href="#cards" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 20, padding: '5px 14px', textDecoration: 'none', color: 'var(--text)', fontSize: 12, fontFamily: "'Figtree', sans-serif", fontWeight: 600, transition: 'border-color 0.15s' }}
           onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--primary)' }}
           onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)' }}>
@@ -368,6 +359,18 @@ export default function SetPageClient({ slug }: { slug: string }) {
             📦 Sealed Product <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>({sealedCards.length})</span>
           </a>
         )}
+        <a href={getEbayUkUrl(setName, `set-${setName}`)} target="_blank" rel="sponsored noopener noreferrer"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 20, padding: '5px 14px', textDecoration: 'none', color: 'var(--text-muted)', fontSize: 12, fontFamily: "'Figtree', sans-serif", fontWeight: 600, transition: 'border-color 0.15s, color 0.15s' }}
+          onMouseEnter={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.borderColor = 'var(--primary)'; el.style.color = 'var(--text)' }}
+          onMouseLeave={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.borderColor = 'var(--border)'; el.style.color = 'var(--text-muted)' }}>
+          🇬🇧 UK Listings
+        </a>
+        <a href={getEbayUsUrl(setName, `set-${setName}`)} target="_blank" rel="sponsored noopener noreferrer"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 20, padding: '5px 14px', textDecoration: 'none', color: 'var(--text-muted)', fontSize: 12, fontFamily: "'Figtree', sans-serif", fontWeight: 600, transition: 'border-color 0.15s, color 0.15s' }}
+          onMouseEnter={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.borderColor = 'var(--primary)'; el.style.color = 'var(--text)' }}
+          onMouseLeave={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.borderColor = 'var(--border)'; el.style.color = 'var(--text-muted)' }}>
+          🇺🇸 US Listings
+        </a>
       </div>
 
       {/* ── Chat ── */}
