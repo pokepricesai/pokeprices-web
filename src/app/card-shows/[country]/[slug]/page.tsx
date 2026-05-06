@@ -9,6 +9,7 @@ import {
   type CardShow,
 } from '@/data/cardShows'
 import StarButton from '../../StarButton'
+import EventCountdown from '../../EventCountdown'
 
 type Country = 'uk' | 'us' | 'ca'
 
@@ -162,9 +163,10 @@ export default async function CardShowDetailPage(
             <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 32, margin: '0 0 6px', color: 'var(--text)', letterSpacing: -0.4, lineHeight: 1.15 }}>
               {show.name}
             </h1>
-            <p style={{ fontSize: 16, color: 'var(--primary)', fontFamily: "'Figtree', sans-serif", margin: 0, fontWeight: 800 }}>
+            <p style={{ fontSize: 16, color: 'var(--primary)', fontFamily: "'Figtree', sans-serif", margin: '0 0 10px', fontWeight: 800 }}>
               {formatShowDate(show)}
             </p>
+            <EventCountdown startDate={show.startDate} endDate={show.endDate} size="lg" />
           </div>
           <StarButton showId={show.id} size="lg" />
         </div>

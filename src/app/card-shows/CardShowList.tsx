@@ -18,6 +18,7 @@ import {
 } from '@/data/cardShows'
 import { supabase } from '@/lib/supabase'
 import StarButton from './StarButton'
+import EventCountdown from './EventCountdown'
 
 type EventType = CardShow['eventType']
 
@@ -349,6 +350,7 @@ function ShowCard({
               fontFamily: "'Figtree', sans-serif",
             }}>📍 {distLabel}</span>
           )}
+          <EventCountdown startDate={show.startDate} endDate={show.endDate} />
         </div>
         <div style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 8 }}>
           {show.city}{show.region ? ` · ${show.region}` : ''}{show.venue ? ` · ${show.venue}` : ''}

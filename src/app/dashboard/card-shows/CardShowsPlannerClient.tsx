@@ -15,6 +15,7 @@ import {
   EVENT_TYPE_LABEL,
   type CardShow,
 } from '@/data/cardShows'
+import EventCountdown from '@/app/card-shows/EventCountdown'
 
 type StarRow = { show_id: string; created_at: string }
 
@@ -204,6 +205,7 @@ function Row({ show, onUnstar, faded }: {
             }}>
               {show.country.toUpperCase()}
             </span>
+            <EventCountdown startDate={show.startDate} endDate={show.endDate} />
           </div>
         </Link>
         <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>

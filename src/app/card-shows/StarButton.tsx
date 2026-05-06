@@ -54,17 +54,30 @@ export default function StarButton({
       return
     }
     if (starred) {
-      await supabase
+      const { error } = await supabase
         .from('card_show_stars')
         .delete()
         .eq('user_id', session.user.id)
         .eq('show_id', showId)
-      setStarred(false)
+      if (error) {
+        console.error('[StarButton] delete failed:', error)
+      } else {
+        setStarred(false)
+      }
     } else {
-      await supabase
+      // Plain INSERT (not upsert) — the migration's RLS policies only cover
+      // INSERT/SELECT/DELETE, so an upsert that lands on the UPDATE path
+      // fails silently. The local `starred` flag already guards against
+      // duplicate inserts; if a stale duplicate sneaks through we ignore the
+      // unique-violation (Postgres error code 23505).
+      const { error } = await supabase
         .from('card_show_stars')
-        .upsert([{ user_id: session.user.id, show_id: showId }], { onConflict: 'user_id,show_id' })
-      setStarred(true)
+        .insert([{ user_id: session.user.id, show_id: showId }])
+      if (error && error.code !== '23505') {
+        console.error('[StarButton] insert failed:', error)
+      } else {
+        setStarred(true)
+      }
     }
     setBusy(false)
   }
