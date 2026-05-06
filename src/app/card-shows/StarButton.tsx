@@ -53,7 +53,13 @@ export default function StarButton({
       setBusy(false)
       return
     }
-    if (starred) {
+    // Optimistic UI: flip first, revert if the DB write fails. We surface
+    // failures via alert() so the user (and we) immediately see what
+    // Supabase rejected — silent failure left the planner empty before.
+    const previous = starred
+    setStarred(!previous)
+
+    if (previous) {
       const { error } = await supabase
         .from('card_show_stars')
         .delete()
@@ -61,22 +67,20 @@ export default function StarButton({
         .eq('show_id', showId)
       if (error) {
         console.error('[StarButton] delete failed:', error)
-      } else {
-        setStarred(false)
+        setStarred(previous)
+        alert(`Could not unstar event: ${error.message}`)
       }
     } else {
       // Plain INSERT (not upsert) — the migration's RLS policies only cover
-      // INSERT/SELECT/DELETE, so an upsert that lands on the UPDATE path
-      // fails silently. The local `starred` flag already guards against
-      // duplicate inserts; if a stale duplicate sneaks through we ignore the
-      // unique-violation (Postgres error code 23505).
+      // INSERT/SELECT/DELETE. The local `starred` flag guards duplicates;
+      // if a stale duplicate sneaks through we ignore Postgres 23505.
       const { error } = await supabase
         .from('card_show_stars')
         .insert([{ user_id: session.user.id, show_id: showId }])
       if (error && error.code !== '23505') {
         console.error('[StarButton] insert failed:', error)
-      } else {
-        setStarred(true)
+        setStarred(previous)
+        alert(`Could not star event: ${error.message}`)
       }
     }
     setBusy(false)
