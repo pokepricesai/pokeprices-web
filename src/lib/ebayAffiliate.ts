@@ -15,7 +15,7 @@ function buildUrl(
   campid: string,
   mkrid: string,
   siteid: string,
-  options: { ukPrefLoc?: boolean; customId?: string },
+  options: { ukPrefLoc?: boolean; customId?: string; sold?: boolean },
 ): string {
   const params = new URLSearchParams()
   params.set('_nkw', searchQuery)
@@ -26,6 +26,10 @@ function buildUrl(
   params.set('toolid', '10001')
   params.set('mkevt', '1')
   if (options.ukPrefLoc) params.set('LH_PrefLoc', '1')
+  if (options.sold) {
+    params.set('LH_Sold', '1')
+    params.set('LH_Complete', '1')
+  }
   params.set('_sacat', TRADING_CARD_SINGLES_CATEGORY)
   if (options.customId) params.set('customid', options.customId)
   return `${base}?${params.toString()}`
@@ -39,6 +43,25 @@ export function getEbayUkUrl(searchQuery: string, customId?: string): string {
 export function getEbayUsUrl(searchQuery: string, customId?: string): string {
   const campid = process.env.NEXT_PUBLIC_EBAY_CAMPID_US ?? ''
   return buildUrl(US_BASE, searchQuery, campid, US_MKRID, '0', { customId })
+}
+
+export function getEbayUkSoldUrl(searchQuery: string, customId?: string): string {
+  const campid = process.env.NEXT_PUBLIC_EBAY_CAMPID_UK ?? ''
+  const finalCustomId = customId ? `${customId}-sold` : undefined
+  return buildUrl(UK_BASE, searchQuery, campid, UK_MKRID, '3', {
+    ukPrefLoc: true,
+    customId: finalCustomId,
+    sold: true,
+  })
+}
+
+export function getEbayUsSoldUrl(searchQuery: string, customId?: string): string {
+  const campid = process.env.NEXT_PUBLIC_EBAY_CAMPID_US ?? ''
+  const finalCustomId = customId ? `${customId}-sold` : undefined
+  return buildUrl(US_BASE, searchQuery, campid, US_MKRID, '0', {
+    customId: finalCustomId,
+    sold: true,
+  })
 }
 
 // Build the canonical eBay search string for a card: name + #number (if not already

@@ -8,7 +8,13 @@ import {
   NO_MARKET_DATA_NOTE,
   type HoldingType,
 } from '@/lib/portfolioGrades'
-import { getEbayUkUrl, getEbayUsUrl, buildCardEbayQuery } from '@/lib/ebayAffiliate'
+import {
+  getEbayUkUrl,
+  getEbayUsUrl,
+  getEbayUkSoldUrl,
+  getEbayUsSoldUrl,
+  buildCardEbayQuery,
+} from '@/lib/ebayAffiliate'
 
 interface Card {
   card_slug: string
@@ -104,14 +110,46 @@ export default function CardQuickActions({ card }: { card: Card }) {
   const ebayCustomId = (card.card_slug || '').toString().replace(/^pc-/, '')
   const ebayUk = getEbayUkUrl(ebayQuery, ebayCustomId)
   const ebayUs = getEbayUsUrl(ebayQuery, ebayCustomId)
+  const ebayUkSold = getEbayUkSoldUrl(ebayQuery, ebayCustomId)
+  const ebayUsSold = getEbayUsSoldUrl(ebayQuery, ebayCustomId)
+
+  // Inline SVG flags — Windows Chrome/Edge does not render flag emoji glyphs
+  // (renders as "GB" / "US" letters), so we draw them ourselves.
+  const ukFlag = (
+    <svg width="18" height="12" viewBox="0 0 18 12" aria-hidden="true" style={{ display: 'block', flexShrink: 0, borderRadius: 1 }}>
+      <rect width="18" height="12" fill="#012169" />
+      <path d="M0 0 L18 12 M18 0 L0 12" stroke="#fff" strokeWidth="2.4" />
+      <path d="M0 0 L18 12 M18 0 L0 12" stroke="#C8102E" strokeWidth="1.2" />
+      <path d="M9 0 V12 M0 6 H18" stroke="#fff" strokeWidth="3.4" />
+      <path d="M9 0 V12 M0 6 H18" stroke="#C8102E" strokeWidth="2" />
+    </svg>
+  )
+  const usFlag = (
+    <svg width="18" height="12" viewBox="0 0 39 26" aria-hidden="true" style={{ display: 'block', flexShrink: 0, borderRadius: 1 }}>
+      <rect width="39" height="26" fill="#B22234" />
+      <rect y="2"  width="39" height="2" fill="#fff" />
+      <rect y="6"  width="39" height="2" fill="#fff" />
+      <rect y="10" width="39" height="2" fill="#fff" />
+      <rect y="14" width="39" height="2" fill="#fff" />
+      <rect y="18" width="39" height="2" fill="#fff" />
+      <rect y="22" width="39" height="2" fill="#fff" />
+      <rect width="15" height="14" fill="#3C3B6E" />
+    </svg>
+  )
 
   const ebayChips = (
     <>
       <a href={ebayUk} target="_blank" rel="sponsored noopener noreferrer" style={baseBtn}>
-        <span>🇬🇧</span> See UK Listings
+        {ukFlag} See UK Listings
       </a>
       <a href={ebayUs} target="_blank" rel="sponsored noopener noreferrer" style={baseBtn}>
-        <span>🇺🇸</span> See US Listings
+        {usFlag} See US Listings
+      </a>
+      <a href={ebayUkSold} target="_blank" rel="sponsored noopener noreferrer" style={baseBtn}>
+        {ukFlag} See UK Sold Listings
+      </a>
+      <a href={ebayUsSold} target="_blank" rel="sponsored noopener noreferrer" style={baseBtn}>
+        {usFlag} See US Sold Listings
       </a>
     </>
   )
