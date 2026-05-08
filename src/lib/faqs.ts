@@ -249,6 +249,14 @@ export function getPokemonFaqItems({
 export function getHomeFaqItems(): FAQItem[] {
   return [
     {
+      question: 'How do I check what a Pokémon card is worth?',
+      answer: 'Search the card by name on PokePrices, or browse by set. Each card page shows the current raw value, PSA 9 and PSA 10 prices, the 30-day trend and PSA population — all sourced from real sold listings, not asking prices. Free, no login.',
+    },
+    {
+      question: 'How do I know if my Pokémon card is valuable?',
+      answer: 'The biggest factors are set, rarity, condition and grading status. PSA 10 copies of holos and full arts typically sell for 3–10× their raw value, while bulk commons sit near zero. PokePrices shows the raw price, the PSA 10 premium and the gem rate for every tracked card so you can judge whether it is worth grading.',
+    },
+    {
       question: 'Where does the Pokémon card price data come from?',
       answer: 'PokePrices tracks sold listings from PriceCharting, updated nightly. Every price you see reflects what cards have actually sold for, not asking prices. PSA population data is scraped directly from PSA\'s public population reports and refreshed biweekly.',
     },

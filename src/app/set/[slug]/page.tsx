@@ -15,8 +15,8 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const setName = decodeURIComponent(slug)
 
   const year        = new Date().getFullYear()
-  const title       = `${setName} Card List (${year}) — All Cards, Prices & PSA 10 Values`
-  const description = `Every card from ${setName} with current raw and PSA 10 prices, grading spreads and chase cards. Full ${setName} checklist with market trends. Updated daily.`
+  const title       = `${setName} Card List & Price Guide (${year}) — Card Prices, PSA 10 Values | PokePrices`
+  const description = `${setName} card list with live raw and PSA 10 prices for every card. Price guide with grading spreads, chase cards and 30-day trends. Full ${setName} checklist updated daily.`
   const canonical   = `https://www.pokeprices.io/set/${slug}`
 
   return {

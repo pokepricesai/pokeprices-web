@@ -54,20 +54,20 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   let description: string
 
   if (useGradingVariant && rawUsd && psa10Usd) {
-    title = `${name}${num}: Is It Worth Grading? ${fmt(card.psa10_usd!)} PSA 10 vs ${fmt(card.raw_usd!)} Raw (${year})`
-    description = `Is ${name}${num} worth grading? PSA 10 ${fmt(card.psa10_usd!)} is ${multiple!.toFixed(1)}× the raw price of ${fmt(card.raw_usd!)}. ${card.set_name} — gem rate, grading spread, PSA population and recent sold listings.`
+    title = `${name}${num} Price: ${fmt(card.psa10_usd!)} PSA 10 vs ${fmt(card.raw_usd!)} Raw — Worth Grading? (${year})`
+    description = `Is ${name}${num} worth grading? PSA 10 ${fmt(card.psa10_usd!)} is ${multiple!.toFixed(1)}× the raw price of ${fmt(card.raw_usd!)}. ${card.set_name} price guide — gem rate, grading spread, PSA population and recent sold listings.`
   } else if (rawUsd && psa10Usd) {
-    title = `${name}${num} Value: ${fmt(card.psa10_usd!)} PSA 10, ${fmt(card.raw_usd!)} Raw (${year}) — ${card.set_name}`
-    description = `How much is ${name}${num} worth? ${card.set_name} — ${fmt(card.raw_usd!)} raw${psa9Usd ? `, ${fmt(card.psa9_usd!)} PSA 9` : ''}, ${fmt(card.psa10_usd!)} PSA 10. Price trend, grading spread, PSA population and recent sold listings.`
+    title = `${name}${num} Price & Value: ${fmt(card.raw_usd!)} Raw, ${fmt(card.psa10_usd!)} PSA 10 (${year}) — ${card.set_name}`
+    description = `How much is ${name}${num} worth? ${card.set_name} price guide — ${fmt(card.raw_usd!)} raw${psa9Usd ? `, ${fmt(card.psa9_usd!)} PSA 9` : ''}, ${fmt(card.psa10_usd!)} PSA 10. Price trend, grading spread, PSA population and recent sold listings.`
   } else if (psa10Usd) {
-    title = `${name}${num} PSA 10 Value: ${fmt(card.psa10_usd!)} (${year}) — ${card.set_name}`
-    description = `${name}${num} PSA 10 value: ${fmt(card.psa10_usd!)}. ${card.set_name} — price trend, PSA population, gem rate and recent sold listings. Updated daily.`
+    title = `${name}${num} PSA 10 Price & Value: ${fmt(card.psa10_usd!)} (${year}) — ${card.set_name}`
+    description = `${name}${num} PSA 10 value: ${fmt(card.psa10_usd!)}. ${card.set_name} price guide — price trend, PSA population, gem rate and recent sold listings. Updated daily.`
   } else if (rawUsd) {
     title = `${name}${num} Price: ${fmt(card.raw_usd!)} Raw (${year}) — ${card.set_name}`
-    description = `How much is ${name}${num} worth? ${card.set_name} — currently ${fmt(card.raw_usd!)} raw. Price trend, grading data, PSA population and recent sold listings. Updated daily.`
+    description = `How much is ${name}${num} worth? ${card.set_name} price guide — currently ${fmt(card.raw_usd!)} raw. Price trend, grading data, PSA population and recent sold listings. Updated daily.`
   } else {
     title = `${name}${num} Pokémon Card Price Guide (${year}) — ${card.set_name}`
-    description = `Track ${name}${num} from ${card.set_name}: raw, PSA 9 and PSA 10 prices, grading spreads, PSA population and recent sold listings. Updated daily.`
+    description = `Track ${name}${num} from ${card.set_name}: raw, PSA 9 and PSA 10 prices, grading spreads, PSA population and recent sold listings. Price guide updated daily.`
   }
 
   return {

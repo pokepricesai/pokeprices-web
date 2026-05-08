@@ -406,7 +406,7 @@ export default function HomeClient() {
             The numbers behind every<br /><span style={{ color: 'var(--accent)' }}>Pokémon</span> card
           </h1>
           <p style={{ color: 'rgba(255,255,255,0.9)', fontSize: 16, margin: '0 0 8px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif", fontWeight: 600 }}>
-            Live prices · PSA 10 values · Grading calculator · Collector&apos;s AI assistant
+            The free Pokémon card price checker · live values · PSA 10 data · grading insights
           </p>
           <p style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14, margin: '0 0 22px', lineHeight: 1.5, fontFamily: "'Figtree', sans-serif" }}>
             40,000+ cards · 156+ sets · Updated nightly from real sold listings

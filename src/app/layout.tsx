@@ -9,9 +9,9 @@ import SiteStructuredData from '@/components/SiteStructuredData'
 export const metadata: Metadata = {
   metadataBase: new URL('https://www.pokeprices.io'),
   title: {
-    default: 'PokePrices — Pokémon Card Prices & PSA 10 Values (2026)',
+    default: 'PokePrices — Pokémon Card Value Checker & Price Guide',
   },
-  description: 'How much is your Pokémon card worth? Live raw and PSA 10 values for 40,000+ cards. Price trends, grading spreads and PSA population data. Free, no login.',
+  description: 'Free Pokémon card value checker — live raw and PSA 10 prices for 40,000+ cards. Price guide with grading spreads, PSA population and 30-day trends. No login.',
   authors: [{ name: 'PokePrices' }],
   creator: 'PokePrices',
   openGraph: {
@@ -19,21 +19,21 @@ export const metadata: Metadata = {
     locale: 'en_GB',
     url: 'https://www.pokeprices.io',
     siteName: 'PokePrices',
-    title: 'PokePrices — Pokémon Card Prices & PSA 10 Values (2026)',
-    description: 'Live raw and PSA 10 values for 40,000+ Pokémon cards. Price trends, grading spreads, PSA population data. Free, no login.',
+    title: 'PokePrices — Pokémon Card Value Checker & Price Guide',
+    description: 'Free Pokémon card value checker — live raw and PSA 10 prices for 40,000+ cards. Price guide with grading spreads, PSA population and 30-day trends.',
     images: [
       {
         url: '/og-image.png',
         width: 1200,
         height: 630,
-        alt: 'PokePrices — Pokémon Card Price Guide',
+        alt: 'PokePrices — Pokémon Card Value Checker & Price Guide',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'PokePrices — Pokémon Card Prices & PSA 10 Values (2026)',
-    description: 'Live raw and PSA 10 values for 40,000+ Pokémon cards. Price trends, grading spreads, PSA population data. Free, no login.',
+    title: 'PokePrices — Pokémon Card Value Checker & Price Guide',
+    description: 'Free Pokémon card value checker — live raw and PSA 10 prices for 40,000+ cards. Price guide with grading spreads, PSA population and 30-day trends.',
     images: ['/og-image.png'],
   },
   robots: {
