@@ -52,7 +52,7 @@ export default function EbayLiveListings({
 export function EbayInlineLink({
   searchQuery,
   customId,
-  label = 'See listings →',
+  label = 'See eBay listings →',
 }: {
   searchQuery: string
   customId: string

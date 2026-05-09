@@ -729,9 +729,9 @@ function MoverPanel({ title, cards, positive }: { title: string; cards: CardRow[
           const ebayQuery = buildCardEbayQuery(c.card_name, c.set_name, c.card_number ?? null)
           const ebayCustomId = `mover-${(c.card_slug || '').toString().replace(/^pc-/, '')}`
           return (
-            <div key={c.card_slug} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div key={c.card_slug} style={{ padding: '4px 4px 0', borderRadius: 8 }}>
               <Link href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`}
-                style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+                style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 10 }}>
                 {c.image_url
                   ? <img src={c.image_url} alt={c.card_name} style={{ width: 30, height: 42, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
                   : <div style={{ width: 30, height: 42, background: 'var(--bg-light)', borderRadius: 3, flexShrink: 0 }} />}
@@ -747,7 +747,9 @@ function MoverPanel({ title, cards, positive }: { title: string; cards: CardRow[
                   {c.raw_pct_30d != null ? `${c.raw_pct_30d > 0 ? '+' : ''}${c.raw_pct_30d.toFixed(1)}%` : '—'}
                 </div>
               </Link>
-              <EbayInlineLink searchQuery={ebayQuery} customId={ebayCustomId} />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 2 }}>
+                <EbayInlineLink searchQuery={ebayQuery} customId={ebayCustomId} />
+              </div>
             </div>
           )
         })}

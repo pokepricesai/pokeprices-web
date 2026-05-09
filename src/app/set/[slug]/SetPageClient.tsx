@@ -85,11 +85,11 @@ function MoverRow({ card, setName, positive }: { card: TrendCard; setName: strin
   const ebayCustomId = `mover-${(card.card_slug || '').toString().replace(/^pc-/, '') || card.card_url_slug || ''}`
   return (
     <div
-      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 8, transition: 'background 0.15s' }}
+      style={{ padding: '6px 8px', borderRadius: 8, transition: 'background 0.15s' }}
       onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-light)' }}
       onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
     >
-      <Link href={href} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
+      <Link href={href} style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
         {card.image_url
           ? <img src={card.image_url} alt={card.card_name} style={{ width: 26, height: 36, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
           : <div style={{ width: 26, height: 36, background: 'var(--bg)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, flexShrink: 0, color: 'var(--border)' }}>🃏</div>}
@@ -108,7 +108,9 @@ function MoverRow({ card, setName, positive }: { card: TrendCard; setName: strin
           </span>
         )}
       </Link>
-      <EbayInlineLink searchQuery={ebayQuery} customId={ebayCustomId} />
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 2 }}>
+        <EbayInlineLink searchQuery={ebayQuery} customId={ebayCustomId} />
+      </div>
     </div>
   )
 }
