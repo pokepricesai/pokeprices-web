@@ -9,8 +9,6 @@ import CardStructuredData from '@/components/CardStructuredData'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import CardQuickActions from '@/components/CardQuickActions'
 import FAQ from '@/components/FAQ'
-import EbayLiveListings from '@/components/EbayLiveListings'
-import { buildCardEbayQuery } from '@/lib/ebayAffiliate'
 import { getCardFaqItems } from '@/lib/faqs'
 import { getSetAssets } from '@/lib/setAssets'
 
@@ -469,7 +467,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   const numberForMessage = cardNumberFormatted ? ` ${cardNumberFormatted}` : ''
   const prefillMessage = `I'm looking at ${card.card_name}${numberForMessage} from ${card.set_name}`
 
-  const ebaySearchQuery = buildCardEbayQuery(card.card_name, card.set_name, card.card_number)
 
   const { logoUrl, symbolUrl } = getSetAssets(card.set_name)
   // Prefer the DB-backed primary species slug (set by the backfill against
@@ -773,11 +770,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
           )}
         </Panel>
       )}
-
-      {/* eBay Search */}
-      <Panel>
-        <EbayLiveListings searchQuery={ebaySearchQuery} customId={card.card_slug} />
-      </Panel>
 
       {/* Live Deals / Listings */}
       {(hasDeals || hasListings) && (

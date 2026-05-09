@@ -498,7 +498,6 @@ export default async function PokemonSpeciesPage({
           <EbayLiveListings
             searchQuery={displayName}
             customId={`pokemon-${slug}`}
-            label={`See live ${displayName} listings`}
           />
         </div>
       )}

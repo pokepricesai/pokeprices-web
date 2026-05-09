@@ -6,6 +6,7 @@ type Size = 'sm' | 'md'
 type Props = {
   searchQuery: string
   customId?: string
+  /** Optional — kept for backwards compat. Ignored after the eBay-compliance update. */
   label?: string
   size?: Size
   className?: string
@@ -19,7 +20,6 @@ const SIZE_STYLES: Record<Size, { padding: string; fontSize: number; flagSize: n
 export default function EbayLiveListings({
   searchQuery,
   customId,
-  label = 'See live listings',
   size = 'md',
   className,
 }: Props) {
@@ -29,21 +29,9 @@ export default function EbayLiveListings({
 
   return (
     <div className={className} style={{ fontFamily: "'Figtree', sans-serif" }}>
-      <div
-        style={{
-          fontSize: 10,
-          fontWeight: 700,
-          textTransform: 'uppercase',
-          letterSpacing: 1,
-          color: 'var(--text-muted)',
-          marginBottom: 8,
-        }}
-      >
-        {label}
-      </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <RegionButton href={ukUrl} flag="🇬🇧" region="UK" sizeStyles={s} primary />
-        <RegionButton href={usUrl} flag="🇺🇸" region="US" sizeStyles={s} />
+        <RegionButton href={ukUrl} flag="🇬🇧" sizeStyles={s} primary />
+        <RegionButton href={usUrl} flag="🇺🇸" sizeStyles={s} />
       </div>
       <p
         style={{
@@ -53,7 +41,7 @@ export default function EbayLiveListings({
           opacity: 0.75,
         }}
       >
-        Affiliate links — support the site at no extra cost
+        Affiliate link · we may earn commission
       </p>
     </div>
   )
@@ -102,13 +90,11 @@ export function EbayInlineLink({
 function RegionButton({
   href,
   flag,
-  region,
   sizeStyles,
   primary = false,
 }: {
   href: string
   flag: string
-  region: 'UK' | 'US'
   sizeStyles: { padding: string; fontSize: number; flagSize: number; gap: number }
   primary?: boolean
 }) {
@@ -141,7 +127,7 @@ function RegionButton({
       }}
     >
       <span style={{ fontSize: sizeStyles.flagSize }}>{flag}</span>
-      {region}
+      Click here for eBay listings
     </a>
   )
 }

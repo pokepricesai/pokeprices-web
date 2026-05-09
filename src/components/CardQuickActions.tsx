@@ -140,23 +140,36 @@ export default function CardQuickActions({ card }: { card: Card }) {
   const ebayChips = (
     <>
       <a href={ebayUk} target="_blank" rel="sponsored noopener noreferrer" style={baseBtn}>
-        {ukFlag} See UK Listings
+        {ukFlag} Click here for eBay listings
       </a>
       <a href={ebayUs} target="_blank" rel="sponsored noopener noreferrer" style={baseBtn}>
-        {usFlag} See US Listings
+        {usFlag} Click here for eBay listings
       </a>
       <a href={ebayUkSold} target="_blank" rel="sponsored noopener noreferrer" style={baseBtn}>
-        {ukFlag} See UK Sold Listings
+        {ukFlag} Show eBay Sold Listings
       </a>
       <a href={ebayUsSold} target="_blank" rel="sponsored noopener noreferrer" style={baseBtn}>
-        {usFlag} See US Sold Listings
+        {usFlag} Show eBay Sold Listings
       </a>
     </>
   )
 
+  const ebayDisclosure = (
+    <p style={{
+      flexBasis: '100%',
+      fontSize: 10,
+      color: 'var(--text-muted)',
+      margin: 0,
+      opacity: 0.75,
+      fontFamily: "'Figtree', sans-serif",
+    }}>
+      Affiliate link · we may earn commission
+    </p>
+  )
+
   if (!user) {
     return (
-      <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap', alignItems: 'center' }}>
         <Link href="/dashboard/login" style={baseBtn}>
           <span>👁</span> Watch
         </Link>
@@ -167,13 +180,14 @@ export default function CardQuickActions({ card }: { card: Card }) {
         <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", alignSelf: 'center' }}>
           Free — no card required to register.
         </span>
+        {ebayDisclosure}
       </div>
     )
   }
 
   return (
     <>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap', alignItems: 'center' }}>
         <button onClick={handleWatch} disabled={busy} style={watchId ? watchingBtn : baseBtn}>
           {watchId ? <><span>✓</span> Watching</> : <><span>👁</span> Watch</>}
         </button>
@@ -181,6 +195,7 @@ export default function CardQuickActions({ card }: { card: Card }) {
           <span>📊</span> Add to portfolio
         </button>
         {ebayChips}
+        {ebayDisclosure}
       </div>
       {showPortfolioModal && (
         <CardPortfolioAddModal
