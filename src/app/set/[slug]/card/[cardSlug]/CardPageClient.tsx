@@ -1,9 +1,10 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { supabase, formatPrice, formatPct } from '@/lib/supabase'
+import { supabase, formatPct } from '@/lib/supabase'
 import InlineChat from '@/components/InlineChat'
 import PriceChart from '@/components/PriceChart'
+import GradeLadder, { type GradePrices } from '@/components/GradeLadder'
 import CardStructuredData from '@/components/CardStructuredData'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import CardQuickActions from '@/components/CardQuickActions'
@@ -374,14 +375,32 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   // Formatted card number for display: "95/165" or "#95"
   const cardNumberFormatted = formatCardNumber(card.card_number, card.card_number_display, card.set_printed_total)
 
-  const grades = [
-    { label: 'Raw',     value: card.raw_usd   },
-    { label: 'PSA 7',   value: card.psa7_usd  },
-    { label: 'PSA 8',   value: card.psa8_usd  },
-    { label: 'PSA 9',   value: card.psa9_usd  },
-    { label: 'PSA 10',  value: card.psa10_usd },
-    { label: 'CGC 9.5', value: card.cgc95_usd },
-  ]
+  // Cents → USD dollars for the GradeLadder. Null stays null.
+  const c2d = (cents: number | null | undefined): number | null =>
+    cents == null ? null : cents / 100
+
+  const gradeLadderPrices: GradePrices = {
+    raw_usd:           c2d(card.raw_usd),
+    psa7_usd:          c2d(card.psa7_usd),
+    psa8_usd:          c2d(card.psa8_usd),
+    psa9_usd:          c2d(card.psa9_usd),
+    psa10_usd:         c2d(card.psa10_usd),
+    cgc95_usd:         c2d(card.cgc95_usd),
+    bgs95_usd:         c2d(card.bgs95_usd),
+    grade1_usd:        c2d(card.grade1_usd),
+    grade2_usd:        c2d(card.grade2_usd),
+    grade3_usd:        c2d(card.grade3_usd),
+    grade4_usd:        c2d(card.grade4_usd),
+    grade5_usd:        c2d(card.grade5_usd),
+    grade6_usd:        c2d(card.grade6_usd),
+    tag10_usd:         c2d(card.tag10_usd),
+    ace10_usd:         c2d(card.ace10_usd),
+    sgc10_usd:         c2d(card.sgc10_usd),
+    cgc10_usd:         c2d(card.cgc10_usd),
+    bgs10_usd:         c2d(card.bgs10_usd),
+    bgs10black_usd:    c2d(card.bgs10black_usd),
+    cgc10pristine_usd: c2d(card.cgc10pristine_usd),
+  }
 
   const hasAnyTrend = trend && (
     trend.raw_pct_7d !== null || trend.raw_pct_30d !== null ||
@@ -597,14 +616,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
 
           <div style={{ background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)', padding: '14px 16px', marginBottom: 14 }}>
             <SectionLabel>Current Prices (USD)</SectionLabel>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-              {grades.map(g => (
-                <div key={g.label}>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, fontFamily: "'Figtree', sans-serif" }}>{g.label}</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "'Figtree', sans-serif", color: g.value ? 'var(--text)' : 'var(--border)' }}>{formatPrice(g.value)}</div>
-                </div>
-              ))}
-            </div>
+            <GradeLadder prices={gradeLadderPrices} mode={card.is_sealed ? 'sealed' : 'card'} />
           </div>
 
           {trendPeriods.length > 0 && (
