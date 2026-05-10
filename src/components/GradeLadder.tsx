@@ -10,7 +10,6 @@ export interface GradePrices {
   psa9_usd?: number | null
   psa10_usd?: number | null
   cgc95_usd?: number | null
-  bgs95_usd?: number | null
   grade1_usd?: number | null
   grade2_usd?: number | null
   grade3_usd?: number | null
@@ -49,7 +48,6 @@ const EXPANDED: { label: string; key: keyof GradePrices }[] = [
   { label: 'SGC 10',  key: 'sgc10_usd' },
   { label: 'TAG 10',  key: 'tag10_usd' },
   { label: 'CGC 9.5', key: 'cgc95_usd' },
-  { label: 'BGS 9.5', key: 'bgs95_usd' },
   { label: 'PSA 6',   key: 'grade6_usd' },
   { label: 'PSA 5',   key: 'grade5_usd' },
   { label: 'PSA 4',   key: 'grade4_usd' },

@@ -384,7 +384,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
     psa9_usd:          c2d(card.psa9_usd),
     psa10_usd:         c2d(card.psa10_usd),
     cgc95_usd:         c2d(card.cgc95_usd),
-    bgs95_usd:         c2d(card.bgs95_usd),
     grade1_usd:        c2d(card.grade1_usd),
     grade2_usd:        c2d(card.grade2_usd),
     grade3_usd:        c2d(card.grade3_usd),
