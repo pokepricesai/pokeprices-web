@@ -278,9 +278,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
   const [priceHistory, setPriceHistory] = useState<any[]>([])
   const [insight,      setInsight]      = useState<string | null>(null)
   const [psaPop,       setPsaPop]       = useState<any | null>(null)
-  const [ebayListings, setEbayListings] = useState<any[]>([])
-  const [ebayDeals,    setEbayDeals]    = useState<any[]>([])
-  const [highConfidenceListingCount, setHighConfidenceListingCount] = useState<number | null>(null)
   const [volumeLabel,  setVolumeLabel]  = useState<string | null>(null)
   const [loading,      setLoading]      = useState(true)
 
@@ -332,34 +329,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
 
       const { data: popData } = await popQuery.order('total_graded', { ascending: false }).limit(1)
       if (popData && popData.length > 0) setPsaPop(popData[0])
-
-      // eBay deals first, then listings
-      const { data: dealsData } = await supabase
-        .from('daily_deals')
-        .select('*')
-        .eq('card_slug', slug)
-        .order('discount_pct', { ascending: false })
-        .limit(5)
-
-      if (dealsData && dealsData.length > 0) {
-        setEbayDeals(dealsData)
-      } else {
-        const { data: listingsData } = await supabase
-          .from('ebay_listings')
-          .select('*')
-          .eq('card_slug', slug)
-          .eq('match_confidence', 'high')
-          .order('total_cost_cents', { ascending: true })
-          .limit(5)
-        if (listingsData) setEbayListings(listingsData)
-      }
-
-      const { count } = await supabase
-        .from('ebay_listings')
-        .select('*', { count: 'exact', head: true })
-        .eq('card_slug', slug)
-        .eq('match_confidence', 'high')
-      if (count != null) setHighConfidenceListingCount(count)
 
       setLoading(false)
     }
@@ -481,8 +450,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
     { label: 'PSA 10', value: card.psa10_usd, multiple: psa10Multiple },
   ].filter(g => g.value && g.multiple)
 
-  const hasDeals    = ebayDeals.length > 0
-  const hasListings = ebayListings.length > 0
   // Prefill message uses formatted number for natural reading: "Bulbasaur 95/165" or "Bulbasaur #95"
   const numberForMessage = cardNumberFormatted ? ` ${cardNumberFormatted}` : ''
   const prefillMessage = `I'm looking at ${card.card_name}${numberForMessage} from ${card.set_name}`
@@ -534,9 +501,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
       sub: liquidityLabel ?? undefined,
     })
   }
-  if (highConfidenceListingCount != null && highConfidenceListingCount > 0) tiles.push({
-    label: 'Live Listings', value: highConfidenceListingCount.toString(), sub: 'Verified matches',
-  })
   const pct30dQuality = pctQuality(trend?.raw_pct_30d, '30d')
   if (trend?.raw_pct_30d != null && pct30dQuality === 'clean') tiles.push({
     label: '30d Price Move',
@@ -801,48 +765,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
               {' '}of all graded copies received PSA 10.
             </div>
           )}
-        </Panel>
-      )}
-
-      {/* Live Deals / Listings */}
-      {(hasDeals || hasListings) && (
-        <Panel>
-          <SectionLabel style={{ color: hasDeals ? 'var(--green)' : undefined }}>
-            {hasDeals ? '🔥 Live Deals' : 'Live Listings'}
-          </SectionLabel>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {(hasDeals ? ebayDeals : ebayListings).map((item: any, i: number) => {
-              const price    = hasDeals ? (item.listing_price_cents / 100).toFixed(2) : (item.total_cost_cents / 100).toFixed(2)
-              const currency = item.currency === 'GBP' ? '£' : '$'
-              const discount  = hasDeals ? item.discount_pct : null
-              const fairValue = hasDeals && item.fair_value_cents ? (item.fair_value_cents / 100).toFixed(2) : null
-              return (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'var(--bg-light)', borderRadius: 10, gap: 12, flexWrap: 'wrap' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-                      <span style={{ fontSize: 14, fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>{currency}{price}</span>
-                      {discount && <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--green)', background: 'rgba(39,174,96,0.1)', padding: '1px 7px', borderRadius: 20, fontFamily: "'Figtree', sans-serif" }}>{discount.toFixed(0)}% off</span>}
-                      {fairValue && <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>vs {currency}{fairValue} fair value</span>}
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-                      {item.condition || 'Ungraded'} · {item.seller_username} ({item.seller_feedback_score?.toLocaleString()} feedback)
-                    </div>
-                  </div>
-                  {item.item_web_url && (
-                    <a href={item.item_web_url} target="_blank" rel="noopener noreferrer" style={{ background: 'var(--primary)', color: '#fff', padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700, textDecoration: 'none', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap' }}>
-                      View on eBay
-                    </a>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-          <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '10px 0 0', fontFamily: "'Figtree', sans-serif" }}>
-            {hasDeals
-              ? 'Deals are pre-screened for 15%+ discount against market value. Verified sellers only. Always check the listing before buying.'
-              : 'Verified high-confidence matches only. Prices scraped daily — always check the listing before buying.'
-            }
-          </p>
         </Panel>
       )}
 

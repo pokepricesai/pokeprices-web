@@ -35,7 +35,35 @@ interface CardChoice {
   psa9_usd: number | null
   psa10_usd: number | null
   card_number_display: string | null
+  // Optional tier prices populated when available — used by target selector.
+  bgs10_usd?: number | null
+  bgs10black_usd?: number | null
+  cgc10_usd?: number | null
+  cgc10pristine_usd?: number | null
+  sgc10_usd?: number | null
+  tag10_usd?: number | null
+  ace10_usd?: number | null
 }
+
+// Available grade targets. The "hit" outcome uses the target's price; the
+// 9-down / 8-down / failed outcomes still use PSA-equivalent fallbacks
+// (psa9, 0.6×psa9, 0.7×raw) since those are conceptually "lower-quality"
+// outcomes regardless of which top grade you were chasing.
+type GradeTarget =
+  | 'psa10' | 'bgs10' | 'bgs10black'
+  | 'cgc10' | 'cgc10pristine'
+  | 'sgc10' | 'tag10' | 'ace10'
+
+const TARGETS: { value: GradeTarget; label: string; priceField: keyof CardChoice }[] = [
+  { value: 'psa10',         label: 'PSA 10',          priceField: 'psa10_usd' },
+  { value: 'bgs10',         label: 'BGS 10',          priceField: 'bgs10_usd' },
+  { value: 'bgs10black',    label: 'BGS 10 Black',    priceField: 'bgs10black_usd' },
+  { value: 'cgc10',         label: 'CGC 10',          priceField: 'cgc10_usd' },
+  { value: 'cgc10pristine', label: 'CGC 10 Pristine', priceField: 'cgc10pristine_usd' },
+  { value: 'sgc10',         label: 'SGC 10',          priceField: 'sgc10_usd' },
+  { value: 'tag10',         label: 'TAG 10',          priceField: 'tag10_usd' },
+  { value: 'ace10',         label: 'ACE 10',          priceField: 'ace10_usd' },
+]
 
 interface PortfolioCandidate extends CardChoice {
   quantity: number
@@ -72,6 +100,9 @@ export default function GradingCalculatorClient() {
   const [pct9,  setPct9]  = useState(55)
   const [pct8,  setPct8]  = useState(15)
   const [pctSub, setPctSub] = useState(5)
+  // Target grade — the "hit" outcome. PSA 10 is default; users chasing
+  // BGS 10 Black / CGC 10 Pristine / etc. can pick that instead.
+  const [target, setTarget] = useState<GradeTarget>('psa10')
 
   // Portfolio candidates
   const [candidates, setCandidates] = useState<PortfolioCandidate[]>([])
@@ -178,16 +209,28 @@ export default function GradingCalculatorClient() {
   }, [query])
 
   async function pickFromSearch(r: any) {
-    // Pull real trends to fill psa9 (search RPC may not include all tiers)
-    const { data: trend } = await supabase
-      .from('card_trends')
-      .select('current_raw, current_psa9, current_psa10')
-      .eq('card_name', r.name)
-      .eq('set_name', r.subtitle || r.set_name)
-      .maybeSingle()
+    // Pull trends (raw / psa9 / psa10 + pcts) and the latest daily_prices
+    // row in parallel — daily_prices carries the new tier columns the
+    // target selector needs.
+    const cardSlug = r.url_slug || r.card_slug
+    const [{ data: trend }, { data: dpRows }] = await Promise.all([
+      supabase
+        .from('card_trends')
+        .select('current_raw, current_psa9, current_psa10')
+        .eq('card_name', r.name)
+        .eq('set_name', r.subtitle || r.set_name)
+        .maybeSingle(),
+      supabase
+        .from('daily_prices')
+        .select('bgs10_usd, bgs10black_usd, cgc10_usd, cgc10pristine_usd, sgc10_usd, tag10_usd, ace10_usd')
+        .eq('card_slug', `pc-${(cardSlug || '').toString().replace(/^pc-/, '')}`)
+        .order('date', { ascending: false })
+        .limit(1),
+    ])
+    const dp = (dpRows && dpRows[0]) as any
     setSelected({
-      card_slug:           r.url_slug || r.card_slug,
-      card_url_slug:       r.url_slug || r.card_slug,
+      card_slug:           cardSlug,
+      card_url_slug:       cardSlug,
       card_name:           r.name,
       set_name:            r.subtitle || r.set_name,
       image_url:           r.image_url || null,
@@ -195,18 +238,42 @@ export default function GradingCalculatorClient() {
       psa9_usd:            trend?.current_psa9 ?? null,
       psa10_usd:           trend?.current_psa10 ?? null,
       card_number_display: r.card_number_display || null,
+      bgs10_usd:           dp?.bgs10_usd ?? null,
+      bgs10black_usd:      dp?.bgs10black_usd ?? null,
+      cgc10_usd:           dp?.cgc10_usd ?? null,
+      cgc10pristine_usd:   dp?.cgc10pristine_usd ?? null,
+      sgc10_usd:           dp?.sgc10_usd ?? null,
+      tag10_usd:           dp?.tag10_usd ?? null,
+      ace10_usd:           dp?.ace10_usd ?? null,
     })
+    setTarget('psa10')
     setQuery(''); setResults([])
   }
 
-  function pickFromCandidate(c: PortfolioCandidate) {
+  async function pickFromCandidate(c: PortfolioCandidate) {
+    // Fetch tier prices from daily_prices so the target selector has data.
+    const { data: dpRows } = await supabase
+      .from('daily_prices')
+      .select('bgs10_usd, bgs10black_usd, cgc10_usd, cgc10pristine_usd, sgc10_usd, tag10_usd, ace10_usd')
+      .eq('card_slug', `pc-${(c.card_slug || '').toString().replace(/^pc-/, '')}`)
+      .order('date', { ascending: false })
+      .limit(1)
+    const dp = (dpRows && dpRows[0]) as any
     setSelected({
       card_slug: c.card_slug, card_url_slug: c.card_url_slug,
       card_name: c.card_name, set_name: c.set_name,
       image_url: c.image_url,
       raw_usd: c.raw_usd, psa9_usd: c.psa9_usd, psa10_usd: c.psa10_usd,
       card_number_display: c.card_number_display,
+      bgs10_usd:         dp?.bgs10_usd ?? null,
+      bgs10black_usd:    dp?.bgs10black_usd ?? null,
+      cgc10_usd:         dp?.cgc10_usd ?? null,
+      cgc10pristine_usd: dp?.cgc10pristine_usd ?? null,
+      sgc10_usd:         dp?.sgc10_usd ?? null,
+      tag10_usd:         dp?.tag10_usd ?? null,
+      ace10_usd:         dp?.ace10_usd ?? null,
     })
+    setTarget('psa10')
   }
 
   // ── Math ──────────────────────────────────────────────────────────────────
@@ -217,22 +284,26 @@ export default function GradingCalculatorClient() {
   }, [pct10, pct9, pct8, pctSub])
   const oddsSum = pct10 + pct9 + pct8 + pctSub
 
+  const targetMeta = TARGETS.find(t => t.value === target)!
+  const targetLabel = targetMeta.label
+  const targetPrice = selected ? (selected[targetMeta.priceField] as number | null | undefined) ?? null : null
+
   const result = useMemo(() => {
     if (!selected || !selected.raw_usd) return null
-    const psa10 = selected.psa10_usd
+    if (targetPrice == null) return null
     const psa9  = selected.psa9_usd
-    if (!psa10 || !psa9) return null
+    if (!psa9) return null
     const psa8Est = Math.round(psa9 * 0.6)
     const subEst  = Math.round(selected.raw_usd * 0.7)
     const feeUsdCents     = Math.round((serviceFeeUsd + shippingUsd) * 100)
-    const expectedSale    = (odds.p10 * psa10) + (odds.p9 * psa9) + (odds.p8 * psa8Est) + (odds.pSub * subEst)
+    const expectedSale    = (odds.p10 * targetPrice) + (odds.p9 * psa9) + (odds.p8 * psa8Est) + (odds.pSub * subEst)
     const expectedReturn  = expectedSale - selected.raw_usd - feeUsdCents
     const roiPct          = (expectedReturn / selected.raw_usd) * 100
     // Breakeven raw price = expectedSale - feeUsdCents (i.e. the most you
     // could pay raw and still break even at these odds)
     const breakeven       = Math.max(0, expectedSale - feeUsdCents)
-    return { expectedSale, expectedReturn, roiPct, breakeven, feeUsdCents }
-  }, [selected, odds, serviceFeeUsd, shippingUsd])
+    return { expectedSale, expectedReturn, roiPct, breakeven, feeUsdCents, targetPrice }
+  }, [selected, odds, serviceFeeUsd, shippingUsd, targetPrice])
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 16px' }}>
@@ -297,8 +368,21 @@ export default function GradingCalculatorClient() {
 
         {/* Inputs */}
         {selected && (
-          <Section title="2. Service + odds">
+          <Section title="2. Target grade, service + odds">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+              <Field label="Target grade (the 'hit')">
+                <select value={target} onChange={e => setTarget(e.target.value as GradeTarget)} style={selectStyle}>
+                  {TARGETS.map(t => {
+                    const price = (selected[t.priceField] as number | null | undefined) ?? null
+                    const disabled = price == null
+                    return (
+                      <option key={t.value} value={t.value} disabled={disabled}>
+                        {t.label}{disabled ? ' (no price data)' : ` — ${fmt(price, currency)}`}
+                      </option>
+                    )
+                  })}
+                </select>
+              </Field>
               <Field label="Grading service">
                 <select value={serviceId} onChange={e => { const id = e.target.value as keyof typeof SERVICES; setServiceId(id); setServiceFeeUsd(SERVICES[id].feeUsd) }}
                   style={selectStyle}>
@@ -319,13 +403,16 @@ export default function GradingCalculatorClient() {
               Outcome odds (must sum to 100)
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 8 }}>
-              <Field label="PSA 10 %"><input type="number" value={pct10} onChange={e => setPct10(parseFloat(e.target.value) || 0)} style={inputStyle} /></Field>
+              <Field label={`${targetLabel} %`}><input type="number" value={pct10} onChange={e => setPct10(parseFloat(e.target.value) || 0)} style={inputStyle} /></Field>
               <Field label="PSA 9 %"><input type="number" value={pct9}  onChange={e => setPct9(parseFloat(e.target.value) || 0)}  style={inputStyle} /></Field>
               <Field label="PSA 8 %"><input type="number" value={pct8}  onChange={e => setPct8(parseFloat(e.target.value) || 0)}  style={inputStyle} /></Field>
               <Field label="≤ 7 %"><input  type="number" value={pctSub} onChange={e => setPctSub(parseFloat(e.target.value) || 0)} style={inputStyle} /></Field>
             </div>
             <p style={{ fontSize: 11, color: oddsSum === 100 ? 'var(--text-muted)' : '#ef4444', fontFamily: "'Figtree', sans-serif", margin: '6px 0 0' }}>
               {oddsSum === 100 ? 'Sum: 100%' : `Sum: ${oddsSum}% — adjust so it totals 100%.`}
+            </p>
+            <p style={{ fontSize: 10.5, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '8px 0 0', lineHeight: 1.5 }}>
+              The "hit" is the price for your chosen target grade. Lower outcomes (PSA 9 / 8 / sub) use PSA-equivalent prices as proxies — most cards that miss the chase target end up at a similar PSA grade regardless of grader.
             </p>
           </Section>
         )}
@@ -356,7 +443,7 @@ export default function GradingCalculatorClient() {
                   : <>Don&apos;t grade. At these odds, you would lose money on average. Either sell it raw or tighten your odds before sending in.</>}
             </div>
             <p style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '12px 0 0', lineHeight: 1.5 }}>
-              Math: expected sale = (PSA 10 × {(odds.p10 * 100).toFixed(0)}%) + (PSA 9 × {(odds.p9 * 100).toFixed(0)}%) + (PSA 8 ≈ 0.6×PSA 9 × {(odds.p8 * 100).toFixed(0)}%) + (sub ≈ 0.7×raw × {(odds.pSub * 100).toFixed(0)}%). Net = expected sale − raw cost − service fee − shipping. PSA 8 / sub-grade prices are estimates because granular price data is sparse below PSA 9.
+              Math: expected sale = ({targetLabel} × {(odds.p10 * 100).toFixed(0)}%) + (PSA 9 × {(odds.p9 * 100).toFixed(0)}%) + (PSA 8 ≈ 0.6×PSA 9 × {(odds.p8 * 100).toFixed(0)}%) + (sub ≈ 0.7×raw × {(odds.pSub * 100).toFixed(0)}%). Net = expected sale − raw cost − service fee − shipping. PSA 8 / sub-grade prices are estimates because granular price data is sparse below PSA 9.
             </p>
           </Section>
         )}

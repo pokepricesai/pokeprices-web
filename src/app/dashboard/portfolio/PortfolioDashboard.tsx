@@ -7,6 +7,7 @@ import DashboardNav from '../DashboardNav'
 import {
   HOLDING_TYPES as ALL_HOLDING_TYPES,
   GRADE_LABELS as ALL_GRADE_LABELS,
+  HOLDING_TYPE_TO_PRICE_COLUMN,
   isManualGrade,
   NO_MARKET_DATA_NOTE,
   type HoldingType,
@@ -983,6 +984,51 @@ export default function PortfolioDashboard() {
               pct_30d:              trend.raw_pct_30d ?? i.pct_30d ?? null,
             }
           })
+
+          // Second pass: enrich extra-tier holdings (PSA 1-8, BGS 10/Black,
+          // CGC 9.5/10/Pristine, SGC/TAG/ACE 10) from daily_prices using the
+          // holding_type → column map. card_trends only carries raw/psa9/psa10
+          // so without this pass these holdings would silently fall back to
+          // the raw price.
+          const extraTierItems = dedupedById.filter(i =>
+            HOLDING_TYPE_TO_PRICE_COLUMN[i.holding_type] &&
+            !['raw', 'psa9', 'psa10'].includes(i.holding_type)
+          )
+          if (extraTierItems.length > 0) {
+            const extraSlugs = Array.from(new Set(
+              extraTierItems.map(i => `pc-${(i.card_slug || '').toString().replace(/^pc-/, '')}`)
+            ))
+            const { data: dpRows } = await supabase
+              .from('daily_prices')
+              .select(
+                'card_slug, date, ' +
+                'grade1_usd, grade2_usd, grade3_usd, grade4_usd, grade5_usd, grade6_usd, ' +
+                'psa7_usd, psa8_usd, ' +
+                'cgc95_usd, cgc10_usd, cgc10pristine_usd, ' +
+                'bgs10_usd, bgs10black_usd, ' +
+                'sgc10_usd, tag10_usd, ace10_usd'
+              )
+              .in('card_slug', extraSlugs)
+              .order('date', { ascending: false })
+            const latestBySlug = new Map<string, any>()
+            for (const r of ((dpRows || []) as any[])) {
+              if (!latestBySlug.has(r.card_slug)) latestBySlug.set(r.card_slug, r)
+            }
+            dedupedById = dedupedById.map(i => {
+              const col = HOLDING_TYPE_TO_PRICE_COLUMN[i.holding_type]
+              if (!col || ['raw', 'psa9', 'psa10'].includes(i.holding_type)) return i
+              const dp = latestBySlug.get(`pc-${(i.card_slug || '').toString().replace(/^pc-/, '')}`)
+              if (!dp) return i
+              const tier = dp[col]
+              if (tier == null) return i
+              const qty = Math.max(1, i.quantity || 1)
+              return {
+                ...i,
+                current_value_cents:  tier,
+                position_value_cents: tier * qty,
+              }
+            })
+          }
         }
 
         // Always recompute the headline aggregates from the deduped items.
