@@ -34,6 +34,7 @@ interface SetProgress {
   printed_total: number
   owned_count: number
   owned_value_cents: number
+  owned: CardRow[]
   missing: CardRow[]
   cheapest_missing: CardRow[]
   biggest_missing: CardRow | null
@@ -97,25 +98,27 @@ export default function SetTrackerClient() {
     const pid = portfolios?.[0]?.id
     if (!pid) { setProgress([]); setLoading(false); return }
 
-    // Owned card_url_slugs for this user (across grades)
+    // Owned card_url_slugs for this user, paired with the set the user
+    // bought them in. set_name_snapshot is captured at add-time, so it
+    // authoritatively says which set the holding belongs to — required
+    // because card_url_slug is NOT unique across sets (reprints share
+    // slugs e.g. "charizard-4" appears in Base, Celebrations, etc.).
     const { data: ownedRows } = await supabase
       .from('portfolio_items')
-      .select('card_slug')
+      .select('card_slug, set_name_snapshot')
       .eq('portfolio_id', pid)
-    const ownedSlugs = new Set((ownedRows || []).map((r: any) => r.card_slug).filter(Boolean))
-    if (!ownedSlugs.size) { setProgress([]); setLoading(false); return }
+    if (!ownedRows || ownedRows.length === 0) { setProgress([]); setLoading(false); return }
 
-    // What sets are those cards in? Pull the cards for the owned slugs to get their set_names.
-    const { data: ownedCards } = await supabase
-      .from('cards')
-      .select('card_url_slug, set_name, is_sealed')
-      .in('card_url_slug', Array.from(ownedSlugs))
-    const setsTouched = Array.from(new Set(
-      (ownedCards || [])
-        .filter((c: any) => !c.is_sealed) // sealed products don't belong to a "completion" set
-        .map((c: any) => c.set_name)
-        .filter(Boolean)
-    ))
+    // Map: set_name → Set<card_url_slug> owned in that specific set.
+    const ownedSetSlugMap = new Map<string, Set<string>>()
+    for (const r of ownedRows as any[]) {
+      const slug = r.card_slug
+      const setName = r.set_name_snapshot
+      if (!slug || !setName) continue
+      if (!ownedSetSlugMap.has(setName)) ownedSetSlugMap.set(setName, new Set())
+      ownedSetSlugMap.get(setName)!.add(slug)
+    }
+    const setsTouched = Array.from(ownedSetSlugMap.keys())
     if (!setsTouched.length) { setProgress([]); setLoading(false); return }
 
     // Pull every non-sealed card for those sets in one hit. We need the
@@ -163,14 +166,16 @@ export default function SetTrackerClient() {
     const out: SetProgress[] = []
     for (const [setName, cards] of Array.from(bySet.entries())) {
       const printedTotal = parseInt(cards[0]?.set_printed_total || '0', 10)
+      // Set-specific owned slugs — never falls into the duplicate-slug trap.
+      const setOwnedSlugs = ownedSetSlugMap.get(setName) ?? new Set<string>()
       // Filter to base set unless the user wants variants
       const inScope = (c: CardRow) =>
         includeVariants
           ? true
           : (printedTotal > 0 && isInBaseSet(c.card_number, printedTotal))
       const scoped = cards.filter(inScope)
-      const owned   = scoped.filter(c => ownedSlugs.has(c.card_url_slug))
-      const missing = scoped.filter(c => !ownedSlugs.has(c.card_url_slug))
+      const owned   = scoped.filter(c => setOwnedSlugs.has(c.card_url_slug))
+      const missing = scoped.filter(c => !setOwnedSlugs.has(c.card_url_slug))
       const ownedValue = owned.reduce((s, c) => s + (c.raw_usd || 0), 0)
       const cheapest = [...missing]
         .filter(c => (c.raw_usd ?? 0) > 0)
@@ -186,6 +191,7 @@ export default function SetTrackerClient() {
         printed_total: denom,
         owned_count: owned.length,
         owned_value_cents: ownedValue,
+        owned,
         missing,
         cheapest_missing: cheapest,
         biggest_missing: biggest,
@@ -320,6 +326,40 @@ function SetCard({ set, currency, onAdd }: {
         )}
       </div>
 
+      {/* Owned in this set — small thumbnails */}
+      {set.owned.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.2, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 8 }}>
+            Owned in {set.set_name} — {set.owned.length} card{set.owned.length === 1 ? '' : 's'}
+          </div>
+          <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
+            {set.owned.map(c => (
+              <Link
+                key={c.card_url_slug}
+                href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`}
+                style={{
+                  flexShrink: 0,
+                  background: 'var(--bg-light)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  padding: 4,
+                  textDecoration: 'none',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  width: 56,
+                }}
+                title={`${c.card_name}${c.card_number_display ? ` · ${c.card_number_display}` : ''}`}
+              >
+                {c.image_url
+                  ? <img src={c.image_url} alt={c.card_name} loading="lazy" style={{ width: 48, height: 66, objectFit: 'contain', borderRadius: 3 }} />
+                  : <div style={{ width: 48, height: 66, background: 'var(--bg)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: 'var(--border)' }}>🃏</div>}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Search & Add — search this set's missing cards directly */}
       {set.missing.length > 0 && (
         <div style={{ marginBottom: 16 }}>
@@ -338,32 +378,46 @@ function SetCard({ set, currency, onAdd }: {
           {filtered.length > 0 && (
             <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 320, overflowY: 'auto' }}>
               {filtered.map(c => (
-                <div key={c.card_url_slug} style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '6px 8px', borderRadius: 8, background: 'var(--bg-light)',
-                }}>
-                  <Link href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
-                    {c.image_url
-                      ? <img src={c.image_url} alt={c.card_name} loading="lazy" style={{ width: 28, height: 38, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
-                      : <div style={{ width: 28, height: 38, background: 'var(--bg)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0, color: 'var(--border)' }}>🃏</div>}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {c.card_name}
-                      </div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-                        {c.card_number_display || c.card_number || ''} · {fmt(c.raw_usd, currency)}
-                      </div>
+                <button
+                  key={c.card_url_slug}
+                  type="button"
+                  onClick={() => onAdd(c)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '6px 8px', borderRadius: 8,
+                    background: 'var(--bg-light)', border: '1px solid var(--border)',
+                    cursor: 'pointer', textAlign: 'left', width: '100%',
+                    transition: 'border-color 0.15s, background 0.15s',
+                    fontFamily: "'Figtree', sans-serif",
+                  }}
+                  onMouseEnter={e => {
+                    const el = e.currentTarget as HTMLButtonElement
+                    el.style.borderColor = 'var(--primary)'
+                    el.style.background = 'rgba(26,95,173,0.06)'
+                  }}
+                  onMouseLeave={e => {
+                    const el = e.currentTarget as HTMLButtonElement
+                    el.style.borderColor = 'var(--border)'
+                    el.style.background = 'var(--bg-light)'
+                  }}
+                >
+                  {c.image_url
+                    ? <img src={c.image_url} alt={c.card_name} loading="lazy" style={{ width: 28, height: 38, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
+                    : <div style={{ width: 28, height: 38, background: 'var(--bg)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0, color: 'var(--border)' }}>🃏</div>}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {c.card_name}
                     </div>
-                  </Link>
-                  <button onClick={() => onAdd(c)}
-                    style={{
-                      padding: '5px 10px', borderRadius: 8,
-                      border: '1px solid var(--primary)', background: 'rgba(26,95,173,0.08)',
-                      color: 'var(--primary)', fontSize: 11, fontWeight: 700,
-                      fontFamily: "'Figtree', sans-serif", cursor: 'pointer', flexShrink: 0,
-                    }}
-                  >+ Add</button>
-                </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      {c.card_number_display || c.card_number || ''} · {fmt(c.raw_usd, currency)}
+                    </div>
+                  </div>
+                  <span style={{
+                    padding: '4px 10px', borderRadius: 8,
+                    background: 'var(--primary)', color: '#fff',
+                    fontSize: 11, fontWeight: 700, flexShrink: 0,
+                  }}>+ Add</span>
+                </button>
               ))}
             </div>
           )}
