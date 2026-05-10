@@ -470,7 +470,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
       {priceHistory.length > 1 && (
         <div style={{ background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)', padding: '20px 20px 32px', marginBottom: 16 }}>
           <SectionLabel>Set Price History</SectionLabel>
-          <PriceChart data={priceHistory} lines={[{ key: 'value_usd', color: 'var(--accent)', label: 'Total Set Value' }]} height={220} />
+          <PriceChart data={priceHistory} series={[{ key: 'value_usd', color: 'var(--accent)', label: 'Total Set Value', defaultOn: true }]} height={220} />
         </div>
       )}
 

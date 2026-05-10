@@ -271,6 +271,20 @@ function SetCard({ set, currency, onAdd }: {
   const remainingCost = set.cheapest_missing.reduce((s, c) => s + (c.raw_usd || 0), 0)
   const allMissingCost = set.missing.reduce((s, c) => s + (c.raw_usd || 0), 0)
 
+  const [query, setQuery] = useState('')
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (q.length < 2) return []
+    return set.missing
+      .filter(c =>
+        c.card_name.toLowerCase().includes(q) ||
+        (c.card_number || '').toLowerCase().includes(q) ||
+        (c.card_number_display || '').toLowerCase().includes(q)
+      )
+      .slice(0, 20)
+  }, [query, set.missing])
+  const showNoMatches = query.trim().length >= 2 && filtered.length === 0
+
   return (
     <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: '18px 20px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: 12 }}>
@@ -305,6 +319,61 @@ function SetCard({ set, currency, onAdd }: {
           />
         )}
       </div>
+
+      {/* Search & Add — search this set's missing cards directly */}
+      {set.missing.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <input
+            type="search"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder={`Search missing cards in ${set.set_name}…`}
+            style={{
+              width: '100%', padding: '9px 12px', boxSizing: 'border-box',
+              border: '1px solid var(--border)', borderRadius: 10,
+              background: 'var(--bg-light)', color: 'var(--text)',
+              fontSize: 13, fontFamily: "'Figtree', sans-serif", outline: 'none',
+            }}
+          />
+          {filtered.length > 0 && (
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 320, overflowY: 'auto' }}>
+              {filtered.map(c => (
+                <div key={c.card_url_slug} style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '6px 8px', borderRadius: 8, background: 'var(--bg-light)',
+                }}>
+                  <Link href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
+                    {c.image_url
+                      ? <img src={c.image_url} alt={c.card_name} loading="lazy" style={{ width: 28, height: 38, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
+                      : <div style={{ width: 28, height: 38, background: 'var(--bg)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0, color: 'var(--border)' }}>🃏</div>}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {c.card_name}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+                        {c.card_number_display || c.card_number || ''} · {fmt(c.raw_usd, currency)}
+                      </div>
+                    </div>
+                  </Link>
+                  <button onClick={() => onAdd(c)}
+                    style={{
+                      padding: '5px 10px', borderRadius: 8,
+                      border: '1px solid var(--primary)', background: 'rgba(26,95,173,0.08)',
+                      color: 'var(--primary)', fontSize: 11, fontWeight: 700,
+                      fontFamily: "'Figtree', sans-serif", cursor: 'pointer', flexShrink: 0,
+                    }}
+                  >+ Add</button>
+                </div>
+              ))}
+            </div>
+          )}
+          {showNoMatches && (
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 0', fontFamily: "'Figtree', sans-serif" }}>
+              No matching missing cards in {set.set_name}.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Cheapest missing */}
       {set.cheapest_missing.length > 0 && (

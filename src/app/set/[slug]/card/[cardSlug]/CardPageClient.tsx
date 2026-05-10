@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { supabase, formatPct } from '@/lib/supabase'
 import InlineChat from '@/components/InlineChat'
-import PriceChart from '@/components/PriceChart'
+import PriceChart, { type ChartSeries } from '@/components/PriceChart'
 import GradeLadder, { type GradePrices } from '@/components/GradeLadder'
 import CardStructuredData from '@/components/CardStructuredData'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
@@ -13,6 +13,27 @@ import { getCardFaqItems } from '@/lib/faqs'
 import { getSetAssets } from '@/lib/setAssets'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+
+// Chart series available on the card page price history. Only Raw is visible
+// by default; the rest are revealed as toggle pills under the chart so
+// collectors can compare tiers without overwhelming the default view.
+// Series with no data anywhere in the history are filtered out by PriceChart
+// itself, so cards without (e.g.) ACE 10 sales just won't show that toggle.
+const CARD_CHART_SERIES: ChartSeries[] = [
+  { key: 'raw_usd',           label: 'Raw',             color: 'var(--primary)', defaultOn: true },
+  { key: 'psa7_usd',          label: 'PSA 7',           color: '#94a3b8' },
+  { key: 'psa8_usd',          label: 'PSA 8',           color: '#60a5fa' },
+  { key: 'psa9_usd',          label: 'PSA 9',           color: '#3b82f6' },
+  { key: 'psa10_usd',         label: 'PSA 10',          color: 'var(--accent)' },
+  { key: 'cgc95_usd',         label: 'CGC 9.5',         color: '#a78bfa' },
+  { key: 'cgc10_usd',         label: 'CGC 10',          color: '#8b5cf6' },
+  { key: 'bgs10_usd',         label: 'BGS 10',          color: '#06b6d4' },
+  { key: 'bgs10black_usd',    label: 'BGS 10 Black',    color: '#0f172a' },
+  { key: 'cgc10pristine_usd', label: 'CGC 10 Pristine', color: '#a855f7' },
+  { key: 'sgc10_usd',         label: 'SGC 10',          color: '#22c55e' },
+  { key: 'tag10_usd',         label: 'TAG 10',          color: '#f59e0b' },
+  { key: 'ace10_usd',         label: 'ACE 10',          color: '#ef4444' },
+]
 
 const NON_POKEMON_PREFIXES = [
   'energy', 'basic energy', 'special energy',
@@ -636,6 +657,19 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
         </div>
       </div>
 
+      {/* Price History Chart */}
+      {priceHistory.length > 1 && (
+        <Panel style={{ paddingBottom: 24 }}>
+          <SectionLabel>Price History</SectionLabel>
+          <PriceChart
+            data={priceHistory}
+            series={CARD_CHART_SERIES}
+            height={280}
+            note="New graded tiers (BGS, CGC, SGC, ACE, TAG) just started tracking — limited history will fill in over the coming weeks."
+          />
+        </Panel>
+      )}
+
       {/* Collector Intel */}
       {tiles.length > 0 && (
         <Panel>
@@ -809,14 +843,6 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
               : 'Verified high-confidence matches only. Prices scraped daily — always check the listing before buying.'
             }
           </p>
-        </Panel>
-      )}
-
-      {/* Price History Chart */}
-      {priceHistory.length > 1 && (
-        <Panel style={{ paddingBottom: 32 }}>
-          <SectionLabel>Price History</SectionLabel>
-          <PriceChart data={priceHistory} height={280} />
         </Panel>
       )}
 

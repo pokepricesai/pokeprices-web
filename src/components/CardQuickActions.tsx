@@ -154,49 +154,62 @@ export default function CardQuickActions({ card }: { card: Card }) {
     </>
   )
 
-  const ebayDisclosure = (
-    <p style={{
-      flexBasis: '100%',
-      fontSize: 10,
-      color: 'var(--text-muted)',
-      margin: 0,
-      opacity: 0.75,
-      fontFamily: "'Figtree', sans-serif",
+  const ebayBox = (
+    <div style={{
+      background: 'var(--bg-light)',
+      border: '1px solid var(--border)',
+      borderRadius: 12,
+      padding: '12px 14px',
+      marginBottom: 18,
     }}>
-      Affiliate link · we may earn commission
-    </p>
+      <div style={{
+        fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.5,
+        color: 'var(--text-muted)', marginBottom: 10, fontFamily: "'Figtree', sans-serif",
+      }}>
+        Find this card on eBay
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {ebayChips}
+      </div>
+      <p style={{
+        fontSize: 10, color: 'var(--text-muted)', margin: '10px 0 0',
+        opacity: 0.75, fontFamily: "'Figtree', sans-serif",
+      }}>
+        Affiliate link · we may earn commission
+      </p>
+    </div>
   )
 
   if (!user) {
     return (
-      <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap', alignItems: 'center' }}>
-        <Link href="/dashboard/login" style={baseBtn}>
-          <span>👁</span> Watch
-        </Link>
-        <Link href="/dashboard/login" style={baseBtn}>
-          <span>📊</span> Add to portfolio
-        </Link>
-        {ebayChips}
-        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", alignSelf: 'center' }}>
-          Free — no card required to register.
-        </span>
-        {ebayDisclosure}
-      </div>
+      <>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <Link href="/dashboard/login" style={baseBtn}>
+            <span>👁</span> Watch
+          </Link>
+          <Link href="/dashboard/login" style={baseBtn}>
+            <span>📊</span> Add to portfolio
+          </Link>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", alignSelf: 'center' }}>
+            Free — no card required to register.
+          </span>
+        </div>
+        {ebayBox}
+      </>
     )
   }
 
   return (
     <>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         <button onClick={handleWatch} disabled={busy} style={watchId ? watchingBtn : baseBtn}>
           {watchId ? <><span>✓</span> Watching</> : <><span>👁</span> Watch</>}
         </button>
         <button onClick={() => setShowPortfolioModal(true)} style={baseBtn}>
           <span>📊</span> Add to portfolio
         </button>
-        {ebayChips}
-        {ebayDisclosure}
       </div>
+      {ebayBox}
       {showPortfolioModal && (
         <CardPortfolioAddModal
           card={card}
