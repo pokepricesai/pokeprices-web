@@ -18,7 +18,12 @@ import {
 const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'pokeprices2024'
 const SESSION_KEY = 'pp_content_studio_authed'
 
-const GENERATE_URL = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/content-studio-generate`
+// Edge function URL slug. Supabase assigns its own random slug when you
+// create a function via the dashboard (e.g. "smooth-responder"); renaming
+// the display name doesn't change the slug. Override via env var if the
+// slug ever changes.
+const GENERATE_FN_SLUG = process.env.NEXT_PUBLIC_CONTENT_STUDIO_FN_SLUG || 'smooth-responder'
+const GENERATE_URL = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/${GENERATE_FN_SLUG}`
 const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
 // ── Login screen ────────────────────────────────────────────────────────────
