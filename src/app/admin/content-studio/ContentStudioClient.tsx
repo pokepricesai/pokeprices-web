@@ -56,17 +56,32 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 async function callGenerate(template_type: TemplateType, options: any): Promise<SocialContentPost> {
-  const res = await fetch(GENERATE_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${ANON_KEY}`,
-      'apikey': ANON_KEY,
-    },
-    body: JSON.stringify({ template_type, options }),
-  })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error || 'Generation failed')
+  let res: Response
+  try {
+    res = await fetch(GENERATE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${ANON_KEY}`,
+        'apikey': ANON_KEY,
+      },
+      body: JSON.stringify({ template_type, options }),
+    })
+  } catch (e: any) {
+    // Network-layer error — almost always CORS preflight failure or the
+    // function not being reachable. Surface a hint.
+    throw new Error(
+      `Cannot reach edge function (${e?.message || 'network error'}). ` +
+      `Check that content-studio-generate is deployed and verify_jwt is OFF.`
+    )
+  }
+  let data: any = null
+  try { data = await res.json() } catch {}
+  if (!res.ok) {
+    const detail = data?.error || data?.message || (await res.text().catch(() => '')) || `HTTP ${res.status}`
+    throw new Error(detail)
+  }
+  if (!data?.post) throw new Error('Edge function returned no post')
   return data.post as SocialContentPost
 }
 
@@ -292,6 +307,7 @@ export default function ContentStudioClient() {
   const [generating, setGenerating] = useState(false)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [filter, setFilter] = useState<'all' | 'draft' | 'approved' | 'rejected' | 'used'>('all')
+  const [lastError, setLastError] = useState<string | null>(null)
 
   // Global options per template type
   const [cardBattleOpts,  setCardBattleOpts]  = useState<CardBattleOptions>(defaultOptionsFor('card_battle') as CardBattleOptions)
@@ -323,16 +339,17 @@ export default function ContentStudioClient() {
 
   async function generateWeeklyPack() {
     setGenerating(true)
+    setLastError(null)
     setProgress({ done: 0, total: weeklyTasks.length })
     const results: SocialContentPost[] = []
+    const errors: string[] = []
     let done = 0
-    // Run in parallel for speed; bump done on each settle.
     await Promise.all(weeklyTasks.map(async t => {
       try {
         const post = await callGenerate(t.template_type, t.options)
         results.push(post)
       } catch (e: any) {
-        console.error('Generation failed for', t.template_type, e?.message)
+        errors.push(`${TEMPLATE_LABELS[t.template_type]}: ${e?.message || e}`)
       } finally {
         done += 1
         setProgress({ done, total: weeklyTasks.length })
@@ -341,6 +358,9 @@ export default function ContentStudioClient() {
     setPosts(prev => [...results, ...prev])
     setGenerating(false)
     setProgress(null)
+    if (errors.length > 0) {
+      setLastError(`${errors.length} of ${weeklyTasks.length} generations failed. First error: ${errors[0]}`)
+    }
   }
 
   async function generateOne(template_type: TemplateType) {
@@ -349,12 +369,13 @@ export default function ContentStudioClient() {
       return
     }
     setGenerating(true)
+    setLastError(null)
     try {
       const opts = template_type === 'card_battle' ? cardBattleOpts : marketMoverOpts
       const post = await callGenerate(template_type, opts)
       setPosts(prev => [post, ...prev])
     } catch (e: any) {
-      alert(`Generation failed: ${e?.message || e}`)
+      setLastError(`${TEMPLATE_LABELS[template_type]}: ${e?.message || e}`)
     } finally { setGenerating(false) }
   }
 
@@ -415,6 +436,17 @@ export default function ContentStudioClient() {
           </button>
         </div>
       </div>
+
+      {/* Error banner */}
+      {lastError && (
+        <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 10, padding: '10px 14px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+          <div style={{ fontSize: 12, color: '#b91c1c', lineHeight: 1.5, fontFamily: "'Figtree', sans-serif" }}>
+            <strong>Generation error.</strong> {lastError}
+          </div>
+          <button onClick={() => setLastError(null)}
+            style={{ background: 'transparent', border: 'none', color: '#b91c1c', fontSize: 16, cursor: 'pointer', lineHeight: 1, padding: 0 }}>×</button>
+        </div>
+      )}
 
       {/* Per-template option panels */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 12, marginBottom: 18 }}>
