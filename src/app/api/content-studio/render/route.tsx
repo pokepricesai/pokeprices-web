@@ -36,6 +36,15 @@ function fmtPrice(cents: number | null): string {
   return gbp ? `${fmtUsd(cents)} (${gbp})` : fmtUsd(cents)
 }
 
+// "123/165" when set has a printed total > 1, else "#123" — same logic
+// used on the live card pages (formatCardNumber helper).
+function fmtCardNumber(num: any, display: any, total: any): string {
+  const t = total ? Number(total) : 0
+  if (display && t > 1) return String(display)
+  if (num != null && num !== '') return `#${num}`
+  return ''
+}
+
 function pct(v: number | null | undefined): string {
   if (v == null) return '—'
   return `${v > 0 ? '+' : ''}${v.toFixed(1)}%`
@@ -74,36 +83,61 @@ async function loadFont(filename: string): Promise<ArrayBuffer | null> {
   } catch { return null }
 }
 
-// Subtle dot-grid pattern for light backgrounds — gives the white tiles a
-// bit of depth without competing with the content. SVG base64 keeps it
-// inside Satori's CSS subset.
-const DOT_PATTERN_DARK = `data:image/svg+xml;base64,${btoa(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="2" cy="2" r="1" fill="rgba(15,23,42,0.08)"/></svg>`
+// Layered patterns for backgrounds. Small dots (24px) + wider soft circles
+// (96px) layered with radial highlights. Two intensities — DARK is used on
+// light backgrounds, LIGHT on dark / blue.
+const DOTS_DARK = `data:image/svg+xml;base64,${btoa(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><circle cx="2" cy="2" r="1" fill="rgba(15,23,42,0.10)"/></svg>`
 )}`
-const DOT_PATTERN_LIGHT = `data:image/svg+xml;base64,${btoa(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="2" cy="2" r="1" fill="rgba(255,255,255,0.10)"/></svg>`
+const DOTS_LIGHT = `data:image/svg+xml;base64,${btoa(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><circle cx="2" cy="2" r="1" fill="rgba(255,255,255,0.12)"/></svg>`
+)}`
+const RINGS_DARK = `data:image/svg+xml;base64,${btoa(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><circle cx="48" cy="48" r="28" fill="none" stroke="rgba(15,23,42,0.05)" stroke-width="1"/></svg>`
+)}`
+const RINGS_LIGHT = `data:image/svg+xml;base64,${btoa(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><circle cx="48" cy="48" r="28" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/></svg>`
 )}`
 
-// Background palette by visual style. bg combines a multi-layer background
-// (radial highlight + dot pattern + linear gradient) so even the plain
-// white style gets visual depth.
-const PALETTE: Record<string, { bg: string; text: string; muted: string; accent: string; border: string }> = {
-  light:  {
-    bg: `url("${DOT_PATTERN_DARK}"), radial-gradient(circle at 80% 0%, rgba(26,95,173,0.10), transparent 55%), linear-gradient(135deg, #ffffff 0%, #eef2f7 100%)`,
+// Background palette by visual style. Layers (front to back):
+//   1. small dot grid
+//   2. softer wider ring pattern
+//   3. radial accent highlight (top right)
+//   4. base linear gradient
+const PALETTE: Record<string, { bg: string; text: string; muted: string; accent: string; border: string; tileBg: string }> = {
+  light: {
+    bg: `url("${DOTS_DARK}"), url("${RINGS_DARK}"), radial-gradient(circle at 78% -10%, rgba(26,95,173,0.14), transparent 50%), radial-gradient(circle at 0% 100%, rgba(255,203,5,0.08), transparent 45%), linear-gradient(135deg, #ffffff 0%, #eef3fa 100%)`,
     text: '#0f172a', muted: '#64748b', accent: '#1a5fad', border: '#e2e8f0',
+    tileBg: 'rgba(15,23,42,0.04)',
   },
-  dark:   {
-    bg: `url("${DOT_PATTERN_LIGHT}"), radial-gradient(circle at 80% 0%, rgba(255,203,5,0.10), transparent 55%), linear-gradient(160deg, #0f172a 0%, #1e293b 100%)`,
+  dark: {
+    bg: `url("${DOTS_LIGHT}"), url("${RINGS_LIGHT}"), radial-gradient(circle at 78% -10%, rgba(255,203,5,0.14), transparent 50%), radial-gradient(circle at 0% 100%, rgba(26,95,173,0.20), transparent 45%), linear-gradient(160deg, #0f172a 0%, #1e293b 100%)`,
     text: '#f8fafc', muted: '#94a3b8', accent: '#ffcb05', border: '#1e293b',
+    tileBg: 'rgba(255,255,255,0.06)',
   },
-  blue:   {
-    bg: `url("${DOT_PATTERN_LIGHT}"), radial-gradient(circle at 80% 0%, rgba(255,203,5,0.18), transparent 55%), linear-gradient(160deg, #1a5fad 0%, #2874c8 100%)`,
+  blue: {
+    bg: `url("${DOTS_LIGHT}"), url("${RINGS_LIGHT}"), radial-gradient(circle at 78% -10%, rgba(255,203,5,0.20), transparent 50%), linear-gradient(160deg, #1a5fad 0%, #2874c8 100%)`,
     text: '#ffffff', muted: 'rgba(255,255,255,0.75)', accent: '#ffcb05', border: 'rgba(255,255,255,0.18)',
+    tileBg: 'rgba(255,255,255,0.08)',
   },
   yellow: {
-    bg: `url("${DOT_PATTERN_DARK}"), radial-gradient(circle at 80% 0%, rgba(26,95,173,0.14), transparent 55%), linear-gradient(135deg, #ffcb05 0%, #ffd84a 100%)`,
+    bg: `url("${DOTS_DARK}"), url("${RINGS_DARK}"), radial-gradient(circle at 78% -10%, rgba(26,95,173,0.18), transparent 50%), linear-gradient(135deg, #ffcb05 0%, #ffd84a 100%)`,
     text: '#0f172a', muted: 'rgba(15,23,42,0.7)', accent: '#1a5fad', border: 'rgba(15,23,42,0.12)',
+    tileBg: 'rgba(15,23,42,0.06)',
   },
+}
+
+// Set logo lookup. Most sets follow "${set_name}.webp"; a few have exception
+// filenames that don't match the DB set_name 1:1.
+const SET_LOGO_OVERRIDES: Record<string, string> = {
+  'Neo Revelation':         'Neo Revelatio.webp',
+  'Fire Red & Leaf Green':  'FireRed & LeafGreen.webp',
+  'Team Magma & Team Aqua': 'Team Magma vs Team Aqua.webp',
+}
+async function fetchSetLogo(setName: string | null | undefined, origin: string): Promise<string | null> {
+  if (!setName) return null
+  const file = SET_LOGO_OVERRIDES[setName] || `${setName}.webp`
+  return await toDataUrl(`${origin}/set-assets/logos/${encodeURIComponent(file)}`)
 }
 
 // Logo cached at module scope — single fetch per cold start.
@@ -181,7 +215,7 @@ async function renderCardBattle(post: any, p: typeof PALETTE['light'], logo: str
         ? <img src={img} width={300} height={420} style={{ objectFit: 'contain', borderRadius: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.25)' }} />
         : <div style={{ width: 300, height: 420, background: p.border, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 80 }}>🃏</div>}
       <div style={{ fontSize: 24, fontWeight: 700, color: p.text, textAlign: 'center', fontFamily: 'Outfit', lineHeight: 1.1, maxWidth: 380, display: 'flex', justifyContent: 'center' }}>
-        {card.card_name}
+        {card.card_name} {fmtCardNumber(card.card_number, card.card_number_display, card.set_printed_total)}
       </div>
       <div style={{ fontSize: 13, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 1.5, display: 'flex', textAlign: 'center' }}>
         {card.set_name}
@@ -219,13 +253,17 @@ async function renderCardBattle(post: any, p: typeof PALETTE['light'], logo: str
 
 // ── Template: Market Mover ──────────────────────────────────────────────────
 
-async function renderMarketMover(post: any, p: typeof PALETTE['light'], logo: string | null): Promise<JSX.Element> {
+async function renderMarketMover(post: any, p: typeof PALETTE['light'], logo: string | null, origin: string): Promise<JSX.Element> {
   const card = post.data_payload?.card || {}
-  const img  = card.image_url ? await toDataUrl(card.image_url) : null
+  const [img, setLogo] = await Promise.all([
+    card.image_url ? toDataUrl(card.image_url) : null,
+    fetchSetLogo(card.set_name, origin),
+  ])
   const move = post.data_payload?.move_pct as number | undefined
   const windowLabel: Record<string, string> = { '7d': '7 days', '30d': '30 days', '90d': '90 days', '1y': '1 year' }
   const wl = windowLabel[post.data_payload?.time_window || '30d']
   const moveText = move != null ? `${move > 0 ? '+' : ''}${move.toFixed(0)}%` : '—'
+  const numberLabel = fmtCardNumber(card.card_number, card.card_number_display, card.set_printed_total)
 
   const TimeStat = ({ label, value }: { label: string; value: string }) => (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flex: 1 }}>
@@ -251,10 +289,13 @@ async function renderMarketMover(post: any, p: typeof PALETTE['light'], logo: st
             {moveText}
           </div>
           <div style={{ fontSize: 30, fontWeight: 700, color: p.text, fontFamily: 'Outfit', lineHeight: 1.2, display: 'flex' }}>
-            {card.card_name}
+            {card.card_name} {numberLabel}
           </div>
-          <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>
-            {card.set_name}  ·  Raw {fmtPrice(card.raw_usd)}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {setLogo && <img src={setLogo} height={28} style={{ objectFit: 'contain', maxWidth: 120 }} />}
+            <span style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>
+              {card.set_name}  ·  Raw {fmtPrice(card.raw_usd)}
+            </span>
           </div>
           {card.sales_30d > 0 && (
             <div style={{ display: 'flex', marginTop: 4 }}>
@@ -301,7 +342,7 @@ async function renderGradingGap(post: any, p: typeof PALETTE['light'], logo: str
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ fontSize: 28, fontWeight: 700, color: p.text, fontFamily: 'Outfit', lineHeight: 1.1, maxWidth: 560, display: 'flex' }}>
-            {card.card_name}
+            {card.card_name} {fmtCardNumber(card.card_number, card.card_number_display, card.set_printed_total)}
           </div>
           <div style={{ fontSize: 16, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 6, display: 'flex' }}>
             {card.set_name}
@@ -357,7 +398,7 @@ async function renderThenVsNow(post: any, p: typeof PALETTE['light'], logo: stri
           : <div style={{ width: 270, height: 378, background: p.border, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 100 }}>🃏</div>}
 
         <div style={{ fontSize: 28, fontWeight: 700, color: p.text, fontFamily: 'Outfit', textAlign: 'center', maxWidth: 800, display: 'flex' }}>
-          {card.card_name}
+          {card.card_name} {fmtCardNumber(card.card_number, card.card_number_display, card.set_printed_total)}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'stretch', gap: 32, marginTop: 4 }}>
@@ -431,12 +472,14 @@ async function renderBudgetBuilder(post: any, p: typeof PALETTE['light'], logo: 
         {/* 2x2 grid */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, justifyContent: 'center', maxWidth: 820 }}>
           {cards.slice(0, 4).map((c, i) => (
-            <div key={i} style={{ width: 380, display: 'flex', alignItems: 'center', gap: 12, padding: 14, background: p.bg === '#ffffff' ? '#f8fafc' : p.border, borderRadius: 12, border: `1px solid ${p.border}` }}>
+            <div key={i} style={{ width: 380, display: 'flex', alignItems: 'center', gap: 12, padding: 14, background: p.tileBg, borderRadius: 12, border: `1px solid ${p.border}` }}>
               {images[i]
                 ? <img src={images[i] as string} width={70} height={98} style={{ objectFit: 'contain', borderRadius: 6, flexShrink: 0 }} />
                 : <div style={{ width: 70, height: 98, background: p.border, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 30 }}>🃏</div>}
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 18, fontWeight: 700, color: p.text, fontFamily: 'Outfit', lineHeight: 1.2, display: 'flex' }}>{c.card_name}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: p.text, fontFamily: 'Outfit', lineHeight: 1.2, display: 'flex' }}>
+                  {c.card_name} {fmtCardNumber(c.card_number, c.card_number_display, c.set_printed_total)}
+                </div>
                 <div style={{ fontSize: 12, color: p.muted, fontFamily: 'Figtree', marginTop: 2, display: 'flex' }}>{c.set_name}</div>
                 <div style={{ fontSize: 20, fontWeight: 800, color: p.accent, fontFamily: 'Outfit', marginTop: 4, display: 'flex' }}>{fmtUsd(c.raw_usd)} <span style={{ fontSize: 13, color: p.muted, fontWeight: 600, marginLeft: 6, display: 'flex' }}>{fmtGbp(c.raw_usd)}</span></div>
               </div>
@@ -481,13 +524,15 @@ async function renderCollectorPulse(post: any, p: typeof PALETTE['light'], logo:
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, justifyContent: 'center' }}>
         {cards.slice(0, 5).map((c, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '14px 20px', background: p.bg === '#ffffff' ? '#f8fafc' : p.border, border: `1px solid ${p.border}`, borderRadius: 14 }}>
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '14px 20px', background: p.tileBg, border: `1px solid ${p.border}`, borderRadius: 14 }}>
             <div style={{ fontSize: 32, fontWeight: 900, color: p.muted, fontFamily: 'Outfit', width: 50, display: 'flex' }}>{i + 1}</div>
             {images[i]
               ? <img src={images[i] as string} width={66} height={92} style={{ objectFit: 'contain', borderRadius: 6, flexShrink: 0 }} />
               : <div style={{ width: 66, height: 92, background: p.border, borderRadius: 6, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>🃏</div>}
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-              <div style={{ fontSize: 22, fontWeight: 700, color: p.text, fontFamily: 'Outfit', display: 'flex' }}>{c.card_name}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: p.text, fontFamily: 'Outfit', display: 'flex' }}>
+                {c.card_name} {fmtCardNumber(c.card_number, c.card_number_display, c.set_printed_total)}
+              </div>
               <div style={{ fontSize: 14, color: p.muted, fontFamily: 'Figtree', marginTop: 2, display: 'flex' }}>{c.set_name}</div>
               {c.sales_30d > 0 && (
                 <div style={{ fontSize: 11, color: p.accent, fontFamily: 'Figtree', marginTop: 3, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', display: 'flex' }}>
@@ -612,46 +657,69 @@ async function renderPokemonBattle(post: any, p: typeof PALETTE['light'], logo: 
 
 // ── Template: Guess the Pokémon ─────────────────────────────────────────────
 
-async function renderGuessThePokemon(post: any, p: typeof PALETTE['light'], logo: string | null): Promise<JSX.Element> {
+async function renderGuessThePokemon(post: any, _p: typeof PALETTE['light'], logo: string | null): Promise<JSX.Element> {
   const poke = post.data_payload?.pokemon || {}
   const clues: string[] = post.data_payload?.clues || []
   const difficulty = post.data_payload?.difficulty || 'silhouette'
   const img = poke.sprite ? await toDataUrl(poke.sprite) : null
 
-  // Silhouette: full brightness(0) makes the image solid black.
-  // Blurred: real blur filter (Satori supports filter: blur(N)).
+  // Classic anime "Who's That Pokémon?" palette. Overrides the chosen
+  // visual_style — this look is iconic and worth being canonical.
+  const p = {
+    bg: `radial-gradient(circle at 50% 38%, #fff8db 0%, #ffd84a 38%, #f59e0b 72%, #d97706 100%)`,
+    text: '#1c2024',
+    muted: 'rgba(28,32,36,0.7)',
+    accent: '#1a5fad',
+    border: 'rgba(28,32,36,0.18)',
+    tileBg: 'rgba(255,255,255,0.55)',
+  }
+
   const imgStyle: React.CSSProperties = difficulty === 'silhouette'
     ? { filter: 'brightness(0)', objectFit: 'contain' }
     : { filter: 'blur(28px)', objectFit: 'contain' }
 
   return (
     <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '60px 50px' }}>
-      <TemplateHeader kind="Guess the Pokémon" p={p} logo={logo} />
+      {/* Custom header — the iconic anime title is the kind label */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+        <div style={{ fontSize: 26, fontWeight: 900, color: p.text, fontFamily: 'Outfit', letterSpacing: 1, textTransform: 'uppercase', display: 'flex' }}>
+          Who&apos;s That Pokémon?
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {logo && <img src={logo} width={26} height={26} style={{ borderRadius: 6 }} />}
+          <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>PokePrices.io</div>
+        </div>
+      </div>
 
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', marginTop: 30, marginBottom: 20 }}>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', marginTop: 20, marginBottom: 14 }}>
+        {/* Soft cream halo behind the silhouette */}
+        <div style={{
+          position: 'absolute', width: 720, height: 720, borderRadius: 360,
+          background: 'radial-gradient(circle, rgba(255,253,232,0.95) 0%, rgba(255,253,232,0.6) 50%, transparent 75%)',
+          display: 'flex',
+        }} />
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {img
             ? <img src={img} width={560} height={560} style={imgStyle} />
             : <div style={{ width: 560, height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 220 }}>?</div>}
-          {/* Big '?' overlay */}
           <div style={{
             position: 'absolute', fontSize: 360, fontWeight: 900,
-            color: p.accent, fontFamily: 'Outfit', opacity: 0.18, lineHeight: 1,
+            color: '#1c2024', fontFamily: 'Outfit', opacity: 0.10, lineHeight: 1,
             display: 'flex',
           }}>?</div>
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', marginBottom: 24 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center', marginBottom: 18 }}>
         {clues.slice(0, 3).map((c, i) => (
           <div key={i} style={{
             display: 'flex', alignItems: 'center', gap: 14,
-            padding: '12px 22px',
-            background: p.bg === '#ffffff' ? '#f8fafc' : p.border,
-            border: `1px solid ${p.border}`, borderRadius: 14, minWidth: 520,
+            padding: '10px 22px',
+            background: p.tileBg,
+            border: `1px solid ${p.border}`, borderRadius: 16, minWidth: 500,
           }}>
-            <span style={{ fontSize: 24, fontWeight: 900, color: p.accent, fontFamily: 'Outfit', width: 32, display: 'flex' }}>{i + 1}</span>
-            <span style={{ fontSize: 22, fontWeight: 600, color: p.text, fontFamily: 'Figtree', display: 'flex' }}>{c}</span>
+            <span style={{ fontSize: 22, fontWeight: 900, color: p.accent, fontFamily: 'Outfit', width: 28, display: 'flex' }}>{i + 1}</span>
+            <span style={{ fontSize: 20, fontWeight: 600, color: p.text, fontFamily: 'Figtree', display: 'flex' }}>{c}</span>
           </div>
         ))}
       </div>
@@ -681,10 +749,11 @@ export async function GET(req: NextRequest) {
   const p = PALETTE[style] || PALETTE.light
 
   const logo = await getLogoDataUrl()
+  const origin = req.nextUrl.origin
   let element: JSX.Element
   try {
     if (post.template_type === 'card_battle')        element = await renderCardBattle(post, p, logo)
-    else if (post.template_type === 'market_mover')  element = await renderMarketMover(post, p, logo)
+    else if (post.template_type === 'market_mover')  element = await renderMarketMover(post, p, logo, origin)
     else if (post.template_type === 'grading_gap')   element = await renderGradingGap(post, p, logo)
     else if (post.template_type === 'then_vs_now')   element = await renderThenVsNow(post, p, logo)
     else if (post.template_type === 'budget_builder') element = await renderBudgetBuilder(post, p, logo)

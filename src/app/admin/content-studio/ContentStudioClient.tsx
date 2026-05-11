@@ -11,6 +11,7 @@ import {
   BUDGETS,
   GENERATIONS,
   TONES,
+  PRODUCT_MODES,
   defaultOptionsFor,
   type SocialContentPost,
   type TemplateType,
@@ -264,7 +265,13 @@ function PriceTierField<O extends { price_tier: any; custom_target_gbp?: number;
 
 function CardBattlePanel({ opts, onChange }: { opts: CardBattleOptions; onChange: (o: CardBattleOptions) => void }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
+      <label style={fieldStyle}>
+        Product
+        <select value={opts.product_mode || 'cards'} onChange={e => onChange({ ...opts, product_mode: e.target.value as any })} style={selectStyle}>
+          {PRODUCT_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+        </select>
+      </label>
       <PriceTierField opts={opts} onChange={onChange} />
       <label style={fieldStyle}>
         Visual style
@@ -338,12 +345,19 @@ function BudgetBuilderPanel({ opts, onChange }: { opts: BudgetBuilderOptions; on
 
 function CollectorPulsePanel({ opts, onChange }: { opts: CollectorPulseOptions; onChange: (o: CollectorPulseOptions) => void }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
       <label style={fieldStyle}>
         Window
         <select value={opts.time_window} onChange={e => onChange({ ...opts, time_window: e.target.value as any })} style={selectStyle}>
           {TIME_WINDOWS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
+      </label>
+      <label style={fieldStyle}>
+        Min raw ($)
+        <input type="number" min={5} step={5}
+          value={opts.min_raw_usd ?? 20}
+          onChange={e => onChange({ ...opts, min_raw_usd: Number(e.target.value) || 5 })}
+          style={inputStyle} />
       </label>
       <label style={fieldStyle}>
         Visual style

@@ -171,6 +171,7 @@ async function generateCardBattle(options: any) {
     options.custom_target_gbp,
     options.custom_tolerance_pct,
   )
+  const productMode = options.product_mode || "cards"  // 'cards' | 'sealed' | 'mixed'
 
   // popular_card_trends view does the join + Topps filter + volume gate
   // server-side. Single query, no URL bloat.
@@ -178,6 +179,8 @@ async function generateCardBattle(options: any) {
     .select("*")
     .gte("current_raw", Math.max(min, MIN_RAW_CENTS))
   if (max != null) q = q.lte("current_raw", max)
+  if (productMode === "cards")  q = q.eq("is_sealed", false)
+  if (productMode === "sealed") q = q.eq("is_sealed", true)
   const { data: cands, error } = await q.order("sales_30d", { ascending: false }).limit(80)
   if (error) throw error
 
@@ -189,16 +192,20 @@ async function generateCardBattle(options: any) {
   const picks = sample(pool, 2)
 
   const cards = picks.map((p: any) => ({
-    card_name:     cleanCardName(p.card_name),
-    raw_card_name: p.card_name,
-    set_name:      p.set_name,
-    image_url:     p.image_url,
-    card_url_slug: p.card_url_slug,
-    raw_usd:       p.current_raw,
-    psa10_usd:     p.current_psa10,
-    raw_pct_30d:   p.raw_pct_30d,
-    raw_pct_365d:  p.raw_pct_365d,
-    sales_30d:     p.sales_30d || 0,
+    card_name:           cleanCardName(p.card_name),
+    raw_card_name:       p.card_name,
+    set_name:            p.set_name,
+    image_url:           p.image_url,
+    card_url_slug:       p.card_url_slug,
+    card_number:         p.card_number,
+    card_number_display: p.card_number_display,
+    set_printed_total:   p.set_printed_total,
+    is_sealed:           !!p.is_sealed,
+    raw_usd:             p.current_raw,
+    psa10_usd:           p.current_psa10,
+    raw_pct_30d:         p.raw_pct_30d,
+    raw_pct_365d:        p.raw_pct_365d,
+    sales_30d:           p.sales_30d || 0,
   }))
 
   const sys = voicePrompt(options.tone)
@@ -257,18 +264,21 @@ async function generateMarketMover(options: any) {
   const picked = pool[Math.floor(Math.random() * pool.length)] as any
 
   const card = {
-    card_name:     cleanCardName(picked.card_name),
-    raw_card_name: picked.card_name,
-    set_name:      picked.set_name,
-    image_url:     picked.image_url,
-    card_url_slug: picked.card_url_slug,
-    raw_usd:       picked.current_raw,
-    psa10_usd:     picked.current_psa10,
-    raw_pct_7d:    picked.raw_pct_7d,
-    raw_pct_30d:   picked.raw_pct_30d,
-    raw_pct_90d:   picked.raw_pct_90d,
-    raw_pct_365d:  picked.raw_pct_365d,
-    sales_30d:     picked.sales_30d || 0,
+    card_name:           cleanCardName(picked.card_name),
+    raw_card_name:       picked.card_name,
+    set_name:            picked.set_name,
+    image_url:           picked.image_url,
+    card_url_slug:       picked.card_url_slug,
+    card_number:         picked.card_number,
+    card_number_display: picked.card_number_display,
+    set_printed_total:   picked.set_printed_total,
+    raw_usd:             picked.current_raw,
+    psa10_usd:           picked.current_psa10,
+    raw_pct_7d:          picked.raw_pct_7d,
+    raw_pct_30d:         picked.raw_pct_30d,
+    raw_pct_90d:         picked.raw_pct_90d,
+    raw_pct_365d:        picked.raw_pct_365d,
+    sales_30d:           picked.sales_30d || 0,
   }
 
   const move = picked[trendKey] as number
@@ -375,12 +385,15 @@ async function generateGradingGap(options: any) {
   }
 
   const card = {
-    card_name:     cleanCardName(picked.card_name),
-    raw_card_name: picked.card_name,
-    set_name:      picked.set_name,
-    image_url:     cardRow.image_url,
-    card_url_slug: cardRow.card_url_slug,
-    grades:        Object.fromEntries(tiers.map(t => [t.label, dp[t.key]])),
+    card_name:           cleanCardName(picked.card_name),
+    raw_card_name:       picked.card_name,
+    set_name:            picked.set_name,
+    image_url:           cardRow.image_url,
+    card_url_slug:       cardRow.card_url_slug,
+    card_number:         picked.card_number,
+    card_number_display: picked.card_number_display,
+    set_printed_total:   picked.set_printed_total,
+    grades:              Object.fromEntries(tiers.map(t => [t.label, dp[t.key]])),
   }
 
   const sys = voicePrompt(options.tone)
@@ -426,19 +439,20 @@ async function generateThenVsNow(options: any) {
   )
 
   let picked: any
-  // If user pinned a specific card_slug, use it instead of random selection.
+  // If user pinned a card via the picker, look it up by card_url_slug
+  // (that's what search_global returns and the picker stores).
   if (options.card_slug) {
-    const bareSlug = String(options.card_slug).replace(/^pc-/, "")
+    const urlSlug = String(options.card_slug).replace(/^pc-/, "")
     const { data: directRows } = await supabase.from("popular_card_trends")
-      .select("*").eq("card_slug", bareSlug).limit(1)
+      .select("*").eq("card_url_slug", urlSlug).limit(1)
     picked = (directRows || [])[0]
     if (!picked) {
-      // Fallback: card might not be in popular_card_trends (low volume).
-      // Pull directly from cards + card_trends.
+      // Fallback: card might be excluded from popular_card_trends
+      // (low volume or no trend data). Look it up directly.
       const { data: cardRow } = await supabase.from("cards")
-        .select("card_slug, card_name, set_name, image_url, card_url_slug")
-        .eq("card_slug", bareSlug).maybeSingle()
-      if (!cardRow) throw new Error("Pinned card not found")
+        .select("card_slug, card_name, set_name, image_url, card_url_slug, card_number, card_number_display, set_printed_total, is_sealed")
+        .eq("card_url_slug", urlSlug).maybeSingle()
+      if (!cardRow) throw new Error("Pinned card not found by url slug: " + urlSlug)
       const { data: trendRow } = await supabase.from("card_trends")
         .select("*").eq("card_name", cardRow.card_name).eq("set_name", cardRow.set_name).maybeSingle()
       picked = { ...cardRow, ...(trendRow || {}), sales_30d: 0 }
@@ -483,17 +497,20 @@ async function generateThenVsNow(options: any) {
   const growth    = thenPrice && nowPrice ? Math.round(((nowPrice - thenPrice) / thenPrice) * 100) : null
 
   const card = {
-    card_name:     cleanCardName(picked.card_name),
-    raw_card_name: picked.card_name,
-    set_name:      picked.set_name,
-    image_url:     cardRow.image_url,
-    card_url_slug: cardRow.card_url_slug,
-    then_price:    thenPrice,
-    now_price:     nowPrice,
-    then_date:     thenDate,
-    now_date:      nowDate,
-    growth_pct:    growth,
-    sales_30d:     cardRow.sales_30d || 0,
+    card_name:           cleanCardName(picked.card_name),
+    raw_card_name:       picked.card_name,
+    set_name:            picked.set_name,
+    image_url:           cardRow.image_url,
+    card_url_slug:       cardRow.card_url_slug,
+    card_number:         picked.card_number,
+    card_number_display: picked.card_number_display,
+    set_printed_total:   picked.set_printed_total,
+    then_price:          thenPrice,
+    now_price:           nowPrice,
+    then_date:           thenDate,
+    now_date:            nowDate,
+    growth_pct:          growth,
+    sales_30d:           cardRow.sales_30d || 0,
   }
 
   const yrLabel = span === "2y" ? "2 years" : span === "3y" ? "3 years" : "5 years"
@@ -567,12 +584,15 @@ async function generateBudgetBuilder(options: any) {
   }
 
   const cards = picks.map((p: any) => ({
-    card_name:     cleanCardName(p.card_name),
-    raw_card_name: p.card_name,
-    set_name:      p.set_name,
-    image_url:     p.image_url,
-    card_url_slug: p.card_url_slug,
-    raw_usd:       p.current_raw,
+    card_name:           cleanCardName(p.card_name),
+    raw_card_name:       p.card_name,
+    set_name:            p.set_name,
+    image_url:           p.image_url,
+    card_url_slug:       p.card_url_slug,
+    card_number:         p.card_number,
+    card_number_display: p.card_number_display,
+    set_printed_total:   p.set_printed_total,
+    raw_usd:             p.current_raw,
   }))
 
   const sys = voicePrompt(options.tone)
@@ -608,13 +628,16 @@ Return JSON with this exact shape:
 
 async function generateCollectorPulse(options: any) {
   const trendKey = timeWindowKey(options.time_window || "7d")
+  // Minimum raw price floor — default $20 so we don't surface bulk movers.
+  const minRawUsdDollars = Number(options.min_raw_usd ?? 20)
+  const minRawCents = Math.max(MIN_RAW_CENTS, Math.round(minRawUsdDollars * 100))
 
   const { data: cands, error } = await supabase.from("popular_card_trends")
     .select("*")
     .not(trendKey, "is", null)
-    .gte("current_raw", MIN_RAW_CENTS)
+    .gte("current_raw", minRawCents)
     .order(trendKey, { ascending: false })
-    .limit(60)
+    .limit(80)
   if (error) throw error
 
   const reliable = (cands || []).filter((c: any) => passesConfidence(c))
@@ -622,14 +645,17 @@ async function generateCollectorPulse(options: any) {
 
   const top = reliable.slice(0, 5)
   const cards = top.map((p: any) => ({
-    card_name:     cleanCardName(p.card_name),
-    raw_card_name: p.card_name,
-    set_name:      p.set_name,
-    image_url:     p.image_url,
-    card_url_slug: p.card_url_slug,
-    raw_usd:       p.current_raw,
-    pct_change:    p[trendKey] as number,
-    sales_30d:     p.sales_30d || 0,
+    card_name:           cleanCardName(p.card_name),
+    raw_card_name:       p.card_name,
+    set_name:            p.set_name,
+    image_url:           p.image_url,
+    card_url_slug:       p.card_url_slug,
+    card_number:         p.card_number,
+    card_number_display: p.card_number_display,
+    set_printed_total:   p.set_printed_total,
+    raw_usd:             p.current_raw,
+    pct_change:          p[trendKey] as number,
+    sales_30d:           p.sales_30d || 0,
   }))
 
   const windowLabel: Record<string, string> = { "7d": "this week", "30d": "this month", "90d": "this quarter", "1y": "this year" }

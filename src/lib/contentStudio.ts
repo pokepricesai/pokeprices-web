@@ -123,9 +123,17 @@ export const STYLE_PALETTE: Record<VisualStyle, {
 }
 
 // Generation options — shape varies by template_type.
+export type ProductMode = 'cards' | 'sealed' | 'mixed'
+export const PRODUCT_MODES: { value: ProductMode; label: string }[] = [
+  { value: 'cards',  label: 'Cards only'   },
+  { value: 'sealed', label: 'Sealed only'  },
+  { value: 'mixed',  label: 'Mixed'        },
+]
+
 export interface CardBattleOptions extends CustomPriceFields, ToneField {
   visual_style: VisualStyle
   price_tier: PriceTier
+  product_mode: ProductMode
 }
 
 export interface MarketMoverOptions extends CustomPriceFields, ToneField {
@@ -169,6 +177,8 @@ export interface BudgetBuilderOptions extends ToneField {
 export interface CollectorPulseOptions extends ToneField {
   visual_style: VisualStyle
   time_window: TimeWindow
+  /** Minimum raw card price in USD dollars (e.g. 20 = $20). */
+  min_raw_usd?: number
 }
 
 export type Generation = 'any' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
@@ -211,7 +221,7 @@ export type GenerateOptions =
 export function defaultOptionsFor(template: TemplateType): GenerateOptions {
   switch (template) {
     case 'card_battle':
-      return { visual_style: 'light', price_tier: '60_150' } as CardBattleOptions
+      return { visual_style: 'light', price_tier: '60_150', product_mode: 'cards' } as CardBattleOptions
     case 'market_mover':
       return { visual_style: 'light', price_tier: 'any', time_window: '30d', direction: 'up' } as MarketMoverOptions
     case 'grading_gap':
@@ -221,7 +231,7 @@ export function defaultOptionsFor(template: TemplateType): GenerateOptions {
     case 'budget_builder':
       return { visual_style: 'light', budget_usd: 250 } as BudgetBuilderOptions
     case 'collector_pulse':
-      return { visual_style: 'light', time_window: '7d' } as CollectorPulseOptions
+      return { visual_style: 'light', time_window: '7d', min_raw_usd: 20 } as CollectorPulseOptions
     case 'pokemon_battle':
       return { visual_style: 'light', generation: 'any' } as PokemonBattleOptions
     case 'guess_the_pokemon':
