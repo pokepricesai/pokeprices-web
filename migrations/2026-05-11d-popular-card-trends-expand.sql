@@ -4,8 +4,13 @@
 --   1. Show "123/165" style numbers on tiles instead of "#123"
 --   2. Toggle Card Battle between cards / sealed / mixed
 --   3. Surface the right metadata without an extra round-trip.
+--
+-- Postgres can't reorder a view's columns via CREATE OR REPLACE, so we
+-- DROP and re-create.
 
-CREATE OR REPLACE VIEW public.popular_card_trends AS
+DROP VIEW IF EXISTS public.popular_card_trends;
+
+CREATE VIEW public.popular_card_trends AS
 SELECT
   ct.card_name,
   ct.set_name,
