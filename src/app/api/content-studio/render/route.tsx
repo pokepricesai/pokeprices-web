@@ -444,10 +444,9 @@ async function renderThenVsNow(post: any, p: typeof PALETTE['light'], logo: stri
 
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
             <span style={{
-              fontSize: 36, fontWeight: 900, color: p.accent, fontFamily: 'Outfit',
-              padding: '4px 14px', border: `3px solid ${p.accent}`, borderRadius: 14,
-              letterSpacing: 2, display: 'flex',
-            }}>VS NOW</span>
+              fontSize: 100, fontWeight: 900, color: p.accent, fontFamily: 'Outfit',
+              letterSpacing: 2, lineHeight: 1, display: 'flex',
+            }}>VS</span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
@@ -587,6 +586,70 @@ async function renderCollectorPulse(post: any, p: typeof PALETTE['light'], logo:
   )
 }
 
+// ── Template: Most Traded ───────────────────────────────────────────────────
+
+async function renderMostTraded(post: any, p: typeof PALETTE['light'], logo: string | null): Promise<JSX.Element> {
+  const card = post.data_payload?.card || {}
+  const img = card.image_url ? await toDataUrl(card.image_url) : null
+  const sales = card.sales_30d || 0
+  const numberLabel = fmtCardNumber(card.card_number, card.card_number_display, card.set_printed_total)
+
+  return (
+    <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '60px 50px' }}>
+      <TemplateHeader kind="Most Traded · 30 days" p={p} logo={logo} />
+
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 40, marginTop: 24 }}>
+        {img
+          ? <img src={img} width={340} height={476} style={{ objectFit: 'contain', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.28)', flexShrink: 0 }} />
+          : <div style={{ width: 340, height: 476, background: p.border, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 100, flexShrink: 0 }}>🃏</div>}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, justifyContent: 'center', maxWidth: 560 }}>
+          <div style={{ fontSize: 22, fontWeight: 700, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 2, display: 'flex' }}>
+            Sales volume
+          </div>
+          <div style={{ fontSize: 200, fontWeight: 900, color: p.accent, fontFamily: 'Outfit', lineHeight: 0.9, display: 'flex' }}>
+            {sales}
+          </div>
+          <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 14, display: 'flex' }}>
+            verified sales · last 30 days
+          </div>
+          <div style={{ fontSize: 30, fontWeight: 700, color: p.text, fontFamily: 'Outfit', lineHeight: 1.15, display: 'flex' }}>
+            {card.card_name} {numberLabel}
+          </div>
+          <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>
+            {card.set_name}
+          </div>
+          {/* Raw + PSA 10 side-by-side */}
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 24, marginTop: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 1.5, display: 'flex' }}>Raw</span>
+              <span style={{ fontSize: 22, fontWeight: 800, color: p.text, fontFamily: 'Outfit', display: 'flex' }}>{fmtPrice(card.raw_usd)}</span>
+            </div>
+            {card.psa10_usd > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 1.5, display: 'flex' }}>PSA 10</span>
+                <span style={{ fontSize: 22, fontWeight: 800, color: p.accent, fontFamily: 'Outfit', display: 'flex' }}>{fmtPrice(card.psa10_usd)}</span>
+              </div>
+            )}
+            {card.raw_pct_30d != null && (
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 1.5, display: 'flex' }}>30d</span>
+                <span style={{ fontSize: 22, fontWeight: 800, color: pctColor(card.raw_pct_30d, p.text), fontFamily: 'Outfit', display: 'flex' }}>{pct(card.raw_pct_30d)}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
+        <div style={{ fontSize: 38, fontWeight: 900, color: p.text, fontFamily: 'Outfit', textAlign: 'center', display: 'flex' }}>
+          {post.hook || 'Are collectors fighting over this one?'}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Type colour palette for Pokémon Battle / Guess the Pokémon ─────────────
 
 const TYPE_COLOURS: Record<string, string> = {
@@ -666,14 +729,19 @@ async function renderPokemonBattle(post: any, p: typeof PALETTE['light'], logo: 
         <Side poke={R} img={rImg} />
       </div>
 
-      {/* Probability split */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, width: '100%' }}>
-        <span style={{ fontSize: 18, fontWeight: 800, color: p.text, fontFamily: 'Outfit', width: 60, textAlign: 'right', display: 'flex', justifyContent: 'flex-end' }}>{lProb}%</span>
-        <div style={{ flex: 1, height: 10, borderRadius: 5, background: p.border, display: 'flex', overflow: 'hidden' }}>
-          <div style={{ width: `${lProb}%`, height: '100%', background: p.accent }} />
-          <div style={{ width: `${rProb}%`, height: '100%', background: p.muted, opacity: 0.6 }} />
+      {/* Power-score split — clearly labelled so readers know what they're seeing */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12, width: '100%' }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 2, textAlign: 'center', display: 'flex', justifyContent: 'center' }}>
+          Power score · total stats × type advantage
         </div>
-        <span style={{ fontSize: 18, fontWeight: 800, color: p.text, fontFamily: 'Outfit', width: 60, display: 'flex' }}>{rProb}%</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%' }}>
+          <span style={{ fontSize: 20, fontWeight: 800, color: p.accent, fontFamily: 'Outfit', width: 70, textAlign: 'right', display: 'flex', justifyContent: 'flex-end' }}>{lProb}%</span>
+          <div style={{ flex: 1, height: 14, borderRadius: 7, background: p.border, display: 'flex', overflow: 'hidden' }}>
+            <div style={{ width: `${lProb}%`, height: '100%', background: p.accent }} />
+            <div style={{ width: `${rProb}%`, height: '100%', background: p.muted, opacity: 0.5 }} />
+          </div>
+          <span style={{ fontSize: 20, fontWeight: 800, color: p.muted, fontFamily: 'Outfit', width: 70, display: 'flex' }}>{rProb}%</span>
+        </div>
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
@@ -792,6 +860,7 @@ export async function GET(req: NextRequest) {
     else if (post.template_type === 'budget_builder') element = await renderBudgetBuilder(post, p, logo)
     else if (post.template_type === 'collector_pulse') element = await renderCollectorPulse(post, p, logo)
     else if (post.template_type === 'pokemon_battle')   element = await renderPokemonBattle(post, p, logo)
+    else if (post.template_type === 'most_traded')       element = await renderMostTraded(post, p, logo)
     else if (post.template_type === 'guess_the_pokemon') {
       const reveal = req.nextUrl.searchParams.get('reveal') === '1'
       element = await renderGuessThePokemon(post, p, logo, reveal)

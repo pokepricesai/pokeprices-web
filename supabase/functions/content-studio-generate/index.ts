@@ -594,7 +594,10 @@ async function generateBudgetBuilder(options: any) {
     .limit(120)
   if (error) throw error
 
-  const reliable = (cands || []).filter((c: any) => passesConfidence(c))
+  let reliable = (cands || []).filter((c: any) => passesConfidence(c))
+  // Budget Builder is always cards-only — the basket is meant to be 4
+  // tradable cards, not sealed product. Backup name-based sealed filter.
+  reliable = reliable.filter((c: any) => !looksLikeSealedProduct(c.card_name))
   if (reliable.length < 4) throw new Error("Not enough reliable popular cards in budget band")
 
   // Greedy random pick: shuffle the top 60 (most popular), take cards summing < budget
@@ -717,6 +720,81 @@ Return JSON with this exact shape:
     twitter_copy: ai.twitter_copy,
     instagram_caption: ai.instagram_caption,
     data_payload: { cards, time_window: options.time_window || "7d" },
+  }
+}
+
+// ── Template: Most Traded ───────────────────────────────────────────────────
+
+async function generateMostTraded(options: any) {
+  const minRawUsd = Number(options.min_raw_usd ?? 20)
+  const minRawCents = Math.max(MIN_RAW_CENTS, Math.round(minRawUsd * 100))
+  const productMode = options.product_mode || "cards"
+
+  // popular_card_trends is already sorted by sales_30d desc when we order
+  // by it. Pull the top 40 reliable rows so we have variety to sample.
+  const { data: cands, error } = await supabase.from("popular_card_trends")
+    .select("*")
+    .gte("current_raw", minRawCents)
+    .order("sales_30d", { ascending: false })
+    .limit(40)
+  if (error) throw error
+
+  let reliable = (cands || []).filter((c: any) => passesConfidence(c))
+  if (productMode === "cards") {
+    reliable = reliable.filter((c: any) => !looksLikeSealedProduct(c.card_name))
+  } else if (productMode === "sealed") {
+    reliable = reliable.filter((c: any) => looksLikeSealedProduct(c.card_name) || c.is_sealed)
+  }
+  if (reliable.length === 0) throw new Error("No reliable top-traded cards found")
+
+  // Pick from top 10 most-traded for variety.
+  const pool = reliable.slice(0, Math.min(10, reliable.length))
+  const picked = pool[Math.floor(Math.random() * pool.length)] as any
+
+  const card = {
+    card_name:           cleanCardName(picked.card_name),
+    raw_card_name:       picked.card_name,
+    set_name:            picked.set_name,
+    image_url:           picked.image_url,
+    card_url_slug:       picked.card_url_slug,
+    card_number:         picked.card_number,
+    card_number_display: picked.card_number_display,
+    set_printed_total:   picked.set_printed_total,
+    raw_usd:             picked.current_raw,
+    psa10_usd:           picked.current_psa10,
+    raw_pct_30d:         picked.raw_pct_30d,
+    sales_30d:           picked.sales_30d || 0,
+  }
+
+  const sys = voicePrompt(options.tone)
+  const usr = `Write a Most Traded social post about the highest-volume Pokemon ${productMode === 'sealed' ? 'sealed product' : 'card'} right now.
+
+CARD:    ${card.card_name} (${card.set_name})
+SALES (30d): ${card.sales_30d}
+RAW:     $${(card.raw_usd / 100).toFixed(2)}
+PSA 10:  ${card.psa10_usd ? "$" + (card.psa10_usd / 100).toFixed(2) : "—"}
+30d %:   ${card.raw_pct_30d != null ? card.raw_pct_30d.toFixed(1) + "%" : "—"}
+
+Frame: volume is truth. This is what collectors are actually trading right now, not what pundits are talking about.
+
+CTA: "Are collectors fighting over this one?"
+
+Return JSON with this exact shape:
+{
+  "title": "short internal title, max 60 chars",
+  "hook": "headline on the image, max 50 chars — lead with the sales count, e.g. '${card.sales_30d} sales this month'",
+  "twitter_copy": "X/Twitter post ending with the CTA",
+  "instagram_caption": "Instagram caption (2 short paragraphs + 3-5 hashtags)"
+}`
+  const aiRaw = await callHaiku(sys, usr)
+  const ai = parseJsonFromAi(aiRaw)
+
+  return {
+    title: ai.title,
+    hook: ai.hook,
+    twitter_copy: ai.twitter_copy,
+    instagram_caption: ai.instagram_caption,
+    data_payload: { card, time_window: "30d" },
   }
 }
 
@@ -1014,6 +1092,8 @@ Deno.serve(async (req) => {
       generated = await generatePokemonBattle(options)
     } else if (template_type === "guess_the_pokemon") {
       generated = await generateGuessThePokemon(options)
+    } else if (template_type === "most_traded") {
+      generated = await generateMostTraded(options)
     } else {
       return new Response(JSON.stringify({ error: `Template '${template_type}' not implemented yet` }),
         { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } })

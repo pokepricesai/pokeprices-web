@@ -23,6 +23,7 @@ import {
   type CollectorPulseOptions,
   type PokemonBattleOptions,
   type GuessThePokemonOptions,
+  type MostTradedOptions,
 } from '@/lib/contentStudio'
 
 const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'pokeprices2024'
@@ -390,6 +391,33 @@ function PokemonBattlePanel({ opts, onChange }: { opts: PokemonBattleOptions; on
   )
 }
 
+function MostTradedPanel({ opts, onChange }: { opts: MostTradedOptions; onChange: (o: MostTradedOptions) => void }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
+      <label style={fieldStyle}>
+        Product
+        <select value={opts.product_mode || 'cards'} onChange={e => onChange({ ...opts, product_mode: e.target.value as any })} style={selectStyle}>
+          {PRODUCT_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+        </select>
+      </label>
+      <label style={fieldStyle}>
+        Min raw ($)
+        <input type="number" min={5} step={5}
+          value={opts.min_raw_usd ?? 20}
+          onChange={e => onChange({ ...opts, min_raw_usd: Number(e.target.value) || 5 })}
+          style={inputStyle} />
+      </label>
+      <label style={fieldStyle}>
+        Visual style
+        <select value={opts.visual_style} onChange={e => onChange({ ...opts, visual_style: e.target.value as any })} style={selectStyle}>
+          {VISUAL_STYLES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+      </label>
+      <ToneFieldInput opts={opts} onChange={onChange} />
+    </div>
+  )
+}
+
 function GuessThePokemonPanel({ opts, onChange }: { opts: GuessThePokemonOptions; onChange: (o: GuessThePokemonOptions) => void }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
@@ -637,6 +665,7 @@ export default function ContentStudioClient() {
   const [collectorPulseOpts, setCollectorPulseOpts] = useState<CollectorPulseOptions>(defaultOptionsFor('collector_pulse') as CollectorPulseOptions)
   const [pokemonBattleOpts,  setPokemonBattleOpts]  = useState<PokemonBattleOptions>(defaultOptionsFor('pokemon_battle')   as PokemonBattleOptions)
   const [guessOpts,          setGuessOpts]          = useState<GuessThePokemonOptions>(defaultOptionsFor('guess_the_pokemon') as GuessThePokemonOptions)
+  const [mostTradedOpts,     setMostTradedOpts]     = useState<MostTradedOptions>(defaultOptionsFor('most_traded') as MostTradedOptions)
 
   function optionsFor(t: TemplateType): any {
     switch (t) {
@@ -648,6 +677,7 @@ export default function ContentStudioClient() {
       case 'collector_pulse':   return collectorPulseOpts
       case 'pokemon_battle':    return pokemonBattleOpts
       case 'guess_the_pokemon': return guessOpts
+      case 'most_traded':       return mostTradedOpts
       default: return {}
     }
   }
@@ -861,6 +891,9 @@ export default function ContentStudioClient() {
         </OptionsCard>
         <OptionsCard title="Guess the Pokémon" count={WEEKLY_PACK_QUOTA.guess_the_pokemon} summary={summarizeOptions('guess_the_pokemon', guessOpts)} onSingle={() => generateOne('guess_the_pokemon')} disabled={generating}>
           <GuessThePokemonPanel opts={guessOpts} onChange={setGuessOpts} />
+        </OptionsCard>
+        <OptionsCard title="Most Traded" count={WEEKLY_PACK_QUOTA.most_traded} summary={summarizeOptions('most_traded', mostTradedOpts)} onSingle={() => generateOne('most_traded')} disabled={generating}>
+          <MostTradedPanel opts={mostTradedOpts} onChange={setMostTradedOpts} />
         </OptionsCard>
       </div>
 
@@ -1095,6 +1128,8 @@ function summarizeOptions(t: TemplateType, opts: any): string {
       return `gen ${opts.generation} · ${v}`
     case 'guess_the_pokemon':
       return `gen ${opts.generation} · ${opts.difficulty} · ${v}`
+    case 'most_traded':
+      return `${opts.product_mode || 'cards'} · ≥$${opts.min_raw_usd ?? 20} · ${v}`
     default: return v
   }
 }

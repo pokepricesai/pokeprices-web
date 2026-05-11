@@ -10,6 +10,7 @@ export type TemplateType =
   | 'collector_pulse'
   | 'then_vs_now'
   | 'guess_the_pokemon'
+  | 'most_traded'
 
 export type PostStatus = 'draft' | 'approved' | 'rejected' | 'used'
 
@@ -90,7 +91,8 @@ export const WEEKLY_PACK_QUOTA: Record<TemplateType, number> = {
   grading_gap:        3,
   pokemon_battle:     3,
   budget_builder:     2,
-  collector_pulse:    2,
+  most_traded:        1,
+  collector_pulse:    1,
   then_vs_now:        1,
   guess_the_pokemon:  1,
 }
@@ -104,12 +106,14 @@ export const TEMPLATE_LABELS: Record<TemplateType, string> = {
   collector_pulse:   'Collector Pulse',
   then_vs_now:       'Then vs Now',
   guess_the_pokemon: 'Guess the Pokémon',
+  most_traded:       'Most Traded',
 }
 
 export const TEMPLATES_IMPLEMENTED: TemplateType[] = [
   'card_battle', 'market_mover',
   'grading_gap', 'then_vs_now', 'budget_builder', 'collector_pulse',
   'pokemon_battle', 'guess_the_pokemon',
+  'most_traded',
 ]
 
 // Background palette by visual style — used by both preview + Satori.
@@ -209,6 +213,12 @@ export interface GuessThePokemonOptions extends ToneField {
   difficulty: GuessDifficulty
 }
 
+export interface MostTradedOptions extends ToneField {
+  visual_style: VisualStyle
+  product_mode: ProductMode
+  min_raw_usd?: number
+}
+
 export type GenerateOptions =
   | CardBattleOptions
   | MarketMoverOptions
@@ -218,6 +228,7 @@ export type GenerateOptions =
   | CollectorPulseOptions
   | PokemonBattleOptions
   | GuessThePokemonOptions
+  | MostTradedOptions
   | Record<string, any>
 
 export function defaultOptionsFor(template: TemplateType): GenerateOptions {
@@ -238,6 +249,8 @@ export function defaultOptionsFor(template: TemplateType): GenerateOptions {
       return { visual_style: 'light', generation: 'any' } as PokemonBattleOptions
     case 'guess_the_pokemon':
       return { visual_style: 'light', generation: 'any', difficulty: 'silhouette' } as GuessThePokemonOptions
+    case 'most_traded':
+      return { visual_style: 'light', product_mode: 'cards', min_raw_usd: 20 } as MostTradedOptions
     default:
       return { visual_style: 'light' }
   }
