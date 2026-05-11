@@ -51,6 +51,16 @@ function passesConfidence(row: any, minRaw = MIN_RAW_CENTS): boolean {
   return withinPctSanity(row)
 }
 
+// Backup name-based sealed filter — cards.is_sealed is mis-flagged on some
+// products (e.g. "Binder Collection", "Mini Tin", "Booster Box" sometimes
+// land with is_sealed=false). Used by Card Battle when product_mode='cards'
+// to keep obvious sealed products out of the battle.
+const NON_CARD_NAME_PATTERN = /\b(booster\s*box|booster\s*pack|elite\s*trainer\s*box|\bETB\b|mini[-\s]*tin|premium\s*collection|premium\s*figure\s*collection|build\s*&\s*battle|blister|bundle|binder\s*collection|trainer\s*box|collection\s*box|2[-\s]*pack|3[-\s]*pack|deluxe\s*pin|gift\s*set|jumbo\s*card|poster\s*collection|tech\s*sticker)/i
+function looksLikeSealedProduct(cardName: string | null | undefined): boolean {
+  if (!cardName) return false
+  return NON_CARD_NAME_PATTERN.test(cardName)
+}
+
 
 function cleanCardName(s: string): string {
   return s.replace(/\s*#\d+\w*\s*$/, "").replace(/\[.*?\]/g, "").trim()
@@ -196,7 +206,15 @@ async function generateCardBattle(options: any) {
   }
   if (error) throw error
 
-  const reliable = (cands || []).filter((c: any) => passesConfidence(c))
+  let reliable = (cands || []).filter((c: any) => passesConfidence(c))
+  // Belt-and-braces sealed filter — cards.is_sealed is wrong on some
+  // products. When user wants cards only, drop anything whose name looks
+  // like a sealed product.
+  if (productMode === "cards") {
+    reliable = reliable.filter((c: any) => !looksLikeSealedProduct(c.card_name))
+  } else if (productMode === "sealed") {
+    reliable = reliable.filter((c: any) => looksLikeSealedProduct(c.card_name) || c.is_sealed)
+  }
   if (reliable.length < 2) throw new Error("Not enough popular cards in this price band")
 
   // Already sorted by volume desc — pick 2 from the top 30 for variety.

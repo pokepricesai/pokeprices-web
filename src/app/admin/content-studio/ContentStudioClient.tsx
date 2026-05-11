@@ -458,7 +458,9 @@ function PostCard({ post, selected, onSelectChange, onUpdate, onDelete, onRegene
 }) {
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState<'twitter' | 'instagram' | null>(null)
-  const [imgKey, setImgKey] = useState(0)
+  // Use post.updated_at as the initial cache key so any old browser-cached
+  // render is automatically busted when the post changes server-side.
+  const [imgKey, setImgKey] = useState(() => post.updated_at || post.created_at || '0')
 
   async function setStatus(status: SocialContentPost['status']) {
     setBusy(true)
@@ -503,11 +505,26 @@ function PostCard({ post, selected, onSelectChange, onUpdate, onDelete, onRegene
         </span>
       </div>
 
-      {/* Image preview */}
-      <div style={{ position: 'relative', width: '100%', aspectRatio: '1 / 1', background: 'var(--bg-light)', borderRadius: 10, overflow: 'hidden' }}>
-        <img key={imgKey} src={`${renderUrl(post.id)}&v=${imgKey}`} alt={post.title || ''}
-          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-      </div>
+      {/* Image preview — Guess the Pokémon shows both silhouette + reveal */}
+      {post.template_type === 'guess_the_pokemon' ? (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+          <div style={{ position: 'relative', aspectRatio: '1 / 1', background: 'var(--bg-light)', borderRadius: 10, overflow: 'hidden' }}>
+            <img key={`s-${imgKey}`} src={`${renderUrl(post.id)}&v=${imgKey}`} alt="Silhouette"
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+            <span style={{ position: 'absolute', top: 6, left: 6, fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 8, background: 'rgba(15,23,42,0.85)', color: '#fff', textTransform: 'uppercase', letterSpacing: 0.5 }}>Silhouette</span>
+          </div>
+          <div style={{ position: 'relative', aspectRatio: '1 / 1', background: 'var(--bg-light)', borderRadius: 10, overflow: 'hidden' }}>
+            <img key={`r-${imgKey}`} src={`${renderUrl(post.id)}&reveal=1&v=${imgKey}`} alt="Reveal"
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+            <span style={{ position: 'absolute', top: 6, left: 6, fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 8, background: 'rgba(34,197,94,0.95)', color: '#fff', textTransform: 'uppercase', letterSpacing: 0.5 }}>Reveal</span>
+          </div>
+        </div>
+      ) : (
+        <div style={{ position: 'relative', width: '100%', aspectRatio: '1 / 1', background: 'var(--bg-light)', borderRadius: 10, overflow: 'hidden' }}>
+          <img key={imgKey} src={`${renderUrl(post.id)}&v=${imgKey}`} alt={post.title || ''}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        </div>
+      )}
 
       {/* Title + hook */}
       {post.title && (
@@ -556,7 +573,7 @@ function PostCard({ post, selected, onSelectChange, onUpdate, onDelete, onRegene
             ⬇ Reveal
           </a>
         )}
-        <button onClick={() => { setImgKey(k => k + 1) }}
+        <button onClick={() => { setImgKey(String(Date.now())) }}
           style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-light)', color: 'var(--text)', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
           ↻ Refresh
         </button>
