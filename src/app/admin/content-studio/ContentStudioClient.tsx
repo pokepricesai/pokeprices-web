@@ -128,16 +128,53 @@ const selectStyle: React.CSSProperties = {
   background: 'var(--bg-light)', color: 'var(--text)', fontFamily: "'Figtree', sans-serif",
   fontSize: 13, outline: 'none', textTransform: 'none', letterSpacing: 0, fontWeight: 400,
 }
+const inputStyle: React.CSSProperties = {
+  ...selectStyle,
+  cursor: 'text',
+}
 
-function CardBattlePanel({ opts, onChange }: { opts: CardBattleOptions; onChange: (o: CardBattleOptions) => void }) {
+// Shared price-tier field with optional custom target+tolerance inputs.
+function PriceTierField<O extends { price_tier: any; custom_target_gbp?: number; custom_tolerance_pct?: number }>(
+  { opts, onChange }: { opts: O; onChange: (o: O) => void }
+) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+    <>
       <label style={fieldStyle}>
         Price tier
         <select value={opts.price_tier} onChange={e => onChange({ ...opts, price_tier: e.target.value as any })} style={selectStyle}>
           {PRICE_TIERS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
       </label>
+      {opts.price_tier === 'custom' && (
+        <>
+          <label style={fieldStyle}>
+            Target (£)
+            <input
+              type="number" min={1} step={1}
+              value={opts.custom_target_gbp ?? 100}
+              onChange={e => onChange({ ...opts, custom_target_gbp: Number(e.target.value) || 0 })}
+              style={inputStyle}
+            />
+          </label>
+          <label style={fieldStyle}>
+            Tolerance (±%)
+            <input
+              type="number" min={1} max={90} step={5}
+              value={opts.custom_tolerance_pct ?? 20}
+              onChange={e => onChange({ ...opts, custom_tolerance_pct: Number(e.target.value) || 20 })}
+              style={inputStyle}
+            />
+          </label>
+        </>
+      )}
+    </>
+  )
+}
+
+function CardBattlePanel({ opts, onChange }: { opts: CardBattleOptions; onChange: (o: CardBattleOptions) => void }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+      <PriceTierField opts={opts} onChange={onChange} />
       <label style={fieldStyle}>
         Visual style
         <select value={opts.visual_style} onChange={e => onChange({ ...opts, visual_style: e.target.value as any })} style={selectStyle}>
@@ -150,13 +187,8 @@ function CardBattlePanel({ opts, onChange }: { opts: CardBattleOptions; onChange
 
 function GradingGapPanel({ opts, onChange }: { opts: GradingGapOptions; onChange: (o: GradingGapOptions) => void }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
-      <label style={fieldStyle}>
-        Price tier
-        <select value={opts.price_tier} onChange={e => onChange({ ...opts, price_tier: e.target.value as any })} style={selectStyle}>
-          {PRICE_TIERS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-        </select>
-      </label>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+      <PriceTierField opts={opts} onChange={onChange} />
       <label style={fieldStyle}>
         Visual style
         <select value={opts.visual_style} onChange={e => onChange({ ...opts, visual_style: e.target.value as any })} style={selectStyle}>
@@ -169,7 +201,7 @@ function GradingGapPanel({ opts, onChange }: { opts: GradingGapOptions; onChange
 
 function ThenVsNowPanel({ opts, onChange }: { opts: ThenVsNowOptions; onChange: (o: ThenVsNowOptions) => void }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
       <label style={fieldStyle}>
         Time span
         <select value={opts.span} onChange={e => onChange({ ...opts, span: e.target.value as any })} style={selectStyle}>
@@ -177,12 +209,7 @@ function ThenVsNowPanel({ opts, onChange }: { opts: ThenVsNowOptions; onChange: 
           <option value="5y">5 years</option>
         </select>
       </label>
-      <label style={fieldStyle}>
-        Price tier
-        <select value={opts.price_tier} onChange={e => onChange({ ...opts, price_tier: e.target.value as any })} style={selectStyle}>
-          {PRICE_TIERS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-        </select>
-      </label>
+      <PriceTierField opts={opts} onChange={onChange} />
       <label style={fieldStyle}>
         Visual style
         <select value={opts.visual_style} onChange={e => onChange({ ...opts, visual_style: e.target.value as any })} style={selectStyle}>
@@ -278,7 +305,7 @@ function GuessThePokemonPanel({ opts, onChange }: { opts: GuessThePokemonOptions
 
 function MarketMoverPanel({ opts, onChange }: { opts: MarketMoverOptions; onChange: (o: MarketMoverOptions) => void }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
       <label style={fieldStyle}>
         Window
         <select value={opts.time_window} onChange={e => onChange({ ...opts, time_window: e.target.value as any })} style={selectStyle}>
@@ -292,12 +319,7 @@ function MarketMoverPanel({ opts, onChange }: { opts: MarketMoverOptions; onChan
           <option value="down">Fallers</option>
         </select>
       </label>
-      <label style={fieldStyle}>
-        Price tier
-        <select value={opts.price_tier} onChange={e => onChange({ ...opts, price_tier: e.target.value as any })} style={selectStyle}>
-          {PRICE_TIERS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-        </select>
-      </label>
+      <PriceTierField opts={opts} onChange={onChange} />
       <label style={fieldStyle}>
         Visual style
         <select value={opts.visual_style} onChange={e => onChange({ ...opts, visual_style: e.target.value as any })} style={selectStyle}>
@@ -310,8 +332,10 @@ function MarketMoverPanel({ opts, onChange }: { opts: MarketMoverOptions; onChan
 
 // ── Post card ───────────────────────────────────────────────────────────────
 
-function PostCard({ post, onUpdate, onDelete, onRegenerate, onActionError }: {
+function PostCard({ post, selected, onSelectChange, onUpdate, onDelete, onRegenerate, onActionError }: {
   post: SocialContentPost
+  selected: boolean
+  onSelectChange: (id: string, checked: boolean) => void
   onUpdate: (p: SocialContentPost) => void
   onDelete: (id: string) => void
   onRegenerate: (post: SocialContentPost) => void
@@ -353,9 +377,12 @@ function PostCard({ post, onUpdate, onDelete, onRegenerate, onActionError }: {
     <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, padding: 14, display: 'flex', flexDirection: 'column', gap: 10, fontFamily: "'Figtree', sans-serif", opacity: busy ? 0.6 : 1, transition: 'opacity 0.15s' }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.2, color: 'var(--text-muted)' }}>
-          {TEMPLATE_LABELS[post.template_type]}
-        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+          <input type="checkbox" checked={selected} onChange={e => onSelectChange(post.id, e.target.checked)} />
+          <span style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.2, color: 'var(--text-muted)' }}>
+            {TEMPLATE_LABELS[post.template_type]}
+          </span>
+        </label>
         <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 12, background: statusBg[post.status], color: statusColor[post.status], textTransform: 'uppercase', letterSpacing: 0.6 }}>
           {post.status}
         </span>
@@ -454,6 +481,7 @@ export default function ContentStudioClient() {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [filter, setFilter] = useState<'all' | 'draft' | 'approved' | 'rejected' | 'used'>('all')
   const [lastError, setLastError] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   // Global options per template type
   const [cardBattleOpts,     setCardBattleOpts]     = useState<CardBattleOptions>(defaultOptionsFor('card_battle')      as CardBattleOptions)
@@ -577,6 +605,49 @@ export default function ContentStudioClient() {
     setPosts(prev => prev.map(x => x.id === p.id ? p : x))
   }
 
+  function toggleSelected(id: string, checked: boolean) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (checked) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }
+
+  async function bulkSetStatus(status: SocialContentPost['status']) {
+    if (selectedIds.size === 0) return
+    if (!confirm(`Set ${selectedIds.size} posts to "${status}"?`)) return
+    const ids = Array.from(selectedIds)
+    const { data, error } = await supabase.from('social_content_posts')
+      .update({ status }).in('id', ids).select('*')
+    if (error) {
+      setLastError(`Bulk status update failed: ${error.message}. Did you run migration 2026-05-11b-social-content-rls-fix.sql?`)
+      return
+    }
+    const updatedById = new Map((data || []).map((r: any) => [r.id, r as SocialContentPost]))
+    setPosts(prev => prev.map(p => updatedById.get(p.id) || p))
+    setSelectedIds(new Set())
+  }
+
+  async function bulkDelete() {
+    if (selectedIds.size === 0) return
+    if (!confirm(`Delete ${selectedIds.size} posts? This can't be undone.`)) return
+    const ids = Array.from(selectedIds)
+    const { error } = await supabase.from('social_content_posts').delete().in('id', ids)
+    if (error) {
+      setLastError(`Bulk delete failed: ${error.message}. Did you run migration 2026-05-11b-social-content-rls-fix.sql?`)
+      return
+    }
+    const idSet = new Set(ids)
+    setPosts(prev => prev.filter(p => !idSet.has(p.id)))
+    setSelectedIds(new Set())
+  }
+
+  function selectAllVisible(visible: SocialContentPost[]) {
+    setSelectedIds(new Set(visible.map(p => p.id)))
+  }
+  function clearSelection() { setSelectedIds(new Set()) }
+
   if (authed === null) return null
   if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />
 
@@ -663,6 +734,45 @@ export default function ContentStudioClient() {
         ))}
       </div>
 
+      {/* Bulk action bar (above grid) */}
+      {visiblePosts.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 10, padding: '10px 12px', background: selectedIds.size > 0 ? 'rgba(26,95,173,0.08)' : 'var(--bg-light)', border: '1px solid var(--border)', borderRadius: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-muted)' }}>
+            <span style={{ fontWeight: 700, color: selectedIds.size > 0 ? 'var(--primary)' : 'var(--text-muted)' }}>
+              {selectedIds.size} selected
+            </span>
+            <button onClick={() => selectAllVisible(visiblePosts)} style={{ background: 'transparent', border: 'none', color: 'var(--primary)', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>
+              Select all {visiblePosts.length}
+            </button>
+            {selectedIds.size > 0 && (
+              <button onClick={clearSelection} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>
+                Clear
+              </button>
+            )}
+          </div>
+          {selectedIds.size > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button onClick={() => bulkSetStatus('approved')}
+                style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #22c55e', background: 'rgba(34,197,94,0.08)', color: '#16a34a', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                ✓ Approve all
+              </button>
+              <button onClick={() => bulkSetStatus('rejected')}
+                style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #ef4444', background: 'rgba(239,68,68,0.06)', color: '#dc2626', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                ✗ Reject all
+              </button>
+              <button onClick={() => bulkSetStatus('used')}
+                style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--primary)', background: 'rgba(26,95,173,0.08)', color: 'var(--primary)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                Mark used
+              </button>
+              <button onClick={bulkDelete}
+                style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                🗑 Delete all
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Posts grid */}
       {loading ? (
         <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading…</p>
@@ -670,13 +780,15 @@ export default function ContentStudioClient() {
         <div style={{ background: 'var(--card)', border: '2px dashed var(--border)', borderRadius: 16, padding: '40px 20px', textAlign: 'center' }}>
           <div style={{ fontSize: 32, marginBottom: 8 }}>🎨</div>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
-            No posts yet. Hit Generate Weekly Pack to spin up your first 9.
+            No posts yet. Hit Generate Weekly Pack to spin up your first 21.
           </p>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 14 }}>
           {visiblePosts.map(p => (
             <PostCard key={p.id} post={p}
+              selected={selectedIds.has(p.id)}
+              onSelectChange={toggleSelected}
               onUpdate={updatePost}
               onDelete={deletePost}
               onRegenerate={regenerate}

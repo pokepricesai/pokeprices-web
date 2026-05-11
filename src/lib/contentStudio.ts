@@ -42,15 +42,23 @@ export const VISUAL_STYLES: { value: VisualStyle; label: string }[] = [
 // Price tier — applies wherever we filter cards by raw price band.
 export type PriceTier =
   | 'under_50' | '50_200' | '200_1000' | '1000_5000' | '5000_plus' | 'any'
+  | 'custom'
 
-export const PRICE_TIERS: { value: PriceTier; label: string; min: number; max: number | null }[] = [
-  { value: 'under_50',  label: 'Under $50',          min: 0,       max: 5000   },
-  { value: '50_200',    label: '$50 – $200',         min: 5000,    max: 20000  },
-  { value: '200_1000',  label: '$200 – $1,000',      min: 20000,   max: 100000 },
-  { value: '1000_5000', label: '$1,000 – $5,000',    min: 100000,  max: 500000 },
-  { value: '5000_plus', label: '$5,000+',            min: 500000,  max: null   },
-  { value: 'any',       label: 'Any price',          min: 0,       max: null   },
+export const PRICE_TIERS: { value: PriceTier; label: string }[] = [
+  { value: 'any',       label: 'Any price'        },
+  { value: 'under_50',  label: 'Under $50'        },
+  { value: '50_200',    label: '$50 – $200'       },
+  { value: '200_1000',  label: '$200 – $1,000'    },
+  { value: '1000_5000', label: '$1,000 – $5,000'  },
+  { value: '5000_plus', label: '$5,000+'          },
+  { value: 'custom',    label: 'Custom (£ ± %)'   },
 ]
+
+// Custom-tier fields — used when price_tier === 'custom'.
+export interface CustomPriceFields {
+  custom_target_gbp?: number
+  custom_tolerance_pct?: number
+}
 
 // Time window for Market Mover.
 export type TimeWindow = '7d' | '30d' | '90d' | '1y'
@@ -101,25 +109,25 @@ export const STYLE_PALETTE: Record<VisualStyle, {
 }
 
 // Generation options — shape varies by template_type.
-export interface CardBattleOptions {
+export interface CardBattleOptions extends CustomPriceFields {
   visual_style: VisualStyle
   price_tier: PriceTier
 }
 
-export interface MarketMoverOptions {
+export interface MarketMoverOptions extends CustomPriceFields {
   visual_style: VisualStyle
   price_tier: PriceTier
   time_window: TimeWindow
   direction: 'up' | 'down'
 }
 
-export interface GradingGapOptions {
+export interface GradingGapOptions extends CustomPriceFields {
   visual_style: VisualStyle
   price_tier: PriceTier
 }
 
 export type ThenVsNowSpan = '2y' | '5y'
-export interface ThenVsNowOptions {
+export interface ThenVsNowOptions extends CustomPriceFields {
   visual_style: VisualStyle
   price_tier: PriceTier
   span: ThenVsNowSpan

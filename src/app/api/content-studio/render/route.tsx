@@ -86,7 +86,7 @@ async function renderCardBattle(post: any, p: typeof PALETTE['light']): Promise<
   const Side = ({ card, img }: { card: any; img: string | null }) => (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 460, gap: 18 }}>
       {img
-        ? <img src={img} width={320} height={448} style={{ borderRadius: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.25)' }} />
+        ? <img src={img} width={320} height={448} style={{ objectFit: 'contain', borderRadius: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.25)' }} />
         : <div style={{ width: 320, height: 448, background: p.border, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 80 }}>🃏</div>}
       <div style={{ fontSize: 26, fontWeight: 700, color: p.text, textAlign: 'center', fontFamily: 'Outfit', lineHeight: 1.1, maxWidth: 420, display: 'flex', justifyContent: 'center' }}>
         {card.card_name}
@@ -164,7 +164,7 @@ async function renderMarketMover(post: any, p: typeof PALETTE['light']): Promise
 
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 50, marginTop: 30 }}>
         {img
-          ? <img src={img} width={360} height={504} style={{ borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.28)', flexShrink: 0 }} />
+          ? <img src={img} width={360} height={504} style={{ objectFit: 'contain', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.28)', flexShrink: 0 }} />
           : <div style={{ width: 360, height: 504, background: p.border, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 100, flexShrink: 0 }}>🃏</div>}
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -220,7 +220,7 @@ async function renderGradingGap(post: any, p: typeof PALETTE['light']): Promise<
 
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 50, marginTop: 30 }}>
         {img
-          ? <img src={img} width={360} height={504} style={{ borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.28)', flexShrink: 0 }} />
+          ? <img src={img} width={360} height={504} style={{ objectFit: 'contain', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.28)', flexShrink: 0 }} />
           : <div style={{ width: 360, height: 504, background: p.border, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 100, flexShrink: 0 }}>🃏</div>}
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -278,7 +278,7 @@ async function renderThenVsNow(post: any, p: typeof PALETTE['light']): Promise<J
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 22, marginTop: 20 }}>
         {img
-          ? <img src={img} width={290} height={406} style={{ borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.28)' }} />
+          ? <img src={img} width={290} height={406} style={{ objectFit: 'contain', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.28)' }} />
           : <div style={{ width: 290, height: 406, background: p.border, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 100 }}>🃏</div>}
 
         <div style={{ fontSize: 28, fontWeight: 700, color: p.text, fontFamily: 'Outfit', textAlign: 'center', maxWidth: 800, display: 'flex' }}>
@@ -343,7 +343,7 @@ async function renderBudgetBuilder(post: any, p: typeof PALETTE['light']): Promi
           {cards.slice(0, 4).map((c, i) => (
             <div key={i} style={{ width: 380, display: 'flex', alignItems: 'center', gap: 12, padding: 14, background: p.bg === '#ffffff' ? '#f8fafc' : p.border, borderRadius: 12, border: `1px solid ${p.border}` }}>
               {images[i]
-                ? <img src={images[i] as string} width={70} height={98} style={{ borderRadius: 6, flexShrink: 0 }} />
+                ? <img src={images[i] as string} width={70} height={98} style={{ objectFit: 'contain', borderRadius: 6, flexShrink: 0 }} />
                 : <div style={{ width: 70, height: 98, background: p.border, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 30 }}>🃏</div>}
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 18, fontWeight: 700, color: p.text, fontFamily: 'Outfit', lineHeight: 1.2, display: 'flex' }}>{c.card_name}</div>
@@ -399,7 +399,7 @@ async function renderCollectorPulse(post: any, p: typeof PALETTE['light']): Prom
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '14px 20px', background: p.bg === '#ffffff' ? '#f8fafc' : p.border, border: `1px solid ${p.border}`, borderRadius: 14 }}>
             <div style={{ fontSize: 32, fontWeight: 900, color: p.muted, fontFamily: 'Outfit', width: 50, display: 'flex' }}>{i + 1}</div>
             {images[i]
-              ? <img src={images[i] as string} width={66} height={92} style={{ borderRadius: 6, flexShrink: 0 }} />
+              ? <img src={images[i] as string} width={66} height={92} style={{ objectFit: 'contain', borderRadius: 6, flexShrink: 0 }} />
               : <div style={{ width: 66, height: 92, background: p.border, borderRadius: 6, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>🃏</div>}
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
               <div style={{ fontSize: 22, fontWeight: 700, color: p.text, fontFamily: 'Outfit', display: 'flex' }}>{c.card_name}</div>
@@ -532,10 +532,10 @@ async function renderGuessThePokemon(post: any, p: typeof PALETTE['light']): Pro
   const img = poke.sprite ? await toDataUrl(poke.sprite) : null
 
   // Silhouette: full brightness(0) makes the image solid black.
-  // Blurred: faint visibility — use lower opacity so the shape shows through.
+  // Blurred: real blur filter (Satori supports filter: blur(N)).
   const imgStyle: React.CSSProperties = difficulty === 'silhouette'
     ? { filter: 'brightness(0)', objectFit: 'contain' }
-    : { opacity: 0.25, objectFit: 'contain' }
+    : { filter: 'blur(28px)', objectFit: 'contain' }
 
   return (
     <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '60px 50px' }}>
