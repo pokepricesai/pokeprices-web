@@ -199,6 +199,229 @@ async function renderMarketMover(post: any, p: typeof PALETTE['light']): Promise
   )
 }
 
+// ── Template: Grading Gap ───────────────────────────────────────────────────
+
+async function renderGradingGap(post: any, p: typeof PALETTE['light']): Promise<JSX.Element> {
+  const card = post.data_payload?.card || {}
+  const img = card.image_url ? await toDataUrl(card.image_url) : null
+  const grades: Record<string, number> = card.grades || {}
+  const entries = Object.entries(grades).filter(([_, v]) => v != null && v > 0).slice(0, 8)
+  const biggestTop    = post.data_payload?.biggest_gap?.top
+  const biggestBottom = post.data_payload?.biggest_gap?.bottom
+
+  return (
+    <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '60px 50px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: p.accent, fontFamily: 'Figtree', letterSpacing: 2, textTransform: 'uppercase', display: 'flex' }}>
+          Grading Gap
+        </div>
+        <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>PokePrices.io</div>
+      </div>
+
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 50, marginTop: 30 }}>
+        {img
+          ? <img src={img} width={360} height={504} style={{ borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.28)', flexShrink: 0 }} />
+          : <div style={{ width: 360, height: 504, background: p.border, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 100, flexShrink: 0 }}>🃏</div>}
+
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ fontSize: 28, fontWeight: 700, color: p.text, fontFamily: 'Outfit', lineHeight: 1.1, maxWidth: 560, display: 'flex' }}>
+            {card.card_name}
+          </div>
+          <div style={{ fontSize: 16, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 6, display: 'flex' }}>
+            {card.set_name}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {entries.map(([label, value]) => {
+              const isHighlight = label === biggestTop || label === biggestBottom
+              return (
+                <div key={label} style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                  padding: '8px 14px', borderRadius: 8,
+                  background: isHighlight ? (p.accent === '#ffcb05' ? 'rgba(255,203,5,0.15)' : 'rgba(26,95,173,0.1)') : 'transparent',
+                  border: isHighlight ? `1px solid ${p.accent}` : `1px solid ${p.border}`,
+                }}>
+                  <span style={{ fontSize: 18, color: isHighlight ? p.accent : p.muted, fontFamily: 'Figtree', fontWeight: 700, display: 'flex' }}>{label}</span>
+                  <span style={{ fontSize: 22, color: isHighlight ? p.accent : p.text, fontFamily: 'Outfit', fontWeight: 700, display: 'flex' }}>{fmtUsd(value as number)}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
+        <div style={{ fontSize: 36, fontWeight: 900, color: p.text, fontFamily: 'Outfit', textAlign: 'center', maxWidth: 980, lineHeight: 1.15, display: 'flex' }}>
+          {post.hook || 'Which grade would you buy?'}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Template: Then vs Now ───────────────────────────────────────────────────
+
+async function renderThenVsNow(post: any, p: typeof PALETTE['light']): Promise<JSX.Element> {
+  const card = post.data_payload?.card || {}
+  const img = card.image_url ? await toDataUrl(card.image_url) : null
+  const yearFromIso = (iso: string | null) => iso ? new Date(iso).getFullYear() : '—'
+  const growth = card.growth_pct as number | null
+  const growthText = growth != null ? `${growth > 0 ? '+' : ''}${growth.toFixed(0)}%` : '—'
+
+  return (
+    <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '60px 50px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: p.accent, fontFamily: 'Figtree', letterSpacing: 2, textTransform: 'uppercase', display: 'flex' }}>
+          Then vs Now
+        </div>
+        <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>PokePrices.io</div>
+      </div>
+
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 22, marginTop: 20 }}>
+        {img
+          ? <img src={img} width={290} height={406} style={{ borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.28)' }} />
+          : <div style={{ width: 290, height: 406, background: p.border, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 100 }}>🃏</div>}
+
+        <div style={{ fontSize: 28, fontWeight: 700, color: p.text, fontFamily: 'Outfit', textAlign: 'center', maxWidth: 800, display: 'flex' }}>
+          {card.card_name}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 40, marginTop: 6 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 16, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 2, display: 'flex' }}>Then</span>
+            <span style={{ fontSize: 14, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>{yearFromIso(card.then_date)}</span>
+            <span style={{ fontSize: 56, fontWeight: 900, color: p.text, fontFamily: 'Outfit', display: 'flex' }}>{fmtUsd(card.then_price)}</span>
+          </div>
+          <div style={{ fontSize: 80, fontWeight: 900, color: p.accent, fontFamily: 'Outfit', display: 'flex' }}>→</div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 16, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 2, display: 'flex' }}>Now</span>
+            <span style={{ fontSize: 14, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>{yearFromIso(card.now_date)}</span>
+            <span style={{ fontSize: 56, fontWeight: 900, color: p.accent, fontFamily: 'Outfit', display: 'flex' }}>{fmtUsd(card.now_price)}</span>
+          </div>
+        </div>
+
+        <div style={{ fontSize: 64, fontWeight: 900, color: pctColor(growth, p.accent), fontFamily: 'Outfit', display: 'flex' }}>
+          {growthText}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 10 }}>
+        <div style={{ fontSize: 36, fontWeight: 900, color: p.text, fontFamily: 'Outfit', textAlign: 'center', display: 'flex' }}>
+          {post.hook || 'Would you have held?'}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Template: Budget Builder ────────────────────────────────────────────────
+
+async function renderBudgetBuilder(post: any, p: typeof PALETTE['light']): Promise<JSX.Element> {
+  const cards = (post.data_payload?.cards || []) as any[]
+  const budget = post.data_payload?.budget_gbp
+  const total = post.data_payload?.total_raw_usd_cents
+  const images = await Promise.all(cards.map(c => c.image_url ? toDataUrl(c.image_url) : null))
+
+  return (
+    <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '60px 50px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: p.accent, fontFamily: 'Figtree', letterSpacing: 2, textTransform: 'uppercase', display: 'flex' }}>
+          Budget Builder
+        </div>
+        <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>PokePrices.io</div>
+      </div>
+
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 24, marginTop: 10 }}>
+        <div style={{ fontSize: 86, fontWeight: 900, color: p.accent, fontFamily: 'Outfit', lineHeight: 1, display: 'flex' }}>
+          £{budget}
+        </div>
+        <div style={{ fontSize: 24, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 2, display: 'flex' }}>
+          What are you buying?
+        </div>
+
+        {/* 2x2 grid */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, justifyContent: 'center', maxWidth: 820 }}>
+          {cards.slice(0, 4).map((c, i) => (
+            <div key={i} style={{ width: 380, display: 'flex', alignItems: 'center', gap: 12, padding: 14, background: p.bg === '#ffffff' ? '#f8fafc' : p.border, borderRadius: 12, border: `1px solid ${p.border}` }}>
+              {images[i]
+                ? <img src={images[i] as string} width={70} height={98} style={{ borderRadius: 6, flexShrink: 0 }} />
+                : <div style={{ width: 70, height: 98, background: p.border, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 30 }}>🃏</div>}
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: p.text, fontFamily: 'Outfit', lineHeight: 1.2, display: 'flex' }}>{c.card_name}</div>
+                <div style={{ fontSize: 12, color: p.muted, fontFamily: 'Figtree', marginTop: 2, display: 'flex' }}>{c.set_name}</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: p.accent, fontFamily: 'Outfit', marginTop: 4, display: 'flex' }}>{fmtUsd(c.raw_usd)}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ fontSize: 16, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>
+          Total: {fmtUsd(total)} raw · pick your four
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 6 }}>
+        <div style={{ fontSize: 32, fontWeight: 900, color: p.text, fontFamily: 'Outfit', textAlign: 'center', display: 'flex' }}>
+          {post.hook || 'Pick your four.'}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Template: Collector Pulse ───────────────────────────────────────────────
+
+async function renderCollectorPulse(post: any, p: typeof PALETTE['light']): Promise<JSX.Element> {
+  const cards = (post.data_payload?.cards || []) as any[]
+  const images = await Promise.all(cards.slice(0, 5).map(c => c.image_url ? toDataUrl(c.image_url) : null))
+  const wt = (post.data_payload?.time_window || '7d') as string
+  const windowLabel: Record<string, string> = { '7d': 'This week', '30d': 'This month', '90d': 'This quarter', '1y': 'This year' }
+
+  return (
+    <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '60px 50px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: p.accent, fontFamily: 'Figtree', letterSpacing: 2, textTransform: 'uppercase', display: 'flex' }}>
+          Collector Pulse
+        </div>
+        <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>PokePrices.io</div>
+      </div>
+
+      <div style={{ marginTop: 22, marginBottom: 10, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <div style={{ fontSize: 30, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 2, display: 'flex' }}>
+          {windowLabel[wt] || 'Trending'}
+        </div>
+        <div style={{ fontSize: 56, fontWeight: 900, color: p.text, fontFamily: 'Outfit', lineHeight: 1.05, textAlign: 'center', marginTop: 6, display: 'flex' }}>
+          What collectors are watching
+        </div>
+      </div>
+
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, justifyContent: 'center' }}>
+        {cards.slice(0, 5).map((c, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '14px 20px', background: p.bg === '#ffffff' ? '#f8fafc' : p.border, border: `1px solid ${p.border}`, borderRadius: 14 }}>
+            <div style={{ fontSize: 32, fontWeight: 900, color: p.muted, fontFamily: 'Outfit', width: 50, display: 'flex' }}>{i + 1}</div>
+            {images[i]
+              ? <img src={images[i] as string} width={66} height={92} style={{ borderRadius: 6, flexShrink: 0 }} />
+              : <div style={{ width: 66, height: 92, background: p.border, borderRadius: 6, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>🃏</div>}
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ fontSize: 22, fontWeight: 700, color: p.text, fontFamily: 'Outfit', display: 'flex' }}>{c.card_name}</div>
+              <div style={{ fontSize: 14, color: p.muted, fontFamily: 'Figtree', marginTop: 2, display: 'flex' }}>{c.set_name}</div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+              <span style={{ fontSize: 26, fontWeight: 900, color: pctColor(c.pct_change, p.accent), fontFamily: 'Outfit', display: 'flex' }}>{pct(c.pct_change)}</span>
+              <span style={{ fontSize: 14, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>{fmtUsd(c.raw_usd)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}>
+        <div style={{ fontSize: 30, fontWeight: 900, color: p.text, fontFamily: 'Outfit', textAlign: 'center', display: 'flex' }}>
+          {post.hook || 'What are collectors watching?'}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main route handler ──────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
@@ -218,6 +441,10 @@ export async function GET(req: NextRequest) {
   try {
     if (post.template_type === 'card_battle')        element = await renderCardBattle(post, p)
     else if (post.template_type === 'market_mover')  element = await renderMarketMover(post, p)
+    else if (post.template_type === 'grading_gap')   element = await renderGradingGap(post, p)
+    else if (post.template_type === 'then_vs_now')   element = await renderThenVsNow(post, p)
+    else if (post.template_type === 'budget_builder') element = await renderBudgetBuilder(post, p)
+    else if (post.template_type === 'collector_pulse') element = await renderCollectorPulse(post, p)
     else return new Response(`Template '${post.template_type}' has no PNG renderer yet`, { status: 400 })
   } catch (e: any) {
     return new Response(`Render error: ${e?.message || e}`, { status: 500 })

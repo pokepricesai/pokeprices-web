@@ -8,11 +8,16 @@ import {
   VISUAL_STYLES,
   PRICE_TIERS,
   TIME_WINDOWS,
+  BUDGETS,
   defaultOptionsFor,
   type SocialContentPost,
   type TemplateType,
   type CardBattleOptions,
   type MarketMoverOptions,
+  type GradingGapOptions,
+  type ThenVsNowOptions,
+  type BudgetBuilderOptions,
+  type CollectorPulseOptions,
 } from '@/lib/contentStudio'
 
 const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'pokeprices2024'
@@ -128,6 +133,89 @@ function CardBattlePanel({ opts, onChange }: { opts: CardBattleOptions; onChange
         Price tier
         <select value={opts.price_tier} onChange={e => onChange({ ...opts, price_tier: e.target.value as any })} style={selectStyle}>
           {PRICE_TIERS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+      </label>
+      <label style={fieldStyle}>
+        Visual style
+        <select value={opts.visual_style} onChange={e => onChange({ ...opts, visual_style: e.target.value as any })} style={selectStyle}>
+          {VISUAL_STYLES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+      </label>
+    </div>
+  )
+}
+
+function GradingGapPanel({ opts, onChange }: { opts: GradingGapOptions; onChange: (o: GradingGapOptions) => void }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+      <label style={fieldStyle}>
+        Price tier
+        <select value={opts.price_tier} onChange={e => onChange({ ...opts, price_tier: e.target.value as any })} style={selectStyle}>
+          {PRICE_TIERS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+      </label>
+      <label style={fieldStyle}>
+        Visual style
+        <select value={opts.visual_style} onChange={e => onChange({ ...opts, visual_style: e.target.value as any })} style={selectStyle}>
+          {VISUAL_STYLES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+      </label>
+    </div>
+  )
+}
+
+function ThenVsNowPanel({ opts, onChange }: { opts: ThenVsNowOptions; onChange: (o: ThenVsNowOptions) => void }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+      <label style={fieldStyle}>
+        Time span
+        <select value={opts.span} onChange={e => onChange({ ...opts, span: e.target.value as any })} style={selectStyle}>
+          <option value="2y">2 years</option>
+          <option value="5y">5 years</option>
+        </select>
+      </label>
+      <label style={fieldStyle}>
+        Price tier
+        <select value={opts.price_tier} onChange={e => onChange({ ...opts, price_tier: e.target.value as any })} style={selectStyle}>
+          {PRICE_TIERS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+      </label>
+      <label style={fieldStyle}>
+        Visual style
+        <select value={opts.visual_style} onChange={e => onChange({ ...opts, visual_style: e.target.value as any })} style={selectStyle}>
+          {VISUAL_STYLES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+      </label>
+    </div>
+  )
+}
+
+function BudgetBuilderPanel({ opts, onChange }: { opts: BudgetBuilderOptions; onChange: (o: BudgetBuilderOptions) => void }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+      <label style={fieldStyle}>
+        Budget
+        <select value={opts.budget_gbp} onChange={e => onChange({ ...opts, budget_gbp: Number(e.target.value) as any })} style={selectStyle}>
+          {BUDGETS.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
+        </select>
+      </label>
+      <label style={fieldStyle}>
+        Visual style
+        <select value={opts.visual_style} onChange={e => onChange({ ...opts, visual_style: e.target.value as any })} style={selectStyle}>
+          {VISUAL_STYLES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+      </label>
+    </div>
+  )
+}
+
+function CollectorPulsePanel({ opts, onChange }: { opts: CollectorPulseOptions; onChange: (o: CollectorPulseOptions) => void }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+      <label style={fieldStyle}>
+        Window
+        <select value={opts.time_window} onChange={e => onChange({ ...opts, time_window: e.target.value as any })} style={selectStyle}>
+          {TIME_WINDOWS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
       </label>
       <label style={fieldStyle}>
@@ -315,8 +403,24 @@ export default function ContentStudioClient() {
   const [lastError, setLastError] = useState<string | null>(null)
 
   // Global options per template type
-  const [cardBattleOpts,  setCardBattleOpts]  = useState<CardBattleOptions>(defaultOptionsFor('card_battle') as CardBattleOptions)
-  const [marketMoverOpts, setMarketMoverOpts] = useState<MarketMoverOptions>(defaultOptionsFor('market_mover') as MarketMoverOptions)
+  const [cardBattleOpts,     setCardBattleOpts]     = useState<CardBattleOptions>(defaultOptionsFor('card_battle')      as CardBattleOptions)
+  const [marketMoverOpts,    setMarketMoverOpts]    = useState<MarketMoverOptions>(defaultOptionsFor('market_mover')    as MarketMoverOptions)
+  const [gradingGapOpts,     setGradingGapOpts]     = useState<GradingGapOptions>(defaultOptionsFor('grading_gap')      as GradingGapOptions)
+  const [thenVsNowOpts,      setThenVsNowOpts]      = useState<ThenVsNowOptions>(defaultOptionsFor('then_vs_now')       as ThenVsNowOptions)
+  const [budgetBuilderOpts,  setBudgetBuilderOpts]  = useState<BudgetBuilderOptions>(defaultOptionsFor('budget_builder') as BudgetBuilderOptions)
+  const [collectorPulseOpts, setCollectorPulseOpts] = useState<CollectorPulseOptions>(defaultOptionsFor('collector_pulse') as CollectorPulseOptions)
+
+  function optionsFor(t: TemplateType): any {
+    switch (t) {
+      case 'card_battle':     return cardBattleOpts
+      case 'market_mover':    return marketMoverOpts
+      case 'grading_gap':     return gradingGapOpts
+      case 'then_vs_now':     return thenVsNowOpts
+      case 'budget_builder':  return budgetBuilderOpts
+      case 'collector_pulse': return collectorPulseOpts
+      default: return {}
+    }
+  }
 
   useEffect(() => {
     try {
@@ -334,11 +438,14 @@ export default function ContentStudioClient() {
 
   useEffect(() => { if (authed) loadPosts() }, [authed, loadPosts])
 
-  // Build the 9-task pack (Phase A only generates the 2 implemented templates).
+  // Build the pack — one entry per quota slot for every implemented template.
   const weeklyTasks = (() => {
     const tasks: { template_type: TemplateType; options: any }[] = []
-    for (let i = 0; i < WEEKLY_PACK_QUOTA.card_battle;  i++) tasks.push({ template_type: 'card_battle',  options: cardBattleOpts  })
-    for (let i = 0; i < WEEKLY_PACK_QUOTA.market_mover; i++) tasks.push({ template_type: 'market_mover', options: marketMoverOpts })
+    for (const t of TEMPLATES_IMPLEMENTED) {
+      for (let i = 0; i < WEEKLY_PACK_QUOTA[t]; i++) {
+        tasks.push({ template_type: t, options: optionsFor(t) })
+      }
+    }
     return tasks
   })()
 
@@ -370,14 +477,13 @@ export default function ContentStudioClient() {
 
   async function generateOne(template_type: TemplateType) {
     if (!TEMPLATES_IMPLEMENTED.includes(template_type)) {
-      alert(`${TEMPLATE_LABELS[template_type]} is coming in Phase B.`)
+      alert(`${TEMPLATE_LABELS[template_type]} is coming in Phase C.`)
       return
     }
     setGenerating(true)
     setLastError(null)
     try {
-      const opts = template_type === 'card_battle' ? cardBattleOpts : marketMoverOpts
-      const post = await callGenerate(template_type, opts)
+      const post = await callGenerate(template_type, optionsFor(template_type))
       setPosts(prev => [post, ...prev])
     } catch (e: any) {
       setLastError(`${TEMPLATE_LABELS[template_type]}: ${e?.message || e}`)
@@ -429,7 +535,7 @@ export default function ContentStudioClient() {
         <div>
           <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 28, margin: '0 0 4px', color: 'var(--text)' }}>Weekly Content Studio</h1>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0, lineHeight: 1.6 }}>
-            Generate a balanced pack of 21 social posts per week. Card Battle + Market Mover are live; other templates land in Phase B.
+            Generate a balanced pack of social posts per week. 17 of 21 templates live (Card Battle, Market Mover, Grading Gap, Then vs Now, Budget Builder, Collector Pulse). Pokémon Battle + Guess the Pokémon arrive in Phase C.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -456,13 +562,25 @@ export default function ContentStudioClient() {
       {/* Per-template option panels */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 12, marginBottom: 18 }}>
         <OptionsCard title="Card Battle" count={WEEKLY_PACK_QUOTA.card_battle} onSingle={() => generateOne('card_battle')} disabled={generating}>
-          <CardBattlePanel  opts={cardBattleOpts}  onChange={setCardBattleOpts} />
+          <CardBattlePanel opts={cardBattleOpts} onChange={setCardBattleOpts} />
         </OptionsCard>
         <OptionsCard title="Market Mover" count={WEEKLY_PACK_QUOTA.market_mover} onSingle={() => generateOne('market_mover')} disabled={generating}>
           <MarketMoverPanel opts={marketMoverOpts} onChange={setMarketMoverOpts} />
         </OptionsCard>
-        {/* Stubs for Phase B */}
-        {(['grading_gap', 'pokemon_battle', 'budget_builder', 'collector_pulse', 'then_vs_now', 'guess_the_pokemon'] as TemplateType[]).map(t => (
+        <OptionsCard title="Grading Gap" count={WEEKLY_PACK_QUOTA.grading_gap} onSingle={() => generateOne('grading_gap')} disabled={generating}>
+          <GradingGapPanel opts={gradingGapOpts} onChange={setGradingGapOpts} />
+        </OptionsCard>
+        <OptionsCard title="Then vs Now" count={WEEKLY_PACK_QUOTA.then_vs_now} onSingle={() => generateOne('then_vs_now')} disabled={generating}>
+          <ThenVsNowPanel opts={thenVsNowOpts} onChange={setThenVsNowOpts} />
+        </OptionsCard>
+        <OptionsCard title="Budget Builder" count={WEEKLY_PACK_QUOTA.budget_builder} onSingle={() => generateOne('budget_builder')} disabled={generating}>
+          <BudgetBuilderPanel opts={budgetBuilderOpts} onChange={setBudgetBuilderOpts} />
+        </OptionsCard>
+        <OptionsCard title="Collector Pulse" count={WEEKLY_PACK_QUOTA.collector_pulse} onSingle={() => generateOne('collector_pulse')} disabled={generating}>
+          <CollectorPulsePanel opts={collectorPulseOpts} onChange={setCollectorPulseOpts} />
+        </OptionsCard>
+        {/* Phase C stubs */}
+        {(['pokemon_battle', 'guess_the_pokemon'] as TemplateType[]).map(t => (
           <OptionsCard key={t} title={TEMPLATE_LABELS[t]} count={WEEKLY_PACK_QUOTA[t]} disabled stub />
         ))}
       </div>

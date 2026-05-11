@@ -84,7 +84,10 @@ export const TEMPLATE_LABELS: Record<TemplateType, string> = {
   guess_the_pokemon: 'Guess the Pokémon',
 }
 
-export const TEMPLATES_IMPLEMENTED: TemplateType[] = ['card_battle', 'market_mover']
+export const TEMPLATES_IMPLEMENTED: TemplateType[] = [
+  'card_battle', 'market_mover',
+  'grading_gap', 'then_vs_now', 'budget_builder', 'collector_pulse',
+]
 
 // Background palette by visual style — used by both preview + Satori.
 export const STYLE_PALETTE: Record<VisualStyle, {
@@ -109,7 +112,44 @@ export interface MarketMoverOptions {
   direction: 'up' | 'down'
 }
 
-export type GenerateOptions = CardBattleOptions | MarketMoverOptions | Record<string, any>
+export interface GradingGapOptions {
+  visual_style: VisualStyle
+  price_tier: PriceTier
+}
+
+export type ThenVsNowSpan = '2y' | '5y'
+export interface ThenVsNowOptions {
+  visual_style: VisualStyle
+  price_tier: PriceTier
+  span: ThenVsNowSpan
+}
+
+export type Budget = 50 | 100 | 250 | 500 | 1000
+export const BUDGETS: { value: Budget; label: string }[] = [
+  { value: 50,   label: '£50'    },
+  { value: 100,  label: '£100'   },
+  { value: 250,  label: '£250'   },
+  { value: 500,  label: '£500'   },
+  { value: 1000, label: '£1,000' },
+]
+export interface BudgetBuilderOptions {
+  visual_style: VisualStyle
+  budget_gbp: Budget
+}
+
+export interface CollectorPulseOptions {
+  visual_style: VisualStyle
+  time_window: TimeWindow
+}
+
+export type GenerateOptions =
+  | CardBattleOptions
+  | MarketMoverOptions
+  | GradingGapOptions
+  | ThenVsNowOptions
+  | BudgetBuilderOptions
+  | CollectorPulseOptions
+  | Record<string, any>
 
 export function defaultOptionsFor(template: TemplateType): GenerateOptions {
   switch (template) {
@@ -117,6 +157,14 @@ export function defaultOptionsFor(template: TemplateType): GenerateOptions {
       return { visual_style: 'light', price_tier: '50_200' } as CardBattleOptions
     case 'market_mover':
       return { visual_style: 'light', price_tier: 'any', time_window: '30d', direction: 'up' } as MarketMoverOptions
+    case 'grading_gap':
+      return { visual_style: 'light', price_tier: '200_1000' } as GradingGapOptions
+    case 'then_vs_now':
+      return { visual_style: 'light', price_tier: 'any', span: '5y' } as ThenVsNowOptions
+    case 'budget_builder':
+      return { visual_style: 'light', budget_gbp: 250 } as BudgetBuilderOptions
+    case 'collector_pulse':
+      return { visual_style: 'light', time_window: '7d' } as CollectorPulseOptions
     default:
       return { visual_style: 'light' }
   }
