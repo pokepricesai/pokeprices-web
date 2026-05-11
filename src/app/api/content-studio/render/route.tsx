@@ -422,6 +422,167 @@ async function renderCollectorPulse(post: any, p: typeof PALETTE['light']): Prom
   )
 }
 
+// ── Type colour palette for Pokémon Battle / Guess the Pokémon ─────────────
+
+const TYPE_COLOURS: Record<string, string> = {
+  normal: '#A8A77A', fire: '#EE8130', water: '#6390F0', electric: '#F7D02C',
+  grass: '#7AC74C',  ice: '#96D9D6',  fighting: '#C22E28', poison: '#A33EA1',
+  ground: '#E2BF65', flying: '#A98FF3', psychic: '#F95587', bug: '#A6B91A',
+  rock: '#B6A136',  ghost: '#735797', dragon: '#6F35FC', dark: '#705746',
+  steel: '#B7B7CE', fairy: '#D685AD',
+}
+
+function typeChipBg(t: string): string { return TYPE_COLOURS[t] || '#94a3b8' }
+
+// ── Template: Pokémon Battle ────────────────────────────────────────────────
+
+async function renderPokemonBattle(post: any, p: typeof PALETTE['light']): Promise<JSX.Element> {
+  const L = post.data_payload?.left  || {}
+  const R = post.data_payload?.right || {}
+  const lProb = post.data_payload?.left_prob ?? 50
+  const rProb = post.data_payload?.right_prob ?? 50
+  const [lImg, rImg] = await Promise.all([
+    L.sprite ? toDataUrl(L.sprite) : null,
+    R.sprite ? toDataUrl(R.sprite) : null,
+  ])
+
+  const TypeChip = ({ t }: { t: string }) => (
+    <span style={{
+      fontSize: 14, fontWeight: 700, color: '#fff', textTransform: 'uppercase',
+      letterSpacing: 1, padding: '4px 12px', borderRadius: 14,
+      background: typeChipBg(t), fontFamily: 'Figtree', display: 'flex',
+    }}>{t}</span>
+  )
+
+  const StatBar = ({ label, value }: { label: string; value: number }) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, width: '100%' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+        <span style={{ fontSize: 14, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 1, display: 'flex' }}>{label}</span>
+        <span style={{ fontSize: 16, fontWeight: 700, color: p.text, fontFamily: 'Outfit', display: 'flex' }}>{value}</span>
+      </div>
+      <div style={{ width: '100%', height: 6, background: p.border, borderRadius: 3, display: 'flex' }}>
+        <div style={{ width: `${Math.min(100, (value / 200) * 100)}%`, height: 6, background: p.accent, borderRadius: 3 }} />
+      </div>
+    </div>
+  )
+
+  const Side = ({ poke, img }: { poke: any; img: string | null }) => (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 460, gap: 14 }}>
+      {img
+        ? <img src={img} width={280} height={280} style={{ objectFit: 'contain' }} />
+        : <div style={{ width: 280, height: 280, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 100 }}>?</div>}
+      <div style={{ fontSize: 30, fontWeight: 800, color: p.text, fontFamily: 'Outfit', textAlign: 'center', display: 'flex' }}>
+        {poke.name}
+      </div>
+      <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+        {(poke.types || []).map((t: string) => <TypeChip key={t} t={t} />)}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, width: '100%', padding: '0 30px' }}>
+        <StatBar label="HP"  value={poke.stats?.hp ?? 0} />
+        <StatBar label="Atk" value={poke.stats?.attack ?? 0} />
+        <StatBar label="Def" value={poke.stats?.defense ?? 0} />
+        <StatBar label="SpA" value={poke.stats?.['special-attack'] ?? 0} />
+        <StatBar label="SpD" value={poke.stats?.['special-defense'] ?? 0} />
+        <StatBar label="Spe" value={poke.stats?.speed ?? 0} />
+      </div>
+      <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 1.5, display: 'flex' }}>
+        Total: <span style={{ color: p.text, fontWeight: 700, marginLeft: 6, display: 'flex' }}>{poke.total ?? '—'}</span>
+      </div>
+    </div>
+  )
+
+  return (
+    <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '50px 40px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: p.accent, fontFamily: 'Figtree', letterSpacing: 2, textTransform: 'uppercase', display: 'flex' }}>Pokémon Battle</div>
+        <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>PokePrices.io</div>
+      </div>
+
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 }}>
+        <Side poke={L} img={lImg} />
+        <div style={{ fontSize: 90, fontWeight: 900, color: p.accent, fontFamily: 'Outfit', display: 'flex' }}>VS</div>
+        <Side poke={R} img={rImg} />
+      </div>
+
+      {/* Probability split */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, width: '100%' }}>
+        <span style={{ fontSize: 18, fontWeight: 800, color: p.text, fontFamily: 'Outfit', width: 60, textAlign: 'right', display: 'flex', justifyContent: 'flex-end' }}>{lProb}%</span>
+        <div style={{ flex: 1, height: 10, borderRadius: 5, background: p.border, display: 'flex', overflow: 'hidden' }}>
+          <div style={{ width: `${lProb}%`, height: '100%', background: p.accent }} />
+          <div style={{ width: `${rProb}%`, height: '100%', background: p.muted, opacity: 0.6 }} />
+        </div>
+        <span style={{ fontSize: 18, fontWeight: 800, color: p.text, fontFamily: 'Outfit', width: 60, display: 'flex' }}>{rProb}%</span>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
+        <div style={{ fontSize: 38, fontWeight: 900, color: p.text, fontFamily: 'Outfit', textAlign: 'center', display: 'flex' }}>
+          {post.hook || 'Who wins?'}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Template: Guess the Pokémon ─────────────────────────────────────────────
+
+async function renderGuessThePokemon(post: any, p: typeof PALETTE['light']): Promise<JSX.Element> {
+  const poke = post.data_payload?.pokemon || {}
+  const clues: string[] = post.data_payload?.clues || []
+  const difficulty = post.data_payload?.difficulty || 'silhouette'
+  const img = poke.sprite ? await toDataUrl(poke.sprite) : null
+
+  // Silhouette: full brightness(0) makes the image solid black.
+  // Blurred: faint visibility — use lower opacity so the shape shows through.
+  const imgStyle: React.CSSProperties = difficulty === 'silhouette'
+    ? { filter: 'brightness(0)', objectFit: 'contain' }
+    : { opacity: 0.25, objectFit: 'contain' }
+
+  return (
+    <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '60px 50px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: p.accent, fontFamily: 'Figtree', letterSpacing: 2, textTransform: 'uppercase', display: 'flex' }}>
+          Guess the Pokémon
+        </div>
+        <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>PokePrices.io</div>
+      </div>
+
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', marginTop: 30, marginBottom: 20 }}>
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {img
+            ? <img src={img} width={560} height={560} style={imgStyle} />
+            : <div style={{ width: 560, height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 220 }}>?</div>}
+          {/* Big '?' overlay */}
+          <div style={{
+            position: 'absolute', fontSize: 360, fontWeight: 900,
+            color: p.accent, fontFamily: 'Outfit', opacity: 0.18, lineHeight: 1,
+            display: 'flex',
+          }}>?</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', marginBottom: 24 }}>
+        {clues.slice(0, 3).map((c, i) => (
+          <div key={i} style={{
+            display: 'flex', alignItems: 'center', gap: 14,
+            padding: '12px 22px',
+            background: p.bg === '#ffffff' ? '#f8fafc' : p.border,
+            border: `1px solid ${p.border}`, borderRadius: 14, minWidth: 520,
+          }}>
+            <span style={{ fontSize: 24, fontWeight: 900, color: p.accent, fontFamily: 'Outfit', width: 32, display: 'flex' }}>{i + 1}</span>
+            <span style={{ fontSize: 22, fontWeight: 600, color: p.text, fontFamily: 'Figtree', display: 'flex' }}>{c}</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'center' }}>
+        <div style={{ fontSize: 40, fontWeight: 900, color: p.text, fontFamily: 'Outfit', textAlign: 'center', display: 'flex' }}>
+          {post.hook || 'Who is it?'}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main route handler ──────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
@@ -445,6 +606,8 @@ export async function GET(req: NextRequest) {
     else if (post.template_type === 'then_vs_now')   element = await renderThenVsNow(post, p)
     else if (post.template_type === 'budget_builder') element = await renderBudgetBuilder(post, p)
     else if (post.template_type === 'collector_pulse') element = await renderCollectorPulse(post, p)
+    else if (post.template_type === 'pokemon_battle')   element = await renderPokemonBattle(post, p)
+    else if (post.template_type === 'guess_the_pokemon') element = await renderGuessThePokemon(post, p)
     else return new Response(`Template '${post.template_type}' has no PNG renderer yet`, { status: 400 })
   } catch (e: any) {
     return new Response(`Render error: ${e?.message || e}`, { status: 500 })

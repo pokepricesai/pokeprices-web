@@ -655,6 +655,191 @@ Return JSON with this exact shape:
   }
 }
 
+// ── PokeAPI helpers (for Pokémon Battle + Guess the Pokémon) ────────────────
+
+const GEN_RANGES: Record<string, [number, number]> = {
+  any: [1,    1025],
+  '1': [1,    151],
+  '2': [152,  251],
+  '3': [252,  386],
+  '4': [387,  493],
+  '5': [494,  649],
+  '6': [650,  721],
+  '7': [722,  809],
+  '8': [810,  905],
+  '9': [906,  1025],
+}
+
+async function fetchPokemon(idOrName: string | number): Promise<any> {
+  const res = await fetch(`https://pokeapi.co/api/v2/pokemon/${idOrName}`)
+  if (!res.ok) throw new Error(`PokeAPI ${idOrName}: ${res.status}`)
+  return await res.json()
+}
+
+function randomPokemonId(gen: string): number {
+  const [min, max] = GEN_RANGES[gen] || GEN_RANGES.any
+  return min + Math.floor(Math.random() * (max - min + 1))
+}
+
+function generationOf(id: number): string {
+  for (const [k, [mn, mx]] of Object.entries(GEN_RANGES)) {
+    if (k === 'any') continue
+    if (id >= mn && id <= mx) return k
+  }
+  return '?'
+}
+
+// Modern Pokémon type effectiveness chart. Lookup:
+// TYPE_CHART[attacker][defender] = multiplier (1 if not listed).
+const TYPE_CHART: Record<string, Record<string, number>> = {
+  normal:   { rock: 0.5, ghost: 0,  steel: 0.5 },
+  fire:     { fire: 0.5, water: 0.5, grass: 2, ice: 2, bug: 2, rock: 0.5, dragon: 0.5, steel: 2 },
+  water:    { fire: 2, water: 0.5, grass: 0.5, ground: 2, rock: 2, dragon: 0.5 },
+  electric: { water: 2, electric: 0.5, grass: 0.5, ground: 0, flying: 2, dragon: 0.5 },
+  grass:    { fire: 0.5, water: 2, grass: 0.5, poison: 0.5, ground: 2, flying: 0.5, bug: 0.5, rock: 2, dragon: 0.5, steel: 0.5 },
+  ice:      { fire: 0.5, water: 0.5, grass: 2, ice: 0.5, ground: 2, flying: 2, dragon: 2, steel: 0.5 },
+  fighting: { normal: 2, ice: 2, poison: 0.5, flying: 0.5, psychic: 0.5, bug: 0.5, rock: 2, ghost: 0, dark: 2, steel: 2, fairy: 0.5 },
+  poison:   { grass: 2, poison: 0.5, ground: 0.5, rock: 0.5, ghost: 0.5, steel: 0, fairy: 2 },
+  ground:   { fire: 2, electric: 2, grass: 0.5, poison: 2, flying: 0, bug: 0.5, rock: 2, steel: 2 },
+  flying:   { electric: 0.5, grass: 2, fighting: 2, bug: 2, rock: 0.5, steel: 0.5 },
+  psychic:  { fighting: 2, poison: 2, psychic: 0.5, dark: 0, steel: 0.5 },
+  bug:      { fire: 0.5, grass: 2, fighting: 0.5, poison: 0.5, flying: 0.5, psychic: 2, ghost: 0.5, dark: 2, steel: 0.5, fairy: 0.5 },
+  rock:     { fire: 2, ice: 2, fighting: 0.5, ground: 0.5, flying: 2, bug: 2, steel: 0.5 },
+  ghost:    { normal: 0, psychic: 2, ghost: 2, dark: 0.5 },
+  dragon:   { dragon: 2, steel: 0.5, fairy: 0 },
+  dark:     { fighting: 0.5, psychic: 2, ghost: 2, dark: 0.5, fairy: 0.5 },
+  steel:    { fire: 0.5, water: 0.5, electric: 0.5, ice: 2, rock: 2, steel: 0.5, fairy: 2 },
+  fairy:    { fire: 0.5, fighting: 2, poison: 0.5, dragon: 2, dark: 2, steel: 0.5 },
+}
+
+function effVs(attackerType: string, defenderTypes: string[]): number {
+  let m = 1
+  for (const dt of defenderTypes) m *= (TYPE_CHART[attackerType]?.[dt] ?? 1)
+  return m
+}
+function bestAdvantage(attackerTypes: string[], defenderTypes: string[]): number {
+  let best = 0
+  for (const at of attackerTypes) best = Math.max(best, effVs(at, defenderTypes))
+  return best
+}
+
+function summarisePokemon(p: any) {
+  const stats: Record<string, number> = {}
+  for (const s of p.stats) stats[s.stat.name] = s.base_stat
+  const types = p.types.map((t: any) => t.type.name)
+  const total = p.stats.reduce((sum: number, x: any) => sum + x.base_stat, 0)
+  const sprite = p.sprites?.other?.['official-artwork']?.front_default
+    || `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${p.id}.png`
+  return {
+    id: p.id,
+    name: p.name.charAt(0).toUpperCase() + p.name.slice(1),
+    types,
+    stats,
+    total,
+    sprite,
+  }
+}
+
+// ── Template: Pokémon Battle ────────────────────────────────────────────────
+
+async function generatePokemonBattle(options: any) {
+  const gen = String(options.generation || 'any')
+  let leftId = randomPokemonId(gen)
+  let rightId = randomPokemonId(gen)
+  while (rightId === leftId) rightId = randomPokemonId(gen)
+
+  const [leftRaw, rightRaw] = await Promise.all([fetchPokemon(leftId), fetchPokemon(rightId)])
+  const L = summarisePokemon(leftRaw)
+  const R = summarisePokemon(rightRaw)
+
+  // Combine total stats with best type advantage in either direction.
+  const lAdv = bestAdvantage(L.types, R.types) || 1
+  const rAdv = bestAdvantage(R.types, L.types) || 1
+  const lScore = L.total * lAdv
+  const rScore = R.total * rAdv
+  const lProb = Math.round((lScore / (lScore + rScore)) * 100)
+  const rProb = 100 - lProb
+
+  const sys = VOICE_PROMPT
+  const usr = `Write a Pokemon Battle social post comparing two Pokemon side by side.
+
+LEFT:  ${L.name} (${L.types.join('/')}) — total stats ${L.total}: HP ${L.stats.hp}, Atk ${L.stats.attack}, Def ${L.stats.defense}, SpA ${L.stats['special-attack']}, SpD ${L.stats['special-defense']}, Spe ${L.stats.speed}
+RIGHT: ${R.name} (${R.types.join('/')}) — total stats ${R.total}: HP ${R.stats.hp}, Atk ${R.stats.attack}, Def ${R.stats.defense}, SpA ${R.stats['special-attack']}, SpD ${R.stats['special-defense']}, Spe ${R.stats.speed}
+
+Quick model says: ${L.name} ${lProb}% vs ${R.name} ${rProb}%. Don't read that as gospel — the question is meant to be fun, not a literal forecast.
+
+CTA: "Who wins?"
+
+Return JSON with this exact shape:
+{
+  "title": "short internal title, max 60 chars",
+  "hook": "headline on the image, max 50 chars, e.g. 'Who wins this one?'",
+  "twitter_copy": "X/Twitter post (under 240 chars) ending with the CTA",
+  "instagram_caption": "Instagram caption (2 short paragraphs + 3-5 hashtags)"
+}`
+  const aiRaw = await callHaiku(sys, usr)
+  const ai = parseJsonFromAi(aiRaw)
+
+  return {
+    title: ai.title,
+    hook: ai.hook,
+    twitter_copy: ai.twitter_copy,
+    instagram_caption: ai.instagram_caption,
+    data_payload: { left: L, right: R, left_prob: lProb, right_prob: rProb },
+  }
+}
+
+// ── Template: Guess the Pokémon ─────────────────────────────────────────────
+
+async function generateGuessThePokemon(options: any) {
+  const gen = String(options.generation || 'any')
+  const difficulty = options.difficulty === 'blurred' ? 'blurred' : 'silhouette'
+  const id = randomPokemonId(gen)
+  const p = await fetchPokemon(id)
+  const P = summarisePokemon(p)
+
+  const highestStat = Object.entries(P.stats).sort((a, b) => b[1] - a[1])[0]
+  const generationNumber = generationOf(id)
+
+  const clues = [
+    `Type: ${P.types.join(' / ')}`,
+    `Generation: ${generationNumber}`,
+    `Strongest stat: ${highestStat[0].replace('-', ' ')} (${highestStat[1]})`,
+  ]
+
+  const sys = VOICE_PROMPT
+  const usr = `Write a "Guess the Pokemon" social post. The Pokemon will appear as a ${difficulty} in the image.
+
+Answer (internal only — DO NOT mention the name in any copy): ${P.name}
+
+Clues shown on the image:
+  - ${clues[0]}
+  - ${clues[1]}
+  - ${clues[2]}
+
+CTA: "Who is it?"
+
+Frame it as a fun guessing game. NEVER reveal the answer in any copy.
+
+Return JSON with this exact shape:
+{
+  "title": "short internal title (can include the answer for your own reference)",
+  "hook": "headline on the image, max 50 chars, e.g. 'Who is it?'",
+  "twitter_copy": "X/Twitter post — playful, ends with the CTA, no answer reveal",
+  "instagram_caption": "Instagram caption (2 short paragraphs + 3-5 hashtags) — no answer reveal"
+}`
+  const aiRaw = await callHaiku(sys, usr)
+  const ai = parseJsonFromAi(aiRaw)
+
+  return {
+    title: ai.title,
+    hook: ai.hook,
+    twitter_copy: ai.twitter_copy,
+    instagram_caption: ai.instagram_caption,
+    data_payload: { pokemon: P, generation: generationNumber, clues, difficulty },
+  }
+}
+
 // ── Main handler ────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
@@ -686,6 +871,10 @@ Deno.serve(async (req) => {
       generated = await generateBudgetBuilder(options)
     } else if (template_type === "collector_pulse") {
       generated = await generateCollectorPulse(options)
+    } else if (template_type === "pokemon_battle") {
+      generated = await generatePokemonBattle(options)
+    } else if (template_type === "guess_the_pokemon") {
+      generated = await generateGuessThePokemon(options)
     } else {
       return new Response(JSON.stringify({ error: `Template '${template_type}' not implemented yet` }),
         { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } })

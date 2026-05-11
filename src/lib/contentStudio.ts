@@ -87,6 +87,7 @@ export const TEMPLATE_LABELS: Record<TemplateType, string> = {
 export const TEMPLATES_IMPLEMENTED: TemplateType[] = [
   'card_battle', 'market_mover',
   'grading_gap', 'then_vs_now', 'budget_builder', 'collector_pulse',
+  'pokemon_battle', 'guess_the_pokemon',
 ]
 
 // Background palette by visual style — used by both preview + Satori.
@@ -142,6 +143,32 @@ export interface CollectorPulseOptions {
   time_window: TimeWindow
 }
 
+export type Generation = 'any' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
+export const GENERATIONS: { value: Generation; label: string }[] = [
+  { value: 'any', label: 'Any generation' },
+  { value: '1',   label: 'Gen 1 (Kanto)'   },
+  { value: '2',   label: 'Gen 2 (Johto)'   },
+  { value: '3',   label: 'Gen 3 (Hoenn)'   },
+  { value: '4',   label: 'Gen 4 (Sinnoh)'  },
+  { value: '5',   label: 'Gen 5 (Unova)'   },
+  { value: '6',   label: 'Gen 6 (Kalos)'   },
+  { value: '7',   label: 'Gen 7 (Alola)'   },
+  { value: '8',   label: 'Gen 8 (Galar)'   },
+  { value: '9',   label: 'Gen 9 (Paldea)'  },
+]
+
+export interface PokemonBattleOptions {
+  visual_style: VisualStyle
+  generation: Generation
+}
+
+export type GuessDifficulty = 'silhouette' | 'blurred'
+export interface GuessThePokemonOptions {
+  visual_style: VisualStyle
+  generation: Generation
+  difficulty: GuessDifficulty
+}
+
 export type GenerateOptions =
   | CardBattleOptions
   | MarketMoverOptions
@@ -149,6 +176,8 @@ export type GenerateOptions =
   | ThenVsNowOptions
   | BudgetBuilderOptions
   | CollectorPulseOptions
+  | PokemonBattleOptions
+  | GuessThePokemonOptions
   | Record<string, any>
 
 export function defaultOptionsFor(template: TemplateType): GenerateOptions {
@@ -165,6 +194,10 @@ export function defaultOptionsFor(template: TemplateType): GenerateOptions {
       return { visual_style: 'light', budget_gbp: 250 } as BudgetBuilderOptions
     case 'collector_pulse':
       return { visual_style: 'light', time_window: '7d' } as CollectorPulseOptions
+    case 'pokemon_battle':
+      return { visual_style: 'light', generation: 'any' } as PokemonBattleOptions
+    case 'guess_the_pokemon':
+      return { visual_style: 'light', generation: 'any', difficulty: 'silhouette' } as GuessThePokemonOptions
     default:
       return { visual_style: 'light' }
   }

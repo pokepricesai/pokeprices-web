@@ -9,6 +9,7 @@ import {
   PRICE_TIERS,
   TIME_WINDOWS,
   BUDGETS,
+  GENERATIONS,
   defaultOptionsFor,
   type SocialContentPost,
   type TemplateType,
@@ -18,6 +19,8 @@ import {
   type ThenVsNowOptions,
   type BudgetBuilderOptions,
   type CollectorPulseOptions,
+  type PokemonBattleOptions,
+  type GuessThePokemonOptions,
 } from '@/lib/contentStudio'
 
 const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'pokeprices2024'
@@ -228,6 +231,51 @@ function CollectorPulsePanel({ opts, onChange }: { opts: CollectorPulseOptions; 
   )
 }
 
+function PokemonBattlePanel({ opts, onChange }: { opts: PokemonBattleOptions; onChange: (o: PokemonBattleOptions) => void }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+      <label style={fieldStyle}>
+        Generation
+        <select value={opts.generation} onChange={e => onChange({ ...opts, generation: e.target.value as any })} style={selectStyle}>
+          {GENERATIONS.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
+        </select>
+      </label>
+      <label style={fieldStyle}>
+        Visual style
+        <select value={opts.visual_style} onChange={e => onChange({ ...opts, visual_style: e.target.value as any })} style={selectStyle}>
+          {VISUAL_STYLES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+      </label>
+    </div>
+  )
+}
+
+function GuessThePokemonPanel({ opts, onChange }: { opts: GuessThePokemonOptions; onChange: (o: GuessThePokemonOptions) => void }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+      <label style={fieldStyle}>
+        Generation
+        <select value={opts.generation} onChange={e => onChange({ ...opts, generation: e.target.value as any })} style={selectStyle}>
+          {GENERATIONS.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
+        </select>
+      </label>
+      <label style={fieldStyle}>
+        Difficulty
+        <select value={opts.difficulty} onChange={e => onChange({ ...opts, difficulty: e.target.value as any })} style={selectStyle}>
+          <option value="silhouette">Silhouette</option>
+          <option value="blurred">Blurred</option>
+        </select>
+      </label>
+      <label style={fieldStyle}>
+        Visual style
+        <select value={opts.visual_style} onChange={e => onChange({ ...opts, visual_style: e.target.value as any })} style={selectStyle}>
+          {VISUAL_STYLES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+      </label>
+    </div>
+  )
+}
+
 function MarketMoverPanel({ opts, onChange }: { opts: MarketMoverOptions; onChange: (o: MarketMoverOptions) => void }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
@@ -262,11 +310,12 @@ function MarketMoverPanel({ opts, onChange }: { opts: MarketMoverOptions; onChan
 
 // ── Post card ───────────────────────────────────────────────────────────────
 
-function PostCard({ post, onUpdate, onDelete, onRegenerate }: {
+function PostCard({ post, onUpdate, onDelete, onRegenerate, onActionError }: {
   post: SocialContentPost
   onUpdate: (p: SocialContentPost) => void
   onDelete: (id: string) => void
   onRegenerate: (post: SocialContentPost) => void
+  onActionError: (msg: string) => void
 }) {
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState<'twitter' | 'instagram' | null>(null)
@@ -276,7 +325,11 @@ function PostCard({ post, onUpdate, onDelete, onRegenerate }: {
     setBusy(true)
     const { data, error } = await supabase.from('social_content_posts')
       .update({ status }).eq('id', post.id).select('*').single()
-    if (!error && data) onUpdate(data as SocialContentPost)
+    if (error) {
+      onActionError(`Couldn't update status: ${error.message}. Did you run migration 2026-05-11b-social-content-rls-fix.sql?`)
+    } else if (data) {
+      onUpdate(data as SocialContentPost)
+    }
     setBusy(false)
   }
 
@@ -409,15 +462,19 @@ export default function ContentStudioClient() {
   const [thenVsNowOpts,      setThenVsNowOpts]      = useState<ThenVsNowOptions>(defaultOptionsFor('then_vs_now')       as ThenVsNowOptions)
   const [budgetBuilderOpts,  setBudgetBuilderOpts]  = useState<BudgetBuilderOptions>(defaultOptionsFor('budget_builder') as BudgetBuilderOptions)
   const [collectorPulseOpts, setCollectorPulseOpts] = useState<CollectorPulseOptions>(defaultOptionsFor('collector_pulse') as CollectorPulseOptions)
+  const [pokemonBattleOpts,  setPokemonBattleOpts]  = useState<PokemonBattleOptions>(defaultOptionsFor('pokemon_battle')   as PokemonBattleOptions)
+  const [guessOpts,          setGuessOpts]          = useState<GuessThePokemonOptions>(defaultOptionsFor('guess_the_pokemon') as GuessThePokemonOptions)
 
   function optionsFor(t: TemplateType): any {
     switch (t) {
-      case 'card_battle':     return cardBattleOpts
-      case 'market_mover':    return marketMoverOpts
-      case 'grading_gap':     return gradingGapOpts
-      case 'then_vs_now':     return thenVsNowOpts
-      case 'budget_builder':  return budgetBuilderOpts
-      case 'collector_pulse': return collectorPulseOpts
+      case 'card_battle':       return cardBattleOpts
+      case 'market_mover':      return marketMoverOpts
+      case 'grading_gap':       return gradingGapOpts
+      case 'then_vs_now':       return thenVsNowOpts
+      case 'budget_builder':    return budgetBuilderOpts
+      case 'collector_pulse':   return collectorPulseOpts
+      case 'pokemon_battle':    return pokemonBattleOpts
+      case 'guess_the_pokemon': return guessOpts
       default: return {}
     }
   }
@@ -508,7 +565,11 @@ export default function ContentStudioClient() {
 
   async function deletePost(id: string) {
     if (!confirm('Delete this post?')) return
-    await supabase.from('social_content_posts').delete().eq('id', id)
+    const { error } = await supabase.from('social_content_posts').delete().eq('id', id)
+    if (error) {
+      setLastError(`Couldn't delete: ${error.message}. Did you run migration 2026-05-11b-social-content-rls-fix.sql?`)
+      return
+    }
     setPosts(prev => prev.filter(p => p.id !== id))
   }
 
@@ -535,7 +596,7 @@ export default function ContentStudioClient() {
         <div>
           <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 28, margin: '0 0 4px', color: 'var(--text)' }}>Weekly Content Studio</h1>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0, lineHeight: 1.6 }}>
-            Generate a balanced pack of social posts per week. 17 of 21 templates live (Card Battle, Market Mover, Grading Gap, Then vs Now, Budget Builder, Collector Pulse). Pokémon Battle + Guess the Pokémon arrive in Phase C.
+            Generate a balanced pack of 21 social posts per week. All 8 templates live.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -579,10 +640,12 @@ export default function ContentStudioClient() {
         <OptionsCard title="Collector Pulse" count={WEEKLY_PACK_QUOTA.collector_pulse} onSingle={() => generateOne('collector_pulse')} disabled={generating}>
           <CollectorPulsePanel opts={collectorPulseOpts} onChange={setCollectorPulseOpts} />
         </OptionsCard>
-        {/* Phase C stubs */}
-        {(['pokemon_battle', 'guess_the_pokemon'] as TemplateType[]).map(t => (
-          <OptionsCard key={t} title={TEMPLATE_LABELS[t]} count={WEEKLY_PACK_QUOTA[t]} disabled stub />
-        ))}
+        <OptionsCard title="Pokémon Battle" count={WEEKLY_PACK_QUOTA.pokemon_battle} onSingle={() => generateOne('pokemon_battle')} disabled={generating}>
+          <PokemonBattlePanel opts={pokemonBattleOpts} onChange={setPokemonBattleOpts} />
+        </OptionsCard>
+        <OptionsCard title="Guess the Pokémon" count={WEEKLY_PACK_QUOTA.guess_the_pokemon} onSingle={() => generateOne('guess_the_pokemon')} disabled={generating}>
+          <GuessThePokemonPanel opts={guessOpts} onChange={setGuessOpts} />
+        </OptionsCard>
       </div>
 
       {/* Status filter */}
@@ -616,7 +679,8 @@ export default function ContentStudioClient() {
             <PostCard key={p.id} post={p}
               onUpdate={updatePost}
               onDelete={deletePost}
-              onRegenerate={regenerate} />
+              onRegenerate={regenerate}
+              onActionError={setLastError} />
           ))}
         </div>
       )}
