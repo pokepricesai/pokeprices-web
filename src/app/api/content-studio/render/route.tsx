@@ -89,14 +89,16 @@ async function loadFont(filename: string): Promise<ArrayBuffer | null> {
 const DOTS_DARK = `data:image/svg+xml;base64,${btoa(
   `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><circle cx="2" cy="2" r="1" fill="rgba(15,23,42,0.10)"/></svg>`
 )}`
+// Dark backgrounds get a much softer pattern so the dots don't fight
+// the content. Light backgrounds keep the higher-contrast pattern.
 const DOTS_LIGHT = `data:image/svg+xml;base64,${btoa(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><circle cx="2" cy="2" r="1" fill="rgba(255,255,255,0.12)"/></svg>`
+  `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><circle cx="2" cy="2" r="1" fill="rgba(255,255,255,0.05)"/></svg>`
 )}`
 const RINGS_DARK = `data:image/svg+xml;base64,${btoa(
   `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><circle cx="48" cy="48" r="28" fill="none" stroke="rgba(15,23,42,0.05)" stroke-width="1"/></svg>`
 )}`
 const RINGS_LIGHT = `data:image/svg+xml;base64,${btoa(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><circle cx="48" cy="48" r="28" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/></svg>`
+  `<svg xmlns="http://www.w3.org/2000/svg" width="140" height="140"><circle cx="70" cy="70" r="36" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"/></svg>`
 )}`
 
 // Background palette by visual style. Layers (front to back):
@@ -255,10 +257,14 @@ async function renderCardBattle(post: any, p: typeof PALETTE['light'], logo: str
 
 async function renderMarketMover(post: any, p: typeof PALETTE['light'], logo: string | null, origin: string): Promise<JSX.Element> {
   const card = post.data_payload?.card || {}
-  const [img, setLogo] = await Promise.all([
-    card.image_url ? toDataUrl(card.image_url) : null,
+  // Settle independently so a slow / missing set logo can never block
+  // the card image render.
+  const [imgRes, setLogoRes] = await Promise.allSettled([
+    card.image_url ? toDataUrl(card.image_url) : Promise.resolve(null),
     fetchSetLogo(card.set_name, origin),
   ])
+  const img = imgRes.status === 'fulfilled' ? imgRes.value : null
+  const setLogo = setLogoRes.status === 'fulfilled' ? setLogoRes.value : null
   const move = post.data_payload?.move_pct as number | undefined
   const windowLabel: Record<string, string> = { '7d': '7 days', '30d': '30 days', '90d': '90 days', '1y': '1 year' }
   const wl = windowLabel[post.data_payload?.time_window || '30d']
@@ -292,7 +298,7 @@ async function renderMarketMover(post: any, p: typeof PALETTE['light'], logo: st
             {card.card_name} {numberLabel}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            {setLogo && <img src={setLogo} height={28} style={{ objectFit: 'contain', maxWidth: 120 }} />}
+            {setLogo && <img src={setLogo} width={80} height={28} style={{ objectFit: 'contain' }} />}
             <span style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>
               {card.set_name}  ·  Raw {fmtPrice(card.raw_usd)}
             </span>
@@ -657,7 +663,7 @@ async function renderPokemonBattle(post: any, p: typeof PALETTE['light'], logo: 
 
 // ── Template: Guess the Pokémon ─────────────────────────────────────────────
 
-async function renderGuessThePokemon(post: any, _p: typeof PALETTE['light'], logo: string | null): Promise<JSX.Element> {
+async function renderGuessThePokemon(post: any, _p: typeof PALETTE['light'], logo: string | null, reveal: boolean = false): Promise<JSX.Element> {
   const poke = post.data_payload?.pokemon || {}
   const clues: string[] = post.data_payload?.clues || []
   const difficulty = post.data_payload?.difficulty || 'silhouette'
@@ -674,16 +680,19 @@ async function renderGuessThePokemon(post: any, _p: typeof PALETTE['light'], log
     tileBg: 'rgba(255,255,255,0.55)',
   }
 
-  const imgStyle: React.CSSProperties = difficulty === 'silhouette'
-    ? { filter: 'brightness(0)', objectFit: 'contain' }
-    : { filter: 'blur(28px)', objectFit: 'contain' }
+  // Reveal mode bypasses silhouette/blur for the "answer" slide.
+  const imgStyle: React.CSSProperties = reveal
+    ? { objectFit: 'contain' }
+    : difficulty === 'silhouette'
+      ? { filter: 'brightness(0)', objectFit: 'contain' }
+      : { filter: 'blur(28px)', objectFit: 'contain' }
 
   return (
     <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '60px 50px' }}>
       {/* Custom header — the iconic anime title is the kind label */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
         <div style={{ fontSize: 26, fontWeight: 900, color: p.text, fontFamily: 'Outfit', letterSpacing: 1, textTransform: 'uppercase', display: 'flex' }}>
-          Who&apos;s That Pokémon?
+          {reveal ? `It's ${poke.name}!` : "Who's That Pokémon?"}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {logo && <img src={logo} width={26} height={26} style={{ borderRadius: 6 }} />}
@@ -726,7 +735,7 @@ async function renderGuessThePokemon(post: any, _p: typeof PALETTE['light'], log
 
       <div style={{ display: 'flex', justifyContent: 'center' }}>
         <div style={{ fontSize: 40, fontWeight: 900, color: p.text, fontFamily: 'Outfit', textAlign: 'center', display: 'flex' }}>
-          {post.hook || 'Who is it?'}
+          {reveal ? `${poke.name}!` : (post.hook || 'Who is it?')}
         </div>
       </div>
     </div>
@@ -759,7 +768,10 @@ export async function GET(req: NextRequest) {
     else if (post.template_type === 'budget_builder') element = await renderBudgetBuilder(post, p, logo)
     else if (post.template_type === 'collector_pulse') element = await renderCollectorPulse(post, p, logo)
     else if (post.template_type === 'pokemon_battle')   element = await renderPokemonBattle(post, p, logo)
-    else if (post.template_type === 'guess_the_pokemon') element = await renderGuessThePokemon(post, p, logo)
+    else if (post.template_type === 'guess_the_pokemon') {
+      const reveal = req.nextUrl.searchParams.get('reveal') === '1'
+      element = await renderGuessThePokemon(post, p, logo, reveal)
+    }
     else return new Response(`Template '${post.template_type}' has no PNG renderer yet`, { status: 400 })
   } catch (e: any) {
     return new Response(`Render error: ${e?.message || e}`, { status: 500 })

@@ -175,13 +175,25 @@ async function generateCardBattle(options: any) {
 
   // popular_card_trends view does the join + Topps filter + volume gate
   // server-side. Single query, no URL bloat.
-  let q = supabase.from("popular_card_trends")
-    .select("*")
-    .gte("current_raw", Math.max(min, MIN_RAW_CENTS))
-  if (max != null) q = q.lte("current_raw", max)
-  if (productMode === "cards")  q = q.eq("is_sealed", false)
-  if (productMode === "sealed") q = q.eq("is_sealed", true)
-  const { data: cands, error } = await q.order("sales_30d", { ascending: false }).limit(80)
+  const buildQ = (withSealedFilter: boolean) => {
+    let q = supabase.from("popular_card_trends")
+      .select("*")
+      .gte("current_raw", Math.max(min, MIN_RAW_CENTS))
+    if (max != null) q = q.lte("current_raw", max)
+    if (withSealedFilter) {
+      if (productMode === "cards")  q = q.eq("is_sealed", false)
+      if (productMode === "sealed") q = q.eq("is_sealed", true)
+    }
+    return q.order("sales_30d", { ascending: false }).limit(80)
+  }
+  let { data: cands, error } = await buildQ(true)
+  // If the view predates migration 2026-05-11d (no is_sealed column yet),
+  // retry without the sealed filter so generation still works.
+  if (error && /is_sealed.+does not exist/i.test(error.message || "")) {
+    const r2 = await buildQ(false)
+    cands = r2.data
+    error = r2.error
+  }
   if (error) throw error
 
   const reliable = (cands || []).filter((c: any) => passesConfidence(c))

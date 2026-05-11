@@ -550,6 +550,12 @@ function PostCard({ post, selected, onSelectChange, onUpdate, onDelete, onRegene
           style={{ flex: 1, minWidth: 100, padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-light)', color: 'var(--text)', fontSize: 11, fontWeight: 700, textAlign: 'center', textDecoration: 'none', cursor: 'pointer' }}>
           ⬇ PNG
         </a>
+        {post.template_type === 'guess_the_pokemon' && (
+          <a href={`${renderUrl(post.id)}&reveal=1&v=${imgKey}`} download={`${post.id}-reveal.png`}
+            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-light)', color: 'var(--text)', fontSize: 11, fontWeight: 700, textAlign: 'center', textDecoration: 'none', cursor: 'pointer' }}>
+            ⬇ Reveal
+          </a>
+        )}
         <button onClick={() => { setImgKey(k => k + 1) }}
           style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-light)', color: 'var(--text)', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
           ↻ Refresh
