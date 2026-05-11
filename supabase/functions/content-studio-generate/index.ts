@@ -51,60 +51,6 @@ function passesConfidence(row: any, minRaw = MIN_RAW_CENTS): boolean {
   return withinPctSanity(row)
 }
 
-// Topps sets are too volatile / patchy to feature. Excluded everywhere.
-function isExcludedSet(setName: string): boolean {
-  if (!setName) return false
-  return /\btopps\b/i.test(setName)
-}
-
-// Pre-fetched per request: high-volume, non-Topps card metadata with sales.
-// Returns the universe each generator should pick from. The result is keyed
-// by `${card_name}::${set_name}` since card_trends joins on that pair.
-async function fetchPopularCardKeys(): Promise<Map<string, {
-  card_slug: string
-  card_name: string
-  set_name:  string
-  image_url: string | null
-  card_url_slug: string | null
-  sales_30d: number
-}>> {
-  // 1. High-volume Ungraded slugs (only ones we trust enough to surface).
-  const { data: vols } = await supabase
-    .from("card_volume")
-    .select("card_slug, sales_30d")
-    .eq("grade", "Ungraded")
-    .gte("sales_30d", 5)
-    .in("confidence", ["high", "medium"])
-    .order("sales_30d", { ascending: false })
-    .limit(800)
-  if (!vols || vols.length === 0) return new Map()
-
-  // 2. Resolve slug → (name, set) and filter Topps out.
-  const slugs = vols.map((v: any) => v.card_slug)
-  const meta: any[] = []
-  const CHUNK = 400
-  for (let i = 0; i < slugs.length; i += CHUNK) {
-    const { data } = await supabase
-      .from("cards")
-      .select("card_slug, card_name, set_name, image_url, card_url_slug")
-      .in("card_slug", slugs.slice(i, i + CHUNK))
-    if (data) meta.push(...data)
-  }
-  const salesBySlug = new Map<string, number>(vols.map((v: any) => [v.card_slug, v.sales_30d]))
-  const out = new Map<string, any>()
-  for (const c of meta) {
-    if (!c.card_name || !c.set_name || isExcludedSet(c.set_name)) continue
-    out.set(`${c.card_name}::${c.set_name}`, {
-      card_slug:     c.card_slug,
-      card_name:     c.card_name,
-      set_name:      c.set_name,
-      image_url:     c.image_url,
-      card_url_slug: c.card_url_slug,
-      sales_30d:     salesBySlug.get(c.card_slug) ?? 0,
-    })
-  }
-  return out
-}
 
 function cleanCardName(s: string): string {
   return s.replace(/\s*#\d+\w*\s*$/, "").replace(/\[.*?\]/g, "").trim()
@@ -213,44 +159,33 @@ async function generateCardBattle(options: any) {
     options.custom_tolerance_pct,
   )
 
-  // Universe: popular cards (high volume, non-Topps).
-  const popular = await fetchPopularCardKeys()
-  if (popular.size < 2) throw new Error("Not enough popular cards available")
-  const names = Array.from(new Set(Array.from(popular.values()).map(c => c.card_name)))
-  const sets  = Array.from(new Set(Array.from(popular.values()).map(c => c.set_name)))
-
-  let q = supabase.from("card_trends")
-    .select("card_name, set_name, current_raw, current_psa10, raw_pct_7d, raw_pct_30d, raw_pct_90d, raw_pct_365d, raw_pct_2y, raw_pct_5y")
-    .in("card_name", names)
-    .in("set_name", sets)
-    .not("current_raw", "is", null)
+  // popular_card_trends view does the join + Topps filter + volume gate
+  // server-side. Single query, no URL bloat.
+  let q = supabase.from("popular_card_trends")
+    .select("*")
     .gte("current_raw", Math.max(min, MIN_RAW_CENTS))
   if (max != null) q = q.lte("current_raw", max)
-  const { data: trends, error } = await q.limit(500)
+  const { data: cands, error } = await q.order("sales_30d", { ascending: false }).limit(80)
   if (error) throw error
 
-  const enriched = (trends || [])
-    .filter((t: any) => popular.has(`${t.card_name}::${t.set_name}`))
-    .filter((t: any) => passesConfidence(t))
-    .map((t: any) => ({ ...t, _meta: popular.get(`${t.card_name}::${t.set_name}`)! }))
-  if (enriched.length < 2) throw new Error("Not enough popular cards in this price band")
+  const reliable = (cands || []).filter((c: any) => passesConfidence(c))
+  if (reliable.length < 2) throw new Error("Not enough popular cards in this price band")
 
-  // Sort by volume desc — most popular surface first — then pick from top 30 randomly.
-  enriched.sort((a: any, b: any) => (b._meta.sales_30d || 0) - (a._meta.sales_30d || 0))
-  const pool = enriched.slice(0, Math.min(30, enriched.length))
+  // Already sorted by volume desc — pick 2 from the top 30 for variety.
+  const pool = reliable.slice(0, Math.min(30, reliable.length))
   const picks = sample(pool, 2)
 
   const cards = picks.map((p: any) => ({
     card_name:     cleanCardName(p.card_name),
     raw_card_name: p.card_name,
     set_name:      p.set_name,
-    image_url:     p._meta?.image_url || null,
-    card_url_slug: p._meta?.card_url_slug || null,
+    image_url:     p.image_url,
+    card_url_slug: p.card_url_slug,
     raw_usd:       p.current_raw,
     psa10_usd:     p.current_psa10,
     raw_pct_30d:   p.raw_pct_30d,
     raw_pct_365d:  p.raw_pct_365d,
-    sales_30d:     p._meta?.sales_30d || 0,
+    sales_30d:     p.sales_30d || 0,
   }))
 
   const sys = VOICE_PROMPT
@@ -291,48 +226,36 @@ async function generateMarketMover(options: any) {
   const trendKey = timeWindowKey(options.time_window || "30d")
   const direction = options.direction === "down" ? "down" : "up"
 
-  const popular = await fetchPopularCardKeys()
-  if (popular.size < 1) throw new Error("Not enough popular cards available")
-  const names = Array.from(new Set(Array.from(popular.values()).map(c => c.card_name)))
-  const sets  = Array.from(new Set(Array.from(popular.values()).map(c => c.set_name)))
-
-  let q = supabase.from("card_trends")
-    .select("card_name, set_name, current_raw, current_psa10, raw_pct_7d, raw_pct_30d, raw_pct_90d, raw_pct_365d, raw_pct_2y, raw_pct_5y")
-    .in("card_name", names)
-    .in("set_name", sets)
-    .not("current_raw", "is", null)
+  let q = supabase.from("popular_card_trends")
+    .select("*")
     .not(trendKey, "is", null)
     .gte("current_raw", Math.max(min, MIN_RAW_CENTS))
   if (max != null) q = q.lte("current_raw", max)
   q = direction === "up"
     ? q.order(trendKey, { ascending: false })
     : q.order(trendKey, { ascending: true })
-  const { data: trends, error } = await q.limit(500)
+  const { data: cands, error } = await q.limit(80)
   if (error) throw error
 
-  const enriched = (trends || [])
-    .filter((t: any) => popular.has(`${t.card_name}::${t.set_name}`))
-    .filter((t: any) => passesConfidence(t))
-    .map((t: any) => ({ ...t, _meta: popular.get(`${t.card_name}::${t.set_name}`)! }))
-  if (enriched.length === 0) throw new Error("No reliable popular movers for that window")
+  const reliable = (cands || []).filter((c: any) => passesConfidence(c))
+  if (reliable.length === 0) throw new Error("No reliable popular movers for that window")
 
-  // Already sorted by trendKey; pick from top 10 for variety.
-  const pool = enriched.slice(0, Math.min(10, enriched.length))
-  const picked = pool[Math.floor(Math.random() * pool.length)]
+  const pool = reliable.slice(0, Math.min(10, reliable.length))
+  const picked = pool[Math.floor(Math.random() * pool.length)] as any
 
   const card = {
     card_name:     cleanCardName(picked.card_name),
     raw_card_name: picked.card_name,
     set_name:      picked.set_name,
-    image_url:     picked._meta?.image_url || null,
-    card_url_slug: picked._meta?.card_url_slug || null,
+    image_url:     picked.image_url,
+    card_url_slug: picked.card_url_slug,
     raw_usd:       picked.current_raw,
     psa10_usd:     picked.current_psa10,
     raw_pct_7d:    picked.raw_pct_7d,
     raw_pct_30d:   picked.raw_pct_30d,
     raw_pct_90d:   picked.raw_pct_90d,
     raw_pct_365d:  picked.raw_pct_365d,
-    sales_30d:     picked._meta?.sales_30d || 0,
+    sales_30d:     picked.sales_30d || 0,
   }
 
   const move = picked[trendKey] as number
@@ -382,29 +305,22 @@ async function generateGradingGap(options: any) {
     options.custom_tolerance_pct,
   )
 
-  const popular = await fetchPopularCardKeys()
-  if (popular.size === 0) throw new Error("Not enough popular cards available")
-  const names = Array.from(new Set(Array.from(popular.values()).map(c => c.card_name)))
-  const sets  = Array.from(new Set(Array.from(popular.values()).map(c => c.set_name)))
-
-  let q = supabase.from("card_trends")
-    .select("card_name, set_name, current_raw, current_psa10, raw_pct_7d, raw_pct_30d, raw_pct_90d, raw_pct_365d, raw_pct_2y, raw_pct_5y")
-    .in("card_name", names).in("set_name", sets)
-    .not("current_raw", "is", null).not("current_psa10", "is", null)
+  let q = supabase.from("popular_card_trends")
+    .select("*")
+    .not("current_psa10", "is", null)
     .gte("current_raw", Math.max(min, MIN_RAW_CENTS))
   if (max != null) q = q.lte("current_raw", max)
-  const { data: cands, error } = await q.limit(500)
+  const { data: cands, error } = await q.limit(120)
   if (error) throw error
 
   const enriched = (cands || [])
-    .filter((c: any) => popular.has(`${c.card_name}::${c.set_name}`))
     .filter((c: any) => passesConfidence(c) && c.current_raw > 0 && c.current_psa10)
-    .map((c: any) => ({ ...c, _meta: popular.get(`${c.card_name}::${c.set_name}`)!, multiple: c.current_psa10 / c.current_raw }))
+    .map((c: any) => ({ ...c, multiple: c.current_psa10 / c.current_raw }))
     .sort((a: any, b: any) => b.multiple - a.multiple)
   if (enriched.length === 0) throw new Error("No reliable popular cards with a PSA 10 spread")
 
-  const picked = enriched[Math.floor(Math.random() * Math.min(15, enriched.length))]
-  const cardRow = picked._meta
+  const picked = enriched[Math.floor(Math.random() * Math.min(15, enriched.length))] as any
+  const cardRow = { card_slug: picked.card_slug, image_url: picked.image_url, card_url_slug: picked.card_url_slug, sales_30d: picked.sales_30d }
 
   // Pull the FULL grade ladder from daily_prices (latest row)
   const { data: dpRows } = await supabase
@@ -488,28 +404,20 @@ async function generateThenVsNow(options: any) {
     options.custom_tolerance_pct,
   )
 
-  const popular = await fetchPopularCardKeys()
-  if (popular.size === 0) throw new Error("Not enough popular cards available")
-  const names = Array.from(new Set(Array.from(popular.values()).map(c => c.card_name)))
-  const sets  = Array.from(new Set(Array.from(popular.values()).map(c => c.set_name)))
-
-  let q = supabase.from("card_trends")
-    .select("card_name, set_name, current_raw, current_psa10, raw_pct_7d, raw_pct_30d, raw_pct_90d, raw_pct_365d, raw_pct_2y, raw_pct_5y")
-    .in("card_name", names).in("set_name", sets)
-    .not("current_raw", "is", null).not(trendKey, "is", null)
+  let q = supabase.from("popular_card_trends")
+    .select("*")
+    .not(trendKey, "is", null)
     .gte("current_raw", Math.max(min, MIN_RAW_CENTS))
   if (max != null) q = q.lte("current_raw", max)
-  const { data: cands, error } = await q.order(trendKey, { ascending: false }).limit(500)
+  const { data: cands, error } = await q.order(trendKey, { ascending: false }).limit(120)
   if (error) throw error
 
   const enriched = (cands || [])
-    .filter((c: any) => popular.has(`${c.card_name}::${c.set_name}`))
     .filter((c: any) => passesConfidence(c))
-    .map((c: any) => ({ ...c, _meta: popular.get(`${c.card_name}::${c.set_name}`)! }))
   if (enriched.length === 0) throw new Error("No reliable popular long-term movers")
 
-  const picked = enriched[Math.floor(Math.random() * Math.min(15, enriched.length))]
-  const cardRow = picked._meta
+  const picked = enriched[Math.floor(Math.random() * Math.min(15, enriched.length))] as any
+  const cardRow = { card_slug: picked.card_slug, image_url: picked.image_url, card_url_slug: picked.card_url_slug, sales_30d: picked.sales_30d }
 
   // Pull oldest historical price (first non-null in the time series).
   const { data: hist } = await supabase.rpc("get_card_price_history", { slug: cardRow.card_slug })
@@ -576,28 +484,19 @@ async function generateBudgetBuilder(options: any) {
   const perCardMin = Math.floor(budgetCents / 8)
   const perCardMax = Math.floor(budgetCents / 2)
 
-  const popular = await fetchPopularCardKeys()
-  if (popular.size === 0) throw new Error("Not enough popular cards available")
-  const popNames = Array.from(new Set(Array.from(popular.values()).map(c => c.card_name)))
-  const popSets  = Array.from(new Set(Array.from(popular.values()).map(c => c.set_name)))
-
-  const { data: cands, error } = await supabase.from("card_trends")
-    .select("card_name, set_name, current_raw, current_psa10, raw_pct_7d, raw_pct_30d, raw_pct_90d, raw_pct_365d, raw_pct_2y, raw_pct_5y")
-    .in("card_name", popNames).in("set_name", popSets)
-    .not("current_raw", "is", null)
+  const { data: cands, error } = await supabase.from("popular_card_trends")
+    .select("*")
     .gte("current_raw", Math.max(perCardMin, MIN_RAW_CENTS))
     .lte("current_raw", perCardMax)
-    .limit(500)
+    .order("sales_30d", { ascending: false })
+    .limit(120)
   if (error) throw error
 
-  const enriched = (cands || [])
-    .filter((c: any) => popular.has(`${c.card_name}::${c.set_name}`))
-    .filter((c: any) => passesConfidence(c))
-    .map((c: any) => ({ ...c, _meta: popular.get(`${c.card_name}::${c.set_name}`)! }))
-  if (enriched.length < 4) throw new Error("Not enough reliable popular cards in budget band")
+  const reliable = (cands || []).filter((c: any) => passesConfidence(c))
+  if (reliable.length < 4) throw new Error("Not enough reliable popular cards in budget band")
 
-  // Greedy random pick: shuffle, then take cards summing < budget
-  const shuffled = sample(enriched, enriched.length)
+  // Greedy random pick: shuffle the top 60 (most popular), take cards summing < budget
+  const shuffled = sample(reliable.slice(0, Math.min(60, reliable.length)), Math.min(60, reliable.length))
   const picks: any[] = []
   let running = 0
   for (const c of shuffled) {
@@ -608,7 +507,7 @@ async function generateBudgetBuilder(options: any) {
     }
   }
   if (picks.length < 4) {
-    const cheapest = [...enriched].sort((a, b) => a.current_raw - b.current_raw).slice(0, 4)
+    const cheapest = [...reliable].sort((a, b) => a.current_raw - b.current_raw).slice(0, 4)
     picks.length = 0
     picks.push(...cheapest)
     running = picks.reduce((s, c) => s + c.current_raw, 0)
@@ -618,8 +517,8 @@ async function generateBudgetBuilder(options: any) {
     card_name:     cleanCardName(p.card_name),
     raw_card_name: p.card_name,
     set_name:      p.set_name,
-    image_url:     p._meta?.image_url || null,
-    card_url_slug: p._meta?.card_url_slug || null,
+    image_url:     p.image_url,
+    card_url_slug: p.card_url_slug,
     raw_usd:       p.current_raw,
   }))
 
@@ -657,33 +556,24 @@ Return JSON with this exact shape:
 async function generateCollectorPulse(options: any) {
   const trendKey = timeWindowKey(options.time_window || "7d")
 
-  const popular = await fetchPopularCardKeys()
-  if (popular.size === 0) throw new Error("Not enough popular cards available")
-  const names = Array.from(new Set(Array.from(popular.values()).map(c => c.card_name)))
-  const sets  = Array.from(new Set(Array.from(popular.values()).map(c => c.set_name)))
-
-  const { data: cands, error } = await supabase.from("card_trends")
-    .select("card_name, set_name, current_raw, current_psa10, raw_pct_7d, raw_pct_30d, raw_pct_90d, raw_pct_365d, raw_pct_2y, raw_pct_5y")
-    .in("card_name", names).in("set_name", sets)
-    .not("current_raw", "is", null).not(trendKey, "is", null)
+  const { data: cands, error } = await supabase.from("popular_card_trends")
+    .select("*")
+    .not(trendKey, "is", null)
     .gte("current_raw", MIN_RAW_CENTS)
     .order(trendKey, { ascending: false })
-    .limit(200)
+    .limit(60)
   if (error) throw error
 
-  const enriched = (cands || [])
-    .filter((c: any) => popular.has(`${c.card_name}::${c.set_name}`))
-    .filter((c: any) => passesConfidence(c))
-    .map((c: any) => ({ ...c, _meta: popular.get(`${c.card_name}::${c.set_name}`)! }))
-  if (enriched.length < 4) throw new Error("Not enough reliable popular risers")
+  const reliable = (cands || []).filter((c: any) => passesConfidence(c))
+  if (reliable.length < 4) throw new Error("Not enough reliable popular risers")
 
-  const top = enriched.slice(0, 5)
+  const top = reliable.slice(0, 5)
   const cards = top.map((p: any) => ({
     card_name:     cleanCardName(p.card_name),
     raw_card_name: p.card_name,
     set_name:      p.set_name,
-    image_url:     p._meta?.image_url || null,
-    card_url_slug: p._meta?.card_url_slug || null,
+    image_url:     p.image_url,
+    card_url_slug: p.card_url_slug,
     raw_usd:       p.current_raw,
     pct_change:    p[trendKey] as number,
   }))
