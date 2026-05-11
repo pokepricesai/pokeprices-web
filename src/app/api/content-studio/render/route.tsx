@@ -138,6 +138,12 @@ const SET_LOGO_OVERRIDES: Record<string, string> = {
 }
 async function fetchSetLogo(setName: string | null | undefined, origin: string): Promise<string | null> {
   if (!setName) return null
+  // Satori (the Vercel-OG renderer) supports JPEG, PNG, GIF and SVG only —
+  // NOT WebP. Our /set-assets/logos/* library is .webp, which silently
+  // corrupts the entire ImageResponse and produces a 0-byte PNG. Until
+  // we ship PNG copies of the logos, disable the fetch.
+  return null
+  // eslint-disable-next-line no-unreachable
   const file = SET_LOGO_OVERRIDES[setName] || `${setName}.webp`
   return await toDataUrl(`${origin}/set-assets/logos/${encodeURIComponent(file)}`)
 }
@@ -232,9 +238,14 @@ async function renderCardBattle(post: any, p: typeof PALETTE['light'], logo: str
     </div>
   )
 
+  // Header label flips to "Sealed Battle" when both sides are sealed
+  // (matches the product mode the user picked).
+  const productMode = post.generated_options?.product_mode
+  const headerKind = productMode === 'sealed' ? 'Sealed Battle' : 'Card Battle'
+
   return (
     <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '60px 50px' }}>
-      <TemplateHeader kind="Card Battle" p={p} logo={logo} />
+      <TemplateHeader kind={headerKind} p={p} logo={logo} />
 
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', marginTop: 24 }}>
         <Side card={left}  img={leftImg} />
