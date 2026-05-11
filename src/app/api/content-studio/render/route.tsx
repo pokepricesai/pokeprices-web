@@ -311,8 +311,21 @@ async function renderMarketMover(post: any, p: typeof PALETTE['light'], logo: st
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             {setLogo && <img src={setLogo} width={80} height={28} style={{ objectFit: 'contain' }} />}
             <span style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>
-              {card.set_name}  ·  Raw {fmtPrice(card.raw_usd)}
+              {card.set_name}
             </span>
+          </div>
+          {/* Raw + PSA 10 side-by-side */}
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 24, marginTop: 4 }}>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 1.5, display: 'flex' }}>Raw</span>
+              <span style={{ fontSize: 24, fontWeight: 800, color: p.text, fontFamily: 'Outfit', display: 'flex' }}>{fmtPrice(card.raw_usd)}</span>
+            </div>
+            {card.psa10_usd > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 1.5, display: 'flex' }}>PSA 10</span>
+                <span style={{ fontSize: 24, fontWeight: 800, color: p.accent, fontFamily: 'Outfit', display: 'flex' }}>{fmtPrice(card.psa10_usd)}</span>
+              </div>
+            )}
           </div>
           {card.sales_30d > 0 && (
             <div style={{ display: 'flex', marginTop: 4 }}>

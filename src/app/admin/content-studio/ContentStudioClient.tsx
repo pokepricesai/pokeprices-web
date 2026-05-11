@@ -419,7 +419,7 @@ function GuessThePokemonPanel({ opts, onChange }: { opts: GuessThePokemonOptions
 
 function MarketMoverPanel({ opts, onChange }: { opts: MarketMoverOptions; onChange: (o: MarketMoverOptions) => void }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10 }}>
       <label style={fieldStyle}>
         Window
         <select value={opts.time_window} onChange={e => onChange({ ...opts, time_window: e.target.value as any })} style={selectStyle}>
@@ -432,6 +432,13 @@ function MarketMoverPanel({ opts, onChange }: { opts: MarketMoverOptions; onChan
           <option value="up">Risers</option>
           <option value="down">Fallers</option>
         </select>
+      </label>
+      <label style={fieldStyle}>
+        Min raw ($)
+        <input type="number" min={5} step={5}
+          value={opts.min_raw_usd ?? 20}
+          onChange={e => onChange({ ...opts, min_raw_usd: Number(e.target.value) || 5 })}
+          style={inputStyle} />
       </label>
       <PriceTierField opts={opts} onChange={onChange} />
       <label style={fieldStyle}>
@@ -805,7 +812,7 @@ export default function ContentStudioClient() {
         <div>
           <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 28, margin: '0 0 4px', color: 'var(--text)' }}>Weekly Content Studio</h1>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0, lineHeight: 1.6 }}>
-            Generate a balanced pack of 21 social posts per week. All 8 templates live.
+            Generate a balanced pack of 21 social posts per week. Each template uses the settings configured on its tile below — adjust before clicking Generate.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -831,28 +838,28 @@ export default function ContentStudioClient() {
 
       {/* Per-template option panels */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 12, marginBottom: 18 }}>
-        <OptionsCard title="Card Battle" count={WEEKLY_PACK_QUOTA.card_battle} onSingle={() => generateOne('card_battle')} disabled={generating}>
+        <OptionsCard title="Card Battle" count={WEEKLY_PACK_QUOTA.card_battle} summary={summarizeOptions('card_battle', cardBattleOpts)} onSingle={() => generateOne('card_battle')} disabled={generating}>
           <CardBattlePanel opts={cardBattleOpts} onChange={setCardBattleOpts} />
         </OptionsCard>
-        <OptionsCard title="Market Mover" count={WEEKLY_PACK_QUOTA.market_mover} onSingle={() => generateOne('market_mover')} disabled={generating}>
+        <OptionsCard title="Market Mover" count={WEEKLY_PACK_QUOTA.market_mover} summary={summarizeOptions('market_mover', marketMoverOpts)} onSingle={() => generateOne('market_mover')} disabled={generating}>
           <MarketMoverPanel opts={marketMoverOpts} onChange={setMarketMoverOpts} />
         </OptionsCard>
-        <OptionsCard title="Grading Gap" count={WEEKLY_PACK_QUOTA.grading_gap} onSingle={() => generateOne('grading_gap')} disabled={generating}>
+        <OptionsCard title="Grading Gap" count={WEEKLY_PACK_QUOTA.grading_gap} summary={summarizeOptions('grading_gap', gradingGapOpts)} onSingle={() => generateOne('grading_gap')} disabled={generating}>
           <GradingGapPanel opts={gradingGapOpts} onChange={setGradingGapOpts} />
         </OptionsCard>
-        <OptionsCard title="Then vs Now" count={WEEKLY_PACK_QUOTA.then_vs_now} onSingle={() => generateOne('then_vs_now')} disabled={generating}>
+        <OptionsCard title="Then vs Now" count={WEEKLY_PACK_QUOTA.then_vs_now} summary={summarizeOptions('then_vs_now', thenVsNowOpts)} onSingle={() => generateOne('then_vs_now')} disabled={generating}>
           <ThenVsNowPanel opts={thenVsNowOpts} onChange={setThenVsNowOpts} />
         </OptionsCard>
-        <OptionsCard title="Budget Builder" count={WEEKLY_PACK_QUOTA.budget_builder} onSingle={() => generateOne('budget_builder')} disabled={generating}>
+        <OptionsCard title="Budget Builder" count={WEEKLY_PACK_QUOTA.budget_builder} summary={summarizeOptions('budget_builder', budgetBuilderOpts)} onSingle={() => generateOne('budget_builder')} disabled={generating}>
           <BudgetBuilderPanel opts={budgetBuilderOpts} onChange={setBudgetBuilderOpts} />
         </OptionsCard>
-        <OptionsCard title="Collector Pulse" count={WEEKLY_PACK_QUOTA.collector_pulse} onSingle={() => generateOne('collector_pulse')} disabled={generating}>
+        <OptionsCard title="Collector Pulse" count={WEEKLY_PACK_QUOTA.collector_pulse} summary={summarizeOptions('collector_pulse', collectorPulseOpts)} onSingle={() => generateOne('collector_pulse')} disabled={generating}>
           <CollectorPulsePanel opts={collectorPulseOpts} onChange={setCollectorPulseOpts} />
         </OptionsCard>
-        <OptionsCard title="Pokémon Battle" count={WEEKLY_PACK_QUOTA.pokemon_battle} onSingle={() => generateOne('pokemon_battle')} disabled={generating}>
+        <OptionsCard title="Pokémon Battle" count={WEEKLY_PACK_QUOTA.pokemon_battle} summary={summarizeOptions('pokemon_battle', pokemonBattleOpts)} onSingle={() => generateOne('pokemon_battle')} disabled={generating}>
           <PokemonBattlePanel opts={pokemonBattleOpts} onChange={setPokemonBattleOpts} />
         </OptionsCard>
-        <OptionsCard title="Guess the Pokémon" count={WEEKLY_PACK_QUOTA.guess_the_pokemon} onSingle={() => generateOne('guess_the_pokemon')} disabled={generating}>
+        <OptionsCard title="Guess the Pokémon" count={WEEKLY_PACK_QUOTA.guess_the_pokemon} summary={summarizeOptions('guess_the_pokemon', guessOpts)} onSingle={() => generateOne('guess_the_pokemon')} disabled={generating}>
           <GuessThePokemonPanel opts={guessOpts} onChange={setGuessOpts} />
         </OptionsCard>
       </div>
@@ -1032,20 +1039,28 @@ function AiImageWorkshop() {
   )
 }
 
-function OptionsCard({ title, count, children, onSingle, disabled, stub }: {
+function OptionsCard({ title, count, children, onSingle, disabled, stub, summary }: {
   title: string; count: number; children?: React.ReactNode
   onSingle?: () => void; disabled?: boolean; stub?: boolean
+  summary?: string
 }) {
   return (
     <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, padding: 14, opacity: stub ? 0.55 : 1 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 8 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>{title}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{count} per pack</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            Generates {count} per weekly pack
+          </div>
+          {summary && (
+            <div style={{ fontSize: 10, color: 'var(--primary)', fontWeight: 700, marginTop: 4, lineHeight: 1.5, fontFamily: "'Figtree', sans-serif" }}>
+              {summary}
+            </div>
+          )}
         </div>
         {onSingle && (
           <button onClick={onSingle} disabled={disabled}
-            style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-light)', color: 'var(--text)', fontSize: 11, fontWeight: 700, cursor: disabled ? 'not-allowed' : 'pointer' }}>
+            style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-light)', color: 'var(--text)', fontSize: 11, fontWeight: 700, cursor: disabled ? 'not-allowed' : 'pointer', flexShrink: 0 }}>
             + One
           </button>
         )}
@@ -1058,4 +1073,28 @@ function OptionsCard({ title, count, children, onSingle, disabled, stub }: {
       {children}
     </div>
   )
+}
+
+// Build a one-line summary of the active options for each template card.
+function summarizeOptions(t: TemplateType, opts: any): string {
+  const v = opts.visual_style ? `${opts.visual_style}` : ''
+  switch (t) {
+    case 'card_battle':
+      return `${opts.product_mode || 'cards'} · ${opts.price_tier} · ${v}${opts.tone && opts.tone !== 'default' ? ` · ${opts.tone}` : ''}`
+    case 'market_mover':
+      return `${opts.direction} · ${opts.time_window} · ≥$${opts.min_raw_usd ?? 20} · ${opts.price_tier} · ${v}`
+    case 'grading_gap':
+      return `${opts.price_tier} · ${v}`
+    case 'then_vs_now':
+      return `${opts.span} · ${opts.price_tier}${opts.card_slug ? ` · pinned: ${opts.card_label || opts.card_slug}` : ''} · ${v}`
+    case 'budget_builder':
+      return `$${opts.budget_usd} · ${v}`
+    case 'collector_pulse':
+      return `${opts.time_window} · ≥$${opts.min_raw_usd ?? 20} · ${v}`
+    case 'pokemon_battle':
+      return `gen ${opts.generation} · ${v}`
+    case 'guess_the_pokemon':
+      return `gen ${opts.generation} · ${opts.difficulty} · ${v}`
+    default: return v
+  }
 }

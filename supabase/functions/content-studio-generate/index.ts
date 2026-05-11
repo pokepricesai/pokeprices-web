@@ -275,11 +275,13 @@ async function generateMarketMover(options: any) {
   )
   const trendKey = timeWindowKey(options.time_window || "30d")
   const direction = options.direction === "down" ? "down" : "up"
+  // Minimum raw price floor — keeps bulk junk out even when price_tier is 'any'.
+  const minRawCents = Math.max(min, MIN_RAW_CENTS, Math.round(Number(options.min_raw_usd ?? 20) * 100))
 
   let q = supabase.from("popular_card_trends")
     .select("*")
     .not(trendKey, "is", null)
-    .gte("current_raw", Math.max(min, MIN_RAW_CENTS))
+    .gte("current_raw", minRawCents)
   if (max != null) q = q.lte("current_raw", max)
   q = direction === "up"
     ? q.order(trendKey, { ascending: false })

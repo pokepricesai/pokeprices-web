@@ -141,6 +141,8 @@ export interface MarketMoverOptions extends CustomPriceFields, ToneField {
   price_tier: PriceTier
   time_window: TimeWindow
   direction: 'up' | 'down'
+  /** Minimum raw card price in USD dollars. Defaults to $20. */
+  min_raw_usd?: number
 }
 
 export interface GradingGapOptions extends CustomPriceFields, ToneField {
@@ -223,7 +225,7 @@ export function defaultOptionsFor(template: TemplateType): GenerateOptions {
     case 'card_battle':
       return { visual_style: 'light', price_tier: '60_150', product_mode: 'cards' } as CardBattleOptions
     case 'market_mover':
-      return { visual_style: 'light', price_tier: 'any', time_window: '30d', direction: 'up' } as MarketMoverOptions
+      return { visual_style: 'light', price_tier: 'any', time_window: '30d', direction: 'up', min_raw_usd: 20 } as MarketMoverOptions
     case 'grading_gap':
       return { visual_style: 'light', price_tier: '150_400' } as GradingGapOptions
     case 'then_vs_now':
