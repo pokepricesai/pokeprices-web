@@ -10,6 +10,7 @@ import {
   TIME_WINDOWS,
   BUDGETS,
   GENERATIONS,
+  TONES,
   defaultOptionsFor,
   type SocialContentPost,
   type TemplateType,
@@ -133,6 +134,96 @@ const inputStyle: React.CSSProperties = {
   cursor: 'text',
 }
 
+// Shared tone-selector field — adds one dropdown column to any panel.
+function ToneFieldInput<O extends { tone?: string }>(
+  { opts, onChange }: { opts: O; onChange: (o: O) => void }
+) {
+  return (
+    <label style={fieldStyle}>
+      Tone
+      <select value={opts.tone || 'default'} onChange={e => onChange({ ...opts, tone: e.target.value as any })} style={selectStyle}>
+        {TONES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+      </select>
+    </label>
+  )
+}
+
+// Card autocomplete picker — used by Then vs Now (and ready for other
+// templates later). Hits the search_global RPC and lets the user lock in
+// a specific card by URL slug.
+function CardPickerField<O extends { card_slug?: string; card_label?: string }>(
+  { opts, onChange }: { opts: O; onChange: (o: O) => void }
+) {
+  const [q, setQ] = useState('')
+  const [results, setResults] = useState<any[]>([])
+  const [searching, setSearching] = useState(false)
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (!q.trim() || q.length < 2) { setResults([]); return }
+    let cancelled = false
+    setSearching(true)
+    const timer = setTimeout(async () => {
+      const { data } = await supabase.rpc('search_global', { query: q })
+      if (cancelled) return
+      const cards = (data || []).filter((r: any) => r.result_type === 'card').slice(0, 8)
+      setResults(cards)
+      setSearching(false)
+    }, 250)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [q])
+
+  if (opts.card_slug) {
+    return (
+      <label style={{ ...fieldStyle, gridColumn: '1 / -1' }}>
+        Pinned card
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 8, background: 'rgba(26,95,173,0.08)', border: '1px solid var(--primary)' }}>
+          <span style={{ flex: 1, fontSize: 13, color: 'var(--text)', textTransform: 'none', letterSpacing: 0, fontWeight: 600 }}>{opts.card_label || opts.card_slug}</span>
+          <button type="button" onClick={() => onChange({ ...opts, card_slug: undefined, card_label: undefined })}
+            style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+            Clear
+          </button>
+        </div>
+      </label>
+    )
+  }
+
+  return (
+    <label style={{ ...fieldStyle, position: 'relative', gridColumn: '1 / -1' }}>
+      Pin a specific card (optional)
+      <input
+        type="text"
+        value={q}
+        onChange={e => { setQ(e.target.value); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="Search by card name…"
+        style={inputStyle}
+      />
+      {open && (q.length >= 2) && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, maxHeight: 240, overflowY: 'auto', zIndex: 50, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
+          {searching && <div style={{ padding: 10, fontSize: 12, color: 'var(--text-muted)' }}>Searching…</div>}
+          {!searching && results.length === 0 && <div style={{ padding: 10, fontSize: 12, color: 'var(--text-muted)' }}>No matches</div>}
+          {results.map((r, i) => {
+            const slug = (r.url_slug || r.card_slug || '').toString().replace(/^pc-/, '')
+            const label = `${r.name}${r.subtitle || r.set_name ? ` · ${r.subtitle || r.set_name}` : ''}`
+            return (
+              <button key={i} type="button"
+                onMouseDown={() => {
+                  onChange({ ...opts, card_slug: slug, card_label: label })
+                  setQ(''); setOpen(false)
+                }}
+                style={{ display: 'flex', width: '100%', textAlign: 'left', padding: '8px 12px', background: 'transparent', border: 'none', borderBottom: i < results.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer', fontFamily: "'Figtree', sans-serif" }}>
+                <span style={{ fontSize: 12.5, color: 'var(--text)', fontWeight: 600 }}>{label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </label>
+  )
+}
+
 // Shared price-tier field with optional custom target+tolerance inputs.
 function PriceTierField<O extends { price_tier: any; custom_target_gbp?: number; custom_tolerance_pct?: number }>(
   { opts, onChange }: { opts: O; onChange: (o: O) => void }
@@ -173,7 +264,7 @@ function PriceTierField<O extends { price_tier: any; custom_target_gbp?: number;
 
 function CardBattlePanel({ opts, onChange }: { opts: CardBattleOptions; onChange: (o: CardBattleOptions) => void }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
       <PriceTierField opts={opts} onChange={onChange} />
       <label style={fieldStyle}>
         Visual style
@@ -181,13 +272,14 @@ function CardBattlePanel({ opts, onChange }: { opts: CardBattleOptions; onChange
           {VISUAL_STYLES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
       </label>
+      <ToneFieldInput opts={opts} onChange={onChange} />
     </div>
   )
 }
 
 function GradingGapPanel({ opts, onChange }: { opts: GradingGapOptions; onChange: (o: GradingGapOptions) => void }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
       <PriceTierField opts={opts} onChange={onChange} />
       <label style={fieldStyle}>
         Visual style
@@ -195,6 +287,7 @@ function GradingGapPanel({ opts, onChange }: { opts: GradingGapOptions; onChange
           {VISUAL_STYLES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
       </label>
+      <ToneFieldInput opts={opts} onChange={onChange} />
     </div>
   )
 }
@@ -206,6 +299,7 @@ function ThenVsNowPanel({ opts, onChange }: { opts: ThenVsNowOptions; onChange: 
         Time span
         <select value={opts.span} onChange={e => onChange({ ...opts, span: e.target.value as any })} style={selectStyle}>
           <option value="2y">2 years</option>
+          <option value="3y">3 years</option>
           <option value="5y">5 years</option>
         </select>
       </label>
@@ -216,16 +310,18 @@ function ThenVsNowPanel({ opts, onChange }: { opts: ThenVsNowOptions; onChange: 
           {VISUAL_STYLES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
       </label>
+      <ToneFieldInput opts={opts} onChange={onChange} />
+      <CardPickerField opts={opts} onChange={onChange} />
     </div>
   )
 }
 
 function BudgetBuilderPanel({ opts, onChange }: { opts: BudgetBuilderOptions; onChange: (o: BudgetBuilderOptions) => void }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
       <label style={fieldStyle}>
-        Budget
-        <select value={opts.budget_gbp} onChange={e => onChange({ ...opts, budget_gbp: Number(e.target.value) as any })} style={selectStyle}>
+        Budget (USD)
+        <select value={opts.budget_usd} onChange={e => onChange({ ...opts, budget_usd: Number(e.target.value) as any })} style={selectStyle}>
           {BUDGETS.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
         </select>
       </label>
@@ -235,13 +331,14 @@ function BudgetBuilderPanel({ opts, onChange }: { opts: BudgetBuilderOptions; on
           {VISUAL_STYLES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
       </label>
+      <ToneFieldInput opts={opts} onChange={onChange} />
     </div>
   )
 }
 
 function CollectorPulsePanel({ opts, onChange }: { opts: CollectorPulseOptions; onChange: (o: CollectorPulseOptions) => void }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
       <label style={fieldStyle}>
         Window
         <select value={opts.time_window} onChange={e => onChange({ ...opts, time_window: e.target.value as any })} style={selectStyle}>
@@ -254,13 +351,14 @@ function CollectorPulsePanel({ opts, onChange }: { opts: CollectorPulseOptions; 
           {VISUAL_STYLES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
       </label>
+      <ToneFieldInput opts={opts} onChange={onChange} />
     </div>
   )
 }
 
 function PokemonBattlePanel({ opts, onChange }: { opts: PokemonBattleOptions; onChange: (o: PokemonBattleOptions) => void }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
       <label style={fieldStyle}>
         Generation
         <select value={opts.generation} onChange={e => onChange({ ...opts, generation: e.target.value as any })} style={selectStyle}>
@@ -273,13 +371,14 @@ function PokemonBattlePanel({ opts, onChange }: { opts: PokemonBattleOptions; on
           {VISUAL_STYLES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
       </label>
+      <ToneFieldInput opts={opts} onChange={onChange} />
     </div>
   )
 }
 
 function GuessThePokemonPanel({ opts, onChange }: { opts: GuessThePokemonOptions; onChange: (o: GuessThePokemonOptions) => void }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
       <label style={fieldStyle}>
         Generation
         <select value={opts.generation} onChange={e => onChange({ ...opts, generation: e.target.value as any })} style={selectStyle}>
@@ -299,13 +398,14 @@ function GuessThePokemonPanel({ opts, onChange }: { opts: GuessThePokemonOptions
           {VISUAL_STYLES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
       </label>
+      <ToneFieldInput opts={opts} onChange={onChange} />
     </div>
   )
 }
 
 function MarketMoverPanel({ opts, onChange }: { opts: MarketMoverOptions; onChange: (o: MarketMoverOptions) => void }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
       <label style={fieldStyle}>
         Window
         <select value={opts.time_window} onChange={e => onChange({ ...opts, time_window: e.target.value as any })} style={selectStyle}>
@@ -326,6 +426,7 @@ function MarketMoverPanel({ opts, onChange }: { opts: MarketMoverOptions; onChan
           {VISUAL_STYLES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
       </label>
+      <ToneFieldInput opts={opts} onChange={onChange} />
     </div>
   )
 }
@@ -773,6 +874,9 @@ export default function ContentStudioClient() {
         </div>
       )}
 
+      {/* AI Image Workshop — experimental separate tool */}
+      <AiImageWorkshop />
+
       {/* Posts grid */}
       {loading ? (
         <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading…</p>
@@ -794,6 +898,97 @@ export default function ContentStudioClient() {
               onRegenerate={regenerate}
               onActionError={setLastError} />
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── AI Image Workshop — experimental ───────────────────────────────────────
+
+function AiImageWorkshop() {
+  const [prompt, setPrompt] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [image, setImage] = useState<string | null>(null)
+  const [finalPrompt, setFinalPrompt] = useState<string | null>(null)
+
+  async function generate() {
+    if (!prompt.trim()) return
+    setBusy(true); setErr(null); setImage(null); setFinalPrompt(null)
+    try {
+      const res = await fetch(GENERATE_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${ANON_KEY}`,
+          'apikey': ANON_KEY,
+        },
+        body: JSON.stringify({ action: 'ai_image', prompt: prompt.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Image generation failed')
+      setImage(data.image)
+      setFinalPrompt(data.final_prompt)
+    } catch (e: any) {
+      setErr(e?.message || String(e))
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, padding: 18, marginBottom: 18 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+        <div>
+          <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 18, margin: '0 0 4px', color: 'var(--text)' }}>
+            AI Image Workshop <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-muted)', padding: '2px 8px', borderRadius: 12, background: 'var(--bg-light)', marginLeft: 8 }}>Experimental</span>
+          </h2>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0, lineHeight: 1.6 }}>
+            Tightly-prompted editorial-style image generation. Each request prepends a strict style preamble (archival photography, minimal composition, no text, no AI glossiness). The free-form prompt sets the subject only.
+          </p>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+        <input
+          type="text"
+          value={prompt}
+          onChange={e => setPrompt(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !busy) generate() }}
+          placeholder="e.g. A Charizard Base Set first-edition card resting on a dark velvet cloth"
+          style={{ ...inputStyle, flex: 1, textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}
+          disabled={busy}
+        />
+        <button onClick={generate} disabled={busy || !prompt.trim()}
+          style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 13, fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.7 : 1, fontFamily: "'Figtree', sans-serif" }}>
+          {busy ? 'Generating…' : 'Generate'}
+        </button>
+      </div>
+
+      {err && (
+        <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, padding: '8px 12px', marginBottom: 10, fontSize: 12, color: '#b91c1c' }}>
+          {err}{err.includes('OPENAI_API_KEY') && ' — set it in Supabase → Functions → smooth-responder → Secrets.'}
+        </div>
+      )}
+
+      {image && (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+          <img src={image} alt="" style={{ width: '100%', maxWidth: 540, aspectRatio: '1 / 1', borderRadius: 12, border: '1px solid var(--border)' }} />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <a href={image} download="ai-image.png"
+              style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-light)', color: 'var(--text)', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
+              ⬇ Download
+            </a>
+            <button onClick={generate} disabled={busy}
+              style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-light)', color: 'var(--text)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+              ⟳ Regenerate
+            </button>
+          </div>
+          {finalPrompt && (
+            <details style={{ width: '100%', maxWidth: 540 }}>
+              <summary style={{ fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>Show full prompt</summary>
+              <pre style={{ fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg-light)', padding: 10, borderRadius: 6, whiteSpace: 'pre-wrap', margin: '6px 0 0', fontFamily: "'Figtree', sans-serif" }}>{finalPrompt}</pre>
+            </details>
+          )}
         </div>
       )}
     </div>

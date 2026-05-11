@@ -150,6 +150,19 @@ Voice rules — non-negotiable:
 
 Output: JSON object exactly matching the schema asked. No commentary, no preamble.`
 
+// Optional tone overlays. The caller can pass options.tone to nudge the AI
+// toward a specific engagement style. Default = the neutral voice above.
+const TONE_OVERLAY: Record<string, string> = {
+  default: '',
+  bold: `\n\nTONE OVERLAY: BOLD AND CONTRARIAN. Take a strong, opinionated stance — even against popular opinion. Avoid nuance. Make readers either agree hard or disagree hard. One sharp argument beats three balanced ones. Still no em-dashes, still no fake certainty, but lean into a clear position.`,
+  educational: `\n\nTONE OVERLAY: EDUCATIONAL AND HIGH-CURIOSITY. Frame as a quick lesson with one juicy insight collectors might miss. Hooks like "Most collectors miss this..." or "Here is what the data actually shows..." work well. End on the engagement question.`,
+  humorous: `\n\nTONE OVERLAY: RELATABLE AND WITTY. Short, observational, slightly self-deprecating. Make the reader feel seen as a collector. One sharp line beats a paragraph. No corny jokes — just honest, dry collector humour.`,
+}
+
+function voicePrompt(tone?: string): string {
+  return VOICE_PROMPT + (TONE_OVERLAY[tone || 'default'] || '')
+}
+
 // ── Template: Card Battle ───────────────────────────────────────────────────
 
 async function generateCardBattle(options: any) {
@@ -188,7 +201,7 @@ async function generateCardBattle(options: any) {
     sales_30d:     p.sales_30d || 0,
   }))
 
-  const sys = VOICE_PROMPT
+  const sys = voicePrompt(options.tone)
   const usr = `Write a Card Battle social post comparing these two Pokemon cards:
 
 LEFT:  ${cards[0].card_name} (${cards[0].set_name}) - raw $${(cards[0].raw_usd / 100).toFixed(2)}, PSA 10 $${cards[0].psa10_usd ? (cards[0].psa10_usd / 100).toFixed(2) : "—"}, 30d ${cards[0].raw_pct_30d ?? "—"}%, 1y ${cards[0].raw_pct_365d ?? "—"}%
@@ -263,7 +276,7 @@ async function generateMarketMover(options: any) {
   const windowLabel: Record<string, string> = { "7d": "this week", "30d": "this month", "90d": "this quarter", "1y": "this year" }
   const wt = windowLabel[options.time_window || "30d"]
 
-  const sys = VOICE_PROMPT
+  const sys = voicePrompt(options.tone)
   const usr = `Write a Market Mover social post about this card whose raw price has moved ${moveText} ${wt}:
 
 CARD:      ${card.card_name} (${card.set_name})
@@ -331,20 +344,26 @@ async function generateGradingGap(options: any) {
     .limit(1)
   const dp = (dpRows && dpRows[0]) as any || {}
 
-  // Find biggest gap among populated tier pairs for the headline
+  // The interesting Grading Gap story is across the various "10" tiers
+  // (PSA 10 vs CGC 10 vs BGS 10 Black vs ACE 10 etc.) — that's where the
+  // big swings sit. Keep Raw as the floor reference but skip PSA 7-9, CGC
+  // 9.5 etc. since they aren't the headline.
   const tiers = [
     { key: "raw_usd",            label: "Raw" },
-    { key: "psa7_usd",           label: "PSA 7" },
-    { key: "psa8_usd",           label: "PSA 8" },
-    { key: "psa9_usd",           label: "PSA 9" },
     { key: "psa10_usd",          label: "PSA 10" },
-    { key: "cgc95_usd",          label: "CGC 9.5" },
     { key: "cgc10_usd",          label: "CGC 10" },
     { key: "bgs10_usd",          label: "BGS 10" },
+    { key: "sgc10_usd",          label: "SGC 10" },
     { key: "ace10_usd",          label: "ACE 10" },
+    { key: "tag10_usd",          label: "TAG 10" },
     { key: "bgs10black_usd",     label: "BGS 10 Black" },
     { key: "cgc10pristine_usd",  label: "CGC 10 Pristine" },
   ].filter(t => dp[t.key] != null && dp[t.key] > 0)
+
+  // Require at least 3 populated tiers (Raw + 2 grade-10 variants) for a
+  // meaningful comparison — otherwise the post is just "PSA 10 vs Raw"
+  // which is what Grading Calculator already shows.
+  if (tiers.length < 3) throw new Error("Not enough graded-10 data on that card for a Grading Gap post")
 
   let biggestGap = { top: tiers[0], bottom: tiers[0], ratio: 1 }
   for (const top of tiers) {
@@ -364,7 +383,7 @@ async function generateGradingGap(options: any) {
     grades:        Object.fromEntries(tiers.map(t => [t.label, dp[t.key]])),
   }
 
-  const sys = VOICE_PROMPT
+  const sys = voicePrompt(options.tone)
   const usr = `Write a Grading Gap social post about ${card.card_name} (${card.set_name}).
 
 Grade prices (USD):
@@ -397,33 +416,66 @@ Return JSON with this exact shape:
 
 async function generateThenVsNow(options: any) {
   const span: string = options.span || "5y"
-  const trendKey = span === "2y" ? "raw_pct_2y" : "raw_pct_5y"
+  // span → minimum required year-range in get_card_price_history
+  const minYears = span === "2y" ? 2 : span === "3y" ? 3 : 5
+  const trendKey = span === "2y" ? "raw_pct_2y" : "raw_pct_5y"  // no 3y column; use 5y as proxy for picking
   const { min, max } = priceTierBounds(
     options.price_tier || "any",
     options.custom_target_gbp,
     options.custom_tolerance_pct,
   )
 
-  let q = supabase.from("popular_card_trends")
-    .select("*")
-    .not(trendKey, "is", null)
-    .gte("current_raw", Math.max(min, MIN_RAW_CENTS))
-  if (max != null) q = q.lte("current_raw", max)
-  const { data: cands, error } = await q.order(trendKey, { ascending: false }).limit(120)
-  if (error) throw error
+  let picked: any
+  // If user pinned a specific card_slug, use it instead of random selection.
+  if (options.card_slug) {
+    const bareSlug = String(options.card_slug).replace(/^pc-/, "")
+    const { data: directRows } = await supabase.from("popular_card_trends")
+      .select("*").eq("card_slug", bareSlug).limit(1)
+    picked = (directRows || [])[0]
+    if (!picked) {
+      // Fallback: card might not be in popular_card_trends (low volume).
+      // Pull directly from cards + card_trends.
+      const { data: cardRow } = await supabase.from("cards")
+        .select("card_slug, card_name, set_name, image_url, card_url_slug")
+        .eq("card_slug", bareSlug).maybeSingle()
+      if (!cardRow) throw new Error("Pinned card not found")
+      const { data: trendRow } = await supabase.from("card_trends")
+        .select("*").eq("card_name", cardRow.card_name).eq("set_name", cardRow.set_name).maybeSingle()
+      picked = { ...cardRow, ...(trendRow || {}), sales_30d: 0 }
+    }
+  } else {
+    let q = supabase.from("popular_card_trends")
+      .select("*")
+      .not(trendKey, "is", null)
+      .gte("current_raw", Math.max(min, MIN_RAW_CENTS))
+    if (max != null) q = q.lte("current_raw", max)
+    const { data: cands, error } = await q.order(trendKey, { ascending: false }).limit(120)
+    if (error) throw error
 
-  const enriched = (cands || [])
-    .filter((c: any) => passesConfidence(c))
-  if (enriched.length === 0) throw new Error("No reliable popular long-term movers")
+    const enriched = (cands || []).filter((c: any) => passesConfidence(c))
+    if (enriched.length === 0) throw new Error("No reliable popular long-term movers")
 
-  const picked = enriched[Math.floor(Math.random() * Math.min(15, enriched.length))] as any
-  const cardRow = { card_slug: picked.card_slug, image_url: picked.image_url, card_url_slug: picked.card_url_slug, sales_30d: picked.sales_30d }
+    picked = enriched[Math.floor(Math.random() * Math.min(15, enriched.length))]
+  }
+  const cardRow = { card_slug: picked.card_slug, image_url: picked.image_url, card_url_slug: picked.card_url_slug, sales_30d: picked.sales_30d || 0 }
 
   // Pull oldest historical price (first non-null in the time series).
   const { data: hist } = await supabase.rpc("get_card_price_history", { slug: cardRow.card_slug })
   const sorted = (hist || []).filter((r: any) => r.raw_usd != null && r.raw_usd > 0)
-  const oldest = sorted[0]
+  if (sorted.length === 0) throw new Error("No price history for that card")
+
+  // Find a historical point AT LEAST `minYears` years before now, or the
+  // oldest available if the card isn't that old. This keeps "5y" honest —
+  // a card from 2024 won't show a fake "5y" headline.
   const newest = sorted[sorted.length - 1]
+  const newestDate = new Date(newest.date)
+  const minTargetMs = newestDate.getTime() - (minYears * 365.25 * 24 * 3600 * 1000)
+  const oldEnough = sorted.filter((r: any) => new Date(r.date).getTime() <= minTargetMs)
+  if (oldEnough.length === 0 && !options.card_slug) {
+    throw new Error(`Card history doesn't reach ${minYears} years; try a shorter span or different card`)
+  }
+  const oldest = oldEnough[0] || sorted[0]
+
   const thenPrice = oldest?.raw_usd ?? null
   const nowPrice  = newest?.raw_usd ?? picked.current_raw
   const thenDate  = oldest?.date || null
@@ -444,8 +496,8 @@ async function generateThenVsNow(options: any) {
     sales_30d:     cardRow.sales_30d || 0,
   }
 
-  const yrLabel = span === "2y" ? "2 years" : "5 years"
-  const sys = VOICE_PROMPT
+  const yrLabel = span === "2y" ? "2 years" : span === "3y" ? "3 years" : "5 years"
+  const sys = voicePrompt(options.tone)
   const usr = `Write a Then vs Now social post for ${card.card_name} (${card.set_name}).
 
 THEN (${thenDate}): $${thenPrice ? (thenPrice / 100).toFixed(2) : "—"}
@@ -476,11 +528,12 @@ Return JSON with this exact shape:
 // ── Template: Budget Builder ────────────────────────────────────────────────
 
 async function generateBudgetBuilder(options: any) {
-  const budgetGbp = Number(options.budget_gbp || 100)
-  const budgetCents = gbpBudgetToUsdCents(budgetGbp)
+  // Budget is now USD (matches the rest of the platform's currency).
+  // Falls back to legacy budget_gbp if present so old saved options
+  // don't break — converts to USD on the fly.
+  const budgetUsd = Number(options.budget_usd ?? (options.budget_gbp ? options.budget_gbp / 0.79 : 100))
+  const budgetCents = Math.round(budgetUsd * 100)
 
-  // We want 4 cards summing under budget. Each card should be roughly
-  // budget/8 .. budget/2 so the mix isn't all bulk or one chase.
   const perCardMin = Math.floor(budgetCents / 8)
   const perCardMax = Math.floor(budgetCents / 2)
 
@@ -522,10 +575,10 @@ async function generateBudgetBuilder(options: any) {
     raw_usd:       p.current_raw,
   }))
 
-  const sys = VOICE_PROMPT
-  const usr = `Write a Budget Builder social post: a £${budgetGbp} basket of 4 Pokemon cards.
+  const sys = voicePrompt(options.tone)
+  const usr = `Write a Budget Builder social post: a $${budgetUsd.toFixed(0)} basket of 4 Pokemon cards.
 
-Total raw value of basket: $${(running / 100).toFixed(2)} (approx £${(running / 127).toFixed(0)})
+Total raw value of basket: $${(running / 100).toFixed(2)}
 
 Cards in basket:
 ${cards.map((c, i) => `  ${i + 1}. ${c.card_name} (${c.set_name}) — raw $${(c.raw_usd / 100).toFixed(2)}`).join("\n")}
@@ -535,7 +588,7 @@ CTA: "Pick your four."
 Return JSON with this exact shape:
 {
   "title": "short internal title, max 60 chars",
-  "hook": "headline on the image, max 50 chars, frame it as a budget pitch (e.g. 'You have £${budgetGbp}. What are you buying?')",
+  "hook": "headline on the image, max 50 chars, frame it as a budget pitch (e.g. 'You have $${budgetUsd.toFixed(0)}. What are you buying?')",
   "twitter_copy": "X/Twitter post ending with the CTA",
   "instagram_caption": "Instagram caption (2 short paragraphs + 3-5 hashtags)"
 }`
@@ -547,7 +600,7 @@ Return JSON with this exact shape:
     hook: ai.hook,
     twitter_copy: ai.twitter_copy,
     instagram_caption: ai.instagram_caption,
-    data_payload: { cards, budget_gbp: budgetGbp, total_raw_usd_cents: running },
+    data_payload: { cards, budget_usd: budgetUsd, total_raw_usd_cents: running },
   }
 }
 
@@ -576,12 +629,13 @@ async function generateCollectorPulse(options: any) {
     card_url_slug: p.card_url_slug,
     raw_usd:       p.current_raw,
     pct_change:    p[trendKey] as number,
+    sales_30d:     p.sales_30d || 0,
   }))
 
   const windowLabel: Record<string, string> = { "7d": "this week", "30d": "this month", "90d": "this quarter", "1y": "this year" }
   const wt = windowLabel[options.time_window || "7d"]
 
-  const sys = VOICE_PROMPT
+  const sys = voicePrompt(options.tone)
   const usr = `Write a Collector Pulse social post — what's trending ${wt}.
 
 Top 5 risers ${wt}:
@@ -736,7 +790,7 @@ async function generatePokemonBattle(options: any) {
   const lProb = Math.round((lScore / (lScore + rScore)) * 100)
   const rProb = 100 - lProb
 
-  const sys = VOICE_PROMPT
+  const sys = voicePrompt(options.tone)
   const usr = `Write a Pokemon Battle social post comparing two Pokemon side by side.
 
 LEFT:  ${L.name} (${L.types.join('/')}) — total stats ${L.total}: HP ${L.stats.hp}, Atk ${L.stats.attack}, Def ${L.stats.defense}, SpA ${L.stats['special-attack']}, SpD ${L.stats['special-defense']}, Spe ${L.stats.speed}
@@ -783,7 +837,7 @@ async function generateGuessThePokemon(options: any) {
     `Strongest stat: ${highestStat[0].replace('-', ' ')} (${highestStat[1]})`,
   ]
 
-  const sys = VOICE_PROMPT
+  const sys = voicePrompt(options.tone)
   const usr = `Write a "Guess the Pokemon" social post. The Pokemon will appear as a ${difficulty} in the image.
 
 Answer (internal only — DO NOT mention the name in any copy): ${P.name}
@@ -824,14 +878,65 @@ Deno.serve(async (req) => {
     return new Response("Method not allowed", { status: 405, headers: CORS_HEADERS })
   }
 
-  let template_type: string, options: any
-  try {
-    const body = await req.json()
-    template_type = body.template_type
-    options = body.options || {}
-  } catch {
+  let body: any
+  try { body = await req.json() } catch {
     return new Response("Invalid JSON", { status: 400, headers: CORS_HEADERS })
   }
+
+  // AI Image Workshop branch — separate experimental tool. Generates an
+  // editorial-style image from a free-form prompt using OpenAI gpt-image-1.
+  // Strict style prefix to avoid generic-AI looking output.
+  if (body.action === "ai_image") {
+    const apiKey = Deno.env.get("OPENAI_API_KEY")
+    if (!apiKey) {
+      return new Response(JSON.stringify({ error: "OPENAI_API_KEY not set on edge function" }),
+        { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } })
+    }
+    const userPrompt = String(body.prompt || "").trim()
+    if (!userPrompt) {
+      return new Response(JSON.stringify({ error: "Empty prompt" }),
+        { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } })
+    }
+    // Constraint-heavy style prefix. Keeps output close to editorial /
+    // documentary look — minimal composition, no AI-pop, no text.
+    const stylePrefix = [
+      "Editorial archival product photography.",
+      "Minimal composition. Soft, natural lighting from one direction.",
+      "Neutral solid backdrop, no clutter, no props.",
+      "Documentary realism, not stylized. Subtle film grain.",
+      "Absolutely NO text, NO numbers, NO logos, NO watermarks anywhere in the image.",
+      "Photorealistic. Avoid the generic glossy/oversaturated AI look.",
+    ].join(" ")
+    const finalPrompt = `${stylePrefix}\n\nSubject: ${userPrompt}`
+
+    try {
+      const aiRes = await fetch("https://api.openai.com/v1/images/generations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+        body: JSON.stringify({ model: "gpt-image-1", prompt: finalPrompt, size: "1024x1024", n: 1 }),
+      })
+      if (!aiRes.ok) {
+        const txt = await aiRes.text()
+        return new Response(JSON.stringify({ error: `OpenAI ${aiRes.status}: ${txt.slice(0, 400)}` }),
+          { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } })
+      }
+      const data = await aiRes.json()
+      const item = data?.data?.[0]
+      const image = item?.b64_json ? `data:image/png;base64,${item.b64_json}` : (item?.url || null)
+      if (!image) {
+        return new Response(JSON.stringify({ error: "No image returned" }),
+          { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } })
+      }
+      return new Response(JSON.stringify({ image, prompt: userPrompt, final_prompt: finalPrompt }),
+        { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } })
+    } catch (e: any) {
+      return new Response(JSON.stringify({ error: String(e?.message || e) }),
+        { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } })
+    }
+  }
+
+  const template_type: string = body.template_type
+  const options: any = body.options || {}
 
   let generated: any
   try {

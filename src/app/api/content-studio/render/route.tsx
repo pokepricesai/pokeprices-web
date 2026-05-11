@@ -74,13 +74,36 @@ async function loadFont(filename: string): Promise<ArrayBuffer | null> {
   } catch { return null }
 }
 
-// Background palette by visual style. bg is a CSS background value, so it
-// can be a gradient. Kept loosely in sync with src/lib/contentStudio.ts.
+// Subtle dot-grid pattern for light backgrounds — gives the white tiles a
+// bit of depth without competing with the content. SVG base64 keeps it
+// inside Satori's CSS subset.
+const DOT_PATTERN_DARK = `data:image/svg+xml;base64,${btoa(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="2" cy="2" r="1" fill="rgba(15,23,42,0.08)"/></svg>`
+)}`
+const DOT_PATTERN_LIGHT = `data:image/svg+xml;base64,${btoa(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="2" cy="2" r="1" fill="rgba(255,255,255,0.10)"/></svg>`
+)}`
+
+// Background palette by visual style. bg combines a multi-layer background
+// (radial highlight + dot pattern + linear gradient) so even the plain
+// white style gets visual depth.
 const PALETTE: Record<string, { bg: string; text: string; muted: string; accent: string; border: string }> = {
-  light:  { bg: 'linear-gradient(135deg, #ffffff 0%, #eef2f7 100%)', text: '#0f172a', muted: '#64748b',           accent: '#1a5fad', border: '#e2e8f0' },
-  dark:   { bg: 'linear-gradient(160deg, #0f172a 0%, #1e293b 100%)', text: '#f8fafc', muted: '#94a3b8',           accent: '#ffcb05', border: '#1e293b' },
-  blue:   { bg: 'linear-gradient(160deg, #1a5fad 0%, #2874c8 100%)', text: '#ffffff', muted: 'rgba(255,255,255,0.75)', accent: '#ffcb05', border: 'rgba(255,255,255,0.18)' },
-  yellow: { bg: 'linear-gradient(135deg, #ffcb05 0%, #ffd84a 100%)', text: '#0f172a', muted: 'rgba(15,23,42,0.7)',  accent: '#1a5fad', border: 'rgba(15,23,42,0.12)' },
+  light:  {
+    bg: `url("${DOT_PATTERN_DARK}"), radial-gradient(circle at 80% 0%, rgba(26,95,173,0.10), transparent 55%), linear-gradient(135deg, #ffffff 0%, #eef2f7 100%)`,
+    text: '#0f172a', muted: '#64748b', accent: '#1a5fad', border: '#e2e8f0',
+  },
+  dark:   {
+    bg: `url("${DOT_PATTERN_LIGHT}"), radial-gradient(circle at 80% 0%, rgba(255,203,5,0.10), transparent 55%), linear-gradient(160deg, #0f172a 0%, #1e293b 100%)`,
+    text: '#f8fafc', muted: '#94a3b8', accent: '#ffcb05', border: '#1e293b',
+  },
+  blue:   {
+    bg: `url("${DOT_PATTERN_LIGHT}"), radial-gradient(circle at 80% 0%, rgba(255,203,5,0.18), transparent 55%), linear-gradient(160deg, #1a5fad 0%, #2874c8 100%)`,
+    text: '#ffffff', muted: 'rgba(255,255,255,0.75)', accent: '#ffcb05', border: 'rgba(255,255,255,0.18)',
+  },
+  yellow: {
+    bg: `url("${DOT_PATTERN_DARK}"), radial-gradient(circle at 80% 0%, rgba(26,95,173,0.14), transparent 55%), linear-gradient(135deg, #ffcb05 0%, #ffd84a 100%)`,
+    text: '#0f172a', muted: 'rgba(15,23,42,0.7)', accent: '#1a5fad', border: 'rgba(15,23,42,0.12)',
+  },
 }
 
 // Logo cached at module scope — single fetch per cold start.
@@ -388,7 +411,8 @@ async function renderThenVsNow(post: any, p: typeof PALETTE['light'], logo: stri
 
 async function renderBudgetBuilder(post: any, p: typeof PALETTE['light'], logo: string | null): Promise<JSX.Element> {
   const cards = (post.data_payload?.cards || []) as any[]
-  const budget = post.data_payload?.budget_gbp
+  // Read either new USD or legacy GBP field for backwards compat with old posts
+  const budget = post.data_payload?.budget_usd ?? (post.data_payload?.budget_gbp != null ? Math.round(post.data_payload.budget_gbp / 0.79) : null)
   const total = post.data_payload?.total_raw_usd_cents
   const images = await Promise.all(cards.map(c => c.image_url ? toDataUrl(c.image_url) : null))
 
@@ -398,7 +422,7 @@ async function renderBudgetBuilder(post: any, p: typeof PALETTE['light'], logo: 
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 24, marginTop: 10 }}>
         <div style={{ fontSize: 86, fontWeight: 900, color: p.accent, fontFamily: 'Outfit', lineHeight: 1, display: 'flex' }}>
-          £{budget}
+          ${budget}
         </div>
         <div style={{ fontSize: 24, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 2, display: 'flex' }}>
           What are you buying?
@@ -421,7 +445,7 @@ async function renderBudgetBuilder(post: any, p: typeof PALETTE['light'], logo: 
         </div>
 
         <div style={{ fontSize: 16, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>
-          Total: {fmtUsd(total)} ({fmtGbp(total)}) raw · pick your four
+          Total: {fmtPrice(total)} raw · pick your four
         </div>
       </div>
 
@@ -465,6 +489,11 @@ async function renderCollectorPulse(post: any, p: typeof PALETTE['light'], logo:
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
               <div style={{ fontSize: 22, fontWeight: 700, color: p.text, fontFamily: 'Outfit', display: 'flex' }}>{c.card_name}</div>
               <div style={{ fontSize: 14, color: p.muted, fontFamily: 'Figtree', marginTop: 2, display: 'flex' }}>{c.set_name}</div>
+              {c.sales_30d > 0 && (
+                <div style={{ fontSize: 11, color: p.accent, fontFamily: 'Figtree', marginTop: 3, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', display: 'flex' }}>
+                  {c.sales_30d}+ sales / 30d
+                </div>
+              )}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
               <span style={{ fontSize: 26, fontWeight: 900, color: pctColor(c.pct_change, p.accent), fontFamily: 'Outfit', display: 'flex' }}>{pct(c.pct_change)}</span>

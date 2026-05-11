@@ -63,6 +63,17 @@ export interface CustomPriceFields {
   custom_tolerance_pct?: number
 }
 
+// Tone overlays applied on top of the base voice prompt.
+export type Tone = 'default' | 'bold' | 'educational' | 'humorous'
+export const TONES: { value: Tone; label: string; hint: string }[] = [
+  { value: 'default',     label: 'Default voice',         hint: 'Casual collector-to-collector tone' },
+  { value: 'bold',        label: 'Bold + contrarian',     hint: 'Strong stance, no nuance, sparks debate' },
+  { value: 'educational', label: 'Educational + curious', hint: 'Quick lesson with one juicy insight' },
+  { value: 'humorous',    label: 'Relatable + witty',     hint: 'Short observational collector humour' },
+]
+
+export interface ToneField { tone?: Tone }
+
 // Time window for Market Mover.
 export type TimeWindow = '7d' | '30d' | '90d' | '1y'
 export const TIME_WINDOWS: { value: TimeWindow; label: string; trendKey: string }[] = [
@@ -112,44 +123,50 @@ export const STYLE_PALETTE: Record<VisualStyle, {
 }
 
 // Generation options — shape varies by template_type.
-export interface CardBattleOptions extends CustomPriceFields {
+export interface CardBattleOptions extends CustomPriceFields, ToneField {
   visual_style: VisualStyle
   price_tier: PriceTier
 }
 
-export interface MarketMoverOptions extends CustomPriceFields {
+export interface MarketMoverOptions extends CustomPriceFields, ToneField {
   visual_style: VisualStyle
   price_tier: PriceTier
   time_window: TimeWindow
   direction: 'up' | 'down'
 }
 
-export interface GradingGapOptions extends CustomPriceFields {
+export interface GradingGapOptions extends CustomPriceFields, ToneField {
   visual_style: VisualStyle
   price_tier: PriceTier
 }
 
-export type ThenVsNowSpan = '2y' | '5y'
-export interface ThenVsNowOptions extends CustomPriceFields {
+export type ThenVsNowSpan = '2y' | '3y' | '5y'
+export interface ThenVsNowOptions extends CustomPriceFields, ToneField {
   visual_style: VisualStyle
   price_tier: PriceTier
   span: ThenVsNowSpan
+  // When set, the generator uses this specific card instead of random
+  // selection. Should be the bare card_slug (no "pc-" prefix).
+  card_slug?: string
+  // Display label used by the picker UI so we can render "Selected: X".
+  card_label?: string
 }
 
-export type Budget = 50 | 100 | 250 | 500 | 1000
+export type Budget = 50 | 100 | 250 | 500 | 1000 | 2500
 export const BUDGETS: { value: Budget; label: string }[] = [
-  { value: 50,   label: '£50'    },
-  { value: 100,  label: '£100'   },
-  { value: 250,  label: '£250'   },
-  { value: 500,  label: '£500'   },
-  { value: 1000, label: '£1,000' },
+  { value: 50,   label: '$50'    },
+  { value: 100,  label: '$100'   },
+  { value: 250,  label: '$250'   },
+  { value: 500,  label: '$500'   },
+  { value: 1000, label: '$1,000' },
+  { value: 2500, label: '$2,500' },
 ]
-export interface BudgetBuilderOptions {
+export interface BudgetBuilderOptions extends ToneField {
   visual_style: VisualStyle
-  budget_gbp: Budget
+  budget_usd: Budget
 }
 
-export interface CollectorPulseOptions {
+export interface CollectorPulseOptions extends ToneField {
   visual_style: VisualStyle
   time_window: TimeWindow
 }
@@ -168,13 +185,13 @@ export const GENERATIONS: { value: Generation; label: string }[] = [
   { value: '9',   label: 'Gen 9 (Paldea)'  },
 ]
 
-export interface PokemonBattleOptions {
+export interface PokemonBattleOptions extends ToneField {
   visual_style: VisualStyle
   generation: Generation
 }
 
 export type GuessDifficulty = 'silhouette' | 'blurred'
-export interface GuessThePokemonOptions {
+export interface GuessThePokemonOptions extends ToneField {
   visual_style: VisualStyle
   generation: Generation
   difficulty: GuessDifficulty
@@ -202,7 +219,7 @@ export function defaultOptionsFor(template: TemplateType): GenerateOptions {
     case 'then_vs_now':
       return { visual_style: 'light', price_tier: 'any', span: '5y' } as ThenVsNowOptions
     case 'budget_builder':
-      return { visual_style: 'light', budget_gbp: 250 } as BudgetBuilderOptions
+      return { visual_style: 'light', budget_usd: 250 } as BudgetBuilderOptions
     case 'collector_pulse':
       return { visual_style: 'light', time_window: '7d' } as CollectorPulseOptions
     case 'pokemon_battle':
