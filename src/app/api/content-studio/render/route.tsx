@@ -13,11 +13,27 @@ const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+const GBP_RATE = 0.79
+
 function fmtUsd(cents: number | null): string {
   if (!cents || cents <= 0) return '—'
   const v = cents / 100
   if (v >= 1000) return `$${Math.round(v).toLocaleString('en-US')}`
   return `$${v.toFixed(2)}`
+}
+
+function fmtGbp(cents: number | null): string {
+  if (!cents || cents <= 0) return ''
+  const v = (cents / 100) * GBP_RATE
+  if (v >= 1000) return `£${Math.round(v).toLocaleString('en-GB')}`
+  return `£${v.toFixed(0)}`
+}
+
+// Combined display: "$X (£Y)" — used across every template.
+function fmtPrice(cents: number | null): string {
+  if (!cents || cents <= 0) return '—'
+  const gbp = fmtGbp(cents)
+  return gbp ? `${fmtUsd(cents)} (${gbp})` : fmtUsd(cents)
 }
 
 function pct(v: number | null | undefined): string {
@@ -58,17 +74,68 @@ async function loadFont(filename: string): Promise<ArrayBuffer | null> {
   } catch { return null }
 }
 
-// Background palette by visual style — kept in sync with src/lib/contentStudio.ts
+// Background palette by visual style. bg is a CSS background value, so it
+// can be a gradient. Kept loosely in sync with src/lib/contentStudio.ts.
 const PALETTE: Record<string, { bg: string; text: string; muted: string; accent: string; border: string }> = {
-  light:  { bg: '#ffffff', text: '#0f172a', muted: '#64748b',          accent: '#1a5fad', border: '#e2e8f0' },
-  dark:   { bg: '#0f172a', text: '#f8fafc', muted: '#94a3b8',          accent: '#ffcb05', border: '#1e293b' },
-  blue:   { bg: '#1a5fad', text: '#ffffff', muted: 'rgba(255,255,255,0.7)', accent: '#ffcb05', border: 'rgba(255,255,255,0.18)' },
-  yellow: { bg: '#ffcb05', text: '#0f172a', muted: 'rgba(15,23,42,0.65)',   accent: '#1a5fad', border: 'rgba(15,23,42,0.12)' },
+  light:  { bg: 'linear-gradient(135deg, #ffffff 0%, #eef2f7 100%)', text: '#0f172a', muted: '#64748b',           accent: '#1a5fad', border: '#e2e8f0' },
+  dark:   { bg: 'linear-gradient(160deg, #0f172a 0%, #1e293b 100%)', text: '#f8fafc', muted: '#94a3b8',           accent: '#ffcb05', border: '#1e293b' },
+  blue:   { bg: 'linear-gradient(160deg, #1a5fad 0%, #2874c8 100%)', text: '#ffffff', muted: 'rgba(255,255,255,0.75)', accent: '#ffcb05', border: 'rgba(255,255,255,0.18)' },
+  yellow: { bg: 'linear-gradient(135deg, #ffcb05 0%, #ffd84a 100%)', text: '#0f172a', muted: 'rgba(15,23,42,0.7)',  accent: '#1a5fad', border: 'rgba(15,23,42,0.12)' },
+}
+
+// Logo cached at module scope — single fetch per cold start.
+let cachedLogoUrl: string | null | undefined = undefined
+async function getLogoDataUrl(): Promise<string | null> {
+  if (cachedLogoUrl !== undefined) return cachedLogoUrl
+  try {
+    const u = new URL('./logo.png', import.meta.url)
+    const r = await fetch(u)
+    if (!r.ok) { cachedLogoUrl = null; return null }
+    const buf = await r.arrayBuffer()
+    const bytes = new Uint8Array(buf)
+    let b = ''
+    const chunk = 8192
+    for (let i = 0; i < bytes.length; i += chunk) {
+      b += String.fromCharCode(...Array.from(bytes.subarray(i, i + chunk)))
+    }
+    cachedLogoUrl = `data:image/png;base64,${btoa(b)}`
+    return cachedLogoUrl
+  } catch { cachedLogoUrl = null; return null }
+}
+
+// Top-of-card header used by every template — kind label on the left,
+// favicon + brand on the right.
+function TemplateHeader({ kind, p, logo }: { kind: string; p: typeof PALETTE['light']; logo: string | null }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+      <div style={{ fontSize: 22, fontWeight: 700, color: p.accent, fontFamily: 'Figtree', letterSpacing: 2, textTransform: 'uppercase', display: 'flex' }}>
+        {kind}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {logo && <img src={logo} width={26} height={26} style={{ borderRadius: 6 }} />}
+        <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>PokePrices.io</div>
+      </div>
+    </div>
+  )
+}
+
+// Small "verified by X sales" pill that surfaces volume on a tile.
+function VolumePill({ sales, p }: { sales: number; p: typeof PALETTE['light'] }) {
+  if (!sales || sales < 1) return null
+  const label = sales >= 100 ? `${sales}+ sales / 30d` : `${sales} sales / 30d`
+  return (
+    <span style={{
+      fontSize: 13, fontWeight: 700, color: p.accent,
+      background: p.bg === 'linear-gradient(135deg, #ffcb05 0%, #ffd84a 100%)' ? 'rgba(15,23,42,0.10)' : 'rgba(26,95,173,0.10)',
+      padding: '3px 10px', borderRadius: 14, fontFamily: 'Figtree',
+      letterSpacing: 0.6, textTransform: 'uppercase', display: 'flex',
+    }}>{label}</span>
+  )
 }
 
 // ── Template: Card Battle ───────────────────────────────────────────────────
 
-async function renderCardBattle(post: any, p: typeof PALETTE['light']): Promise<JSX.Element> {
+async function renderCardBattle(post: any, p: typeof PALETTE['light'], logo: string | null): Promise<JSX.Element> {
   const left  = post.data_payload?.left  || {}
   const right = post.data_payload?.right || {}
   const [leftImg, rightImg] = await Promise.all([
@@ -78,54 +145,47 @@ async function renderCardBattle(post: any, p: typeof PALETTE['light']): Promise<
 
   const StatRow = ({ label, value, color }: { label: string; value: string; color?: string }) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', width: '100%' }}>
-      <span style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree' }}>{label}</span>
-      <span style={{ fontSize: 24, fontWeight: 700, color: color ?? p.text, fontFamily: 'Outfit' }}>{value}</span>
+      <span style={{ fontSize: 17, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>{label}</span>
+      <span style={{ fontSize: 19, fontWeight: 700, color: color ?? p.text, fontFamily: 'Outfit', display: 'flex' }}>{value}</span>
     </div>
   )
 
+  // Equal-width sides + fixed-width centre keeps the VS dead-centre regardless
+  // of card name length.
   const Side = ({ card, img }: { card: any; img: string | null }) => (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 460, gap: 18 }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, minWidth: 0 }}>
       {img
-        ? <img src={img} width={320} height={448} style={{ objectFit: 'contain', borderRadius: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.25)' }} />
-        : <div style={{ width: 320, height: 448, background: p.border, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 80 }}>🃏</div>}
-      <div style={{ fontSize: 26, fontWeight: 700, color: p.text, textAlign: 'center', fontFamily: 'Outfit', lineHeight: 1.1, maxWidth: 420, display: 'flex', justifyContent: 'center' }}>
+        ? <img src={img} width={300} height={420} style={{ objectFit: 'contain', borderRadius: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.25)' }} />
+        : <div style={{ width: 300, height: 420, background: p.border, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 80 }}>🃏</div>}
+      <div style={{ fontSize: 24, fontWeight: 700, color: p.text, textAlign: 'center', fontFamily: 'Outfit', lineHeight: 1.1, maxWidth: 380, display: 'flex', justifyContent: 'center' }}>
         {card.card_name}
       </div>
-      <div style={{ fontSize: 14, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 2, display: 'flex' }}>
+      <div style={{ fontSize: 13, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 1.5, display: 'flex', textAlign: 'center' }}>
         {card.set_name}
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', padding: '0 30px' }}>
-        <StatRow label="Raw"   value={fmtUsd(card.raw_usd)} />
-        <StatRow label="PSA 10" value={fmtUsd(card.psa10_usd)} color={p.accent} />
-        <StatRow label="30d"   value={pct(card.raw_pct_30d)}  color={pctColor(card.raw_pct_30d, p.text)} />
-        <StatRow label="1y"    value={pct(card.raw_pct_365d)} color={pctColor(card.raw_pct_365d, p.text)} />
+      {card.sales_30d > 0 && <VolumePill sales={card.sales_30d} p={p} />}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', padding: '0 24px', marginTop: 4 }}>
+        <StatRow label="Raw"    value={fmtPrice(card.raw_usd)} />
+        <StatRow label="PSA 10" value={fmtPrice(card.psa10_usd)} color={p.accent} />
+        <StatRow label="30d"    value={pct(card.raw_pct_30d)}  color={pctColor(card.raw_pct_30d, p.text)} />
+        <StatRow label="1y"     value={pct(card.raw_pct_365d)} color={pctColor(card.raw_pct_365d, p.text)} />
       </div>
     </div>
   )
 
   return (
     <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '60px 50px' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-        <div style={{ fontSize: 22, fontWeight: 700, color: p.accent, fontFamily: 'Figtree', letterSpacing: 2, textTransform: 'uppercase', display: 'flex' }}>
-          Card Battle
-        </div>
-        <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>
-          PokePrices.io
-        </div>
-      </div>
+      <TemplateHeader kind="Card Battle" p={p} logo={logo} />
 
-      {/* Battle */}
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 30 }}>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', marginTop: 24 }}>
         <Side card={left}  img={leftImg} />
-        <div style={{ fontSize: 90, fontWeight: 900, color: p.accent, fontFamily: 'Outfit', display: 'flex' }}>
-          VS
+        <div style={{ width: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <div style={{ fontSize: 96, fontWeight: 900, color: p.accent, fontFamily: 'Outfit', lineHeight: 1, display: 'flex' }}>VS</div>
         </div>
         <Side card={right} img={rightImg} />
       </div>
 
-      {/* CTA */}
-      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
         <div style={{ fontSize: 38, fontWeight: 900, color: p.text, fontFamily: 'Outfit', textAlign: 'center', display: 'flex' }}>
           {post.hook || 'Which are you taking?'}
         </div>
@@ -136,7 +196,7 @@ async function renderCardBattle(post: any, p: typeof PALETTE['light']): Promise<
 
 // ── Template: Market Mover ──────────────────────────────────────────────────
 
-async function renderMarketMover(post: any, p: typeof PALETTE['light']): Promise<JSX.Element> {
+async function renderMarketMover(post: any, p: typeof PALETTE['light'], logo: string | null): Promise<JSX.Element> {
   const card = post.data_payload?.card || {}
   const img  = card.image_url ? await toDataUrl(card.image_url) : null
   const move = post.data_payload?.move_pct as number | undefined
@@ -145,45 +205,43 @@ async function renderMarketMover(post: any, p: typeof PALETTE['light']): Promise
   const moveText = move != null ? `${move > 0 ? '+' : ''}${move.toFixed(0)}%` : '—'
 
   const TimeStat = ({ label, value }: { label: string; value: string }) => (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 140 }}>
-      <span style={{ fontSize: 38, fontWeight: 900, color: p.accent, fontFamily: 'Outfit', display: 'flex' }}>{value}</span>
-      <span style={{ fontSize: 16, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 1.5, display: 'flex' }}>{label}</span>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flex: 1 }}>
+      <span style={{ fontSize: 36, fontWeight: 900, color: p.accent, fontFamily: 'Outfit', display: 'flex' }}>{value}</span>
+      <span style={{ fontSize: 15, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 1.5, display: 'flex' }}>{label}</span>
     </div>
   )
 
   return (
     <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '60px 50px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-        <div style={{ fontSize: 22, fontWeight: 700, color: p.accent, fontFamily: 'Figtree', letterSpacing: 2, textTransform: 'uppercase', display: 'flex' }}>
-          Market Mover
-        </div>
-        <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>
-          PokePrices.io
-        </div>
-      </div>
+      <TemplateHeader kind="Market Mover" p={p} logo={logo} />
 
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 50, marginTop: 30 }}>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 40, marginTop: 24 }}>
         {img
-          ? <img src={img} width={360} height={504} style={{ objectFit: 'contain', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.28)', flexShrink: 0 }} />
-          : <div style={{ width: 360, height: 504, background: p.border, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 100, flexShrink: 0 }}>🃏</div>}
+          ? <img src={img} width={340} height={476} style={{ objectFit: 'contain', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.28)', flexShrink: 0 }} />
+          : <div style={{ width: 340, height: 476, background: p.border, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 100, flexShrink: 0 }}>🃏</div>}
 
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ fontSize: 30, fontWeight: 700, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 2, display: 'flex' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, justifyContent: 'center', maxWidth: 560 }}>
+          <div style={{ fontSize: 28, fontWeight: 700, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 2, display: 'flex' }}>
             {wl}
           </div>
-          <div style={{ fontSize: 140, fontWeight: 900, color: pctColor(move ?? null, p.accent), fontFamily: 'Outfit', lineHeight: 1, display: 'flex' }}>
+          <div style={{ fontSize: 130, fontWeight: 900, color: pctColor(move ?? null, p.accent), fontFamily: 'Outfit', lineHeight: 1, display: 'flex' }}>
             {moveText}
           </div>
-          <div style={{ fontSize: 34, fontWeight: 700, color: p.text, fontFamily: 'Outfit', maxWidth: 540, lineHeight: 1.2, display: 'flex' }}>
+          <div style={{ fontSize: 30, fontWeight: 700, color: p.text, fontFamily: 'Outfit', lineHeight: 1.2, display: 'flex' }}>
             {card.card_name}
           </div>
-          <div style={{ fontSize: 20, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>
-            {card.set_name}  ·  raw {fmtUsd(card.raw_usd)}
+          <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>
+            {card.set_name}  ·  Raw {fmtPrice(card.raw_usd)}
           </div>
+          {card.sales_30d > 0 && (
+            <div style={{ display: 'flex', marginTop: 4 }}>
+              <VolumePill sales={card.sales_30d} p={p} />
+            </div>
+          )}
         </div>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', marginBottom: 30 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', marginBottom: 24 }}>
         <TimeStat label="7d"  value={pct(card.raw_pct_7d)} />
         <TimeStat label="30d" value={pct(card.raw_pct_30d)} />
         <TimeStat label="90d" value={pct(card.raw_pct_90d)} />
@@ -201,7 +259,7 @@ async function renderMarketMover(post: any, p: typeof PALETTE['light']): Promise
 
 // ── Template: Grading Gap ───────────────────────────────────────────────────
 
-async function renderGradingGap(post: any, p: typeof PALETTE['light']): Promise<JSX.Element> {
+async function renderGradingGap(post: any, p: typeof PALETTE['light'], logo: string | null): Promise<JSX.Element> {
   const card = post.data_payload?.card || {}
   const img = card.image_url ? await toDataUrl(card.image_url) : null
   const grades: Record<string, number> = card.grades || {}
@@ -211,12 +269,7 @@ async function renderGradingGap(post: any, p: typeof PALETTE['light']): Promise<
 
   return (
     <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '60px 50px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-        <div style={{ fontSize: 22, fontWeight: 700, color: p.accent, fontFamily: 'Figtree', letterSpacing: 2, textTransform: 'uppercase', display: 'flex' }}>
-          Grading Gap
-        </div>
-        <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>PokePrices.io</div>
-      </div>
+      <TemplateHeader kind="Grading Gap" p={p} logo={logo} />
 
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 50, marginTop: 30 }}>
         {img
@@ -241,7 +294,7 @@ async function renderGradingGap(post: any, p: typeof PALETTE['light']): Promise<
                   border: isHighlight ? `1px solid ${p.accent}` : `1px solid ${p.border}`,
                 }}>
                   <span style={{ fontSize: 18, color: isHighlight ? p.accent : p.muted, fontFamily: 'Figtree', fontWeight: 700, display: 'flex' }}>{label}</span>
-                  <span style={{ fontSize: 22, color: isHighlight ? p.accent : p.text, fontFamily: 'Outfit', fontWeight: 700, display: 'flex' }}>{fmtUsd(value as number)}</span>
+                  <span style={{ fontSize: 22, color: isHighlight ? p.accent : p.text, fontFamily: 'Outfit', fontWeight: 700, display: 'flex' }}>{fmtPrice(value as number)}</span>
                 </div>
               )
             })}
@@ -260,47 +313,65 @@ async function renderGradingGap(post: any, p: typeof PALETTE['light']): Promise<
 
 // ── Template: Then vs Now ───────────────────────────────────────────────────
 
-async function renderThenVsNow(post: any, p: typeof PALETTE['light']): Promise<JSX.Element> {
+async function renderThenVsNow(post: any, p: typeof PALETTE['light'], logo: string | null): Promise<JSX.Element> {
   const card = post.data_payload?.card || {}
   const img = card.image_url ? await toDataUrl(card.image_url) : null
-  const yearFromIso = (iso: string | null) => iso ? new Date(iso).getFullYear() : '—'
+  const monthYear = (iso: string | null) => {
+    if (!iso) return '—'
+    const d = new Date(iso)
+    return d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
+  }
   const growth = card.growth_pct as number | null
   const growthText = growth != null ? `${growth > 0 ? '+' : ''}${growth.toFixed(0)}%` : '—'
 
   return (
     <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '60px 50px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-        <div style={{ fontSize: 22, fontWeight: 700, color: p.accent, fontFamily: 'Figtree', letterSpacing: 2, textTransform: 'uppercase', display: 'flex' }}>
-          Then vs Now
-        </div>
-        <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>PokePrices.io</div>
-      </div>
+      <TemplateHeader kind="Then vs Now" p={p} logo={logo} />
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 22, marginTop: 20 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 18, marginTop: 20 }}>
         {img
-          ? <img src={img} width={290} height={406} style={{ objectFit: 'contain', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.28)' }} />
-          : <div style={{ width: 290, height: 406, background: p.border, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 100 }}>🃏</div>}
+          ? <img src={img} width={270} height={378} style={{ objectFit: 'contain', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.28)' }} />
+          : <div style={{ width: 270, height: 378, background: p.border, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 100 }}>🃏</div>}
 
         <div style={{ fontSize: 28, fontWeight: 700, color: p.text, fontFamily: 'Outfit', textAlign: 'center', maxWidth: 800, display: 'flex' }}>
           {card.card_name}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 40, marginTop: 6 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-            <span style={{ fontSize: 16, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 2, display: 'flex' }}>Then</span>
-            <span style={{ fontSize: 14, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>{yearFromIso(card.then_date)}</span>
-            <span style={{ fontSize: 56, fontWeight: 900, color: p.text, fontFamily: 'Outfit', display: 'flex' }}>{fmtUsd(card.then_price)}</span>
+        <div style={{ display: 'flex', alignItems: 'stretch', gap: 32, marginTop: 4 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+            <span style={{ fontSize: 20, fontWeight: 800, color: p.muted, fontFamily: 'Outfit', textTransform: 'uppercase', letterSpacing: 3, display: 'flex' }}>
+              {monthYear(card.then_date)}
+            </span>
+            <span style={{ fontSize: 56, fontWeight: 900, color: p.text, fontFamily: 'Outfit', lineHeight: 1, display: 'flex' }}>{fmtUsd(card.then_price)}</span>
+            {card.then_price != null && (
+              <span style={{ fontSize: 18, fontWeight: 700, color: p.muted, fontFamily: 'Outfit', display: 'flex' }}>{fmtGbp(card.then_price)}</span>
+            )}
           </div>
-          <div style={{ fontSize: 80, fontWeight: 900, color: p.accent, fontFamily: 'Outfit', display: 'flex' }}>→</div>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-            <span style={{ fontSize: 16, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 2, display: 'flex' }}>Now</span>
-            <span style={{ fontSize: 14, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>{yearFromIso(card.now_date)}</span>
-            <span style={{ fontSize: 56, fontWeight: 900, color: p.accent, fontFamily: 'Outfit', display: 'flex' }}>{fmtUsd(card.now_price)}</span>
+
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{
+              fontSize: 36, fontWeight: 900, color: p.accent, fontFamily: 'Outfit',
+              padding: '4px 14px', border: `3px solid ${p.accent}`, borderRadius: 14,
+              letterSpacing: 2, display: 'flex',
+            }}>VS NOW</span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+            <span style={{ fontSize: 20, fontWeight: 800, color: p.accent, fontFamily: 'Outfit', textTransform: 'uppercase', letterSpacing: 3, display: 'flex' }}>
+              {monthYear(card.now_date)}
+            </span>
+            <span style={{ fontSize: 56, fontWeight: 900, color: p.accent, fontFamily: 'Outfit', lineHeight: 1, display: 'flex' }}>{fmtUsd(card.now_price)}</span>
+            {card.now_price != null && (
+              <span style={{ fontSize: 18, fontWeight: 700, color: p.muted, fontFamily: 'Outfit', display: 'flex' }}>{fmtGbp(card.now_price)}</span>
+            )}
           </div>
         </div>
 
-        <div style={{ fontSize: 64, fontWeight: 900, color: pctColor(growth, p.accent), fontFamily: 'Outfit', display: 'flex' }}>
-          {growthText}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 4 }}>
+          <div style={{ fontSize: 64, fontWeight: 900, color: pctColor(growth, p.accent), fontFamily: 'Outfit', display: 'flex' }}>
+            {growthText}
+          </div>
+          {card.sales_30d > 0 && <VolumePill sales={card.sales_30d} p={p} />}
         </div>
       </div>
 
@@ -315,7 +386,7 @@ async function renderThenVsNow(post: any, p: typeof PALETTE['light']): Promise<J
 
 // ── Template: Budget Builder ────────────────────────────────────────────────
 
-async function renderBudgetBuilder(post: any, p: typeof PALETTE['light']): Promise<JSX.Element> {
+async function renderBudgetBuilder(post: any, p: typeof PALETTE['light'], logo: string | null): Promise<JSX.Element> {
   const cards = (post.data_payload?.cards || []) as any[]
   const budget = post.data_payload?.budget_gbp
   const total = post.data_payload?.total_raw_usd_cents
@@ -323,12 +394,7 @@ async function renderBudgetBuilder(post: any, p: typeof PALETTE['light']): Promi
 
   return (
     <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '60px 50px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-        <div style={{ fontSize: 22, fontWeight: 700, color: p.accent, fontFamily: 'Figtree', letterSpacing: 2, textTransform: 'uppercase', display: 'flex' }}>
-          Budget Builder
-        </div>
-        <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>PokePrices.io</div>
-      </div>
+      <TemplateHeader kind="Budget Builder" p={p} logo={logo} />
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 24, marginTop: 10 }}>
         <div style={{ fontSize: 86, fontWeight: 900, color: p.accent, fontFamily: 'Outfit', lineHeight: 1, display: 'flex' }}>
@@ -348,14 +414,14 @@ async function renderBudgetBuilder(post: any, p: typeof PALETTE['light']): Promi
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 18, fontWeight: 700, color: p.text, fontFamily: 'Outfit', lineHeight: 1.2, display: 'flex' }}>{c.card_name}</div>
                 <div style={{ fontSize: 12, color: p.muted, fontFamily: 'Figtree', marginTop: 2, display: 'flex' }}>{c.set_name}</div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: p.accent, fontFamily: 'Outfit', marginTop: 4, display: 'flex' }}>{fmtUsd(c.raw_usd)}</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: p.accent, fontFamily: 'Outfit', marginTop: 4, display: 'flex' }}>{fmtUsd(c.raw_usd)} <span style={{ fontSize: 13, color: p.muted, fontWeight: 600, marginLeft: 6, display: 'flex' }}>{fmtGbp(c.raw_usd)}</span></div>
               </div>
             </div>
           ))}
         </div>
 
         <div style={{ fontSize: 16, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>
-          Total: {fmtUsd(total)} raw · pick your four
+          Total: {fmtUsd(total)} ({fmtGbp(total)}) raw · pick your four
         </div>
       </div>
 
@@ -370,7 +436,7 @@ async function renderBudgetBuilder(post: any, p: typeof PALETTE['light']): Promi
 
 // ── Template: Collector Pulse ───────────────────────────────────────────────
 
-async function renderCollectorPulse(post: any, p: typeof PALETTE['light']): Promise<JSX.Element> {
+async function renderCollectorPulse(post: any, p: typeof PALETTE['light'], logo: string | null): Promise<JSX.Element> {
   const cards = (post.data_payload?.cards || []) as any[]
   const images = await Promise.all(cards.slice(0, 5).map(c => c.image_url ? toDataUrl(c.image_url) : null))
   const wt = (post.data_payload?.time_window || '7d') as string
@@ -378,12 +444,7 @@ async function renderCollectorPulse(post: any, p: typeof PALETTE['light']): Prom
 
   return (
     <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '60px 50px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-        <div style={{ fontSize: 22, fontWeight: 700, color: p.accent, fontFamily: 'Figtree', letterSpacing: 2, textTransform: 'uppercase', display: 'flex' }}>
-          Collector Pulse
-        </div>
-        <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>PokePrices.io</div>
-      </div>
+      <TemplateHeader kind="Collector Pulse" p={p} logo={logo} />
 
       <div style={{ marginTop: 22, marginBottom: 10, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         <div style={{ fontSize: 30, color: p.muted, fontFamily: 'Figtree', textTransform: 'uppercase', letterSpacing: 2, display: 'flex' }}>
@@ -407,7 +468,7 @@ async function renderCollectorPulse(post: any, p: typeof PALETTE['light']): Prom
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
               <span style={{ fontSize: 26, fontWeight: 900, color: pctColor(c.pct_change, p.accent), fontFamily: 'Outfit', display: 'flex' }}>{pct(c.pct_change)}</span>
-              <span style={{ fontSize: 14, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>{fmtUsd(c.raw_usd)}</span>
+              <span style={{ fontSize: 14, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>{fmtUsd(c.raw_usd)} <span style={{ marginLeft: 4, display: 'flex' }}>{fmtGbp(c.raw_usd)}</span></span>
             </div>
           </div>
         ))}
@@ -436,7 +497,7 @@ function typeChipBg(t: string): string { return TYPE_COLOURS[t] || '#94a3b8' }
 
 // ── Template: Pokémon Battle ────────────────────────────────────────────────
 
-async function renderPokemonBattle(post: any, p: typeof PALETTE['light']): Promise<JSX.Element> {
+async function renderPokemonBattle(post: any, p: typeof PALETTE['light'], logo: string | null): Promise<JSX.Element> {
   const L = post.data_payload?.left  || {}
   const R = post.data_payload?.right || {}
   const lProb = post.data_payload?.left_prob ?? 50
@@ -493,10 +554,7 @@ async function renderPokemonBattle(post: any, p: typeof PALETTE['light']): Promi
 
   return (
     <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '50px 40px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-        <div style={{ fontSize: 22, fontWeight: 700, color: p.accent, fontFamily: 'Figtree', letterSpacing: 2, textTransform: 'uppercase', display: 'flex' }}>Pokémon Battle</div>
-        <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>PokePrices.io</div>
-      </div>
+      <TemplateHeader kind="Pokémon Battle" p={p} logo={logo} />
 
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 }}>
         <Side poke={L} img={lImg} />
@@ -525,7 +583,7 @@ async function renderPokemonBattle(post: any, p: typeof PALETTE['light']): Promi
 
 // ── Template: Guess the Pokémon ─────────────────────────────────────────────
 
-async function renderGuessThePokemon(post: any, p: typeof PALETTE['light']): Promise<JSX.Element> {
+async function renderGuessThePokemon(post: any, p: typeof PALETTE['light'], logo: string | null): Promise<JSX.Element> {
   const poke = post.data_payload?.pokemon || {}
   const clues: string[] = post.data_payload?.clues || []
   const difficulty = post.data_payload?.difficulty || 'silhouette'
@@ -539,12 +597,7 @@ async function renderGuessThePokemon(post: any, p: typeof PALETTE['light']): Pro
 
   return (
     <div style={{ width: 1080, height: 1080, background: p.bg, display: 'flex', flexDirection: 'column', padding: '60px 50px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-        <div style={{ fontSize: 22, fontWeight: 700, color: p.accent, fontFamily: 'Figtree', letterSpacing: 2, textTransform: 'uppercase', display: 'flex' }}>
-          Guess the Pokémon
-        </div>
-        <div style={{ fontSize: 18, color: p.muted, fontFamily: 'Figtree', display: 'flex' }}>PokePrices.io</div>
-      </div>
+      <TemplateHeader kind="Guess the Pokémon" p={p} logo={logo} />
 
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', marginTop: 30, marginBottom: 20 }}>
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -598,16 +651,17 @@ export async function GET(req: NextRequest) {
   const style = post.generated_options?.visual_style || 'light'
   const p = PALETTE[style] || PALETTE.light
 
+  const logo = await getLogoDataUrl()
   let element: JSX.Element
   try {
-    if (post.template_type === 'card_battle')        element = await renderCardBattle(post, p)
-    else if (post.template_type === 'market_mover')  element = await renderMarketMover(post, p)
-    else if (post.template_type === 'grading_gap')   element = await renderGradingGap(post, p)
-    else if (post.template_type === 'then_vs_now')   element = await renderThenVsNow(post, p)
-    else if (post.template_type === 'budget_builder') element = await renderBudgetBuilder(post, p)
-    else if (post.template_type === 'collector_pulse') element = await renderCollectorPulse(post, p)
-    else if (post.template_type === 'pokemon_battle')   element = await renderPokemonBattle(post, p)
-    else if (post.template_type === 'guess_the_pokemon') element = await renderGuessThePokemon(post, p)
+    if (post.template_type === 'card_battle')        element = await renderCardBattle(post, p, logo)
+    else if (post.template_type === 'market_mover')  element = await renderMarketMover(post, p, logo)
+    else if (post.template_type === 'grading_gap')   element = await renderGradingGap(post, p, logo)
+    else if (post.template_type === 'then_vs_now')   element = await renderThenVsNow(post, p, logo)
+    else if (post.template_type === 'budget_builder') element = await renderBudgetBuilder(post, p, logo)
+    else if (post.template_type === 'collector_pulse') element = await renderCollectorPulse(post, p, logo)
+    else if (post.template_type === 'pokemon_battle')   element = await renderPokemonBattle(post, p, logo)
+    else if (post.template_type === 'guess_the_pokemon') element = await renderGuessThePokemon(post, p, logo)
     else return new Response(`Template '${post.template_type}' has no PNG renderer yet`, { status: 400 })
   } catch (e: any) {
     return new Response(`Render error: ${e?.message || e}`, { status: 500 })

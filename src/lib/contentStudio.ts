@@ -40,18 +40,21 @@ export const VISUAL_STYLES: { value: VisualStyle; label: string }[] = [
 ]
 
 // Price tier — applies wherever we filter cards by raw price band.
+// Tightened ranges so each tier surfaces visually similar cards.
 export type PriceTier =
-  | 'under_50' | '50_200' | '200_1000' | '1000_5000' | '5000_plus' | 'any'
-  | 'custom'
+  | 'any' | 'under_25' | '25_60' | '60_150' | '150_400'
+  | '400_1000' | '1000_2500' | '2500_plus' | 'custom'
 
 export const PRICE_TIERS: { value: PriceTier; label: string }[] = [
-  { value: 'any',       label: 'Any price'        },
-  { value: 'under_50',  label: 'Under $50'        },
-  { value: '50_200',    label: '$50 – $200'       },
-  { value: '200_1000',  label: '$200 – $1,000'    },
-  { value: '1000_5000', label: '$1,000 – $5,000'  },
-  { value: '5000_plus', label: '$5,000+'          },
-  { value: 'custom',    label: 'Custom (£ ± %)'   },
+  { value: 'any',         label: 'Any price'        },
+  { value: 'under_25',    label: 'Under $25'        },
+  { value: '25_60',       label: '$25 – $60'        },
+  { value: '60_150',      label: '$60 – $150'       },
+  { value: '150_400',     label: '$150 – $400'      },
+  { value: '400_1000',    label: '$400 – $1,000'    },
+  { value: '1000_2500',   label: '$1,000 – $2,500'  },
+  { value: '2500_plus',   label: '$2,500+'          },
+  { value: 'custom',      label: 'Custom (£ ± %)'   },
 ]
 
 // Custom-tier fields — used when price_tier === 'custom'.
@@ -191,11 +194,11 @@ export type GenerateOptions =
 export function defaultOptionsFor(template: TemplateType): GenerateOptions {
   switch (template) {
     case 'card_battle':
-      return { visual_style: 'light', price_tier: '50_200' } as CardBattleOptions
+      return { visual_style: 'light', price_tier: '60_150' } as CardBattleOptions
     case 'market_mover':
       return { visual_style: 'light', price_tier: 'any', time_window: '30d', direction: 'up' } as MarketMoverOptions
     case 'grading_gap':
-      return { visual_style: 'light', price_tier: '200_1000' } as GradingGapOptions
+      return { visual_style: 'light', price_tier: '150_400' } as GradingGapOptions
     case 'then_vs_now':
       return { visual_style: 'light', price_tier: 'any', span: '5y' } as ThenVsNowOptions
     case 'budget_builder':

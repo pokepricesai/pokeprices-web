@@ -125,12 +125,14 @@ function priceTierBounds(tier: string, customTargetGbp?: number, customTolerance
     }
   }
   switch (tier) {
-    case "under_50":  return { min: 0,      max: 5000   }
-    case "50_200":    return { min: 5000,   max: 20000  }
-    case "200_1000":  return { min: 20000,  max: 100000 }
-    case "1000_5000": return { min: 100000, max: 500000 }
-    case "5000_plus": return { min: 500000, max: null   }
-    default:          return { min: 0,      max: null   }
+    case "under_25":   return { min: 0,      max: 2500   }
+    case "25_60":      return { min: 2500,   max: 6000   }
+    case "60_150":     return { min: 6000,   max: 15000  }
+    case "150_400":    return { min: 15000,  max: 40000  }
+    case "400_1000":   return { min: 40000,  max: 100000 }
+    case "1000_2500":  return { min: 100000, max: 250000 }
+    case "2500_plus":  return { min: 250000, max: null   }
+    default:           return { min: 0,      max: null   }
   }
 }
 
@@ -248,6 +250,7 @@ async function generateCardBattle(options: any) {
     psa10_usd:     p.current_psa10,
     raw_pct_30d:   p.raw_pct_30d,
     raw_pct_365d:  p.raw_pct_365d,
+    sales_30d:     p._meta?.sales_30d || 0,
   }))
 
   const sys = VOICE_PROMPT
@@ -329,6 +332,7 @@ async function generateMarketMover(options: any) {
     raw_pct_30d:   picked.raw_pct_30d,
     raw_pct_90d:   picked.raw_pct_90d,
     raw_pct_365d:  picked.raw_pct_365d,
+    sales_30d:     picked._meta?.sales_30d || 0,
   }
 
   const move = picked[trendKey] as number
@@ -529,6 +533,7 @@ async function generateThenVsNow(options: any) {
     then_date:     thenDate,
     now_date:      nowDate,
     growth_pct:    growth,
+    sales_30d:     cardRow.sales_30d || 0,
   }
 
   const yrLabel = span === "2y" ? "2 years" : "5 years"
@@ -800,11 +805,34 @@ function summarisePokemon(p: any) {
 
 // ── Template: Pokémon Battle ────────────────────────────────────────────────
 
+// Pick from the top-N Pokémon by TCG card count for the chosen generation.
+// pokemon_species.total_cards is our popularity proxy — Pikachu / Charizard /
+// Eevee / Mewtwo etc. surface first; obscure species are excluded so the
+// posts feature Pokémon people recognise.
+async function pickPopularPokemonIds(gen: string, count: number): Promise<number[]> {
+  let q = supabase.from('pokemon_species')
+    .select('id, total_cards, generation')
+    .gt('total_cards', 10)
+  if (gen !== 'any') q = q.eq('generation', Number(gen))
+  const { data } = await q.order('total_cards', { ascending: false }).limit(150)
+  const pool = (data || []).map((r: any) => r.id as number)
+  if (pool.length === 0) {
+    // Fallback: just pick from the generation range.
+    return Array.from({ length: count }, () => randomPokemonId(gen))
+  }
+  // Sample without replacement.
+  const out: number[] = []
+  const copy = [...pool]
+  while (out.length < count && copy.length > 0) {
+    const idx = Math.floor(Math.random() * copy.length)
+    out.push(copy.splice(idx, 1)[0])
+  }
+  return out
+}
+
 async function generatePokemonBattle(options: any) {
   const gen = String(options.generation || 'any')
-  let leftId = randomPokemonId(gen)
-  let rightId = randomPokemonId(gen)
-  while (rightId === leftId) rightId = randomPokemonId(gen)
+  const [leftId, rightId] = await pickPopularPokemonIds(gen, 2)
 
   const [leftRaw, rightRaw] = await Promise.all([fetchPokemon(leftId), fetchPokemon(rightId)])
   const L = summarisePokemon(leftRaw)
@@ -852,7 +880,7 @@ Return JSON with this exact shape:
 async function generateGuessThePokemon(options: any) {
   const gen = String(options.generation || 'any')
   const difficulty = options.difficulty === 'blurred' ? 'blurred' : 'silhouette'
-  const id = randomPokemonId(gen)
+  const [id] = await pickPopularPokemonIds(gen, 1)
   const p = await fetchPokemon(id)
   const P = summarisePokemon(p)
 
