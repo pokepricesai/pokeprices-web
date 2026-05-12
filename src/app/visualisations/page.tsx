@@ -19,7 +19,7 @@ type Viz = {
 
 const VISUALISATIONS: Viz[] = [
   {
-    title: 'Market heatmap',
+    title: 'Market Heatmap',
     blurb: 'A grid of the most-watched cards, colour-coded by 30-day price change. Spot the whole market at a glance.',
     status: 'live',
     href: '/visualisations/heatmap',
@@ -27,35 +27,36 @@ const VISUALISATIONS: Viz[] = [
     emoji: '🔥',
   },
   {
-    title: 'Risers & fallers',
-    blurb: 'Leaderboards of the biggest movers — 30d, 90d, 365d. Sparklines per row so you see the shape of the move, not just the number.',
-    status: 'soon',
+    title: 'Risers & Fallers',
+    blurb: 'Leaderboards of the biggest movers — 30d, 90d, 365d. Card images, prices and confirmed-volume tags per row.',
+    status: 'live',
+    href: '/visualisations/risers-fallers',
     accent: 'linear-gradient(135deg, #22c55e 0%, #ef4444 100%)',
     emoji: '📈',
   },
   {
-    title: 'Set price index',
+    title: 'Set Price Index',
     blurb: 'Average sealed and single price per set, tracked over time. Compare any two sets on one chart.',
     status: 'soon',
     accent: 'linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%)',
     emoji: '📊',
   },
   {
-    title: 'Grade premium curve',
+    title: 'Grade Premium Curve',
     blurb: 'For any card: the raw price, then PSA 6, 7, 8, 9, 10 — plotted against grading cost so the break-even line is obvious.',
     status: 'soon',
     accent: 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)',
     emoji: '📐',
   },
   {
-    title: 'Price distribution',
+    title: 'Price Distribution',
     blurb: 'Histogram of every recent sale for a card. See the modal price, the long tail, and which grades sit where.',
     status: 'planned',
     accent: 'linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)',
     emoji: '📉',
   },
   {
-    title: 'Sealed market tracker',
+    title: 'Sealed Market Tracker',
     blurb: 'Booster boxes, ETBs and special sets, tracked over their full release-to-now arc. Compare any two products side by side.',
     status: 'planned',
     accent: 'linear-gradient(135deg, #ec4899 0%, #f472b6 100%)',

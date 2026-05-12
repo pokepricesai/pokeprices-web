@@ -109,20 +109,21 @@ export default function GradingCalculatorClient() {
   const [loadingCandidates, setLoadingCandidates] = useState(true)
 
   useEffect(() => {
+    // Open access — the grading calculator works without a login. If a user
+    // is signed in we additionally surface their portfolio as quick-pick
+    // candidates; otherwise the search-only flow handles everything.
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) { router.push('/dashboard/login'); return }
-      setUser(session.user)
+      setUser(session?.user ?? null)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
-      if (!session) router.push('/dashboard/login')
-      else setUser(session.user)
+      setUser(session?.user ?? null)
     })
     return () => subscription.unsubscribe()
   }, [])
 
   // Load currency + raw portfolio cards as candidates
   const loadCandidates = useCallback(async () => {
-    if (!user) return
+    if (!user) { setCandidates([]); setLoadingCandidates(false); return }
     setLoadingCandidates(true)
     const [prefsRes, portRes] = await Promise.all([
       supabase.from('user_email_preferences').select('display_currency').eq('user_id', user.id).maybeSingle()
@@ -450,7 +451,11 @@ export default function GradingCalculatorClient() {
 
         {/* Best candidates */}
         <Section title="Best candidates from your raw cards">
-          {loadingCandidates ? (
+          {!user ? (
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, lineHeight: 1.6 }}>
+              <Link href="/dashboard/login" style={{ color: 'var(--primary)', fontWeight: 700, textDecoration: 'none' }}>Sign in</Link> to surface your raw cards here, ranked by expected grading ROI at your current odds. The calculator itself works without an account — pick any card via the search above.
+            </p>
+          ) : loadingCandidates ? (
             <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0 }}>Loading…</p>
           ) : candidates.length === 0 ? (
             <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, lineHeight: 1.6 }}>

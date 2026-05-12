@@ -50,7 +50,7 @@ const NAV: NavGroup[] = [
   {
     label: 'Prices',
     items: [
-      { label: 'Browse cards & sets', href: '/browse' },
+      { label: 'Browse Cards & Sets', href: '/browse' },
       { label: 'Browse Pokémon',      href: '/pokemon' },
       { label: 'Visualisations',      href: '/visualisations', badge: 'New' },
     ],
@@ -59,26 +59,26 @@ const NAV: NavGroup[] = [
     label: 'Tools',
     items: [
       // Free first — advertises that value is accessible immediately
-      { label: 'Grading calculator', href: '/dashboard/grading' },
-      { label: 'Card show planner',  href: '/dashboard/card-shows' },
-      { label: 'Trade evaluator',    comingSoon: true },
+      { label: 'Grading Calculator', href: '/dashboard/grading' },
+      { label: 'Card Show Planner',  href: '/dashboard/card-shows' },
+      { label: 'Trade Evaluator',    href: '/dealer' },
       // Gated (still clickable — tool pages handle login wall)
       { label: 'Portfolio',          href: '/dashboard/portfolio', gated: true },
       { label: 'Watchlist',          href: '/dashboard/watchlist', gated: true },
-      { label: 'Set completion',     href: '/dashboard/sets',      gated: true },
-      { label: 'Smart alerts',       href: '/dashboard/alerts',    gated: true },
+      { label: 'Set Completion',     href: '/dashboard/sets',      gated: true },
+      { label: 'Smart Alerts',       href: '/dashboard/alerts',    gated: true },
       { label: 'Studio',             href: '/studio',              gated: true },
     ],
-    footer: { label: 'View all tools →', href: '/tools' },
+    footer: { label: 'View All Tools →', href: '/tools' },
   },
   { label: 'Insights', href: '/insights' },
   {
     label: 'Community',
     items: [
-      { label: 'Content creators',     href: '/creators' },
-      { label: 'Vendors & dealers',    href: '/vendors' },
-      { label: 'Upcoming card shows',  href: '/card-shows' },
-      { label: 'Submit a listing',     href: '/creators/submit' },
+      { label: 'Content Creators',     href: '/creators' },
+      { label: 'Vendors & Dealers',    href: '/vendors' },
+      { label: 'Upcoming Card Shows',  href: '/card-shows' },
+      { label: 'Submit A Listing',     href: '/creators/submit' },
     ],
   },
   { label: 'Games', href: '/games', badge: 'New' },
@@ -461,6 +461,21 @@ export default function Navbar() {
         {showResults && allResults.length > 0 && <ResultsDropdown />}
       </div>
 
+      {/* Persistent AI assistant CTA — always visible in the top bar. */}
+      <Link href="/ai-assistant"
+        className="ai-cta"
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0,
+          background: 'linear-gradient(135deg, #ffcb05, #ffae00)', color: '#1a5fad',
+          padding: '6px 12px', borderRadius: 18, textDecoration: 'none',
+          fontSize: 12, fontWeight: 800, fontFamily: "'Figtree', sans-serif",
+          boxShadow: '0 2px 8px rgba(255,203,5,0.30)', whiteSpace: 'nowrap',
+        }}
+      >
+        <span aria-hidden style={{ fontSize: 13, lineHeight: 1 }}>✨</span>
+        <span className="ai-cta-label">Ask me anything</span>
+      </Link>
+
       {/* Auth area — Sign in + Sign up free when logged out; profile menu when logged in */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }} className="auth-area">
         {isAuthed && user ? (
@@ -689,6 +704,8 @@ export default function Navbar() {
           .desktop-nav { display: none !important; }
           .nav-search { display: none !important; }
           .auth-area { display: none !important; }
+          .ai-cta-label { display: none !important; }
+          .ai-cta { padding: 6px 9px !important; }
         }
       `}</style>
     </nav>

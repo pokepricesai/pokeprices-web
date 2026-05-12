@@ -26,34 +26,34 @@ type Category = {
 
 const CATEGORIES: Category[] = [
   {
-    label: 'Calculators & utilities',
+    label: 'Calculators & Utilities',
     hint: 'Free, no login. Open data, open math.',
     tools: [
       {
-        title: 'Grading calculator',
+        title: 'Grading Calculator',
         blurb: 'PSA / CGC / BGS landed cost vs. graded uplift. See break-even and ROI for every card.',
         href: '/dashboard/grading',
         accent: 'linear-gradient(135deg, #1a5fad 0%, #2874c8 100%)',
         emoji: '🎯',
       },
       {
-        title: 'Card show planner',
+        title: 'Card Show Planner',
         blurb: 'UK & US Pokémon card shows mapped, filtered and saved. Plan your weekend in one screen.',
         href: '/dashboard/card-shows',
         accent: 'linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)',
         emoji: '📍',
       },
       {
-        title: 'Trade evaluator',
-        blurb: 'Drop two lots of cards in, get an honest valuation gap based on live sold-listing data.',
-        comingSoon: true,
-        accent: 'linear-gradient(135deg, #94a3b8 0%, #cbd5e1 100%)',
+        title: 'Trade Evaluator',
+        blurb: 'Build two stacks of cards side-by-side. See the fair-value gap in cash, trade-credit and blended modes.',
+        href: '/dealer',
+        accent: 'linear-gradient(135deg, #06b6d4 0%, #38bdf8 100%)',
         emoji: '⚖️',
       },
     ],
   },
   {
-    label: 'Track your collection',
+    label: 'Track Your Collection',
     hint: 'Sign in to save. Free forever, no data sold.',
     tools: [
       {
@@ -73,7 +73,7 @@ const CATEGORIES: Category[] = [
         emoji: '👀',
       },
       {
-        title: 'Set completion',
+        title: 'Set Completion',
         blurb: 'Tick off what you own. See your progress per set, missing cards ranked by current market value.',
         href: '/dashboard/sets',
         gated: true,
@@ -81,7 +81,7 @@ const CATEGORIES: Category[] = [
         emoji: '📚',
       },
       {
-        title: 'Smart alerts',
+        title: 'Smart Alerts',
         blurb: 'Get pinged when a card breaks a price you care about — up or down. Email only, no spam.',
         href: '/dashboard/alerts',
         gated: true,
@@ -91,7 +91,7 @@ const CATEGORIES: Category[] = [
     ],
   },
   {
-    label: 'Create & share',
+    label: 'Create & Share',
     hint: 'For creators, dealers and Discord show-and-tellers.',
     tools: [
       {

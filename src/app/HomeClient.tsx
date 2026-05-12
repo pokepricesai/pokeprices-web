@@ -58,7 +58,7 @@ type Insight = {
 
 const FEATURED_TOOLS = [
   {
-    title: 'Grading calculator',
+    title: 'Grading Calculator',
     blurb: 'PSA / CGC / BGS landed cost vs. graded uplift. Break-even at a glance.',
     href: '/dashboard/grading',
     accent: 'linear-gradient(135deg, #1a5fad 0%, #2874c8 100%)',
@@ -72,7 +72,7 @@ const FEATURED_TOOLS = [
     emoji: '🎨',
   },
   {
-    title: 'Card show planner',
+    title: 'Card Show Planner',
     blurb: 'UK & US Pokémon card shows, mapped and filtered. Plan your weekend.',
     href: '/dashboard/card-shows',
     accent: 'linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)',

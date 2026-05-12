@@ -70,20 +70,32 @@ export default function DashboardNav({
           Dashboard
         </Link>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {email && (
-            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", maxWidth: 180, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {email}
-            </span>
+          {email ? (
+            <>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", maxWidth: 180, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {email}
+              </span>
+              <button onClick={handleSignOut} style={{
+                padding: '5px 10px', borderRadius: 8,
+                border: '1px solid var(--border)', background: 'transparent',
+                color: 'var(--text-muted)', fontSize: 11, fontWeight: 700,
+                fontFamily: "'Figtree', sans-serif", cursor: 'pointer',
+                letterSpacing: 0.5,
+              }}>
+                Sign out
+              </button>
+            </>
+          ) : (
+            <Link href="/dashboard/login" style={{
+              padding: '5px 10px', borderRadius: 8,
+              border: '1px solid var(--primary)', background: 'rgba(26,95,173,0.08)',
+              color: 'var(--primary)', fontSize: 11, fontWeight: 800,
+              fontFamily: "'Figtree', sans-serif", textDecoration: 'none',
+              letterSpacing: 0.5,
+            }}>
+              Sign in
+            </Link>
           )}
-          <button onClick={handleSignOut} style={{
-            padding: '5px 10px', borderRadius: 8,
-            border: '1px solid var(--border)', background: 'transparent',
-            color: 'var(--text-muted)', fontSize: 11, fontWeight: 700,
-            fontFamily: "'Figtree', sans-serif", cursor: 'pointer',
-            letterSpacing: 0.5,
-          }}>
-            Sign out
-          </button>
         </div>
       </div>
 
