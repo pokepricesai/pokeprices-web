@@ -37,13 +37,6 @@ const CATEGORIES: Category[] = [
         emoji: '🎯',
       },
       {
-        title: 'Card Show Planner',
-        blurb: 'UK & US Pokémon card shows mapped, filtered and saved. Plan your weekend in one screen.',
-        href: '/dashboard/card-shows',
-        accent: 'linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)',
-        emoji: '📍',
-      },
-      {
         title: 'Trade Evaluator',
         blurb: 'Build two stacks of cards side-by-side. See the fair-value gap in cash, trade-credit and blended modes.',
         href: '/dealer',
@@ -88,17 +81,24 @@ const CATEGORIES: Category[] = [
         accent: 'linear-gradient(135deg, #ec4899 0%, #f472b6 100%)',
         emoji: '🔔',
       },
+      {
+        title: 'Card Show Planner',
+        blurb: 'UK & US Pokémon card shows mapped, filtered and saved. Plan your weekend in one screen.',
+        href: '/dashboard/card-shows',
+        gated: true,
+        accent: 'linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)',
+        emoji: '📍',
+      },
     ],
   },
   {
     label: 'Create & Share',
-    hint: 'For creators, dealers and Discord show-and-tellers.',
+    hint: 'Open to everyone.',
     tools: [
       {
         title: 'Studio',
         blurb: 'One-click branded graphics from any card or set. Export PNG for X, Instagram, YouTube thumbs.',
         href: '/studio',
-        gated: true,
         accent: 'linear-gradient(135deg, #1a5fad 0%, #7c3aed 100%)',
         emoji: '🎨',
       },

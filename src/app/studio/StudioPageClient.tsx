@@ -67,13 +67,13 @@ type GradeView = 'raw' | 'psa9' | 'psa10'
 // Layout variants for the Insight Card
 type CardLayout = 'compact' | 'showcase' | 'minimal' | 'hero'
 
-const VISUAL_TYPES: { id: VisualType; label: string; icon: string; desc: string; category: string }[] = [
-  { id: 'insight',       label: 'Insight Card',   icon: '*', desc: 'Prices, trend & grade premium',        category: 'Card'   },
-  { id: 'peak-distance', label: 'Peak Distance',   icon: '^', desc: 'Price vs its recent high',            category: 'Card'   },
-  { id: 'temperature',   label: 'Temperature',     icon: 'o', desc: 'Is this card hot or cooling?',        category: 'Card'   },
-  { id: 'grade-compare', label: 'Grade Compare',   icon: 'o', desc: 'Raw vs PSA 9 vs PSA 10 bars',        category: 'Card'   },
-  { id: 'movers',        label: 'Market Movers',   icon: '^v', desc: 'Top risers or fallers',              category: 'Market' },
-  { id: 'set-report',    label: 'Set Report',      icon: '#', desc: '30-day performance snapshot',         category: 'Set'    },
+const VISUAL_TYPES: { id: VisualType; label: string; icon: string; desc: string; category: string; accent: string }[] = [
+  { id: 'insight',       label: 'Insight Card',  icon: '✨', desc: 'Prices, trend & grade premium',  category: 'Card',   accent: '#1a5fad' },
+  { id: 'peak-distance', label: 'Peak Distance', icon: '📐', desc: 'Price vs its recent high',       category: 'Card',   accent: '#7c3aed' },
+  { id: 'temperature',   label: 'Temperature',   icon: '🌡️', desc: 'Hot, warm or cooling?',          category: 'Card',   accent: '#ef4444' },
+  { id: 'grade-compare', label: 'Grade Compare', icon: '📊', desc: 'Raw vs PSA 9 vs PSA 10 bars',    category: 'Card',   accent: '#0ea5e9' },
+  { id: 'movers',        label: 'Market Movers', icon: '📈', desc: 'Top risers or fallers',          category: 'Market', accent: '#22c55e' },
+  { id: 'set-report',    label: 'Set Report',    icon: '🧩', desc: '30-day performance snapshot',    category: 'Set',    accent: '#f59e0b' },
 ]
 
 // -- Data fetching -------------------------------------------------------------
@@ -1873,11 +1873,40 @@ export default function StudioPageClient() {
         isAccessibleForFree: true,
       }) }} />
 
-      <div style={{ marginBottom: isMobile ? 18 : 28 }}>
-        <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: isMobile ? 24 : 30, margin: '0 0 4px', color: 'var(--text)', fontWeight: 900 }}>PokePrices Studio</h1>
-        <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0, fontFamily: "'Figtree',sans-serif" }}>
-          Create shareable market intelligence visuals for Twitter, Reddit, and Discord.
+      <div style={{ marginBottom: isMobile ? 18 : 26 }}>
+        <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 11, fontWeight: 800, color: 'var(--primary)', background: 'rgba(26,95,173,0.10)', padding: '4px 12px', borderRadius: 14, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 12, fontFamily: "'Figtree',sans-serif" }}>
+          Free · No login · No watermark
+        </div>
+        <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: isMobile ? 26 : 32, margin: '0 0 8px', color: 'var(--text)', fontWeight: 900, letterSpacing: '-0.5px' }}>
+          PokePrices Studio
+        </h1>
+        <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: 0, fontFamily: "'Figtree',sans-serif", lineHeight: 1.6, maxWidth: 680 }}>
+          Turn live PokePrices data into share-ready graphics. Pick a visual style, drop in a card or set, tweak the look — export a clean PNG for X, Reddit, Discord or your set-page banner. Built on the same sold-listing data the rest of the site runs on, so the numbers on the image are the numbers you can verify everywhere else.
         </p>
+
+        {/* Workflow hint strip — three quick pills explaining the flow */}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
+          {[
+            { n: '1', label: 'Pick a visual' },
+            { n: '2', label: 'Drop in a card or set' },
+            { n: '3', label: 'Export PNG' },
+          ].map(s => (
+            <div key={s.n} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 20,
+              padding: '5px 12px 5px 6px',
+              fontFamily: "'Figtree',sans-serif",
+            }}>
+              <span style={{
+                width: 20, height: 20, borderRadius: '50%',
+                background: 'var(--primary)', color: '#fff',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 10, fontWeight: 900,
+              }}>{s.n}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{s.label}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '280px 1fr 240px', gap: isMobile ? 14 : 24, alignItems: 'start' }}>
@@ -1892,23 +1921,37 @@ export default function StudioPageClient() {
               <div key={cat} style={{ marginBottom: 8 }}>
                 <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 5, fontFamily: "'Figtree',sans-serif" }}>{cat}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {VISUAL_TYPES.filter(v => v.category === cat).map(vt => (
-                    <button key={vt.id} onClick={() => setVisualType(vt.id)} style={{
-                      display: 'flex', alignItems: 'center', gap: 10,
-                      padding: '9px 12px', borderRadius: 10,
-                      border: `1px solid ${visualType === vt.id ? 'var(--primary)' : 'var(--border)'}`,
-                      background: visualType === vt.id ? 'rgba(26,95,173,0.08)' : 'transparent',
-                      color: visualType === vt.id ? 'var(--primary)' : 'var(--text)',
-                      cursor: 'pointer', textAlign: 'left', width: '100%',
-                      fontFamily: "'Figtree',sans-serif", transition: 'all 0.15s',
-                    }}>
-                      <span style={{ fontSize: 13 }}>{vt.icon}</span>
-                      <div>
-                        <div style={{ fontSize: 12, fontWeight: 700, lineHeight: 1.2 }}>{vt.label}</div>
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>{vt.desc}</div>
-                      </div>
-                    </button>
-                  ))}
+                  {VISUAL_TYPES.filter(v => v.category === cat).map(vt => {
+                    const active = visualType === vt.id
+                    return (
+                      <button key={vt.id} onClick={() => setVisualType(vt.id)} style={{
+                        position: 'relative', display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '10px 12px 10px 14px', borderRadius: 12,
+                        border: `1px solid ${active ? vt.accent : 'var(--border)'}`,
+                        background: active ? `${vt.accent}10` : 'var(--card)',
+                        color: 'var(--text)',
+                        cursor: 'pointer', textAlign: 'left', width: '100%',
+                        fontFamily: "'Figtree',sans-serif", transition: 'transform 0.12s, border-color 0.12s, background 0.12s',
+                        overflow: 'hidden',
+                      }}
+                      onMouseEnter={e => { if (!active) (e.currentTarget as HTMLButtonElement).style.transform = 'translateX(2px)' }}
+                      onMouseLeave={e => { if (!active) (e.currentTarget as HTMLButtonElement).style.transform = '' }}
+                      >
+                        {/* Active accent strip on the left edge */}
+                        {active && (
+                          <span aria-hidden style={{
+                            position: 'absolute', left: 0, top: 0, bottom: 0, width: 4,
+                            background: vt.accent,
+                          }} />
+                        )}
+                        <span style={{ fontSize: 20, lineHeight: 1, flexShrink: 0 }}>{vt.icon}</span>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 800, lineHeight: 1.2, color: active ? vt.accent : 'var(--text)' }}>{vt.label}</div>
+                          <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.4 }}>{vt.desc}</div>
+                        </div>
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
             ))}

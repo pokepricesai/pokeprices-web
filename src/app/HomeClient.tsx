@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import SearchBar from '@/components/SearchBar'
+import InlineChat from '@/components/InlineChat'
 import NewsletterSignup from '@/components/NewsletterSignup'
 import FAQ from '@/components/FAQ'
 import { getHomeFaqItems } from '@/lib/faqs'
@@ -454,6 +455,32 @@ export default function HomeClient() {
               </div>
             </Link>
           ))}
+        </div>
+      </section>
+
+      {/* ── AI ASSISTANT ── */}
+      <section style={{ padding: '36px 24px 8px', maxWidth: 820, margin: '0 auto' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+          <div>
+            <h2 style={{ fontSize: 22, margin: 0, fontFamily: "'Outfit', sans-serif" }}>Ask Me Anything</h2>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0', fontFamily: "'Figtree', sans-serif" }}>
+              Collector-built assistant that knows every card and sold price in our database.
+            </p>
+          </div>
+          <Link href="/ai-assistant" style={{ fontSize: 12, fontWeight: 800, color: 'var(--primary)', textDecoration: 'none', textTransform: 'uppercase', letterSpacing: 1.5 }}>
+            Open in full →
+          </Link>
+        </div>
+        <div style={{ position: 'relative' }}>
+          <div aria-hidden style={{
+            position: 'absolute', inset: -10, borderRadius: 24,
+            background: 'radial-gradient(ellipse at center, rgba(255,203,5,0.18), rgba(106,176,245,0.10) 55%, transparent 78%)',
+            filter: 'blur(14px)',
+            pointerEvents: 'none',
+          }} />
+          <div style={{ position: 'relative' }}>
+            <InlineChat />
+          </div>
         </div>
       </section>
 

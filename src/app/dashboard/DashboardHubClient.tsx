@@ -29,12 +29,12 @@ export default function DashboardHubClient() {
       setAvatarPokemonId(typeof pid === 'number' ? pid : null)
     }
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) { router.push('/dashboard/login'); return }
+      if (!session) { router.replace('/dashboard/login'); return }
       applyUser(session.user)
       setLoading(false)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
-      if (!session) router.push('/dashboard/login')
+      if (!session) router.replace('/dashboard/login')
       else applyUser(session.user)
     })
     try {

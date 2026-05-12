@@ -209,26 +209,50 @@ export default function GradingCalculatorClient() {
     return () => clearTimeout(timer)
   }, [query])
 
+  // The tier-grade columns (bgs10, cgc10 pristine, sgc10, tag10, ace10 etc.)
+  // are NOT populated on every daily_prices row — they only land when a sale
+  // at that grade is recorded. Pulling LIMIT 1 by date desc therefore often
+  // returns nulls for grades that the card DOES have prices for further
+  // back. Fix: pull the last ~120 rows and take the most recent non-null
+  // value per column, so the target selector reflects what we actually know.
+  async function fetchLatestTierPrices(cardSlug: string) {
+    const slug = `pc-${(cardSlug || '').toString().replace(/^pc-/, '')}`
+    const { data: rows } = await supabase
+      .from('daily_prices')
+      .select('date, bgs10_usd, bgs10black_usd, cgc10_usd, cgc10pristine_usd, sgc10_usd, tag10_usd, ace10_usd')
+      .eq('card_slug', slug)
+      .order('date', { ascending: false })
+      .limit(120)
+    const out = {
+      bgs10_usd:         null as number | null,
+      bgs10black_usd:    null as number | null,
+      cgc10_usd:         null as number | null,
+      cgc10pristine_usd: null as number | null,
+      sgc10_usd:         null as number | null,
+      tag10_usd:         null as number | null,
+      ace10_usd:         null as number | null,
+    }
+    for (const row of (rows || []) as any[]) {
+      for (const k of Object.keys(out) as (keyof typeof out)[]) {
+        if (out[k] == null && row[k] != null && row[k] > 0) out[k] = row[k]
+      }
+    }
+    return out
+  }
+
   async function pickFromSearch(r: any) {
-    // Pull trends (raw / psa9 / psa10 + pcts) and the latest daily_prices
-    // row in parallel — daily_prices carries the new tier columns the
-    // target selector needs.
+    // Pull trends (raw / psa9 / psa10) and the most-recent non-null tier
+    // prices in parallel.
     const cardSlug = r.url_slug || r.card_slug
-    const [{ data: trend }, { data: dpRows }] = await Promise.all([
+    const [{ data: trend }, tiers] = await Promise.all([
       supabase
         .from('card_trends')
         .select('current_raw, current_psa9, current_psa10')
         .eq('card_name', r.name)
         .eq('set_name', r.subtitle || r.set_name)
         .maybeSingle(),
-      supabase
-        .from('daily_prices')
-        .select('bgs10_usd, bgs10black_usd, cgc10_usd, cgc10pristine_usd, sgc10_usd, tag10_usd, ace10_usd')
-        .eq('card_slug', `pc-${(cardSlug || '').toString().replace(/^pc-/, '')}`)
-        .order('date', { ascending: false })
-        .limit(1),
+      fetchLatestTierPrices(cardSlug),
     ])
-    const dp = (dpRows && dpRows[0]) as any
     setSelected({
       card_slug:           cardSlug,
       card_url_slug:       cardSlug,
@@ -239,40 +263,21 @@ export default function GradingCalculatorClient() {
       psa9_usd:            trend?.current_psa9 ?? null,
       psa10_usd:           trend?.current_psa10 ?? null,
       card_number_display: r.card_number_display || null,
-      bgs10_usd:           dp?.bgs10_usd ?? null,
-      bgs10black_usd:      dp?.bgs10black_usd ?? null,
-      cgc10_usd:           dp?.cgc10_usd ?? null,
-      cgc10pristine_usd:   dp?.cgc10pristine_usd ?? null,
-      sgc10_usd:           dp?.sgc10_usd ?? null,
-      tag10_usd:           dp?.tag10_usd ?? null,
-      ace10_usd:           dp?.ace10_usd ?? null,
+      ...tiers,
     })
     setTarget('psa10')
     setQuery(''); setResults([])
   }
 
   async function pickFromCandidate(c: PortfolioCandidate) {
-    // Fetch tier prices from daily_prices so the target selector has data.
-    const { data: dpRows } = await supabase
-      .from('daily_prices')
-      .select('bgs10_usd, bgs10black_usd, cgc10_usd, cgc10pristine_usd, sgc10_usd, tag10_usd, ace10_usd')
-      .eq('card_slug', `pc-${(c.card_slug || '').toString().replace(/^pc-/, '')}`)
-      .order('date', { ascending: false })
-      .limit(1)
-    const dp = (dpRows && dpRows[0]) as any
+    const tiers = await fetchLatestTierPrices(c.card_slug)
     setSelected({
       card_slug: c.card_slug, card_url_slug: c.card_url_slug,
       card_name: c.card_name, set_name: c.set_name,
       image_url: c.image_url,
       raw_usd: c.raw_usd, psa9_usd: c.psa9_usd, psa10_usd: c.psa10_usd,
       card_number_display: c.card_number_display,
-      bgs10_usd:         dp?.bgs10_usd ?? null,
-      bgs10black_usd:    dp?.bgs10black_usd ?? null,
-      cgc10_usd:         dp?.cgc10_usd ?? null,
-      cgc10pristine_usd: dp?.cgc10pristine_usd ?? null,
-      sgc10_usd:         dp?.sgc10_usd ?? null,
-      tag10_usd:         dp?.tag10_usd ?? null,
-      ace10_usd:         dp?.ace10_usd ?? null,
+      ...tiers,
     })
     setTarget('psa10')
   }

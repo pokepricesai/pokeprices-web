@@ -154,11 +154,11 @@ export default function WatchlistClient() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) { router.push('/dashboard/login'); return }
+      if (!session) { router.replace('/dashboard/login'); return }
       setUser(session.user)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
-      if (!session) router.push('/dashboard/login')
+      if (!session) router.replace('/dashboard/login')
       else setUser(session.user)
     })
     return () => subscription.unsubscribe()

@@ -27,7 +27,7 @@ export default function SettingsClient() {
 
   useEffect(() => {
     function applySession(u: any) {
-      if (!u) { router.push('/dashboard/login'); return }
+      if (!u) { router.replace('/dashboard/login'); return }
       setUser(u)
       const pid = u.user_metadata?.avatar_pokemon_id
       setAvatarPokemonId(typeof pid === 'number' ? pid : null)
