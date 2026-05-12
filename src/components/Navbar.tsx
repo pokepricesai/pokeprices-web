@@ -100,6 +100,40 @@ function ChevronDown({ size = 10 }: { size?: number }) {
   )
 }
 
+// Deterministic colour for the initial-fallback avatar so the same user
+// always gets the same circle colour.
+const AVATAR_COLOURS = ['#1a5fad', '#0ea5e9', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6']
+function avatarColour(id: string | null | undefined): string {
+  if (!id) return AVATAR_COLOURS[0]
+  let h = 0
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0
+  return AVATAR_COLOURS[Math.abs(h) % AVATAR_COLOURS.length]
+}
+function avatarInitial(displayName: string | null | undefined, email: string | null | undefined): string {
+  const source = displayName || email || ''
+  const ch = source.trim().charAt(0).toUpperCase()
+  return ch || '?'
+}
+
+const mobAuthLink: React.CSSProperties = {
+  display: 'block', color: '#fff', textDecoration: 'none',
+  background: 'rgba(255,255,255,0.10)', border: '1px solid rgba(255,255,255,0.20)',
+  padding: '10px 12px', borderRadius: 10, fontSize: 14, fontWeight: 700,
+  fontFamily: "'Figtree', sans-serif", boxSizing: 'border-box',
+}
+
+function ProfileLink({ href, label, onClose }: { href: string; label: string; onClose: () => void }) {
+  return (
+    <Link href={href} onClick={onClose}
+      style={{ display: 'block', padding: '8px 14px', fontSize: 13, fontWeight: 600, color: 'var(--text)', textDecoration: 'none', fontFamily: "'Figtree', sans-serif" }}
+      onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.background = 'var(--bg-light)'}
+      onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.background = 'transparent'}
+    >
+      {label}
+    </Link>
+  )
+}
+
 // ── Main component ──────────────────────────────────────────────────────────
 
 export default function Navbar() {
@@ -113,13 +147,27 @@ export default function Navbar() {
   const [showResults, setShowResults]   = useState(false)
   const [activeIndex, setActiveIndex]   = useState(-1)
   const [isAuthed, setIsAuthed]         = useState(false)
+  const [user, setUser]                 = useState<{ id: string; email: string | null; displayName: string } | null>(null)
+  const [profileOpen, setProfileOpen]   = useState(false)
   const debounceRef = useRef<NodeJS.Timeout>()
   const searchRef = useRef<HTMLDivElement>(null)
   const navRef = useRef<HTMLDivElement>(null)
+  const profileRef = useRef<HTMLDivElement>(null)
+  const closeTimerRef = useRef<NodeJS.Timeout>()
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => setIsAuthed(!!session))
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => setIsAuthed(!!session))
+    function applySession(session: any) {
+      setIsAuthed(!!session)
+      if (session?.user) {
+        const u = session.user
+        const display = u.user_metadata?.display_name || (u.email ? u.email.split('@')[0] : 'Collector')
+        setUser({ id: u.id, email: u.email ?? null, displayName: display })
+      } else {
+        setUser(null)
+      }
+    }
+    supabase.auth.getSession().then(({ data: { session } }) => applySession(session))
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => applySession(session))
     return () => subscription.unsubscribe()
   }, [])
 
@@ -132,10 +180,30 @@ export default function Navbar() {
       if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
         setShowResults(false)
       }
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
+        setProfileOpen(false)
+      }
     }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
+
+  // Hover-open dropdowns with a small grace delay on leave so flicking the
+  // cursor down to a long menu doesn't snap it shut mid-motion.
+  function hoverOpen(label: string) {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+    setOpenGroup(label)
+  }
+  function hoverClose() {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+    closeTimerRef.current = setTimeout(() => setOpenGroup(null), 140)
+  }
+
+  async function handleSignOut() {
+    setProfileOpen(false)
+    await supabase.auth.signOut()
+    router.push('/')
+  }
 
   // Close dropdowns on route change so they don't linger after navigation.
   useEffect(() => {
@@ -308,8 +376,13 @@ export default function Navbar() {
         </Link>
       )
     }
+    // Hover container — wraps both trigger and the dropdown panel so the
+    // pointer can move from the trigger into the menu without closing it.
     return (
-      <div style={{ position: 'relative' }}>
+      <div style={{ position: 'relative' }}
+        onMouseEnter={() => hoverOpen(group.label)}
+        onMouseLeave={hoverClose}
+      >
         <button onClick={() => setOpenGroup(isOpen ? null : group.label)}
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -393,19 +466,88 @@ export default function Navbar() {
         {showResults && allResults.length > 0 && <ResultsDropdown />}
       </div>
 
-      {/* Auth area (Step 1 — unchanged; full overhaul comes in Step 2) */}
+      {/* Auth area — Sign in + Sign up free when logged out; profile menu when logged in */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }} className="auth-area">
-        {isAuthed ? (
-          <Link href="/dashboard" style={{
-            color: '#fff', textDecoration: 'none', fontSize: 13, fontWeight: 800,
-            background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.25)',
-            padding: '5px 12px', borderRadius: 20, whiteSpace: 'nowrap',
-          }}>Dashboard</Link>
+        {isAuthed && user ? (
+          <div ref={profileRef} style={{ position: 'relative' }}
+            onMouseEnter={() => { if (closeTimerRef.current) clearTimeout(closeTimerRef.current); setProfileOpen(true) }}
+            onMouseLeave={() => { if (closeTimerRef.current) clearTimeout(closeTimerRef.current); closeTimerRef.current = setTimeout(() => setProfileOpen(false), 160) }}
+          >
+            <button onClick={() => setProfileOpen(o => !o)}
+              aria-label="Account menu"
+              style={{
+                width: 36, height: 36, borderRadius: '50%',
+                background: avatarColour(user.id),
+                color: '#fff', fontSize: 15, fontWeight: 800,
+                fontFamily: "'Outfit', sans-serif",
+                border: '2px solid rgba(255,255,255,0.45)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', padding: 0,
+                boxShadow: profileOpen ? '0 0 0 3px rgba(255,255,255,0.18)' : 'none',
+                transition: 'box-shadow 0.15s',
+              }}>
+              {avatarInitial(user.displayName, user.email)}
+            </button>
+
+            {profileOpen && (
+              <div style={{
+                position: 'absolute', top: 'calc(100% + 8px)', right: 0,
+                minWidth: 240, background: 'var(--card)',
+                border: '1px solid var(--border)', borderRadius: 12,
+                boxShadow: '0 12px 40px rgba(0,0,0,0.18)',
+                padding: '6px 0', zIndex: 150,
+                fontFamily: "'Figtree', sans-serif",
+              }}>
+                {/* Header — name + email */}
+                <div style={{ padding: '10px 14px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: '50%',
+                    background: avatarColour(user.id), color: '#fff',
+                    fontSize: 15, fontWeight: 800, fontFamily: "'Outfit', sans-serif",
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0,
+                  }}>{avatarInitial(user.displayName, user.email)}</div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.displayName}</div>
+                    {user.email && <div style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.email}</div>}
+                  </div>
+                </div>
+
+                <ProfileLink href="/dashboard"             label="Dashboard" onClose={() => setProfileOpen(false)} />
+                <ProfileLink href="/dashboard/portfolio"   label="Portfolio" onClose={() => setProfileOpen(false)} />
+                <ProfileLink href="/dashboard/watchlist"   label="Watchlist" onClose={() => setProfileOpen(false)} />
+
+                <div style={{ height: 1, background: 'var(--border)', margin: '6px 0' }} />
+                <ProfileLink href="/dashboard/settings"    label="Settings"  onClose={() => setProfileOpen(false)} />
+
+                <button onClick={handleSignOut}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left',
+                    background: 'transparent', border: 'none', cursor: 'pointer',
+                    padding: '8px 14px', fontSize: 13, fontWeight: 600,
+                    color: '#ef4444', fontFamily: "'Figtree', sans-serif",
+                  }}
+                  onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.08)'}
+                  onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
+                >
+                  Log out
+                </button>
+              </div>
+            )}
+          </div>
         ) : (
-          <Link href="/dashboard/login" style={{
-            color: '#fff', textDecoration: 'none', fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap',
-            padding: '5px 12px',
-          }}>Sign in</Link>
+          <>
+            <Link href="/dashboard/login" style={{
+              color: 'rgba(255,255,255,0.9)', textDecoration: 'none',
+              fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', padding: '5px 10px',
+            }}>Sign in</Link>
+            <Link href="/dashboard/login?mode=signup" style={{
+              color: '#0f172a', background: 'var(--accent)',
+              textDecoration: 'none', fontSize: 13, fontWeight: 800,
+              padding: '7px 14px', borderRadius: 20, whiteSpace: 'nowrap',
+              boxShadow: '0 2px 8px rgba(255,203,5,0.35)',
+            }}>Sign up free</Link>
+          </>
         )}
       </div>
 
@@ -482,18 +624,42 @@ export default function Navbar() {
           })}
 
           <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {isAuthed ? (
-              <Link href="/dashboard" onClick={() => setMenuOpen(false)} style={{
-                display: 'block', textAlign: 'center', color: '#fff', textDecoration: 'none',
-                background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.3)',
-                padding: '10px', borderRadius: 10, fontSize: 14, fontWeight: 800,
-              }}>Dashboard</Link>
+            {isAuthed && user ? (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0' }}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: '50%',
+                    background: avatarColour(user.id), color: '#fff',
+                    fontSize: 15, fontWeight: 800, fontFamily: "'Outfit', sans-serif",
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0,
+                  }}>{avatarInitial(user.displayName, user.email)}</div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.displayName}</div>
+                    {user.email && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.email}</div>}
+                  </div>
+                </div>
+                <Link href="/dashboard"           onClick={() => setMenuOpen(false)} style={mobAuthLink}>Dashboard</Link>
+                <Link href="/dashboard/portfolio" onClick={() => setMenuOpen(false)} style={mobAuthLink}>Portfolio</Link>
+                <Link href="/dashboard/watchlist" onClick={() => setMenuOpen(false)} style={mobAuthLink}>Watchlist</Link>
+                <Link href="/dashboard/settings"  onClick={() => setMenuOpen(false)} style={mobAuthLink}>Settings</Link>
+                <button onClick={async () => { await handleSignOut(); setMenuOpen(false) }}
+                  style={{ ...mobAuthLink, background: 'transparent', border: '1px solid rgba(239,68,68,0.45)', color: '#fecaca', textAlign: 'left', cursor: 'pointer' }}>
+                  Log out
+                </button>
+              </>
             ) : (
-              <Link href="/dashboard/login" onClick={() => setMenuOpen(false)} style={{
-                display: 'block', textAlign: 'center', color: '#fff', textDecoration: 'none',
-                background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.3)',
-                padding: '10px', borderRadius: 10, fontSize: 14, fontWeight: 800,
-              }}>Sign in</Link>
+              <>
+                <Link href="/dashboard/login?mode=signup" onClick={() => setMenuOpen(false)} style={{
+                  display: 'block', textAlign: 'center', color: '#0f172a',
+                  textDecoration: 'none', background: 'var(--accent)',
+                  padding: '12px', borderRadius: 10, fontSize: 15, fontWeight: 800,
+                }}>Sign up free</Link>
+                <Link href="/dashboard/login" onClick={() => setMenuOpen(false)} style={{
+                  display: 'block', textAlign: 'center', color: '#fff',
+                  textDecoration: 'none', padding: '10px', fontSize: 14, fontWeight: 700,
+                }}>Sign in</Link>
+              </>
             )}
           </div>
         </div>
