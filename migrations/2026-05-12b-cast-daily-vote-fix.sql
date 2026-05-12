@@ -10,6 +10,11 @@
 --      explicitly the table's columns.
 -- The RPC's JSON response keys change from option_a_votes → a_votes etc.,
 -- so the client also unpacks the new names.
+--
+-- Postgres won't let CREATE OR REPLACE change a function's return type, so
+-- we drop first.
+
+DROP FUNCTION IF EXISTS public.cast_daily_vote(date, int, text);
 
 CREATE OR REPLACE FUNCTION public.cast_daily_vote(
   p_date       date,
