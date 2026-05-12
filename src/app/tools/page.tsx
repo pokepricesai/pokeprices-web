@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import type { Metadata } from 'next'
+import ComingSoonBadge from '@/components/ComingSoonBadge'
 
 export const metadata: Metadata = {
   title: 'Tools for Pokémon TCG collectors | PokePrices',
@@ -180,18 +181,8 @@ function ToolCard({ tool }: { tool: Tool }) {
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
           <div style={{ fontSize: 28 }}>{tool.emoji}</div>
-          {tool.comingSoon && (
-            <span style={{
-              fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.5,
-              background: 'rgba(255,255,255,0.18)', padding: '3px 8px', borderRadius: 8,
-            }}>Coming soon</span>
-          )}
-          {tool.gated && !tool.comingSoon && (
-            <span style={{
-              fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.5,
-              background: 'rgba(255,255,255,0.18)', padding: '3px 8px', borderRadius: 8,
-            }}>Sign in</span>
-          )}
+          {tool.comingSoon && <ComingSoonBadge variant="light" />}
+          {tool.gated && !tool.comingSoon && <ComingSoonBadge variant="light" label="Sign in" />}
         </div>
         <div style={{ fontSize: 22, fontWeight: 900, fontFamily: "'Outfit', sans-serif", lineHeight: 1.15, marginTop: 'auto' }}>
           {tool.title}

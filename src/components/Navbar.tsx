@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import Avatar from './Avatar'
+import ComingSoonBadge from './ComingSoonBadge'
 
 interface SearchResult {
   result_type: string
@@ -200,6 +201,14 @@ export default function Navbar() {
     setOpenGroup(null); setMenuOpen(false); setMobileExp(null)
   }, [])
 
+  // Lock body scroll when the mobile menu is open so it does not double-scroll.
+  useEffect(() => {
+    if (!menuOpen) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [menuOpen])
+
   async function handleSearch(val: string) {
     setQuery(val)
     setActiveIndex(-1)
@@ -330,12 +339,8 @@ export default function Navbar() {
       }}>
         {item.gated && <span style={{ color: 'var(--text-muted)', display: 'inline-flex' }} title="Sign in to use"><LockIcon /></span>}
         <span style={{ flex: 1 }}>{item.label}</span>
-        {item.badge && !disabled && (
-          <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--accent)', background: 'rgba(255,203,5,0.18)', padding: '2px 7px', borderRadius: 10, letterSpacing: 0.5, textTransform: 'uppercase' }}>{item.badge}</span>
-        )}
-        {disabled && (
-          <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', background: 'var(--bg-light)', border: '1px solid var(--border)', padding: '2px 7px', borderRadius: 10, letterSpacing: 0.5, textTransform: 'uppercase' }}>Coming soon</span>
-        )}
+        {item.badge && !disabled && <ComingSoonBadge tone="new" label={item.badge} />}
+        {disabled && <ComingSoonBadge variant="dark" />}
       </div>
     )
     if (disabled || !item.href) {
@@ -362,7 +367,7 @@ export default function Navbar() {
           padding: '6px 10px', borderRadius: 8, whiteSpace: 'nowrap',
         }}>
           {group.label}
-          {group.badge && <span style={{ fontSize: 9, fontWeight: 800, color: '#0f172a', background: 'var(--accent)', padding: '1px 6px', borderRadius: 10, letterSpacing: 0.5, textTransform: 'uppercase' }}>{group.badge}</span>}
+          {group.badge && <ComingSoonBadge tone="new" label={group.badge} />}
         </Link>
       )
     }
@@ -572,7 +577,7 @@ export default function Navbar() {
                 <Link key={group.label} href={group.href} onClick={() => setMenuOpen(false)}
                   style={{ display: 'block', color: '#fff', textDecoration: 'none', padding: '12px 0', fontSize: 15, fontWeight: 800, borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
                   {group.label}
-                  {group.badge && <span style={{ fontSize: 9, fontWeight: 800, color: '#0f172a', background: 'var(--accent)', padding: '1px 6px', borderRadius: 10, letterSpacing: 0.5, textTransform: 'uppercase', marginLeft: 8 }}>{group.badge}</span>}
+                  {group.badge && <span style={{ marginLeft: 8, display: 'inline-flex', verticalAlign: 'middle' }}><ComingSoonBadge tone="new" label={group.badge} /></span>}
                 </Link>
               )
             }
@@ -580,20 +585,20 @@ export default function Navbar() {
             return (
               <div key={group.label} style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
                 <button onClick={() => setMobileExp(isOpen ? null : group.label)}
-                  style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'none', border: 'none', color: '#fff', padding: '12px 0', fontSize: 15, fontWeight: 800, cursor: 'pointer', fontFamily: "'Figtree', sans-serif" }}>
+                  style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'none', border: 'none', color: '#fff', padding: '14px 0', fontSize: 15, fontWeight: 800, cursor: 'pointer', fontFamily: "'Figtree', sans-serif" }}>
                   <span>{group.label}</span>
-                  <span style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s' }}><ChevronDown size={12} /></span>
+                  <span style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s', opacity: 0.75 }}><ChevronDown size={16} /></span>
                 </button>
                 {isOpen && group.items && (
                   <div style={{ padding: '4px 0 12px 12px' }}>
                     {group.items.map(it => {
                       const disabled = it.comingSoon
                       const content = (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', fontSize: 14, color: disabled ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.92)', opacity: disabled ? 0.6 : 1, fontFamily: "'Figtree', sans-serif" }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0', fontSize: 14, color: disabled ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.92)', opacity: disabled ? 0.6 : 1, fontFamily: "'Figtree', sans-serif" }}>
                           {it.gated && <span style={{ display: 'inline-flex' }}><LockIcon size={11} /></span>}
                           <span style={{ flex: 1 }}>{it.label}</span>
-                          {it.badge && !disabled && <span style={{ fontSize: 9, fontWeight: 800, color: '#0f172a', background: 'var(--accent)', padding: '1px 6px', borderRadius: 10 }}>{it.badge}</span>}
-                          {disabled && <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.65)' }}>Coming soon</span>}
+                          {it.badge && !disabled && <ComingSoonBadge tone="new" label={it.badge} />}
+                          {disabled && <ComingSoonBadge variant="light" />}
                         </div>
                       )
                       if (disabled || !it.href) return <div key={it.label}>{content}</div>
@@ -654,6 +659,20 @@ export default function Navbar() {
               </>
             )}
           </div>
+
+          {/* Close affordance — covers the case where the user has scrolled
+              far from the hamburger and needs a quick way back. */}
+          <button onClick={() => setMenuOpen(false)}
+            style={{
+              display: 'block', width: '100%', marginTop: 18, padding: '10px',
+              background: 'transparent', border: '1px solid rgba(255,255,255,0.2)',
+              color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: 700,
+              borderRadius: 10, cursor: 'pointer', fontFamily: "'Figtree', sans-serif",
+              textTransform: 'uppercase', letterSpacing: 1.5,
+            }}
+          >
+            Close menu
+          </button>
         </div>
       )}
 

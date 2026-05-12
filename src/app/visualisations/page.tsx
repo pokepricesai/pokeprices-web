@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import type { Metadata } from 'next'
+import ComingSoonBadge from '@/components/ComingSoonBadge'
 
 export const metadata: Metadata = {
   title: 'Pokémon TCG market visualisations | PokePrices',
@@ -136,11 +137,7 @@ function VizCard({ viz }: { viz: Viz }) {
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
           <div style={{ fontSize: 28 }}>{viz.emoji}</div>
-          <span style={{
-            fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.5,
-            background: viz.status === 'live' ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.18)',
-            padding: '3px 8px', borderRadius: 8,
-          }}>{STATUS_LABEL[viz.status]}</span>
+          <ComingSoonBadge variant="light" label={STATUS_LABEL[viz.status]} />
         </div>
         <div style={{ fontSize: 22, fontWeight: 900, fontFamily: "'Outfit', sans-serif", lineHeight: 1.15, marginTop: 'auto' }}>
           {viz.title}

@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import ComingSoonBadge from '@/components/ComingSoonBadge'
 
 type ToolId = 'portfolio' | 'watchlist' | 'sets' | 'grading' | 'card-shows' | 'alerts' | 'settings'
 
@@ -119,13 +120,7 @@ export default function DashboardNav({
                   }}>
                     <span style={{ fontSize: 13, lineHeight: 1 }}>{t.icon}</span>
                     {t.label}
-                    {t.soon && (
-                      <span style={{
-                        fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 10,
-                        background: 'rgba(245, 158, 11, 0.14)', color: '#b45309',
-                        textTransform: 'uppercase', letterSpacing: 0.6,
-                      }}>soon</span>
-                    )}
+                    {t.soon && <ComingSoonBadge label="Soon" />}
                   </Link>
                 )
               })}
