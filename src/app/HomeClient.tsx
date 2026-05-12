@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import InlineChat from '@/components/InlineChat'
+import SearchBar from '@/components/SearchBar'
 import NewsletterSignup from '@/components/NewsletterSignup'
 import FAQ from '@/components/FAQ'
 import { getHomeFaqItems } from '@/lib/faqs'
@@ -32,17 +32,6 @@ type WeeklyReportRow = {
   metric_label: string
 }
 
-type HeatmapCard = {
-  card_slug: string
-  card_name: string
-  set_name: string
-  card_url_slug: string | null
-  price_usd: number | null
-  pct_change: number | null
-  color_band: string
-  is_recovery: boolean
-}
-
 type HiddenGem = {
   card_slug: string
   card_name: string
@@ -54,122 +43,42 @@ type HiddenGem = {
   gem_score: number
 }
 
-// ── Tools Row Components ─────────────────────────────────────────────────
-
-function ToolIcon({ path }: { path: string }) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-      <path d={path} />
-    </svg>
-  )
+type Insight = {
+  id: string
+  slug: string
+  headline: string
+  intro: string | null
+  theme_label: string | null
+  published_at: string
+  image_url: string | null
+  read_time_mins: number | null
 }
 
-function PokeballIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
-      <circle cx="12" cy="12" r="9" />
-      <line x1="3" y1="12" x2="9" y2="12" />
-      <line x1="15" y1="12" x2="21" y2="12" />
-      <circle cx="12" cy="12" r="2.5" fill="currentColor" />
-    </svg>
-  )
-}
+// ── Featured tools ───────────────────────────────────────────────────────
 
-function ToolChip({ href, icon, label, comingSoon = false }: {
-  href?: string; icon: React.ReactNode; label: string; comingSoon?: boolean
-}) {
-  const baseStyle: React.CSSProperties = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 7,
-    padding: '7px 14px',
-    borderRadius: 20,
-    fontSize: 12,
-    fontWeight: 700,
-    fontFamily: "'Figtree', sans-serif",
-    textDecoration: 'none',
-    whiteSpace: 'nowrap',
-    transition: 'all 0.15s',
-    backdropFilter: 'blur(4px)',
-  }
-
-  if (comingSoon) {
-    return (
-      <span style={{
-        ...baseStyle,
-        background: 'rgba(255,255,255,0.06)',
-        color: 'rgba(255,255,255,0.55)',
-        border: '1px dashed rgba(255,255,255,0.2)',
-        cursor: 'default',
-      }}>
-        {icon}
-        {label}
-        <span style={{
-          fontSize: 9,
-          fontWeight: 800,
-          letterSpacing: 0.5,
-          background: 'rgba(255,203,5,0.2)',
-          color: 'var(--accent)',
-          padding: '1px 6px',
-          borderRadius: 10,
-          textTransform: 'uppercase',
-          marginLeft: 2,
-        }}>
-          Soon
-        </span>
-      </span>
-    )
-  }
-
-  return (
-    <Link href={href!} style={{
-      ...baseStyle,
-      background: 'rgba(255,255,255,0.15)',
-      color: '#fff',
-      border: '1px solid rgba(255,255,255,0.25)',
-    }}
-      onMouseEnter={e => {
-        const el = e.currentTarget as HTMLAnchorElement
-        el.style.background = 'rgba(255,255,255,0.25)'
-        el.style.borderColor = 'rgba(255,255,255,0.4)'
-        el.style.transform = 'translateY(-1px)'
-      }}
-      onMouseLeave={e => {
-        const el = e.currentTarget as HTMLAnchorElement
-        el.style.background = 'rgba(255,255,255,0.15)'
-        el.style.borderColor = 'rgba(255,255,255,0.25)'
-        el.style.transform = ''
-      }}
-    >
-      {icon}
-      {label}
-    </Link>
-  )
-}
-
-function ToolsRow() {
-  return (
-    <div style={{
-      display: 'flex',
-      gap: 8,
-      flexWrap: 'wrap',
-      justifyContent: 'center',
-      maxWidth: 780,
-      margin: '0 auto',
-    }}>
-      <ToolChip href="/browse" icon={<ToolIcon path="M21 21l-4.35-4.35M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16z" />} label="Browse sets" />
-      <ToolChip href="/pokemon" icon={<PokeballIcon />} label="By Pokémon" />
-      <ToolChip href="/insights" icon={<ToolIcon path="M12 20h9M3 17l6-6 4 4 8-8" />} label="Insights" />
-      <ToolChip href="/studio" icon={<ToolIcon path="M12 19l7-7 3 3-7 7-3-3zM18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5zM2 2l7.586 7.586M11 11a2 2 0 1 1-2-2 2 2 0 0 1 2 2z" />} label="Studio" />
-      <ToolChip href="/creators" icon={<ToolIcon path="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />} label="Creators" />
-      <ToolChip href="/vendors" icon={<ToolIcon path="M3 7h18M3 7l2-4h14l2 4M3 7v13a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V7M9 12h6" />} label="Vendors" />
-
-      <ToolChip icon={<ToolIcon path="M3 3v18h18M7 14l4-4 4 4 5-5" />} label="Portfolio tracker" comingSoon />
-      <ToolChip icon={<ToolIcon path="M6 2l.01 7.01L12 17l5.99-7.99L18 2H6zM6 22h12" />} label="Pull rates" comingSoon />
-      <ToolChip icon={<ToolIcon path="M5 12l5 5L20 7" />} label="Rip or keep" comingSoon />
-    </div>
-  )
-}
+const FEATURED_TOOLS = [
+  {
+    title: 'Grading calculator',
+    blurb: 'PSA / CGC / BGS landed cost vs. graded uplift. Break-even at a glance.',
+    href: '/dashboard/grading',
+    accent: 'linear-gradient(135deg, #1a5fad 0%, #2874c8 100%)',
+    emoji: '🎯',
+  },
+  {
+    title: 'Studio',
+    blurb: 'One-click branded graphics from any card or set, for X, Insta and Discord.',
+    href: '/studio',
+    accent: 'linear-gradient(135deg, #1a5fad 0%, #7c3aed 100%)',
+    emoji: '🎨',
+  },
+  {
+    title: 'Card show planner',
+    blurb: 'UK & US Pokémon card shows, mapped and filtered. Plan your weekend.',
+    href: '/dashboard/card-shows',
+    accent: 'linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)',
+    emoji: '📍',
+  },
+]
 
 // ── Hero visual components ───────────────────────────────────────────────
 
@@ -266,14 +175,8 @@ function categoryMeta(cat: string) {
   }
 }
 
-function heatColor(band: string) {
-  switch (band) {
-    case 'strong_up':   return { bg: 'rgba(34,197,94,0.15)',   border: 'rgba(34,197,94,0.3)',   text: '#16a34a' }
-    case 'up':          return { bg: 'rgba(34,197,94,0.07)',   border: 'rgba(34,197,94,0.18)',  text: '#22c55e' }
-    case 'strong_down': return { bg: 'rgba(239,68,68,0.15)',   border: 'rgba(239,68,68,0.3)',   text: '#dc2626' }
-    case 'down':        return { bg: 'rgba(239,68,68,0.07)',   border: 'rgba(239,68,68,0.18)',  text: '#ef4444' }
-    default:            return { bg: 'rgba(148,163,184,0.06)', border: 'rgba(148,163,184,0.18)',text: '#94a3b8' }
-  }
+function formatInsightDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 const upcomingReleases = [
@@ -298,9 +201,8 @@ export default function HomeClient() {
   const [marketIndex, setMarketIndex] = useState<MarketIndexRow[]>([])
   const [totalMarket, setTotalMarket] = useState<{ value: number, pct30d: number | null, cardsTracked: number } | null>(null)
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReportRow[]>([])
-  const [heatmap, setHeatmap] = useState<HeatmapCard[]>([])
   const [hiddenGems, setHiddenGems] = useState<HiddenGem[]>([])
-  const [heatmapUpdated, setHeatmapUpdated] = useState<string | null>(null)
+  const [latestInsights, setLatestInsights] = useState<Insight[]>([])
   const [weeklyUpdated, setWeeklyUpdated] = useState<string | null>(null)
 
   useEffect(() => {
@@ -319,13 +221,18 @@ export default function HomeClient() {
 
   useEffect(() => {
     async function loadAnalytics() {
-      const [indexRes, gemsRes, totalRes] = await Promise.all([
+      const [indexRes, gemsRes, totalRes, insightsRes] = await Promise.all([
         supabase.from('market_index')
           .select('date, total_raw_usd, median_raw_usd, raw_pct_30d')
           .order('date', { ascending: true })
           .limit(80),
         supabase.rpc('get_hidden_gems', { lim: 6 }),
         supabase.rpc('get_market_total'),
+        supabase.from('insights')
+          .select('id, slug, headline, intro, theme_label, published_at, image_url, read_time_mins')
+          .eq('status', 'published')
+          .order('published_at', { ascending: false })
+          .limit(3),
       ])
 
       if (indexRes.data && indexRes.data.length > 0) {
@@ -338,6 +245,7 @@ export default function HomeClient() {
       }
 
       if (gemsRes.data && gemsRes.data.length > 0) setHiddenGems(gemsRes.data)
+      if (insightsRes.data && insightsRes.data.length > 0) setLatestInsights(insightsRes.data)
     }
     loadAnalytics()
   }, [])
@@ -358,18 +266,6 @@ export default function HomeClient() {
     return () => { cancelled = true }
   }, [])
 
-  useEffect(() => {
-    async function loadHeatmap() {
-      const res = await supabase.rpc('get_heatmap_top_cards', { lim: 30 })
-      const rows = res.data?.results ?? res.data
-      if (rows && rows.length > 0) {
-        setHeatmap(rows)
-        setHeatmapUpdated(new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))
-      }
-    }
-    loadHeatmap()
-  }, [])
-
   const sparklineData = marketIndex.slice(-30).map(r => r.total_raw_usd / 100)
   const marketUp = (totalMarket?.pct30d ?? 0) >= 0
 
@@ -382,14 +278,14 @@ export default function HomeClient() {
       }}>
         <PokemonSilhouettes />
         <Sparkles />
-        <div style={{ maxWidth: 820, margin: '0 auto', textAlign: 'center', position: 'relative', zIndex: 1 }}>
+        <div style={{ maxWidth: 760, margin: '0 auto', textAlign: 'center', position: 'relative', zIndex: 1 }}>
           <img src="/logo.png" alt="PokePrices" style={{
-            height: 120, margin: '0 auto 16px', display: 'block',
+            height: 110, margin: '0 auto 14px', display: 'block',
             filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.2))',
             animation: 'float 4s ease-in-out infinite',
           }} />
 
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
             {['100% Free', 'No Login', 'No Data Collection'].map(pill => (
               <span key={pill} style={{
                 background: 'rgba(255,255,255,0.15)', color: '#fff', fontSize: 11, fontWeight: 700,
@@ -405,53 +301,17 @@ export default function HomeClient() {
           }}>
             The numbers behind every<br /><span style={{ color: 'var(--accent)' }}>Pokémon</span> card
           </h1>
-          <p style={{ color: 'rgba(255,255,255,0.9)', fontSize: 16, margin: '0 0 8px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif", fontWeight: 600 }}>
-            The free Pokémon card price checker · live values · PSA 10 data · grading insights
-          </p>
-          <p style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14, margin: '0 0 22px', lineHeight: 1.5, fontFamily: "'Figtree', sans-serif" }}>
-            40,000+ cards · 156+ sets · Updated nightly from real sold listings
+          <p style={{ color: 'rgba(255,255,255,0.9)', fontSize: 16, margin: '0 0 22px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif", fontWeight: 600 }}>
+            Live values · PSA 10 data · grading insights · 40,000+ cards · 156+ sets
           </p>
 
-          <ToolsRow />
-
-          <div style={{ marginTop: 24, position: 'relative' }}>
-            <div style={{ textAlign: 'center', marginBottom: 10 }}>
-              <span style={{
-                display: 'inline-flex', alignItems: 'center', gap: 8,
-                background: 'linear-gradient(135deg, #ffcb05, #ffae00)',
-                color: '#1a5fad',
-                padding: '6px 8px 6px 14px',
-                borderRadius: 22, fontSize: 12, fontWeight: 800,
-                fontFamily: "'Figtree', sans-serif", letterSpacing: 0.2,
-                boxShadow: '0 4px 14px rgba(0,0,0,0.18)',
-              }}>
-                <span style={{ fontSize: 13 }}>✨</span>
-                Try the collector&apos;s AI assistant
-                <span aria-hidden style={{
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  width: 20, height: 20, borderRadius: '50%',
-                  background: 'rgba(26,95,173,0.15)',
-                  fontSize: 13, fontWeight: 900,
-                  animation: 'bounce 1.4s ease-in-out infinite',
-                }}>↓</span>
-              </span>
-            </div>
-
-            <div style={{ maxWidth: 640, margin: '0 auto', position: 'relative' }}>
-              <div aria-hidden style={{
-                position: 'absolute', inset: -12, borderRadius: 28,
-                background: 'radial-gradient(ellipse at center, rgba(255,203,5,0.5), rgba(106,176,245,0.25) 55%, transparent 78%)',
-                filter: 'blur(18px)',
-                animation: 'pulseGlow 3.2s ease-in-out infinite',
-                pointerEvents: 'none',
-              }} />
-              <div style={{ position: 'relative' }}>
-                <InlineChat />
-              </div>
-            </div>
+          {/* Primary CTA: search */}
+          <div style={{ maxWidth: 620, margin: '0 auto' }}>
+            <SearchBar placeholder='Search cards, sets, Pokémon… try "Charizard Base Set"' />
           </div>
-          <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 11, marginTop: 14, fontFamily: "'Figtree', sans-serif" }}>
-            Free, no login — knows every card, set and sold price we track
+
+          <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, marginTop: 14, fontFamily: "'Figtree', sans-serif" }}>
+            Updated nightly from real sold listings — no asking prices, no guesses
           </p>
         </div>
       </section>
@@ -496,7 +356,7 @@ export default function HomeClient() {
         </section>
       )}
 
-      {/* ── WEEKLY MARKET REPORT ── */}
+      {/* ── WEEKLY MARKET REPORT (pulse strip) ── */}
       {weeklyReport.length > 0 && (
         <section style={{ padding: '32px 24px 12px', maxWidth: 960, margin: '0 auto' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
@@ -557,90 +417,99 @@ export default function HomeClient() {
         </section>
       )}
 
-      {/* ── MARKET HEATMAP ── */}
-      <section style={{ padding: '8px 24px 40px', maxWidth: 960, margin: '0 auto' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-          <div>
-            <h2 style={{ fontSize: 24, margin: '0 0 4px', fontFamily: "'Outfit', sans-serif" }}>Market Heatmap</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0, fontFamily: "'Figtree', sans-serif" }}>
-              High-value actively-traded cards — colour shows 30-day price movement · min 3 confirmed sales
-            </p>
-          </div>
-          {heatmapUpdated && (
-            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", flexShrink: 0 }}>
-              Updated {heatmapUpdated}
-            </span>
-          )}
+      {/* ── FEATURED TOOLS ── */}
+      <section style={{ padding: '36px 24px 8px', maxWidth: 1000, margin: '0 auto' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+          <h2 style={{ fontSize: 22, margin: 0, fontFamily: "'Outfit', sans-serif" }}>Tools collectors actually use</h2>
+          <Link href="/tools" style={{ fontSize: 12, fontWeight: 800, color: 'var(--primary)', textDecoration: 'none', textTransform: 'uppercase', letterSpacing: 1.5 }}>
+            All tools →
+          </Link>
         </div>
-        {heatmap.length > 0 ? (
-          <>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 6 }}>
-              {heatmap.slice(0, 48).map(card => {
-                const { bg, border, text } = heatColor(card.color_band)
-                return (
-                  <Link key={card.card_slug} href={`/set/${encodeURIComponent(card.set_name)}/card/${card.card_url_slug || card.card_slug}`} style={{ textDecoration: 'none' }}>
-                    <div style={{ background: bg, border: `1px solid ${border}`, borderRadius: 10, padding: '10px 10px 8px', cursor: 'pointer', transition: 'opacity 0.12s' }}
-                      onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.opacity = '0.75'}
-                      onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.opacity = '1'}
-                    >
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', lineHeight: 1.3, marginBottom: 3, fontFamily: "'Figtree', sans-serif",
-                        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                        {card.card_name}
-                      </div>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 5, fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {card.set_name}
-                      </div>
-                      {card.is_recovery && (
-                        <div style={{ fontSize: 9, fontWeight: 700, color: '#f59e0b', letterSpacing: 0.3, marginBottom: 4, fontFamily: "'Figtree', sans-serif" }}>
-                          ↩ RECOVERY
-                        </div>
-                      )}
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>
-                            {card.price_usd != null ? `$${card.price_usd >= 100 ? Math.round(card.price_usd) : Number(card.price_usd).toFixed(2)}` : '—'}
-                          </span>
-                          <span style={{ fontSize: 8, fontWeight: 800, color: 'var(--text-muted)', opacity: 0.7, fontFamily: "'Figtree', sans-serif", letterSpacing: 0.3 }}>RAW</span>
-                        </div>
-                        {card.pct_change != null && (
-                          <span style={{ fontSize: 12, fontWeight: 800, color: text, fontFamily: "'Figtree', sans-serif" }}>
-                            {card.pct_change > 0 ? '+' : ''}{Number(card.pct_change).toFixed(1)}%
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </Link>
-                )
-              })}
-            </div>
-            <div style={{ display: 'flex', gap: 16, marginTop: 14, justifyContent: 'center', flexWrap: 'wrap' }}>
-              {[
-                { band: 'strong_up',   label: '+10% or more' },
-                { band: 'up',          label: '+2% to +10%'  },
-                { band: 'flat',        label: 'Flat (±2%)'   },
-                { band: 'down',        label: '-2% to -10%'  },
-                { band: 'strong_down', label: '-10% or more' },
-              ].map(({ band, label }) => {
-                const { bg, border } = heatColor(band)
-                return (
-                  <div key={band} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <div style={{ width: 12, height: 12, borderRadius: 3, background: bg, border: `1px solid ${border}` }} />
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>{label}</span>
-                  </div>
-                )
-              })}
-            </div>
-          </>
-        ) : (
-          <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-            Loading heatmap…
-          </div>
-        )}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+          {FEATURED_TOOLS.map(tool => (
+            <Link key={tool.title} href={tool.href} style={{
+              display: 'flex', flexDirection: 'column', textDecoration: 'none',
+              background: 'var(--card)', borderRadius: 16, border: '1px solid var(--border)',
+              overflow: 'hidden', transition: 'transform 0.15s, box-shadow 0.15s',
+            }}
+              onMouseEnter={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.transform = 'translateY(-2px)'; el.style.boxShadow = '0 6px 20px rgba(0,0,0,0.08)' }}
+              onMouseLeave={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.transform = ''; el.style.boxShadow = '' }}
+            >
+              <div style={{
+                background: tool.accent, color: '#fff', padding: '24px 20px',
+                display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8, minHeight: 120,
+              }}>
+                <div style={{ fontSize: 26 }}>{tool.emoji}</div>
+                <div style={{ fontSize: 20, fontWeight: 900, fontFamily: "'Outfit', sans-serif", lineHeight: 1.15, marginTop: 'auto' }}>
+                  {tool.title}
+                </div>
+              </div>
+              <div style={{ padding: '14px 18px 18px', flex: 1, display: 'flex', flexDirection: 'column', fontFamily: "'Figtree', sans-serif" }}>
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55, margin: '0 0 12px' }}>
+                  {tool.blurb}
+                </p>
+                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 'auto' }}>
+                  Open tool →
+                </span>
+              </div>
+            </Link>
+          ))}
+        </div>
       </section>
+
+      {/* ── LATEST GUIDES ── */}
+      {latestInsights.length > 0 && (
+        <section style={{ padding: '36px 24px 8px', maxWidth: 1000, margin: '0 auto' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+            <h2 style={{ fontSize: 22, margin: 0, fontFamily: "'Outfit', sans-serif" }}>Latest guides</h2>
+            <Link href="/insights" style={{ fontSize: 12, fontWeight: 800, color: 'var(--primary)', textDecoration: 'none', textTransform: 'uppercase', letterSpacing: 1.5 }}>
+              All guides →
+            </Link>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+            {latestInsights.map(insight => (
+              <Link key={insight.id} href={`/insights/${insight.slug}`} style={{
+                display: 'flex', flexDirection: 'column', textDecoration: 'none',
+                background: 'var(--card)', borderRadius: 16, border: '1px solid var(--border)',
+                overflow: 'hidden', transition: 'transform 0.15s, box-shadow 0.15s',
+              }}
+                onMouseEnter={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.transform = 'translateY(-2px)'; el.style.boxShadow = '0 6px 20px rgba(0,0,0,0.08)' }}
+                onMouseLeave={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.transform = ''; el.style.boxShadow = '' }}
+              >
+                {insight.image_url ? (
+                  <img src={insight.image_url} alt="" style={{ width: '100%', height: 140, objectFit: 'cover', display: 'block' }} />
+                ) : (
+                  <div style={{ width: '100%', height: 140, background: 'linear-gradient(135deg, #1a5fad 0%, #2874c8 100%)' }} />
+                )}
+                <div style={{ padding: '14px 18px 18px', flex: 1, display: 'flex', flexDirection: 'column', fontFamily: "'Figtree', sans-serif" }}>
+                  {insight.theme_label && (
+                    <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 6 }}>
+                      {insight.theme_label}
+                    </div>
+                  )}
+                  <h3 style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)', margin: '0 0 6px', lineHeight: 1.3, fontFamily: "'Outfit', sans-serif" }}>
+                    {insight.headline}
+                  </h3>
+                  {insight.intro && (
+                    <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.55, margin: '0 0 12px',
+                      display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      {insight.intro}
+                    </p>
+                  )}
+                  <div style={{ marginTop: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>
+                    {formatInsightDate(insight.published_at)}
+                    {insight.read_time_mins ? ` · ${insight.read_time_mins} min read` : ''}
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ── HIDDEN GEMS ── */}
       {hiddenGems.length > 0 && (
-        <section style={{ padding: '0 24px 44px', maxWidth: 960, margin: '0 auto' }}>
+        <section style={{ padding: '36px 24px 0', maxWidth: 960, margin: '0 auto' }}>
           <div style={{
             background: 'linear-gradient(135deg, rgba(167,139,250,0.07), rgba(59,130,246,0.05))',
             border: '1px solid rgba(167,139,250,0.18)', borderRadius: 18, padding: '24px',
@@ -699,7 +568,7 @@ export default function HomeClient() {
       )}
 
       {/* ── NEXT RELEASE ── */}
-      <section style={{ padding: '0 24px 40px', maxWidth: 900, margin: '0 auto' }}>
+      <section style={{ padding: '36px 24px 8px', maxWidth: 900, margin: '0 auto' }}>
         <div style={{ background: 'var(--card)', borderRadius: 18, border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 2px 15px rgba(37,99,168,0.06)' }}>
           <div style={{ background: 'linear-gradient(135deg, #1a5fad, #2874c8)', padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14 }}>
             <div>
@@ -733,7 +602,7 @@ export default function HomeClient() {
       </section>
 
       {/* ── BUILT DIFFERENT ── */}
-      <section style={{ padding: '16px 24px 44px', maxWidth: 900, margin: '0 auto' }}>
+      <section style={{ padding: '36px 24px 44px', maxWidth: 900, margin: '0 auto' }}>
         <h2 style={{ fontSize: 24, textAlign: 'center', margin: '0 0 6px', fontFamily: "'Outfit', sans-serif" }}>Built for collectors, not investors</h2>
         <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: 14, margin: '0 0 28px', fontFamily: "'Figtree', sans-serif" }}>No login. No paywall. No data collection. Ever.</p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
@@ -766,7 +635,7 @@ export default function HomeClient() {
       </section>
 
       {/* ── NEWSLETTER ── */}
-      <section style={{ padding: '0 24px 44px', maxWidth: 680, margin: '0 auto' }}>
+      <section style={{ padding: '44px 24px 44px', maxWidth: 680, margin: '0 auto' }}>
         <div style={{
           background: 'linear-gradient(135deg, rgba(26,95,173,0.06), rgba(59,130,246,0.04))',
           border: '1px solid rgba(26,95,173,0.2)', borderRadius: 20, padding: '32px 28px', textAlign: 'center',
@@ -786,7 +655,7 @@ export default function HomeClient() {
       </section>
 
       {/* ── FAQ (visible content + FAQPage schema) ── */}
-      <section style={{ padding: '24px 24px 44px', maxWidth: 680, margin: '0 auto' }}>
+      <section style={{ padding: '0 24px 44px', maxWidth: 680, margin: '0 auto' }}>
         <FAQ items={getHomeFaqItems()} title="Questions collectors ask" />
       </section>
     </>
