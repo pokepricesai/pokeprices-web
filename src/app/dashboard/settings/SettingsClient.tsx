@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import DashboardNav from '../DashboardNav'
+import Avatar from '@/components/Avatar'
+import AvatarPicker from '@/components/AvatarPicker'
 
 interface Prefs {
   weekly_digest_enabled: boolean
@@ -20,15 +22,19 @@ export default function SettingsClient() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<number | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [avatarPokemonId, setAvatarPokemonId] = useState<number | null>(null)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) { router.push('/dashboard/login'); return }
-      setUser(session.user)
-    })
+    function applySession(u: any) {
+      if (!u) { router.push('/dashboard/login'); return }
+      setUser(u)
+      const pid = u.user_metadata?.avatar_pokemon_id
+      setAvatarPokemonId(typeof pid === 'number' ? pid : null)
+    }
+    supabase.auth.getSession().then(({ data: { session } }) => applySession(session?.user || null))
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
-      if (!session) router.push('/dashboard/login')
-      else setUser(session.user)
+      applySession(session?.user || null)
     })
     return () => subscription.unsubscribe()
   }, [])
@@ -96,6 +102,35 @@ export default function SettingsClient() {
         <div className="skeleton" style={{ height: 200, borderRadius: 16 }} />
       ) : (
         <>
+          {/* Avatar */}
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: 22, marginBottom: 16 }}>
+            <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 17, margin: '0 0 4px', color: 'var(--text)' }}>Avatar</h2>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 18px' }}>
+              The Pokémon that appears next to your name in the top bar.
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <Avatar
+                pokemonId={avatarPokemonId}
+                seed={user?.id}
+                displayName={user?.user_metadata?.display_name || (user?.email ? user.email.split('@')[0] : null)}
+                email={user?.email}
+                size={64}
+              />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 8 }}>
+                  {avatarPokemonId ? 'You have an avatar set. Pick a different one any time.' : 'No avatar yet — pick a Gen 1 Pokémon.'}
+                </div>
+                <button onClick={() => setPickerOpen(true)}
+                  style={{
+                    background: 'var(--primary)', color: '#fff', border: 'none',
+                    padding: '7px 14px', borderRadius: 10, fontSize: 12, fontWeight: 800,
+                    fontFamily: "'Figtree', sans-serif", cursor: 'pointer',
+                  }}
+                >{avatarPokemonId ? 'Change avatar' : 'Choose avatar'}</button>
+              </div>
+            </div>
+          </div>
+
           {/* Display preferences */}
           <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: 22, marginBottom: 16 }}>
             <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 17, margin: '0 0 4px', color: 'var(--text)' }}>Display preferences</h2>
@@ -205,6 +240,13 @@ export default function SettingsClient() {
           </div>
         </>
       )}
+
+      <AvatarPicker
+        open={pickerOpen}
+        currentPokemonId={avatarPokemonId}
+        onClose={() => setPickerOpen(false)}
+        onSaved={(id) => setAvatarPokemonId(id)}
+      />
     </div>
   )
 }

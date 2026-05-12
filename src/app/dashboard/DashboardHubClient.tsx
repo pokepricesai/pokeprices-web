@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import AvatarPicker from '@/components/AvatarPicker'
 
 interface Counts {
   portfolio: number | null
@@ -16,17 +17,30 @@ export default function DashboardHubClient() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [counts, setCounts] = useState<Counts>({ portfolio: null, watchlist: null, alerts: null, alertsTriggered: null })
+  const [avatarPokemonId, setAvatarPokemonId] = useState<number | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [bannerDismissed, setBannerDismissed] = useState(false)
 
   useEffect(() => {
+    function applyUser(u: any) {
+      setUser(u)
+      const pid = u?.user_metadata?.avatar_pokemon_id
+      setAvatarPokemonId(typeof pid === 'number' ? pid : null)
+    }
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) { router.push('/dashboard/login'); return }
-      setUser(session.user)
+      applyUser(session.user)
       setLoading(false)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
       if (!session) router.push('/dashboard/login')
-      else setUser(session.user)
+      else applyUser(session.user)
     })
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage.getItem('pp-avatar-banner-dismissed') === '1') {
+        setBannerDismissed(true)
+      }
+    } catch {}
     return () => subscription.unsubscribe()
   }, [])
 
@@ -156,8 +170,45 @@ export default function DashboardHubClient() {
     },
   ]
 
+  function dismissBanner() {
+    setBannerDismissed(true)
+    try { window.sessionStorage.setItem('pp-avatar-banner-dismissed', '1') } catch {}
+  }
+
   return (
     <div style={{ maxWidth: 880, margin: '0 auto', padding: '32px 16px' }}>
+
+      {!avatarPokemonId && !bannerDismissed && (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(26,95,173,0.10), rgba(124,58,237,0.08))',
+          border: '1px solid rgba(26,95,173,0.25)',
+          borderRadius: 14, padding: '14px 18px', marginBottom: 20,
+          display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+          fontFamily: "'Figtree', sans-serif",
+        }}>
+          <span style={{ fontSize: 24 }}>👾</span>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', marginBottom: 2 }}>
+              Pick your Pokémon avatar
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              Adds a bit of personality next to your name. One click to set.
+            </div>
+          </div>
+          <button onClick={() => setPickerOpen(true)}
+            style={{
+              background: 'var(--primary)', color: '#fff', border: 'none',
+              padding: '7px 14px', borderRadius: 10, fontSize: 12, fontWeight: 800, cursor: 'pointer',
+            }}
+          >Pick avatar</button>
+          <button onClick={dismissBanner} aria-label="Dismiss"
+            style={{
+              background: 'transparent', border: 'none', color: 'var(--text-muted)',
+              fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: '4px 8px',
+            }}
+          >Later</button>
+        </div>
+      )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28, flexWrap: 'wrap', gap: 12 }}>
         <div>
@@ -236,6 +287,13 @@ export default function DashboardHubClient() {
       <p style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textAlign: 'center', margin: '32px 0 0', lineHeight: 1.6 }}>
         Free forever. No tracking. No data sold. Ever.
       </p>
+
+      <AvatarPicker
+        open={pickerOpen}
+        currentPokemonId={avatarPokemonId}
+        onClose={() => setPickerOpen(false)}
+        onSaved={(id) => { setAvatarPokemonId(id); dismissBanner() }}
+      />
     </div>
   )
 }

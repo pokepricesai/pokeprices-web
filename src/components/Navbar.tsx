@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import Avatar from './Avatar'
 
 interface SearchResult {
   result_type: string
@@ -100,20 +101,7 @@ function ChevronDown({ size = 10 }: { size?: number }) {
   )
 }
 
-// Deterministic colour for the initial-fallback avatar so the same user
-// always gets the same circle colour.
-const AVATAR_COLOURS = ['#1a5fad', '#0ea5e9', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6']
-function avatarColour(id: string | null | undefined): string {
-  if (!id) return AVATAR_COLOURS[0]
-  let h = 0
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0
-  return AVATAR_COLOURS[Math.abs(h) % AVATAR_COLOURS.length]
-}
-function avatarInitial(displayName: string | null | undefined, email: string | null | undefined): string {
-  const source = displayName || email || ''
-  const ch = source.trim().charAt(0).toUpperCase()
-  return ch || '?'
-}
+// Avatar primitives (sprite-or-initial fallback) live in components/Avatar.tsx.
 
 const mobAuthLink: React.CSSProperties = {
   display: 'block', color: '#fff', textDecoration: 'none',
@@ -147,7 +135,7 @@ export default function Navbar() {
   const [showResults, setShowResults]   = useState(false)
   const [activeIndex, setActiveIndex]   = useState(-1)
   const [isAuthed, setIsAuthed]         = useState(false)
-  const [user, setUser]                 = useState<{ id: string; email: string | null; displayName: string } | null>(null)
+  const [user, setUser]                 = useState<{ id: string; email: string | null; displayName: string; avatarPokemonId: number | null } | null>(null)
   const [profileOpen, setProfileOpen]   = useState(false)
   const debounceRef = useRef<NodeJS.Timeout>()
   const searchRef = useRef<HTMLDivElement>(null)
@@ -161,7 +149,9 @@ export default function Navbar() {
       if (session?.user) {
         const u = session.user
         const display = u.user_metadata?.display_name || (u.email ? u.email.split('@')[0] : 'Collector')
-        setUser({ id: u.id, email: u.email ?? null, displayName: display })
+        const rawPid = u.user_metadata?.avatar_pokemon_id
+        const pid = typeof rawPid === 'number' ? rawPid : null
+        setUser({ id: u.id, email: u.email ?? null, displayName: display, avatarPokemonId: pid })
       } else {
         setUser(null)
       }
@@ -476,17 +466,19 @@ export default function Navbar() {
             <button onClick={() => setProfileOpen(o => !o)}
               aria-label="Account menu"
               style={{
-                width: 36, height: 36, borderRadius: '50%',
-                background: avatarColour(user.id),
-                color: '#fff', fontSize: 15, fontWeight: 800,
-                fontFamily: "'Outfit', sans-serif",
-                border: '2px solid rgba(255,255,255,0.45)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer', padding: 0,
+                background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
+                borderRadius: '50%',
                 boxShadow: profileOpen ? '0 0 0 3px rgba(255,255,255,0.18)' : 'none',
                 transition: 'box-shadow 0.15s',
               }}>
-              {avatarInitial(user.displayName, user.email)}
+              <Avatar
+                pokemonId={user.avatarPokemonId}
+                seed={user.id}
+                displayName={user.displayName}
+                email={user.email}
+                size={36}
+                ringColour="rgba(255,255,255,0.45)"
+              />
             </button>
 
             {profileOpen && (
@@ -500,13 +492,13 @@ export default function Navbar() {
               }}>
                 {/* Header — name + email */}
                 <div style={{ padding: '10px 14px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{
-                    width: 36, height: 36, borderRadius: '50%',
-                    background: avatarColour(user.id), color: '#fff',
-                    fontSize: 15, fontWeight: 800, fontFamily: "'Outfit', sans-serif",
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    flexShrink: 0,
-                  }}>{avatarInitial(user.displayName, user.email)}</div>
+                  <Avatar
+                    pokemonId={user.avatarPokemonId}
+                    seed={user.id}
+                    displayName={user.displayName}
+                    email={user.email}
+                    size={36}
+                  />
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.displayName}</div>
                     {user.email && <div style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.email}</div>}
@@ -627,13 +619,13 @@ export default function Navbar() {
             {isAuthed && user ? (
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0' }}>
-                  <div style={{
-                    width: 36, height: 36, borderRadius: '50%',
-                    background: avatarColour(user.id), color: '#fff',
-                    fontSize: 15, fontWeight: 800, fontFamily: "'Outfit', sans-serif",
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    flexShrink: 0,
-                  }}>{avatarInitial(user.displayName, user.email)}</div>
+                  <Avatar
+                    pokemonId={user.avatarPokemonId}
+                    seed={user.id}
+                    displayName={user.displayName}
+                    email={user.email}
+                    size={36}
+                  />
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 14, fontWeight: 800, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.displayName}</div>
                     {user.email && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.email}</div>}
