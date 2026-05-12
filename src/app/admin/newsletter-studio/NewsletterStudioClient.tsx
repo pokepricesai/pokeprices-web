@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { supabase, CHAT_ENDPOINT } from '@/lib/supabase'
+
+const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
 // ── Admin password gate (mirrors /admin/content-studio) ──────────────────
 
@@ -409,20 +411,96 @@ function buildClosing() {
 type SectionId = 'intro' | 'movers' | 'insight' | 'grading' | 'focus' | 'trending' | 'closing'
 type Section = { id: SectionId; title: string; md: string; html: string; text: string }
 
+// ── AI rewrite ────────────────────────────────────────────────────────────
+
+const REWRITE_INSTRUCTIONS: Partial<Record<SectionId, string>> = {
+  intro:   'Rewrite this weekly newsletter intro. Keep it 2-3 short sentences, conversational collector-to-collector tone, no marketing speak. Preserve every number and percentage exactly as-is.',
+  insight: 'Rewrite this market insight observation. Keep it to one short paragraph, collector-to-collector tone, plain language. Preserve every number, percentage, and set name exactly.',
+  grading: 'Rewrite this grading-watch paragraph. One paragraph, plain prose, honest about the maths. Preserve every card name, set name, dollar figure, and the multiplier exactly.',
+  focus:   'Rewrite this collector-focus paragraph. One paragraph, intriguing but not hype-y. Preserve every card name, set name, dollar figure, and percentage exactly.',
+}
+
+async function rewriteWithAI(sectionId: SectionId, currentText: string): Promise<string> {
+  const instr = REWRITE_INSTRUCTIONS[sectionId]
+  if (!instr) throw new Error('This section is not AI-rewriteable.')
+  const message = `${instr}\n\nReturn ONLY the rewritten text, nothing else. No preamble. No quotes around the result.\n\nORIGINAL:\n${currentText}`
+  const res = await fetch(CHAT_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON_KEY}` },
+    body: JSON.stringify({
+      message,
+      session_id: 'newsletter-rewrite-' + Math.random().toString(36).slice(2, 8),
+      history: [],
+    }),
+  })
+  if (!res.ok) throw new Error(`AI rewrite failed: HTTP ${res.status}`)
+  const json = await res.json()
+  const answer = (json?.answer || json?.response || '').toString().trim()
+  if (!answer) throw new Error('AI returned an empty rewrite.')
+  // Strip wrapping quotes if the model added them
+  return answer.replace(/^["“'']\s*|\s*["”'']$/g, '').trim()
+}
+
+// ── Image generation ─────────────────────────────────────────────────────
+
+type ImageKey = 'intro' | 'movers-risers' | 'movers-fallers' | 'insight' | 'grading' | 'focus' | 'trending'
+
+async function renderImage(template: 'intro' | 'movers' | 'fallers' | 'insight' | 'grading' | 'focus' | 'trending', payload: any, weekLabel: string): Promise<string> {
+  const res = await fetch('/api/newsletter/render', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ template, payload, weekLabel }),
+  })
+  if (!res.ok) {
+    let detail = ''
+    try { const j = await res.json(); detail = j?.error || '' } catch {}
+    throw new Error(`Render failed: HTTP ${res.status} ${detail}`)
+  }
+  const blob = await res.blob()
+  if (blob.size === 0) throw new Error('Render returned an empty image.')
+  return URL.createObjectURL(blob)
+}
+
+function downloadBlobUrl(url: string, filename: string) {
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+}
+
+// ── Component ─────────────────────────────────────────────────────────────
+
 export default function NewsletterStudioClient() {
   const [authed, setAuthed]   = useState<boolean | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState<string | null>(null)
   const [data, setData]       = useState<NewsletterData | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
+  // Per-section markdown overrides (set when user clicks "Rewrite with AI")
+  const [overrides, setOverrides] = useState<Partial<Record<SectionId, string>>>({})
+  const [rewriting, setRewriting] = useState<SectionId | null>(null)
+  // Generated image blob URLs, keyed by section + variant
+  const [images, setImages] = useState<Partial<Record<ImageKey, string>>>({})
+  const [rendering, setRendering] = useState<ImageKey | null>(null)
 
   useEffect(() => {
     try { setAuthed(sessionStorage.getItem(SESSION_KEY) === '1') } catch { setAuthed(false) }
   }, [])
 
+  // Revoke object URLs on unmount / regenerate
+  useEffect(() => () => {
+    Object.values(images).forEach(u => { if (u) URL.revokeObjectURL(u) })
+  }, [images])
+
   async function generate() {
     setLoading(true)
     setError(null)
+    // Clear previous overrides/images on fresh generate
+    setOverrides({})
+    Object.values(images).forEach(u => { if (u) URL.revokeObjectURL(u) })
+    setImages({})
     try {
       const d = await generateNewsletter()
       setData(d)
@@ -443,10 +521,42 @@ export default function NewsletterStudioClient() {
     }
   }
 
+  async function handleRewrite(sectionId: SectionId, currentMd: string) {
+    setRewriting(sectionId)
+    setError(null)
+    try {
+      const rewritten = await rewriteWithAI(sectionId, currentMd)
+      setOverrides(prev => ({ ...prev, [sectionId]: rewritten }))
+    } catch (e: any) {
+      setError(e?.message || 'AI rewrite failed.')
+    } finally {
+      setRewriting(null)
+    }
+  }
+
+  async function handleRenderImage(key: ImageKey, template: any, payload: any) {
+    if (!data) return
+    setRendering(key)
+    setError(null)
+    try {
+      const weekLabel = `Week of ${thisWeekLabel(data.generatedAt)}`
+      const url = await renderImage(template, payload, weekLabel)
+      // Free previous URL if any
+      const prev = images[key]
+      if (prev) URL.revokeObjectURL(prev)
+      setImages(curr => ({ ...curr, [key]: url }))
+    } catch (e: any) {
+      setError(e?.message || 'Image render failed.')
+    } finally {
+      setRendering(null)
+    }
+  }
+
   if (authed === null) return null
   if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />
 
-  const sections: Section[] = data ? [
+  // Build sections, then layer overrides on top of the markdown
+  const baseSections: Section[] = data ? [
     { id: 'intro',    title: 'Intro',              ...buildIntro(data) },
     { id: 'movers',   title: 'Biggest Movers',     ...buildBiggestMovers(data) },
     { id: 'insight',  title: 'Market Insight',     ...buildMarketInsight(data) },
@@ -455,6 +565,16 @@ export default function NewsletterStudioClient() {
     { id: 'trending', title: 'Trending Searches',  ...buildTrendingSearches(data) },
     { id: 'closing',  title: 'Closing',            ...buildClosing() },
   ] : []
+  const sections: Section[] = baseSections.map(s => {
+    const o = overrides[s.id]
+    if (!o) return s
+    return {
+      ...s,
+      md: o,
+      html: `<p>${o.replace(/\n/g, '<br/>')}</p>`,
+      text: o,
+    }
+  })
 
   const allMd   = sections.map(s => `## ${s.title}\n\n${s.md}`).join('\n\n')
   const allHtml = sections.map(s => `<h2>${s.title}</h2>${s.html}`).join('')
@@ -510,8 +630,14 @@ export default function NewsletterStudioClient() {
               <SectionCard
                 key={s.id}
                 section={s}
+                data={data}
                 copied={copiedKey === s.id}
+                rewriting={rewriting === s.id}
+                rendering={rendering}
+                images={images}
                 onCopy={() => copy(s.id, s.md)}
+                onRewrite={() => handleRewrite(s.id, s.md)}
+                onRenderImage={handleRenderImage}
               />
             ))}
           </div>
@@ -540,18 +666,98 @@ export default function NewsletterStudioClient() {
   )
 }
 
-function SectionCard({ section, copied, onCopy }: { section: Section; copied: boolean; onCopy: () => void }) {
+function SectionCard({ section, data, copied, rewriting, rendering, images, onCopy, onRewrite, onRenderImage }: {
+  section: Section
+  data: NewsletterData
+  copied: boolean
+  rewriting: boolean
+  rendering: ImageKey | null
+  images: Partial<Record<ImageKey, string>>
+  onCopy: () => void
+  onRewrite: () => void
+  onRenderImage: (key: ImageKey, template: any, payload: any) => void
+}) {
+  const canRewrite = !!REWRITE_INSTRUCTIONS[section.id]
+
+  // Build the image button(s) for this section
+  const imageButtons: { key: ImageKey; label: string; template: string; payload: any }[] = []
+  if (section.id === 'intro') {
+    imageButtons.push({
+      key: 'intro', label: 'Intro graphic', template: 'intro',
+      payload: { totalMarketUsd: data.totalMarketUsd, cardsTracked: data.cardsTracked, pct30d: data.pct30d },
+    })
+  } else if (section.id === 'movers') {
+    if (data.risers.length > 0) {
+      imageButtons.push({
+        key: 'movers-risers', label: 'Risers graphic', template: 'movers',
+        payload: { items: data.risers.slice(0, 5) },
+      })
+    }
+    if (data.fallers.length > 0) {
+      imageButtons.push({
+        key: 'movers-fallers', label: 'Fallers graphic', template: 'fallers',
+        payload: { items: data.fallers.slice(0, 5) },
+      })
+    }
+  } else if (section.id === 'insight') {
+    imageButtons.push({
+      key: 'insight', label: 'Insight graphic', template: 'insight',
+      payload: { text: section.md },
+    })
+  } else if (section.id === 'grading' && data.gradingPick) {
+    imageButtons.push({
+      key: 'grading', label: 'Grading graphic', template: 'grading',
+      payload: { card: data.gradingPick },
+    })
+  } else if (section.id === 'focus' && data.hiddenGem) {
+    imageButtons.push({
+      key: 'focus', label: 'Focus graphic', template: 'focus',
+      payload: {
+        card: {
+          card_name: data.hiddenGem.card_name,
+          set_name: data.hiddenGem.set_name,
+          current_price: data.hiddenGem.current_price,
+          pct_30d: data.hiddenGem.pct_30d,
+          psa10_pop: data.hiddenGem.psa10_pop,
+          image_url: data.hiddenGem.image_url,
+        },
+      },
+    })
+  } else if (section.id === 'trending' && data.trendingSets.length > 0) {
+    imageButtons.push({
+      key: 'trending', label: 'Trending graphic', template: 'trending',
+      payload: { sets: data.trendingSets },
+    })
+  }
+  // 'closing' has no image button
+
   return (
     <div style={{
       background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14,
       padding: '16px 18px',
     }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
         <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, margin: 0, color: 'var(--text)' }}>
           {section.title}
         </h2>
-        <CopyButton label={copied ? 'Copied ✓' : 'Copy markdown'} onClick={onCopy} />
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {imageButtons.map(b => (
+            <CopyButton
+              key={b.key}
+              label={rendering === b.key ? 'Rendering…' : `🖼  ${b.label}`}
+              onClick={() => onRenderImage(b.key, b.template, b.payload)}
+            />
+          ))}
+          {canRewrite && (
+            <CopyButton
+              label={rewriting ? 'Rewriting…' : '✨ Rewrite with AI'}
+              onClick={onRewrite}
+            />
+          )}
+          <CopyButton label={copied ? 'Copied ✓' : 'Copy markdown'} onClick={onCopy} />
+        </div>
       </div>
+
       <pre style={{
         margin: 0, padding: '12px 14px',
         background: 'var(--bg-light)', borderRadius: 10, border: '1px solid var(--border)',
@@ -560,6 +766,42 @@ function SectionCard({ section, copied, onCopy }: { section: Section; copied: bo
         fontFamily: "'Figtree', sans-serif",
         overflow: 'auto', maxHeight: 320,
       }}>{section.md}</pre>
+
+      {/* Render generated images for this section */}
+      {imageButtons.some(b => images[b.key]) && (
+        <div style={{ marginTop: 12, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          {imageButtons.map(b => images[b.key] ? (
+            <ImagePreview
+              key={b.key}
+              src={images[b.key]!}
+              filename={`pokeprices-newsletter-${section.id}-${b.key}.png`}
+              label={b.label}
+            />
+          ) : null)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ImagePreview({ src, filename, label }: { src: string; filename: string; label: string }) {
+  return (
+    <div style={{ flex: 1, minWidth: 280, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <img src={src} alt={label} style={{
+        width: '100%', height: 'auto', borderRadius: 8, border: '1px solid var(--border)',
+        display: 'block',
+      }} />
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1 }}>{label}</span>
+        <button onClick={() => downloadBlobUrl(src, filename)}
+          style={{
+            padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 800,
+            background: 'var(--primary)', color: '#fff', border: 'none', cursor: 'pointer',
+            fontFamily: "'Figtree', sans-serif",
+          }}>
+          Download PNG
+        </button>
+      </div>
     </div>
   )
 }
