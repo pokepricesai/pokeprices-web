@@ -58,11 +58,16 @@ export default function DailyPickClient() {
     })
     setVoting(null)
     if (error) { alert('Vote failed: ' + error.message); return }
-    const row = (Array.isArray(data) ? data[0] : data) as Tallies
-    const next: VotedState = { choice, tallies: row, date: todayKey() }
+    // RPC returns { a_votes, b_votes } — remap to our state shape.
+    const row = (Array.isArray(data) ? data[0] : data) as { a_votes?: number; b_votes?: number; option_a_votes?: number; option_b_votes?: number }
+    const t: Tallies = {
+      option_a_votes: row?.a_votes ?? row?.option_a_votes ?? 0,
+      option_b_votes: row?.b_votes ?? row?.option_b_votes ?? 0,
+    }
+    const next: VotedState = { choice, tallies: t, date: todayKey() }
     writeLs(`daily-pick-${matchup.id}`, next)
     setVoted(next)
-    setTallies(row)
+    setTallies(t)
   }
 
   if (loading || !aCard || !bCard) {
