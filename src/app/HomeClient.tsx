@@ -311,9 +311,36 @@ export default function HomeClient() {
             <SearchBar placeholder='Search cards, sets, Pokémon… try "Charizard Base Set"' />
           </div>
 
-          <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, marginTop: 14, fontFamily: "'Figtree', sans-serif" }}>
+          <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, marginTop: 14, marginBottom: 22, fontFamily: "'Figtree', sans-serif" }}>
             Updated nightly from real sold listings — no asking prices, no guesses
           </p>
+
+          {/* AI assistant — directly below search */}
+          <div style={{ maxWidth: 640, margin: '0 auto', textAlign: 'left' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: '#fff', fontFamily: "'Figtree', sans-serif" }}>
+                <span style={{ fontSize: 13 }}>✨</span>
+                <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.5 }}>Ask me anything</span>
+              </div>
+              <Link href="/ai-assistant" style={{
+                fontSize: 11, fontWeight: 800, color: 'rgba(255,255,255,0.85)', textDecoration: 'none',
+                textTransform: 'uppercase', letterSpacing: 1.5,
+              }}>
+                Open in full →
+              </Link>
+            </div>
+            <div style={{ position: 'relative' }}>
+              <div aria-hidden style={{
+                position: 'absolute', inset: -12, borderRadius: 24,
+                background: 'radial-gradient(ellipse at center, rgba(255,203,5,0.30), rgba(106,176,245,0.18) 55%, transparent 78%)',
+                filter: 'blur(18px)',
+                pointerEvents: 'none',
+              }} />
+              <div style={{ position: 'relative' }}>
+                <InlineChat />
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -455,32 +482,6 @@ export default function HomeClient() {
               </div>
             </Link>
           ))}
-        </div>
-      </section>
-
-      {/* ── AI ASSISTANT ── */}
-      <section style={{ padding: '36px 24px 8px', maxWidth: 820, margin: '0 auto' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
-          <div>
-            <h2 style={{ fontSize: 22, margin: 0, fontFamily: "'Outfit', sans-serif" }}>Ask Me Anything</h2>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0', fontFamily: "'Figtree', sans-serif" }}>
-              Collector-built assistant that knows every card and sold price in our database.
-            </p>
-          </div>
-          <Link href="/ai-assistant" style={{ fontSize: 12, fontWeight: 800, color: 'var(--primary)', textDecoration: 'none', textTransform: 'uppercase', letterSpacing: 1.5 }}>
-            Open in full →
-          </Link>
-        </div>
-        <div style={{ position: 'relative' }}>
-          <div aria-hidden style={{
-            position: 'absolute', inset: -10, borderRadius: 24,
-            background: 'radial-gradient(ellipse at center, rgba(255,203,5,0.18), rgba(106,176,245,0.10) 55%, transparent 78%)',
-            filter: 'blur(14px)',
-            pointerEvents: 'none',
-          }} />
-          <div style={{ position: 'relative' }}>
-            <InlineChat />
-          </div>
         </div>
       </section>
 
