@@ -36,8 +36,9 @@ const VISUALISATIONS: Viz[] = [
   },
   {
     title: 'Set Price Index',
-    blurb: 'Average sealed and single price per set, tracked over time. Compare any two sets on one chart.',
-    status: 'soon',
+    blurb: 'Total tracked value per set, charted over time. Pick up to three sets and compare on one line chart.',
+    status: 'live',
+    href: '/visualisations/set-price-index',
     accent: 'linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%)',
     emoji: '📊',
   },
