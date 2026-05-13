@@ -968,20 +968,35 @@ export default function PortfolioDashboard() {
           dedupedById = dedupedById.map(i => {
             const trend = trendMap[`${i.card_name}::${i.set_name}`]
             if (!trend) return i
-            const tier = i.holding_type === 'psa10' ? trend.current_psa10
-                       : i.holding_type === 'psa9'  ? trend.current_psa9
-                       : trend.current_raw
-            if (!tier) return i
+            // Always refresh the reference prices the rest of the UI displays.
+            const refreshed = {
+              current_raw:   trend.current_raw  ?? i.current_raw,
+              current_psa9:  trend.current_psa9 ?? i.current_psa9,
+              current_psa10: trend.current_psa10 ?? i.current_psa10,
+              pct_7d:        trend.raw_pct_7d  ?? i.pct_7d  ?? null,
+              pct_30d:       trend.raw_pct_30d ?? i.pct_30d ?? null,
+            }
+            // card_trends only carries raw / PSA 9 / PSA 10. ALL other holding
+            // tiers (PSA 1–8, BGS, CGC, SGC, TAG, ACE etc.) are handled by the
+            // second pass below against daily_prices. Falling back to
+            // trend.current_raw here would silently disguise a graded slab as
+            // raw — exactly the bug we are fixing — so for those tiers we
+            // null the position value out and let pass 2 fill it (or leave
+            // it null so the UI can flag "no market data").
+            const trendTier =
+              i.holding_type === 'raw'   ? trend.current_raw
+            : i.holding_type === 'psa9'  ? trend.current_psa9
+            : i.holding_type === 'psa10' ? trend.current_psa10
+            : null
+            if (trendTier == null) {
+              // Wipe any stale raw fallback that the RPC join produced.
+              return { ...i, ...refreshed, current_value_cents: null, position_value_cents: null }
+            }
             const qty = Math.max(1, i.quantity || 1)
             return {
-              ...i,
-              current_raw:          trend.current_raw  ?? i.current_raw,
-              current_psa9:         trend.current_psa9 ?? i.current_psa9,
-              current_psa10:        trend.current_psa10 ?? i.current_psa10,
-              current_value_cents:  tier,
-              position_value_cents: tier * qty,
-              pct_7d:               trend.raw_pct_7d  ?? i.pct_7d  ?? null,
-              pct_30d:              trend.raw_pct_30d ?? i.pct_30d ?? null,
+              ...i, ...refreshed,
+              current_value_cents:  trendTier,
+              position_value_cents: trendTier * qty,
             }
           })
 
@@ -1331,6 +1346,18 @@ export default function PortfolioDashboard() {
                               title="Click Edit to set a value"
                             >
                               no value set
+                            </span>
+                          )}
+                          {!isManual && effPerCard == null && (
+                            <span
+                              style={{
+                                marginLeft: 6, color: '#ef4444', fontWeight: 700,
+                                background: 'rgba(239,68,68,0.1)',
+                                padding: '1px 7px', borderRadius: 6,
+                              }}
+                              title="We do not have a recent sale at this grade for this card. Open Edit to set a manual value."
+                            >
+                              no market data — set manual
                             </span>
                           )}
                           {stale && (
