@@ -18,6 +18,8 @@ interface PriceChartProps {
   height?: number
   /** Optional note shown beneath the toggle row (e.g. "new tiers limited history"). */
   note?: string
+  /** Override the default cents-to-USD formatter (axis ticks + tooltip). */
+  valueFormatter?: (v: number) => string
 }
 
 const defaultSeries: ChartSeries[] = [
@@ -26,8 +28,9 @@ const defaultSeries: ChartSeries[] = [
   { key: 'psa10_usd', label: 'PSA 10', color: 'var(--accent)',      defaultOn: true },
 ]
 
-export default function PriceChart({ data, series, height = 260, note }: PriceChartProps) {
+export default function PriceChart({ data, series, height = 260, note, valueFormatter }: PriceChartProps) {
   const allSeries = series ?? defaultSeries
+  const fmt = valueFormatter ?? formatChartPrice
 
   // Hide series with no data anywhere in the history (keeps the toggle row tidy).
   const seriesWithData = allSeries.filter(s =>
@@ -80,7 +83,7 @@ export default function PriceChart({ data, series, height = 260, note }: PriceCh
               tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
               tickLine={false}
               axisLine={false}
-              tickFormatter={(v) => formatChartPrice(v)}
+              tickFormatter={(v) => fmt(v)}
               width={55}
             />
             <Tooltip
@@ -91,7 +94,7 @@ export default function PriceChart({ data, series, height = 260, note }: PriceCh
               labelStyle={{ fontWeight: 600, marginBottom: 4 }}
               formatter={(value: number, name: string) => {
                 const s = allSeries.find(x => x.key === name)
-                return [formatChartPrice(value), s?.label || name]
+                return [fmt(value), s?.label || name]
               }}
             />
             {allSeries.filter(s => visible.has(s.key)).map(s => (

@@ -25,6 +25,8 @@ const MAX_SELECTED = 3
 // Colour palette for the chart series (one per selected set).
 const SERIES_COLOURS = ['var(--primary)', 'var(--accent)', '#22c55e', '#ec4899']
 
+type ChartMode = 'absolute' | 'indexed'
+
 function fmtCents(cents: number | null | undefined): string {
   if (cents == null) return '—'
   const d = cents / 100
@@ -73,6 +75,7 @@ export default function SetPriceIndexClient() {
   const [loadingHist, setLoadingHist] = useState(false)
 
   const [query, setQuery] = useState('')
+  const [chartMode, setChartMode] = useState<ChartMode>('indexed')
 
   // Load the set list once, pre-select two recent popular sets as defaults
   useEffect(() => {
@@ -126,13 +129,23 @@ export default function SetPriceIndexClient() {
 
   const merged = useMemo(() => {
     if (selected.length === 0) return []
-    const series = selected.map(name => ({
-      setName: name,
-      key: setKey(name),
-      rows: historyMap[name] ?? [],
-    }))
+    const series = selected.map(name => {
+      const rows = historyMap[name] ?? []
+      // For indexed mode, normalise to 100 at the first non-null point.
+      // Without this, comparing a $5M set to a $200k set squashes one line
+      // into the X-axis. Indexed mode plots % change from the start.
+      if (chartMode === 'indexed') {
+        const base = rows.find(r => r.value_usd != null && r.value_usd > 0)?.value_usd ?? null
+        const normalised = rows.map(r => ({
+          date: r.date,
+          value_usd: (base && r.value_usd != null) ? (r.value_usd / base) * 100 : null,
+        }))
+        return { setName: name, key: setKey(name), rows: normalised }
+      }
+      return { setName: name, key: setKey(name), rows }
+    })
     return mergeHistories(series)
-  }, [selected, historyMap])
+  }, [selected, historyMap, chartMode])
 
   const chartSeries: ChartSeries[] = useMemo(() => selected.map((name, i) => ({
     key: setKey(name),
@@ -161,16 +174,33 @@ export default function SetPriceIndexClient() {
     return allSets.filter(s => s.set_name.toLowerCase().includes(q))
   }, [allSets, query, selected])
 
-  // First-and-last-value summary per selected set (for % move display)
-  function summarise(setName: string) {
+  // First-and-last-value summary per selected set. Returns a partial result
+  // when the set has only one datapoint so we still show the current value
+  // for very new sets — only `pct` is gated on having two non-null points.
+  function summarise(setName: string): { first: number | null; last: number | null; pct: number | null } | null {
     const rows = historyMap[setName]
-    if (!rows || rows.length < 2) return null
-    const first = rows.find(r => r.value_usd != null)?.value_usd
-    const last = [...rows].reverse().find(r => r.value_usd != null)?.value_usd
-    if (first == null || last == null || first === 0) return null
-    const pct = ((last - first) / first) * 100
+    if (!rows || rows.length === 0) return null
+    const firstRow = rows.find(r => r.value_usd != null)
+    const lastRow  = [...rows].reverse().find(r => r.value_usd != null)
+    const first = firstRow?.value_usd ?? null
+    const last  = lastRow?.value_usd ?? null
+    if (last == null) return null
+    const canComputePct = first != null && first !== 0 && firstRow !== lastRow
+    const pct = canComputePct ? ((last - first!) / first!) * 100 : null
     return { first, last, pct }
   }
+
+  // Y-axis formatter — dollars in absolute mode, "100 = start" index in indexed mode
+  const valueFormatter = chartMode === 'indexed'
+    ? (v: number) => `${Math.round(v)}`
+    : (v: number) => {
+        if (!v) return '$0'
+        const d = v / 100
+        if (d >= 1_000_000) return `$${(d / 1_000_000).toFixed(1)}M`
+        if (d >= 1_000)     return `$${(d / 1_000).toFixed(0)}k`
+        if (d >= 100)       return `$${Math.round(d)}`
+        return `$${d.toFixed(2)}`
+      }
 
   return (
     <div style={{ maxWidth: 1080, margin: '0 auto', padding: '32px 20px 60px', fontFamily: "'Figtree', sans-serif" }}>
@@ -198,6 +228,28 @@ export default function SetPriceIndexClient() {
             background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16,
             padding: '20px 22px',
           }}>
+            {/* Mode toggle */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1.4, fontWeight: 700 }}>
+                {chartMode === 'indexed' ? 'Indexed · 100 = first datapoint per set' : 'Absolute · Total set value (USD)'}
+              </div>
+              <div style={{ display: 'inline-flex', gap: 4, padding: 3, background: 'var(--bg-light)', borderRadius: 10, border: '1px solid var(--border)' }}>
+                {(['indexed', 'absolute'] as ChartMode[]).map(m => (
+                  <button key={m} onClick={() => setChartMode(m)}
+                    style={{
+                      padding: '5px 12px', borderRadius: 7, border: 'none',
+                      background: chartMode === m ? 'var(--card)' : 'transparent',
+                      color: chartMode === m ? 'var(--text)' : 'var(--text-muted)',
+                      fontSize: 11, fontWeight: 800, cursor: 'pointer',
+                      boxShadow: chartMode === m ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                    }}
+                  >
+                    {m === 'indexed' ? 'Indexed' : 'Absolute'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {selected.length === 0 ? (
               <div style={{
                 height: 260, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -214,7 +266,10 @@ export default function SetPriceIndexClient() {
                 data={merged}
                 series={chartSeries}
                 height={300}
-                note="Total tracked value across all cards in each set, in USD. Sourced from sold listings, updated nightly."
+                valueFormatter={valueFormatter}
+                note={chartMode === 'indexed'
+                  ? 'Each set is normalised so its first datapoint equals 100. Lines above 100 are up since launch; below 100 are down. Lets you compare a $5M vintage set against a $200k modern set on the same chart.'
+                  : 'Total tracked value across all cards in each set, in USD. Sourced from sold listings, updated nightly.'}
               />
             )}
           </div>
@@ -246,21 +301,25 @@ export default function SetPriceIndexClient() {
                     </div>
                     {sum ? (
                       <>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
                           <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, fontWeight: 900, color: 'var(--text)', letterSpacing: -0.5 }}>
                             {fmtCents(sum.last)}
                           </div>
-                          <div style={{ fontSize: 12, fontWeight: 800, color: sum.pct >= 0 ? '#22c55e' : '#ef4444' }}>
-                            {sum.pct >= 0 ? '+' : ''}{sum.pct.toFixed(1)}%
-                          </div>
+                          {sum.pct != null && (
+                            <div style={{ fontSize: 12, fontWeight: 800, color: sum.pct >= 0 ? '#22c55e' : '#ef4444' }}>
+                              {sum.pct >= 0 ? '+' : ''}{sum.pct.toFixed(1)}%
+                            </div>
+                          )}
                         </div>
                         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                          since {sum.first != null ? fmtCents(sum.first) : '—'}
+                          {sum.pct != null
+                            ? `since ${fmtCents(sum.first)}`
+                            : 'Just one datapoint so far — % change will appear once we have more.'}
                         </div>
                       </>
                     ) : (
                       <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                        {historyMap[name] === undefined ? 'Loading history…' : 'Not enough history yet.'}
+                        {historyMap[name] === undefined ? 'Loading history…' : 'No history yet for this set.'}
                       </div>
                     )}
                   </div>

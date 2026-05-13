@@ -40,15 +40,19 @@ function isSealed(name: string, setName: string) {
   return SEALED_PATTERNS.some(p => p.test(name || '') || p.test(setName || ''))
 }
 
-async function fetchMovers(direction: 'rising' | 'falling', period: Period, mode: 'singles' | 'sealed'): Promise<Mover[]> {
+async function fetchSinglesMovers(direction: 'rising' | 'falling', period: Period): Promise<Mover[]> {
+  // get_top_risers_filtered / get_top_fallers do the SQL-side sealed exclusion
+  // and the volume-quality filter for us. Use these for singles only.
   const fnName = direction === 'rising' ? 'get_top_risers_filtered' : 'get_top_fallers'
   const { data } = await supabase.rpc(fnName, { time_period: period, min_price: 3000 })
   if (!data) return []
   const parsed = typeof data === 'string' ? JSON.parse(data) : data
   const results: any[] = parsed?.results || []
 
+  // Defensive — strip anything that LOOKS sealed in case the RPC sealed
+  // filter misses an unusual name pattern.
   const filtered = results
-    .filter(r => mode === 'sealed' ? isSealed(r.card_name, r.set_name) : !isSealed(r.card_name, r.set_name))
+    .filter(r => !isSealed(r.card_name, r.set_name))
     .slice(0, 20)
 
   const slugs = filtered.map((r: any) => r.card_slug).filter(Boolean)
@@ -64,8 +68,6 @@ async function fetchMovers(direction: 'rising' | 'falling', period: Period, mode
   ;(volData || []).forEach((v: any) => { volMap[String(v.card_slug)] = v })
 
   return filtered.map((r: any) => {
-    // The RPC parameterises by time_period; pct_change is the period-specific
-    // value. pct_30d is the fallback snapshot column the older code path used.
     const rawPct = r.pct_change ?? r.pct_30d ?? 0
     return {
       card_slug:     r.card_slug,
@@ -76,6 +78,56 @@ async function fetchMovers(direction: 'rising' | 'falling', period: Period, mode
       current_price: r.current_price ?? r.current_raw ?? 0,
       pct_change:    direction === 'rising' ? rawPct : -Math.abs(rawPct),
       volume_label:  volMap[r.card_slug]?.volume_label ?? null,
+    } as Mover
+  })
+}
+
+// The "_filtered" RPC strips sealed product at the SQL level, so we can't
+// get sealed risers/fallers from it. Fetch sealed directly from card_trends
+// using the pct column for the chosen period.
+async function fetchSealedMovers(direction: 'rising' | 'falling', period: Period): Promise<Mover[]> {
+  const pctCol = period === '7d'  ? 'raw_pct_7d'
+              :  period === '90d' ? 'raw_pct_90d'
+              :  /* 30d + 365d fallback */ 'raw_pct_30d'
+
+  // Step 1: pull top candidates by absolute movement; over-fetch so the
+  // name-pattern sealed filter below has plenty to work with.
+  const { data: trends } = await supabase
+    .from('card_trends')
+    .select(`card_slug, card_name, set_name, current_raw, ${pctCol}`)
+    .gt('current_raw', 3000)                  // $30+ so we skip junk packs
+    .not(pctCol, 'is', null)
+    .order(pctCol, { ascending: direction === 'falling', nullsFirst: false })
+    .limit(300)
+
+  if (!trends?.length) return []
+
+  const sealedTrends = (trends as any[])
+    .filter(t => isSealed(t.card_name, t.set_name))
+    .slice(0, 20)
+
+  if (!sealedTrends.length) return []
+
+  // Hydrate with images + url_slug from cards
+  const slugs = sealedTrends.map(t => t.card_slug)
+  const { data: cardRows } = await supabase
+    .from('cards')
+    .select('card_slug, image_url, card_url_slug')
+    .in('card_slug', slugs)
+  const imgMap: Record<string, any> = {}
+  ;(cardRows || []).forEach((c: any) => { imgMap[String(c.card_slug)] = c })
+
+  return sealedTrends.map((t: any) => {
+    const pct = Number(t[pctCol]) || 0
+    return {
+      card_slug:     t.card_slug,
+      card_name:     t.card_name,
+      set_name:      t.set_name,
+      card_url_slug: imgMap[t.card_slug]?.card_url_slug ?? null,
+      image_url:     imgMap[t.card_slug]?.image_url ?? null,
+      current_price: t.current_raw,
+      pct_change:    direction === 'rising' ? pct : -Math.abs(pct),
+      volume_label:  null,
     } as Mover
   })
 }
@@ -118,15 +170,15 @@ export default function RisersFallersClient() {
     setLoadingSealed(true)
     let cancelled = false
     Promise.all([
-      fetchMovers('rising',  period, 'singles'),
-      fetchMovers('falling', period, 'singles'),
+      fetchSinglesMovers('rising',  period),
+      fetchSinglesMovers('falling', period),
     ]).then(([r, f]) => {
       if (cancelled) return
       setSinglesRisers(r); setSinglesFallers(f); setLoadingCards(false)
     })
     Promise.all([
-      fetchMovers('rising',  period, 'sealed'),
-      fetchMovers('falling', period, 'sealed'),
+      fetchSealedMovers('rising',  period),
+      fetchSealedMovers('falling', period),
     ]).then(([r, f]) => {
       if (cancelled) return
       setSealedRisers(r); setSealedFallers(f); setLoadingSealed(false)
