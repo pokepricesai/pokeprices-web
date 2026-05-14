@@ -55,6 +55,7 @@ const TILT_SAMPLE_POINTS = 80            // per region, per frame
 
 type Stage = 'idle' | 'starting' | 'live' | 'captured' | 'scanning' | 'result' | 'error'
 type Feature = 'DOCUMENT_TEXT_DETECTION' | 'TEXT_DETECTION'
+type Engine  = 'vision_ocr' | 'ai_vision'
 
 // ── Holo / reverse-holo detection (tilt-based) ─────────────────────────────
 // v1 single-still didn't work: glare and ambient lighting drowned the signal.
@@ -199,7 +200,10 @@ interface Candidate {
 
 interface ScanResult {
   scan_log_id: number | null
+  engine?: Engine
   feature_used: Feature
+  ai_variant?: string | null
+  ai_variant_confidence?: 'high' | 'medium' | 'low' | null
   vision: { full_text: string; word_count: number }
   parsed: {
     collector_number: string | null
@@ -225,6 +229,7 @@ export default function ScanTestClient() {
   const [capturedDataUrl, setCapturedDataUrl] = useState<string | null>(null)
   const [result, setResult] = useState<ScanResult | null>(null)
   const [feature, setFeature] = useState<Feature>('DOCUMENT_TEXT_DETECTION')
+  const [engine, setEngine] = useState<Engine>('vision_ocr')
   // Default-open so the user can immediately compare what Vision read
   // against what we parsed out of it — most "why did it miss?" debugging
   // starts with checking the raw output anyway.
@@ -468,12 +473,15 @@ export default function ScanTestClient() {
         },
         body: JSON.stringify({
           image_base64: base64,
-          image_base64_number: numberStripDataUrl
+          // The AI engine works from the single full image — no need to
+          // send the extra crops, saving payload size.
+          image_base64_number: engine === 'vision_ocr' && numberStripDataUrl
             ? numberStripDataUrl.replace(/^data:image\/\w+;base64,/, '')
             : undefined,
-          image_base64_corner: cornerDataUrl
+          image_base64_corner: engine === 'vision_ocr' && cornerDataUrl
             ? cornerDataUrl.replace(/^data:image\/\w+;base64,/, '')
             : undefined,
+          engine,
           feature,
           holo_analysis: holo,
         }),
@@ -538,6 +546,8 @@ export default function ScanTestClient() {
           dataUrl={capturedDataUrl}
           feature={feature}
           onFeatureChange={setFeature}
+          engine={engine}
+          onEngineChange={setEngine}
           onSend={sendScan}
           onRetake={() => { setCapturedDataUrl(null); startCamera() }}
         />
@@ -649,28 +659,46 @@ function CardOverlay() {
 }
 
 function CapturedPanel({
-  dataUrl, feature, onFeatureChange, onSend, onRetake,
+  dataUrl, feature, onFeatureChange, engine, onEngineChange, onSend, onRetake,
 }: {
   dataUrl: string
   feature: Feature
   onFeatureChange: (f: Feature) => void
+  engine: Engine
+  onEngineChange: (e: Engine) => void
   onSend: () => void
   onRetake: () => void
 }) {
   return (
     <div style={panelStyle}>
       <img src={dataUrl} alt="captured" style={{ width: '100%', borderRadius: 12, display: 'block' }} />
+
       <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <label style={smallLabelStyle}>Vision feature</label>
+        <label style={smallLabelStyle}>Engine</label>
         <select
-          value={feature}
-          onChange={e => onFeatureChange(e.target.value as Feature)}
+          value={engine}
+          onChange={e => onEngineChange(e.target.value as Engine)}
           style={selectStyle}
         >
-          <option value="DOCUMENT_TEXT_DETECTION">DOCUMENT_TEXT_DETECTION (default — preserves layout)</option>
-          <option value="TEXT_DETECTION">TEXT_DETECTION (looser, sometimes catches stylised text)</option>
+          <option value="vision_ocr">Vision OCR (3 calls, ~$0.0045/scan, deterministic)</option>
+          <option value="ai_vision">AI Vision — Haiku 4.5 (1 call, ~$0.0025/scan, sees holo visually)</option>
         </select>
       </div>
+
+      {engine === 'vision_ocr' && (
+        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <label style={smallLabelStyle}>Vision feature</label>
+          <select
+            value={feature}
+            onChange={e => onFeatureChange(e.target.value as Feature)}
+            style={selectStyle}
+          >
+            <option value="DOCUMENT_TEXT_DETECTION">DOCUMENT_TEXT_DETECTION (default — preserves layout)</option>
+            <option value="TEXT_DETECTION">TEXT_DETECTION (looser, sometimes catches stylised text)</option>
+          </select>
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
         <button onClick={onRetake} style={secondaryButtonStyle}>Retake</button>
         <button onClick={onSend} style={primaryButtonStyle}>Recognise</button>
@@ -704,8 +732,16 @@ function ResultPanel({
 }) {
   const p = result.parsed
   const noText = !p.full_text || p.full_text.trim().length === 0
-  const candidates = reorderByHolo(result.candidates, holo)
-  const holoDiag = holoReorderDiagnosis(result.candidates, holo)
+
+  // When AI engine is used, prefer the AI's variant verdict for reordering
+  // over the client-side tilt heuristic. AI sees the foil visually from a
+  // single still; tilt depends on the user actually tilting consistently.
+  const variantSignal: HoloAnalysis | null = result.engine === 'ai_vision' && result.ai_variant
+    ? aiVariantToHolo(result.ai_variant, result.ai_variant_confidence ?? 'medium')
+    : holo
+
+  const candidates = reorderByHolo(result.candidates, variantSignal)
+  const holoDiag = holoReorderDiagnosis(result.candidates, variantSignal)
   const top = candidates[0]
   const scannedDenom = p.collector_number?.split('/')[1] || null
   const variantNote = (() => {
@@ -746,7 +782,10 @@ function ResultPanel({
           <Stat label="Total"  value={`${result.timing_ms.total} ms`} />
         </div>
         <div style={{ fontFamily: "'Figtree', sans-serif", fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
-          Feature: {result.feature_used} · {result.vision.word_count} words detected
+          Engine: <strong style={{ color: 'var(--text)' }}>{result.engine === 'ai_vision' ? 'AI Vision (Haiku 4.5)' : `Vision OCR · ${result.feature_used}`}</strong>
+          {result.engine === 'ai_vision'
+            ? ' · ~$0.0025 per scan'
+            : ` · ${result.vision.word_count} words detected · ~$0.0045 per scan`}
         </div>
       </div>
 
@@ -763,7 +802,9 @@ function ResultPanel({
         <SignalRow label="Promo card" value={p.is_promo ? 'yes — filtering to promo sets' : null} />
       </div>
 
-      {holo && <HoloPanel holo={holo} />}
+      {result.engine === 'ai_vision' && result.ai_variant
+        ? <AIVariantPanel variant={result.ai_variant} confidence={result.ai_variant_confidence ?? 'medium'} />
+        : holo && <HoloPanel holo={holo} />}
 
       <div style={panelStyle}>
         <SectionTitle>
@@ -1044,6 +1085,60 @@ function Tag({ on, label }: { on: boolean; label: string }) {
       color: on ? '#fff' : 'var(--text-muted)',
       fontWeight: 600, fontSize: 10, letterSpacing: 0.3,
     }}>{label}</span>
+  )
+}
+
+// Map Haiku's variant string + confidence into the HoloAnalysis shape so
+// downstream reordering / labelling code can stay engine-agnostic.
+function aiVariantToHolo(variant: string, confidence: 'high' | 'medium' | 'low' | string): HoloAnalysis | null {
+  const confMap: Record<string, number> = { high: 0.9, medium: 0.7, low: 0.5 }
+  const conf = confMap[String(confidence).toLowerCase()] ?? 0.6
+  const verdictMap: Record<string, HoloVerdict> = {
+    holo:         'holo',
+    reverse_holo: 'reverse_holo',
+    full_art:     'full_art',
+    textured:     'full_art',
+    regular:      'non_holo',
+    unknown:      'uncertain',
+  }
+  const verdict = verdictMap[String(variant).toLowerCase()] ?? 'uncertain'
+  // Build a synthetic RegionStats so the shape matches what HoloPanel
+  // expects — values are placeholders since we did not run pixel sampling.
+  const blank = { shimmer_count: 0, shimmer_density: 0, mean_l_stdev: 0, max_l_stdev: 0 }
+  return {
+    artwork:       blank,
+    frame:         blank,
+    shimmer_ratio: 0,
+    verdict,
+    confidence:    conf,
+    frame_count:   0,
+    capture_ms:    0,
+  }
+}
+
+function AIVariantPanel({ variant, confidence }: { variant: string; confidence: string }) {
+  const labelMap: Record<string, { label: string; color: string }> = {
+    holo:         { label: 'HOLO',          color: 'var(--green)'     },
+    reverse_holo: { label: 'REVERSE HOLO',  color: 'var(--primary)'   },
+    full_art:     { label: 'FULL ART',      color: 'var(--green)'     },
+    textured:     { label: 'TEXTURED',      color: 'var(--green)'     },
+    regular:      { label: 'REGULAR',       color: 'var(--text-muted)' },
+    unknown:      { label: 'UNKNOWN',       color: '#f59e0b'          },
+  }
+  const v = labelMap[variant.toLowerCase()] ?? { label: variant.toUpperCase(), color: 'var(--text)' }
+  return (
+    <div style={panelStyle}>
+      <SectionTitle>Surface analysis (AI vision)</SectionTitle>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 8 }}>
+        <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, fontWeight: 700, color: v.color }}>{v.label}</span>
+        <span style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+          {String(confidence).toUpperCase()} confidence
+        </span>
+      </div>
+      <p style={{ ...mutedNoteStyle, fontSize: 12 }}>
+        Haiku looked at the card directly and judged the surface from the foil pattern visible in the image. No tilt required.
+      </p>
+    </div>
   )
 }
 

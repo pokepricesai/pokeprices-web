@@ -18,6 +18,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const GOOGLE_VISION_API_KEY = Deno.env.get("GOOGLE_VISION_API_KEY")
+const CLAUDE_API_KEY = Deno.env.get("CLAUDE_API_KEY")
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
@@ -87,6 +88,94 @@ async function callVision(
     full:        data?.responses?.[0] ?? {},
     numberStrip: stripIdx  >= 0 ? (data?.responses?.[stripIdx]  ?? null) : null,
     corner:      cornerIdx >= 0 ? (data?.responses?.[cornerIdx] ?? null) : null,
+  }
+}
+
+// ── AI vision (alternative recognition path) ───────────────────────────────
+// Single Haiku 4.5 call that takes the full card image and returns
+// structured JSON. Replaces the entire Google Vision + parse pipeline
+// when engine === "ai_vision". Designed to be a drop-in alternative so
+// downstream matching is identical.
+
+const HAIKU_VISION_PROMPT = `You are an expert Pokemon TCG card identifier. Look at this card photo and return a JSON object describing what you see.
+
+Return ONLY this JSON shape. No preamble, no markdown code fence.
+
+{
+  "pokemon_name": string | null,         // just the Pokemon name, strip HP, symbols, brackets
+  "collector_number": string | null,     // exact format printed, e.g. "4/102", "016/165", "SWSH-123"
+  "set_name": string | null,             // best guess at full set name if you recognize it
+  "set_abbreviation": string | null,     // 3-letter code if visible (SVI, PAR, OBF, PAF, etc)
+  "copyright_year": number | null,       // 4-digit year from copyright line
+  "is_promo": boolean,                   // PROMO badge, black star, or promo-prefixed number (SWSH/XY/SM/SVP...)
+  "variant": "regular" | "holo" | "reverse_holo" | "full_art" | "textured" | "unknown",
+  "variant_confidence": "high" | "medium" | "low",
+  "notes": string                        // one short sentence about anything unclear in your reading
+}
+
+Variant guidance:
+- holo:         foil pattern visible IN the artwork window only
+- reverse_holo: foil pattern visible in the frame/border but NOT in the artwork
+- full_art:     whole card is foil (ex / V / VMAX / modern ex / Special Illustration Rare)
+- textured:     physical texture/embossing visible (Special Illustration Rare, Ultra Rare textured)
+- regular:      plain matte non-foil
+
+Output ONLY the JSON object.`
+
+async function callAIVision(imageBase64: string): Promise<{ signals: ParsedSignals; raw: any; variant: string | null; variantConfidence: string | null }> {
+  if (!CLAUDE_API_KEY) throw new Error("CLAUDE_API_KEY not set on edge function")
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": CLAUDE_API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5",
+      max_tokens: 600,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: imageBase64 } },
+          { type: "text", text: HAIKU_VISION_PROMPT },
+        ],
+      }],
+    }),
+  })
+  if (!res.ok) {
+    const txt = await res.text()
+    throw new Error(`Haiku ${res.status}: ${txt.slice(0, 400)}`)
+  }
+  const data = await res.json()
+  const text = String(data?.content?.[0]?.text || "")
+
+  let parsed: any
+  try {
+    const cleaned = text.replace(/```json|```/g, "").trim()
+    const start = cleaned.indexOf("{")
+    const end = cleaned.lastIndexOf("}")
+    if (start < 0 || end < 0) throw new Error("no JSON braces")
+    parsed = JSON.parse(cleaned.slice(start, end + 1))
+  } catch (e: any) {
+    throw new Error(`Could not parse Haiku JSON: ${e?.message || e}. Raw: ${text.slice(0, 200)}`)
+  }
+
+  const signals: ParsedSignals = {
+    collector_number: parsed.collector_number ? String(parsed.collector_number).trim() : null,
+    collector_number_pattern: parsed.collector_number ? "ai-vision" : null,
+    name: parsed.pokemon_name ? String(parsed.pokemon_name).trim() : null,
+    set_hint: parsed.set_name ? String(parsed.set_name).trim() : null,
+    set_abbreviation: parsed.set_abbreviation ? String(parsed.set_abbreviation).trim().toUpperCase() : null,
+    copyright_year: typeof parsed.copyright_year === "number" ? parsed.copyright_year : null,
+    is_promo: !!parsed.is_promo,
+    full_text: JSON.stringify(parsed, null, 2),
+  }
+  return {
+    signals,
+    raw: parsed,
+    variant: parsed.variant ?? null,
+    variantConfidence: parsed.variant_confidence ?? null,
   }
 }
 
@@ -309,23 +398,30 @@ async function matchCards(signals: ParsedSignals): Promise<any[]> {
 
 async function logScan(opts: {
   feature: VisionFeature
+  engine: "vision_ocr" | "ai_vision"
   signals: ParsedSignals
   candidates: any[]
   timing: Record<string, number>
   holoAnalysis: any | null
+  aiVariant: string | null
+  aiVariantConfidence: string | null
 }): Promise<number | null> {
   const top = opts.candidates[0]
   try {
     const { data, error } = await supabase.from("scan_logs").insert([{
-      feature_used:    opts.feature,
+      feature_used:    opts.engine === "ai_vision" ? "AI_VISION" : opts.feature,
       vision_full_text: opts.signals.full_text?.slice(0, 4000) ?? null,
       parsed_signals: {
+        engine: opts.engine,
         collector_number: opts.signals.collector_number,
         collector_number_pattern: opts.signals.collector_number_pattern,
         name: opts.signals.name,
         set_hint: opts.signals.set_hint,
         set_abbreviation: opts.signals.set_abbreviation,
         copyright_year: opts.signals.copyright_year,
+        is_promo: opts.signals.is_promo,
+        ai_variant: opts.aiVariant,
+        ai_variant_confidence: opts.aiVariantConfidence,
       },
       candidates:       opts.candidates,
       top_card_slug:    top?.card_slug ?? null,
@@ -374,56 +470,72 @@ Deno.serve(async (req) => {
   }
 
   // ── Recognise branch ─────────────────────────────────────────────────────
-  if (!GOOGLE_VISION_API_KEY) {
-    return json({ error: "GOOGLE_VISION_API_KEY not set on edge function" }, 500)
-  }
-
   const imageBase64: string = String(body.image_base64 || "").replace(/^data:image\/\w+;base64,/, "")
   if (!imageBase64) return json({ error: "Missing image_base64" }, 400)
 
-  const numberStripBase64: string | null = body.image_base64_number
-    ? String(body.image_base64_number).replace(/^data:image\/\w+;base64,/, "")
-    : null
+  const engine: "vision_ocr" | "ai_vision" =
+    body.engine === "ai_vision" ? "ai_vision" : "vision_ocr"
 
-  const cornerBase64: string | null = body.image_base64_corner
-    ? String(body.image_base64_corner).replace(/^data:image\/\w+;base64,/, "")
-    : null
-
+  let signals: ParsedSignals
+  let visionMs = 0
+  let parseMs = 0
+  let aiVariant: string | null = null
+  let aiVariantConfidence: string | null = null
+  let visionResult: { full: any; numberStrip: any | null; corner: any | null } = { full: null, numberStrip: null, corner: null }
   const feature: VisionFeature =
     body.feature === "TEXT_DETECTION" ? "TEXT_DETECTION" : "DOCUMENT_TEXT_DETECTION"
 
-  // Vision (batch: full card + optional bottom-strip + optional corner)
-  const tVisionStart = Date.now()
-  let visionResult: { full: any; numberStrip: any | null; corner: any | null }
-  try {
-    visionResult = await callVision(imageBase64, feature, numberStripBase64, cornerBase64)
-  } catch (e: any) {
-    console.error("Vision error", e?.message || e)
-    return json({ error: String(e?.message || e), stage: "vision" }, 500)
+  if (engine === "ai_vision") {
+    if (!CLAUDE_API_KEY) return json({ error: "CLAUDE_API_KEY not set on edge function" }, 500)
+    const tAIStart = Date.now()
+    try {
+      const aiResult = await callAIVision(imageBase64)
+      signals = aiResult.signals
+      aiVariant = aiResult.variant
+      aiVariantConfidence = aiResult.variantConfidence
+    } catch (e: any) {
+      console.error("AI vision error", e?.message || e)
+      return json({ error: String(e?.message || e), stage: "ai_vision" }, 500)
+    }
+    visionMs = Date.now() - tAIStart
+    console.log("[scan-card] engine=ai_vision haikuMs=", visionMs, " signals:", JSON.stringify({
+      collector_number: signals.collector_number,
+      name: signals.name,
+      set_hint: signals.set_hint,
+      is_promo: signals.is_promo,
+      variant: aiVariant,
+    }))
+  } else {
+    if (!GOOGLE_VISION_API_KEY) return json({ error: "GOOGLE_VISION_API_KEY not set on edge function" }, 500)
+
+    const numberStripBase64: string | null = body.image_base64_number
+      ? String(body.image_base64_number).replace(/^data:image\/\w+;base64,/, "")
+      : null
+    const cornerBase64: string | null = body.image_base64_corner
+      ? String(body.image_base64_corner).replace(/^data:image\/\w+;base64,/, "")
+      : null
+
+    const tVisionStart = Date.now()
+    try {
+      visionResult = await callVision(imageBase64, feature, numberStripBase64, cornerBase64)
+    } catch (e: any) {
+      console.error("Vision error", e?.message || e)
+      return json({ error: String(e?.message || e), stage: "vision" }, 500)
+    }
+    visionMs = Date.now() - tVisionStart
+
+    const previewText   = String(visionResult.full?.fullTextAnnotation?.text   || "").slice(0, 600)
+    const stripPreview  = String(visionResult.numberStrip?.fullTextAnnotation?.text || "").slice(0, 200)
+    const cornerPreview = String(visionResult.corner?.fullTextAnnotation?.text || "").slice(0, 200)
+    console.log("[scan-card] engine=vision_ocr feature=", feature, " visionMs=", visionMs,
+      " full preview:\n", previewText,
+      "\n strip preview:\n", stripPreview,
+      "\n corner preview:\n", cornerPreview)
+
+    const tParseStart = Date.now()
+    signals = parseSignals(visionResult.full, visionResult.numberStrip, visionResult.corner)
+    parseMs = Date.now() - tParseStart
   }
-  const visionMs = Date.now() - tVisionStart
-
-  const previewText  = String(visionResult.full?.fullTextAnnotation?.text   || "").slice(0, 600)
-  const stripPreview = String(visionResult.numberStrip?.fullTextAnnotation?.text || "").slice(0, 200)
-  const cornerPreview = String(visionResult.corner?.fullTextAnnotation?.text || "").slice(0, 200)
-  console.log("[scan-card] feature=", feature, " visionMs=", visionMs,
-    " full preview:\n", previewText,
-    "\n strip preview:\n", stripPreview,
-    "\n corner preview:\n", cornerPreview)
-
-  // Parse
-  const tParseStart = Date.now()
-  const signals = parseSignals(visionResult.full, visionResult.numberStrip, visionResult.corner)
-  const parseMs = Date.now() - tParseStart
-  console.log("[scan-card] parsed:", JSON.stringify({
-    collector_number: signals.collector_number,
-    name: signals.name,
-    set_hint: signals.set_hint,
-    set_abbreviation: signals.set_abbreviation,
-    copyright_year: signals.copyright_year,
-    is_promo: signals.is_promo,
-  }))
-
   // Match
   const tMatchStart = Date.now()
   let candidates: any[] = []
@@ -448,14 +560,18 @@ Deno.serve(async (req) => {
   // Log (non-blocking on failure — we still return the result to the user).
   const tLogStart = Date.now()
   const scanLogId = await logScan({
-    feature, signals, candidates, timing,
+    feature, engine, signals, candidates, timing,
     holoAnalysis: body.holo_analysis ?? null,
+    aiVariant, aiVariantConfidence,
   })
   const logMs = Date.now() - tLogStart
 
   return json({
     scan_log_id: scanLogId,
+    engine,
     feature_used: feature,
+    ai_variant: aiVariant,
+    ai_variant_confidence: aiVariantConfidence,
     vision: {
       full_text: signals.full_text,
       word_count: Array.isArray(visionResult.full?.textAnnotations) ? visionResult.full.textAnnotations.length - 1 : 0,
