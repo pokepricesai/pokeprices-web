@@ -38,12 +38,17 @@ function json(body: unknown, status = 200) {
 
 type VisionFeature = "TEXT_DETECTION" | "DOCUMENT_TEXT_DETECTION"
 
-async function callVision(imageBase64: string, feature: VisionFeature, numberStripBase64?: string | null): Promise<{ full: any; numberStrip: any | null }> {
-  // Batch request: full card crop + (optional) high-res bottom-strip crop.
-  // Both run in a single round-trip so wall-clock is the same as one call.
-  // Bottom strip is for the small printed collector number — Vision often
-  // misses that at full-card resolution but reads it cleanly when given a
-  // tight high-res crop.
+async function callVision(
+  imageBase64: string,
+  feature: VisionFeature,
+  numberStripBase64?: string | null,
+  cornerBase64?: string | null,
+): Promise<{ full: any; numberStrip: any | null; corner: any | null }> {
+  // Batch request: up to three images in one round-trip.
+  //   [0] full card        — name + general text
+  //   [1] bottom strip     — modern bottom-LEFT collector number
+  //   [2] bottom-R corner  — vintage bottom-RIGHT collector number,
+  //                           contrast-boosted, max zoom
   const url = `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_VISION_API_KEY}`
   const requests: any[] = [
     {
@@ -52,11 +57,18 @@ async function callVision(imageBase64: string, feature: VisionFeature, numberStr
       imageContext: { languageHints: ["en"] },
     },
   ]
+  const stripIdx = numberStripBase64 ? requests.length : -1
   if (numberStripBase64) {
     requests.push({
       image: { content: numberStripBase64 },
-      // TEXT_DETECTION (not DOCUMENT_) tends to do better on short isolated
-      // alphanumeric strings like collector numbers.
+      features: [{ type: "TEXT_DETECTION", maxResults: 20 }],
+      imageContext: { languageHints: ["en"] },
+    })
+  }
+  const cornerIdx = cornerBase64 ? requests.length : -1
+  if (cornerBase64) {
+    requests.push({
+      image: { content: cornerBase64 },
       features: [{ type: "TEXT_DETECTION", maxResults: 20 }],
       imageContext: { languageHints: ["en"] },
     })
@@ -73,7 +85,8 @@ async function callVision(imageBase64: string, feature: VisionFeature, numberStr
   const data = await res.json()
   return {
     full:        data?.responses?.[0] ?? {},
-    numberStrip: numberStripBase64 ? (data?.responses?.[1] ?? null) : null,
+    numberStrip: stripIdx  >= 0 ? (data?.responses?.[stripIdx]  ?? null) : null,
+    corner:      cornerIdx >= 0 ? (data?.responses?.[cornerIdx] ?? null) : null,
   }
 }
 
@@ -231,29 +244,35 @@ function extractName(response: any): string | null {
   return cleaned || null
 }
 
-function parseSignals(fullResponse: any, numberStripResponse: any | null): ParsedSignals {
-  const fullText = String(fullResponse?.fullTextAnnotation?.text || fullResponse?.textAnnotations?.[0]?.description || "")
-  const stripText = String(numberStripResponse?.fullTextAnnotation?.text || numberStripResponse?.textAnnotations?.[0]?.description || "")
+function parseSignals(fullResponse: any, numberStripResponse: any | null, cornerResponse: any | null): ParsedSignals {
+  const fullText   = String(fullResponse?.fullTextAnnotation?.text   || fullResponse?.textAnnotations?.[0]?.description   || "")
+  const stripText  = String(numberStripResponse?.fullTextAnnotation?.text || numberStripResponse?.textAnnotations?.[0]?.description || "")
+  const cornerText = String(cornerResponse?.fullTextAnnotation?.text || cornerResponse?.textAnnotations?.[0]?.description || "")
 
-  // Run BOTH extractions and prefer whichever returned a denominator (N/M
-  // form). The strip-first approach we used previously could lock in a
-  // denominator-less reading even when the full-card text actually had the
-  // complete number — and downstream matching needs the denominator to
-  // narrow to the right set.
-  const stripNum = stripText ? extractCollectorNumber(stripText) : { value: null, pattern: null }
-  const fullNum  = fullText  ? extractCollectorNumber(fullText)  : { value: null, pattern: null }
+  // Try all three OCR passes; prefer whichever returned a denominator
+  // (N/M form). Order of preference when no denom is found:
+  //   corner (high-zoom bottom-right, best for vintage)
+  //   strip  (bottom 35%, good for modern bottom-left)
+  //   full   (whole card, last resort)
+  const cornerNum = cornerText ? extractCollectorNumber(cornerText) : { value: null, pattern: null }
+  const stripNum  = stripText  ? extractCollectorNumber(stripText)  : { value: null, pattern: null }
+  const fullNum   = fullText   ? extractCollectorNumber(fullText)   : { value: null, pattern: null }
   const hasDenom = (v: string | null) => v != null && v.includes("/")
   let number: { value: string | null; pattern: string | null }
-  if (hasDenom(stripNum.value))      number = stripNum
-  else if (hasDenom(fullNum.value))  number = fullNum
-  else if (stripNum.value)           number = stripNum
-  else                               number = fullNum
+  if      (hasDenom(cornerNum.value)) number = cornerNum
+  else if (hasDenom(stripNum.value))  number = stripNum
+  else if (hasDenom(fullNum.value))   number = fullNum
+  else if (cornerNum.value)           number = cornerNum
+  else if (stripNum.value)            number = stripNum
+  else                                number = fullNum
 
-  // Set abbreviation is also printed near the number, so try the strip first.
-  let abbreviation: string | null = stripText ? extractSetAbbreviation(stripText) : null
-  if (!abbreviation) abbreviation = extractSetAbbreviation(fullText)
+  // Set abbreviation is printed near the number; check corner, then strip,
+  // then full.
+  let abbreviation: string | null = cornerText ? extractSetAbbreviation(cornerText) : null
+  if (!abbreviation && stripText) abbreviation = extractSetAbbreviation(stripText)
+  if (!abbreviation)              abbreviation = extractSetAbbreviation(fullText)
 
-  const combinedText = fullText + (stripText ? "\n" + stripText : "")
+  const combinedText = fullText + (stripText ? "\n" + stripText : "") + (cornerText ? "\n" + cornerText : "")
   return {
     collector_number: number.value,
     collector_number_pattern: number.pattern,
@@ -262,7 +281,9 @@ function parseSignals(fullResponse: any, numberStripResponse: any | null): Parse
     set_abbreviation: abbreviation,
     copyright_year: extractCopyrightYear(fullText),
     is_promo: extractIsPromo(combinedText, number.pattern),
-    full_text: fullText + (stripText ? `\n--- bottom strip ---\n${stripText}` : ""),
+    full_text: fullText
+      + (stripText  ? `\n--- bottom strip ---\n${stripText}`     : "")
+      + (cornerText ? `\n--- bottom-right corner ---\n${cornerText}` : ""),
   }
 }
 
@@ -364,27 +385,35 @@ Deno.serve(async (req) => {
     ? String(body.image_base64_number).replace(/^data:image\/\w+;base64,/, "")
     : null
 
+  const cornerBase64: string | null = body.image_base64_corner
+    ? String(body.image_base64_corner).replace(/^data:image\/\w+;base64,/, "")
+    : null
+
   const feature: VisionFeature =
     body.feature === "TEXT_DETECTION" ? "TEXT_DETECTION" : "DOCUMENT_TEXT_DETECTION"
 
-  // Vision (batch: full card + optional bottom-strip)
+  // Vision (batch: full card + optional bottom-strip + optional corner)
   const tVisionStart = Date.now()
-  let visionResult: { full: any; numberStrip: any | null }
+  let visionResult: { full: any; numberStrip: any | null; corner: any | null }
   try {
-    visionResult = await callVision(imageBase64, feature, numberStripBase64)
+    visionResult = await callVision(imageBase64, feature, numberStripBase64, cornerBase64)
   } catch (e: any) {
     console.error("Vision error", e?.message || e)
     return json({ error: String(e?.message || e), stage: "vision" }, 500)
   }
   const visionMs = Date.now() - tVisionStart
 
-  const previewText = String(visionResult.full?.fullTextAnnotation?.text || "").slice(0, 600)
+  const previewText  = String(visionResult.full?.fullTextAnnotation?.text   || "").slice(0, 600)
   const stripPreview = String(visionResult.numberStrip?.fullTextAnnotation?.text || "").slice(0, 200)
-  console.log("[scan-card] feature=", feature, " visionMs=", visionMs, " full preview:\n", previewText, "\n strip preview:\n", stripPreview)
+  const cornerPreview = String(visionResult.corner?.fullTextAnnotation?.text || "").slice(0, 200)
+  console.log("[scan-card] feature=", feature, " visionMs=", visionMs,
+    " full preview:\n", previewText,
+    "\n strip preview:\n", stripPreview,
+    "\n corner preview:\n", cornerPreview)
 
   // Parse
   const tParseStart = Date.now()
-  const signals = parseSignals(visionResult.full, visionResult.numberStrip)
+  const signals = parseSignals(visionResult.full, visionResult.numberStrip, visionResult.corner)
   const parseMs = Date.now() - tParseStart
   console.log("[scan-card] parsed:", JSON.stringify({
     collector_number: signals.collector_number,
@@ -432,6 +461,7 @@ Deno.serve(async (req) => {
       word_count: Array.isArray(visionResult.full?.textAnnotations) ? visionResult.full.textAnnotations.length - 1 : 0,
       words: body.include_words === true ? visionResult.full?.textAnnotations?.slice(1) : undefined,
       number_strip_text: String(visionResult.numberStrip?.fullTextAnnotation?.text || visionResult.numberStrip?.textAnnotations?.[0]?.description || ""),
+      corner_text:       String(visionResult.corner?.fullTextAnnotation?.text || visionResult.corner?.textAnnotations?.[0]?.description || ""),
     },
     parsed: signals,
     candidates,

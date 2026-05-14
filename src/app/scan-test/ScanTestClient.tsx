@@ -18,12 +18,28 @@ const MAX_LONG_EDGE = 1600
 const JPEG_QUALITY = 0.85
 // Bottom-strip crop sent at higher resolution for crisp number OCR. Vision
 // often misses the small printed collector number at full-card scale.
-// Bumped from 0.27 to 0.35 so older cards (bottom-RIGHT corner numbers)
-// and promo badges (bottom-LEFT) are both firmly inside the strip with
-// margin to spare.
-const NUMBER_STRIP_PCT = 0.35            // bottom fraction of cropped card to crop again
-const NUMBER_STRIP_MAX_LONG_EDGE = 1600  // higher res, smaller area => much more pixels per character
+// Strip covers the bottom 35% — modern bottom-LEFT collector numbers and
+// the promo badge area sit firmly inside this with margin.
+const NUMBER_STRIP_PCT = 0.35
+const NUMBER_STRIP_MAX_LONG_EDGE = 1600
 const NUMBER_STRIP_QUALITY = 0.92
+
+// Bottom-right corner crop — vintage cards (Base, Jungle, Fossil...) print
+// the collector number in the bottom-right at a tiny font. The bottom strip
+// is full width so each character only gets a small slice of the OCR
+// budget. This dedicated 40% x 22% corner crop scales up to ~1200px on
+// the long edge with contrast boost, giving Vision 3-4x more pixels per
+// character for that vintage corner number.
+const BR_CORNER_X = 0.55          // start at 55% of width
+const BR_CORNER_Y = 0.78          // start at 78% of height
+const BR_CORNER_W = 0.45          // 45% wide  -> generous, slight overlap with strip is fine
+const BR_CORNER_H = 0.22          // 22% tall
+const BR_MAX_LONG_EDGE = 1400
+const BR_JPEG_QUALITY = 0.94
+// Canvas filter applied during the corner crop: light contrast and
+// brightness boost so faint vintage print is more legible for OCR. Too
+// aggressive and we introduce artefacts that fool Vision, so kept mild.
+const BR_CANVAS_FILTER = 'contrast(1.30) brightness(1.05) saturate(0.9)'
 // Mirror of the overlay rect (see CardOverlay) so the capture step can crop
 // to roughly the same region the user framed against.
 const PREVIEW_CONTAINER_ASPECT = 3 / 4   // width / height
@@ -218,6 +234,7 @@ export default function ScanTestClient() {
   const [holo, setHolo] = useState<HoloAnalysis | null>(null)
   const [capturing, setCapturing] = useState(false)
   const [numberStripDataUrl, setNumberStripDataUrl] = useState<string | null>(null)
+  const [cornerDataUrl, setCornerDataUrl] = useState<string | null>(null)
 
   useEffect(() => {
     return () => stopCamera()
@@ -384,6 +401,23 @@ export default function ScanTestClient() {
     stripCtx.drawImage(mainCanvas, 0, stripSrcY, dstW, stripSrcH, 0, 0, stripDstW, stripDstH)
     setNumberStripDataUrl(stripCanvas.toDataURL('image/jpeg', NUMBER_STRIP_QUALITY))
 
+    // Bottom-right corner crop for vintage cards (number printed
+    // bottom-right at a tiny font). Contrast-boosted for legibility.
+    const brSrcX = Math.floor(dstW * BR_CORNER_X)
+    const brSrcY = Math.floor(dstH * BR_CORNER_Y)
+    const brSrcW = Math.ceil(dstW * BR_CORNER_W)
+    const brSrcH = Math.ceil(dstH * BR_CORNER_H)
+    const brScale = Math.min(3, BR_MAX_LONG_EDGE / Math.max(brSrcW, brSrcH))
+    const brDstW = Math.round(brSrcW * brScale)
+    const brDstH = Math.round(brSrcH * brScale)
+    const brCanvas = document.createElement('canvas')
+    brCanvas.width = brDstW; brCanvas.height = brDstH
+    const brCtx = brCanvas.getContext('2d')!
+    brCtx.imageSmoothingQuality = 'high'
+    brCtx.filter = BR_CANVAS_FILTER
+    brCtx.drawImage(mainCanvas, brSrcX, brSrcY, brSrcW, brSrcH, 0, 0, brDstW, brDstH)
+    setCornerDataUrl(brCanvas.toDataURL('image/jpeg', BR_JPEG_QUALITY))
+
     stopCamera()
     setCapturing(false)
     setStage('captured')
@@ -437,6 +471,9 @@ export default function ScanTestClient() {
           image_base64_number: numberStripDataUrl
             ? numberStripDataUrl.replace(/^data:image\/\w+;base64,/, '')
             : undefined,
+          image_base64_corner: cornerDataUrl
+            ? cornerDataUrl.replace(/^data:image\/\w+;base64,/, '')
+            : undefined,
           feature,
           holo_analysis: holo,
         }),
@@ -465,6 +502,7 @@ export default function ScanTestClient() {
     setHolo(null)
     setCapturing(false)
     setNumberStripDataUrl(null)
+    setCornerDataUrl(null)
     setStage('idle')
   }
 
