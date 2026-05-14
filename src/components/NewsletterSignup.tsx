@@ -57,7 +57,12 @@ export default function NewsletterSignup({ source = 'website', dark = false }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, width: '100%' }}>
-      <div style={{ display: 'flex', gap: 8, width: '100%', maxWidth: 400 }}>
+      <div style={{
+        display: 'flex', gap: 8, width: '100%', maxWidth: 400,
+        // Wrap so the button never overflows the container on narrow
+        // mobile widths — it drops below the input instead.
+        flexWrap: 'wrap',
+      }}>
         <input
           type="email"
           value={email}
@@ -66,7 +71,12 @@ export default function NewsletterSignup({ source = 'website', dark = false }: {
           placeholder="your@email.com"
           disabled={state === 'loading'}
           style={{
-            flex: 1,
+            flex: '1 1 180px',
+            // min-width:0 lets the input shrink past its intrinsic
+            // content-based minimum so flex layout can actually distribute
+            // space; without it the input stays too wide and pushes the
+            // button outside the column.
+            minWidth: 0,
             padding: '10px 14px',
             fontSize: 14,
             borderRadius: 10,
@@ -75,12 +85,14 @@ export default function NewsletterSignup({ source = 'website', dark = false }: {
             color: dark ? '#fff' : 'var(--text)',
             fontFamily: "'Figtree', sans-serif",
             outline: 'none',
+            boxSizing: 'border-box',
           }}
         />
         <button
           onClick={handleSubmit}
           disabled={state === 'loading' || !email.trim()}
           style={{
+            flex: '0 0 auto',
             padding: '10px 18px',
             borderRadius: 10,
             border: 'none',

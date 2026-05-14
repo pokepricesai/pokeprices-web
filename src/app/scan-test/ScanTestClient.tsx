@@ -150,7 +150,7 @@ function verdictFromShimmer(artwork: RegionStats, frame: RegionStats): { verdict
   return { verdict: 'uncertain', confidence: 0.4 }
 }
 
-type MatchQuality = 'full' | 'with_denom' | 'numerator' | 'name_only'
+type MatchQuality = 'full' | 'with_denom' | 'unknown_denom' | 'numerator' | 'name_only'
 
 interface Candidate {
   card_slug: string
@@ -655,16 +655,25 @@ function ResultPanel({
   const p = result.parsed
   const noText = !p.full_text || p.full_text.trim().length === 0
   const top = result.candidates[0]
+  const scannedDenom = p.collector_number?.split('/')[1] || null
   const variantNote = (() => {
-    if (!top) return null
+    if (!top) {
+      if (p.collector_number && scannedDenom) {
+        return `Scanned ${p.collector_number} cleanly but no card with set total ${scannedDenom} exists in our DB. The set may not be loaded yet — cross-set numerator-only "matches" are suppressed because they would be wrong.`
+      }
+      return null
+    }
     if (top.match_quality === 'full' || top.match_quality === 'with_denom') {
       if ((top.pool_size ?? 1) > 1) {
         return `${top.pool_size} variants of this exact card (regular / reverse holo / etc) — confirm below.`
       }
       return null
     }
+    if (top.match_quality === 'unknown_denom') {
+      return `Numerator matches but our DB has no set total for ${top.set_name} — verify this is the right set before confirming.`
+    }
     if (top.match_quality === 'numerator') {
-      return `No denominator match in DB — these are cards numbered ${p.collector_number?.split('/')[0] || '?'} across different sets. Pick the right one or skip.`
+      return `Scan did not produce a clear denominator. Showing numerator-only matches across sets — pick the right one or rescan.`
     }
     return null
   })()
@@ -911,10 +920,11 @@ function HoloPanel({ holo }: { holo: HoloAnalysis }) {
 function QualityTag({ q }: { q?: MatchQuality }) {
   if (!q) return null
   const cfg: Record<MatchQuality, { label: string; bg: string; fg: string }> = {
-    full:       { label: 'FULL MATCH', bg: 'var(--green)',  fg: '#fff' },
-    with_denom: { label: 'NUM + /TOTAL', bg: 'var(--green)', fg: '#fff' },
-    numerator:  { label: 'NUM ONLY',   bg: '#f59e0b',       fg: '#fff' },
-    name_only:  { label: 'NAME ONLY',  bg: 'var(--border)', fg: 'var(--text-muted)' },
+    full:          { label: 'FULL MATCH',    bg: 'var(--green)',  fg: '#fff' },
+    with_denom:    { label: 'NUM + /TOTAL',  bg: 'var(--green)',  fg: '#fff' },
+    unknown_denom: { label: 'TOTAL UNKNOWN', bg: '#f59e0b',       fg: '#fff' },
+    numerator:     { label: 'NUM ONLY',      bg: '#f59e0b',       fg: '#fff' },
+    name_only:     { label: 'NAME ONLY',     bg: 'var(--border)', fg: 'var(--text-muted)' },
   }
   const c = cfg[q]
   return (
