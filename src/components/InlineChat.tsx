@@ -238,7 +238,7 @@ export default function InlineChat({ cardContext, prefillMessage, suggestedPromp
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
           placeholder={cardContext ? 'Ask anything about this card…' : 'Ask anything about Pokémon cards…'}
-          style={{ flex: 1, border: 'none', outline: 'none', fontSize: 14, color: 'var(--text)', background: 'transparent', fontFamily: 'inherit', fontWeight: 600 }}
+          style={{ flex: 1, border: 'none', outline: 'none', fontSize: 16, color: 'var(--text)', background: 'transparent', fontFamily: 'inherit', fontWeight: 600 }}
         />
         <button onClick={() => sendMessage()} disabled={loading} style={{
           background: 'var(--accent)', border: 'none', borderRadius: 12,

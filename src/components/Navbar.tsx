@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { useState, useRef, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import Avatar from './Avatar'
 import ComingSoonBadge from './ComingSoonBadge'
@@ -127,6 +127,7 @@ function ProfileLink({ href, label, onClose }: { href: string; label: string; on
 
 export default function Navbar() {
   const router = useRouter()
+  const pathname = usePathname()
   const [menuOpen, setMenuOpen]         = useState(false)
   const [openGroup, setOpenGroup]       = useState<string | null>(null)
   const [mobileExpanded, setMobileExp]  = useState<string | null>(null)
@@ -196,10 +197,13 @@ export default function Navbar() {
     router.push('/')
   }
 
-  // Close dropdowns on route change so they don't linger after navigation.
+  // Close dropdowns + mobile menu on route change so they do not linger
+  // after navigation. The previous effect had empty deps, which meant it
+  // ran once on mount and never again.
   useEffect(() => {
     setOpenGroup(null); setMenuOpen(false); setMobileExp(null)
-  }, [])
+    setShowResults(false); setProfileOpen(false)
+  }, [pathname])
 
   // Lock body scroll when the mobile menu is open so it does not double-scroll.
   useEffect(() => {
@@ -451,7 +455,10 @@ export default function Navbar() {
             style={{
               width: '100%', padding: '8px 36px 8px 36px', borderRadius: 10,
               border: 'none', background: 'rgba(255,255,255,0.18)', color: '#fff',
-              fontSize: 13, fontFamily: "'Figtree', sans-serif", outline: 'none', boxSizing: 'border-box',
+              // 16px to prevent iOS Safari auto-zoom on focus. Anything
+              // smaller triggers the zoom-in. Visual size unchanged on
+              // desktop where the field sits in a narrow nav slot.
+              fontSize: 16, fontFamily: "'Figtree', sans-serif", outline: 'none', boxSizing: 'border-box',
             }}
           />
           {searching && (
