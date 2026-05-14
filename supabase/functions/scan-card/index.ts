@@ -222,6 +222,7 @@ async function logScan(opts: {
   signals: ParsedSignals
   candidates: any[]
   timing: Record<string, number>
+  holoAnalysis: any | null
 }): Promise<number | null> {
   const top = opts.candidates[0]
   try {
@@ -240,6 +241,7 @@ async function logScan(opts: {
       top_card_slug:    top?.card_slug ?? null,
       top_confidence:   top?.confidence ?? null,
       timing_ms:        opts.timing,
+      holo_analysis:    opts.holoAnalysis ?? null,
     }]).select("id").single()
     if (error) {
       console.error("[scan-card] scan_logs insert failed:", error.message)
@@ -341,7 +343,10 @@ Deno.serve(async (req) => {
 
   // Log (non-blocking on failure — we still return the result to the user).
   const tLogStart = Date.now()
-  const scanLogId = await logScan({ feature, signals, candidates, timing })
+  const scanLogId = await logScan({
+    feature, signals, candidates, timing,
+    holoAnalysis: body.holo_analysis ?? null,
+  })
   const logMs = Date.now() - tLogStart
 
   return json({

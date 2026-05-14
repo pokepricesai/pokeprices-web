@@ -27,6 +27,128 @@ const CROP_PADDING_PCT = 0.06            // pad each edge so we do not clip the 
 type Stage = 'idle' | 'starting' | 'live' | 'captured' | 'scanning' | 'result' | 'error'
 type Feature = 'DOCUMENT_TEXT_DETECTION' | 'TEXT_DETECTION'
 
+// ── Holo / reverse-holo detection ──────────────────────────────────────────
+// Single-frame heuristic. Foil pixels are simultaneously bright AND saturated
+// (spectral diffraction from foil produces saturated highlights — regular
+// printed cards have desaturated highlights). We sample two regions of the
+// cropped card: the artwork area (holo foil lives there) and the bottom
+// info / frame area (reverse-holo foil lives there), then compare densities.
+//
+// Honest caveat: a single still is fooled by glare. Multi-frame "tilt"
+// detection is the robust path — capture 2-3 frames as the user tilts the
+// card, look for bright-region movement. v2 if v1 proves too noisy.
+
+type HoloVerdict = 'holo' | 'reverse_holo' | 'non_holo' | 'uncertain'
+
+interface RegionStats {
+  foil_density: number      // 0-1, fraction of sampled pixels that are bright+saturated
+  max_lightness: number     // 0-1
+  mean_saturation: number   // 0-1
+  hue_variance: number      // 0..~0.08 — high values mean rainbow/streaky
+}
+
+interface HoloAnalysis {
+  artwork: RegionStats
+  frame: RegionStats
+  artwork_shine: number     // composite score
+  frame_shine:   number
+  shine_ratio:   number     // artwork_shine / frame_shine
+  verdict:       HoloVerdict
+  confidence:    number     // 0-1
+}
+
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  r /= 255; g /= 255; b /= 255
+  const max = Math.max(r, g, b), min = Math.min(r, g, b)
+  const l = (max + min) / 2
+  let h = 0, s = 0
+  if (max !== min) {
+    const d = max - min
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+    if (max === r)      h = (g - b) / d + (g < b ? 6 : 0)
+    else if (max === g) h = (b - r) / d + 2
+    else                h = (r - g) / d + 4
+    h /= 6
+  }
+  return [h, s, l]
+}
+
+function analyzeRegion(imageData: ImageData, x0: number, x1: number, y0: number, y1: number): RegionStats {
+  const data = imageData.data
+  const W = imageData.width
+  const stepX = Math.max(1, Math.floor((x1 - x0) / 70))
+  const stepY = Math.max(1, Math.floor((y1 - y0) / 70))
+
+  let maxL = 0, sumS = 0, count = 0, foilCount = 0
+  const hues: number[] = []
+  for (let y = y0; y < y1; y += stepY) {
+    for (let x = x0; x < x1; x += stepX) {
+      const i = (y * W + x) * 4
+      const [h, s, l] = rgbToHsl(data[i], data[i + 1], data[i + 2])
+      if (l > maxL) maxL = l
+      sumS += s
+      count++
+      // Foil signature: bright AND saturated.
+      if (l > 0.62 && s > 0.32) foilCount++
+      if (l > 0.3) hues.push(h)
+    }
+  }
+  const meanH = hues.reduce((a, b) => a + b, 0) / Math.max(1, hues.length)
+  const varH = hues.reduce((a, b) => a + (b - meanH) * (b - meanH), 0) / Math.max(1, hues.length)
+  return {
+    foil_density:    foilCount / Math.max(1, count),
+    max_lightness:   maxL,
+    mean_saturation: sumS / Math.max(1, count),
+    hue_variance:    varH,
+  }
+}
+
+function analyzeHolo(canvas: HTMLCanvasElement): HoloAnalysis | null {
+  const ctx = canvas.getContext('2d')
+  if (!ctx || !canvas.width || !canvas.height) return null
+  let imageData: ImageData
+  try { imageData = ctx.getImageData(0, 0, canvas.width, canvas.height) }
+  catch { return null }
+
+  const W = canvas.width, H = canvas.height
+  // Our capture crops to roughly the card with 6% padding, then the card
+  // itself has its own ~5% printed border. So the artwork window sits at
+  // approx X 12-88%, Y 17-56% of the captured image. The reverse-holo
+  // bottom info strip sits at approx Y 76-93%.
+  const artwork = analyzeRegion(imageData,
+    Math.floor(W * 0.12), Math.floor(W * 0.88),
+    Math.floor(H * 0.17), Math.floor(H * 0.56))
+  const frame = analyzeRegion(imageData,
+    Math.floor(W * 0.12), Math.floor(W * 0.88),
+    Math.floor(H * 0.76), Math.floor(H * 0.93))
+
+  // Composite shine = foil-pixel density weighted by hue variance (rainbow).
+  const artworkShine = artwork.foil_density * (1 + artwork.hue_variance * 12)
+  const frameShine   = frame.foil_density   * (1 + frame.hue_variance   * 12)
+  const ratio = artworkShine / Math.max(0.001, frameShine)
+
+  let verdict: HoloVerdict = 'uncertain'
+  let confidence = 0.4
+  if (artworkShine > 0.18 && ratio > 1.5) {
+    verdict = 'holo'
+    confidence = Math.min(0.95, 0.55 + artworkShine * 0.4)
+  } else if (frameShine > 0.18 && ratio < 0.67) {
+    verdict = 'reverse_holo'
+    confidence = Math.min(0.95, 0.55 + frameShine * 0.4)
+  } else if (artworkShine < 0.06 && frameShine < 0.06) {
+    verdict = 'non_holo'
+    confidence = 0.75
+  }
+
+  return {
+    artwork, frame,
+    artwork_shine: artworkShine,
+    frame_shine:   frameShine,
+    shine_ratio:   ratio,
+    verdict, confidence,
+  }
+}
+
 type MatchQuality = 'full' | 'with_denom' | 'numerator' | 'name_only'
 
 interface Candidate {
@@ -80,6 +202,7 @@ export default function ScanTestClient() {
   const [showRawText, setShowRawText] = useState(false)
   const [confirmed, setConfirmed] = useState<string | null>(null)
   const [confirmError, setConfirmError] = useState<string | null>(null)
+  const [holo, setHolo] = useState<HoloAnalysis | null>(null)
 
   useEffect(() => {
     return () => stopCamera()
@@ -173,6 +296,9 @@ export default function ScanTestClient() {
     const ctx = canvas.getContext('2d')
     if (!ctx) { setError('Canvas not available'); setStage('error'); return }
     ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, dstW, dstH)
+    // Surface analysis on the cropped frame, before JPEG encoding so we
+    // operate on the cleanest pixel data available.
+    setHolo(analyzeHolo(canvas))
     const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY)
     setCapturedDataUrl(dataUrl)
     stopCamera()
@@ -222,7 +348,7 @@ export default function ScanTestClient() {
           'Authorization': `Bearer ${ANON_KEY}`,
           'apikey': ANON_KEY,
         },
-        body: JSON.stringify({ image_base64: base64, feature }),
+        body: JSON.stringify({ image_base64: base64, feature, holo_analysis: holo }),
       })
       let data: any = null
       try { data = await res.json() } catch {}
@@ -245,6 +371,7 @@ export default function ScanTestClient() {
     setShowRawText(false)
     setConfirmed(null)
     setConfirmError(null)
+    setHolo(null)
     setStage('idle')
   }
 
@@ -302,6 +429,7 @@ export default function ScanTestClient() {
           confirmed={confirmed}
           confirmError={confirmError}
           onConfirm={confirmTopCandidate}
+          holo={holo}
         />
       )}
     </div>
@@ -409,7 +537,7 @@ function ErrorPanel({ message, onReset }: { message: string; onReset: () => void
 
 function ResultPanel({
   result, capturedDataUrl, showRawText, onToggleRawText, onReset,
-  confirmed, confirmError, onConfirm,
+  confirmed, confirmError, onConfirm, holo,
 }: {
   result: ScanResult
   capturedDataUrl: string
@@ -419,6 +547,7 @@ function ResultPanel({
   confirmed: string | null
   confirmError: string | null
   onConfirm: (c: Candidate) => void
+  holo: HoloAnalysis | null
 }) {
   const p = result.parsed
   const noText = !p.full_text || p.full_text.trim().length === 0
@@ -468,6 +597,8 @@ function ResultPanel({
         <SignalRow label="Set hint" value={p.set_hint} />
         <SignalRow label="Copyright year" value={p.copyright_year != null ? String(p.copyright_year) : null} />
       </div>
+
+      {holo && <HoloPanel holo={holo} />}
 
       <div style={panelStyle}>
         <SectionTitle>
@@ -624,6 +755,53 @@ function Tag({ on, label }: { on: boolean; label: string }) {
       color: on ? '#fff' : 'var(--text-muted)',
       fontWeight: 600, fontSize: 10, letterSpacing: 0.3,
     }}>{label}</span>
+  )
+}
+
+function HoloPanel({ holo }: { holo: HoloAnalysis }) {
+  const verdictMap: Record<HoloVerdict, { label: string; color: string }> = {
+    holo:          { label: 'HOLO',          color: 'var(--green)' },
+    reverse_holo:  { label: 'REVERSE HOLO',  color: 'var(--primary)' },
+    non_holo:      { label: 'NON-HOLO',      color: 'var(--text-muted)' },
+    uncertain:     { label: 'UNCERTAIN',     color: '#f59e0b' },
+  }
+  const v = verdictMap[holo.verdict]
+  return (
+    <div style={panelStyle}>
+      <SectionTitle>Surface analysis</SectionTitle>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 8 }}>
+        <span style={{
+          fontFamily: "'Outfit', sans-serif", fontSize: 20, fontWeight: 700,
+          color: v.color,
+        }}>{v.label}</span>
+        <span style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+          {Math.round(holo.confidence * 100)}% confidence
+        </span>
+      </div>
+      <p style={{ ...mutedNoteStyle, fontSize: 12 }}>
+        Single-frame heuristic — glare can fool it. After ~20 known cards we will
+        have data to tune the thresholds (or add tilt detection if v1 is too noisy).
+      </p>
+      <div style={statsRowStyle}>
+        <Stat label="Artwork shine" value={holo.artwork_shine.toFixed(3)} />
+        <Stat label="Frame shine"   value={holo.frame_shine.toFixed(3)} />
+        <Stat label="Ratio (A/F)"   value={holo.shine_ratio.toFixed(2)} />
+      </div>
+      <div style={{ marginTop: 10, fontFamily: "'Figtree', sans-serif", fontSize: 11, color: 'var(--text-muted)' }}>
+        <strong style={{ color: 'var(--text)' }}>Artwork region</strong>
+        {' — '}foil density {(holo.artwork.foil_density * 100).toFixed(1)}%,
+        {' '}max L {holo.artwork.max_lightness.toFixed(2)},
+        {' '}mean S {holo.artwork.mean_saturation.toFixed(2)},
+        {' '}hue var {holo.artwork.hue_variance.toFixed(4)}
+      </div>
+      <div style={{ marginTop: 4, fontFamily: "'Figtree', sans-serif", fontSize: 11, color: 'var(--text-muted)' }}>
+        <strong style={{ color: 'var(--text)' }}>Frame region</strong>
+        {' — '}foil density {(holo.frame.foil_density * 100).toFixed(1)}%,
+        {' '}max L {holo.frame.max_lightness.toFixed(2)},
+        {' '}mean S {holo.frame.mean_saturation.toFixed(2)},
+        {' '}hue var {holo.frame.hue_variance.toFixed(4)}
+      </div>
+    </div>
   )
 }
 
