@@ -205,7 +205,10 @@ export default function ScanTestClient() {
   const [capturedDataUrl, setCapturedDataUrl] = useState<string | null>(null)
   const [result, setResult] = useState<ScanResult | null>(null)
   const [feature, setFeature] = useState<Feature>('DOCUMENT_TEXT_DETECTION')
-  const [showRawText, setShowRawText] = useState(false)
+  // Default-open so the user can immediately compare what Vision read
+  // against what we parsed out of it — most "why did it miss?" debugging
+  // starts with checking the raw output anyway.
+  const [showRawText, setShowRawText] = useState(true)
   const [confirmed, setConfirmed] = useState<string | null>(null)
   const [confirmError, setConfirmError] = useState<string | null>(null)
   const [holo, setHolo] = useState<HoloAnalysis | null>(null)
@@ -660,7 +663,7 @@ function ResultPanel({
   const p = result.parsed
   const noText = !p.full_text || p.full_text.trim().length === 0
   const candidates = reorderByHolo(result.candidates, holo)
-  const reordered = candidates !== result.candidates && candidates[0] !== result.candidates[0]
+  const holoDiag = holoReorderDiagnosis(result.candidates, holo)
   const top = candidates[0]
   const scannedDenom = p.collector_number?.split('/')[1] || null
   const variantNote = (() => {
@@ -736,9 +739,13 @@ function ResultPanel({
         {variantNote && (
           <p style={{ ...mutedNoteStyle, fontWeight: 700, color: 'var(--text)' }}>{variantNote}</p>
         )}
-        {reordered && holo && (
-          <p style={{ ...mutedNoteStyle, color: 'var(--primary)', fontWeight: 700 }}>
-            Reordered to match surface verdict ({holo.verdict.replace('_', ' ')}) — the {holo.verdict === 'reverse_holo' ? 'reverse holo' : holo.verdict} variant is now on top.
+        {holoDiag.reason && (
+          <p style={{
+            ...mutedNoteStyle,
+            color: holoDiag.reordered ? 'var(--primary)' : '#f59e0b',
+            fontWeight: 700,
+          }}>
+            {holoDiag.reason}
           </p>
         )}
         {result.match_error && (
@@ -791,38 +798,83 @@ function displayConfidenceFor(cands: Candidate[], i: number): number {
   return c.confidence
 }
 
-// Variant detection from card_name. Variants are encoded in the stored name
-// as bracket suffixes — e.g. "Granbull [Reverse Holo] #38" or "Toxtricity
-// [Holo] #68". Match these patterns to identify which candidate is which.
+// Variant detection. Variants can be encoded several ways in the DB —
+// "[Reverse Holo]" in card_name, "-rh" / "-reverse-holo" suffix in
+// card_url_slug, or even just the words "Reverse Holo" without brackets.
+// We check all of them so a known variant is not missed because of a
+// formatting inconsistency in the scraper.
 function isReverseHoloVariant(c: Candidate): boolean {
-  return /\[\s*reverse\s*holo\s*\]/i.test(c.card_name)
+  const name = c.card_name || ''
+  const slug = c.card_url_slug || ''
+  return (
+    /\[\s*reverse\s*holo\s*\]/i.test(name)
+    || /\breverse\s*holo\b/i.test(name)
+    || /(?:^|[-_])(rh|reverse[-_]?holo|reverse)\b/i.test(slug)
+  )
 }
 function isHoloVariant(c: Candidate): boolean {
-  // "[Holo]" but not "[Reverse Holo]" or "[Cosmos Holo]" etc.
-  return /\[\s*holo\s*\]/i.test(c.card_name)
+  if (isReverseHoloVariant(c)) return false   // mutually exclusive
+  const name = c.card_name || ''
+  const slug = c.card_url_slug || ''
+  return (
+    /\[\s*holo\s*\]/i.test(name)
+    || /(?:^|\s)holo(?:\s|$)/i.test(name)
+    || /(?:^|[-_])holo\b/i.test(slug)
+  )
 }
 function isFullArtVariant(c: Candidate): boolean {
-  return /\[\s*(full\s*art|special\s*art|illustration\s*rare|alt\s*art|secret\s*rare|rainbow\s*rare)\s*\]/i.test(c.card_name)
+  const name = c.card_name || ''
+  const slug = c.card_url_slug || ''
+  return (
+    /\[\s*(full\s*art|special\s*art|illustration\s*rare|alt\s*art|secret\s*rare|rainbow\s*rare|textured)\s*\]/i.test(name)
+    || /(?:^|[-_])(full[-_]?art|alt[-_]?art|illustration[-_]?rare|secret[-_]?rare|textured)\b/i.test(slug)
+  )
 }
 
 // Re-rank candidates so the variant matching the surface verdict floats to
-// the top — provided the verdict is reasonably confident. The RPC has no
-// idea about holo state; this is a client-side overlay.
+// the top. Threshold lowered to 0.55 — when the tilt analysis is even
+// moderately confident, the variant cue is more reliable than the RPC's
+// default name-similarity tiebreaker.
 function reorderByHolo(candidates: Candidate[], holo: HoloAnalysis | null): Candidate[] {
-  if (!holo || holo.confidence < 0.7) return candidates
+  if (!holo || holo.confidence < 0.55) return candidates
   const matchesVariant = (c: Candidate): boolean => {
     if (holo.verdict === 'reverse_holo') return isReverseHoloVariant(c)
-    if (holo.verdict === 'holo')         return isHoloVariant(c) && !isReverseHoloVariant(c)
+    if (holo.verdict === 'holo')         return isHoloVariant(c)
     if (holo.verdict === 'full_art')     return isFullArtVariant(c)
     return false
   }
   const anyMatch = candidates.some(matchesVariant)
   if (!anyMatch) return candidates
-  // Stable partition: matching variants first, rest preserved in order.
   const matched: Candidate[] = []
   const rest:    Candidate[] = []
   for (const c of candidates) (matchesVariant(c) ? matched : rest).push(c)
   return [...matched, ...rest]
+}
+
+// Diagnose why the holo verdict could not be honored — separates "DB
+// doesn't have this variant" from "holo wasn't confident enough" so the
+// user sees the real reason, not just an unranked list.
+function holoReorderDiagnosis(
+  candidates: Candidate[],
+  holo: HoloAnalysis | null,
+): { reordered: boolean; reason: string | null } {
+  if (!holo) return { reordered: false, reason: null }
+  if (holo.verdict !== 'reverse_holo' && holo.verdict !== 'holo' && holo.verdict !== 'full_art') {
+    return { reordered: false, reason: null }
+  }
+  const verdictLabel = holo.verdict.replace('_', ' ')
+  if (holo.confidence < 0.55) {
+    return { reordered: false, reason: `Tilt verdict was ${verdictLabel} but only ${Math.round(holo.confidence * 100)}% confident — not strong enough to override the database ordering.` }
+  }
+  const hasMatch = candidates.some(c =>
+    holo.verdict === 'reverse_holo' ? isReverseHoloVariant(c) :
+    holo.verdict === 'holo'         ? isHoloVariant(c) :
+                                      isFullArtVariant(c)
+  )
+  if (!hasMatch) {
+    return { reordered: false, reason: `Tilt verdict was ${verdictLabel} (${Math.round(holo.confidence * 100)}% confident) but no ${verdictLabel} variant for this card exists in our database — the scraper may not track that variant yet.` }
+  }
+  return { reordered: true, reason: `Reordered: ${verdictLabel} variant moved to top to match surface verdict.` }
 }
 
 function confidenceLabel(conf: number): { text: string; color: string } {
