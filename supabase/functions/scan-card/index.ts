@@ -112,6 +112,7 @@ export interface ParsedSignals {
   set_hint: string | null
   set_abbreviation: string | null
   copyright_year: number | null
+  is_promo: boolean
   full_text: string
 }
 
@@ -147,6 +148,16 @@ function extractSetAbbreviation(text: string): string | null {
     if (re.test(upper)) return abbr
   }
   return null
+}
+
+// Promo signals: the bottom-left of a Pokemon promo card carries one of
+// these markers. Vision sometimes also catches a "PROMO" word in the
+// rarity slot. Promo-prefixed numbers (SWSH123, XY12, SM01...) imply promo
+// too — we treat any of these as positive signal.
+function extractIsPromo(text: string, collectorPattern: string | null): boolean {
+  if (collectorPattern === 'promo-prefixed') return true
+  return /\bpromo(?:tional)?\b/i.test(text)
+      || /\bblack\s*star\b/i.test(text)
 }
 
 function extractSetHint(text: string): string | null {
@@ -236,6 +247,7 @@ function parseSignals(fullResponse: any, numberStripResponse: any | null): Parse
   let abbreviation: string | null = stripText ? extractSetAbbreviation(stripText) : null
   if (!abbreviation) abbreviation = extractSetAbbreviation(fullText)
 
+  const combinedText = fullText + (stripText ? "\n" + stripText : "")
   return {
     collector_number: number.value,
     collector_number_pattern: number.pattern,
@@ -243,6 +255,7 @@ function parseSignals(fullResponse: any, numberStripResponse: any | null): Parse
     set_hint: extractSetHint(fullText),
     set_abbreviation: abbreviation,
     copyright_year: extractCopyrightYear(fullText),
+    is_promo: extractIsPromo(combinedText, number.pattern),
     full_text: fullText + (stripText ? `\n--- bottom strip ---\n${stripText}` : ""),
   }
 }
@@ -259,6 +272,7 @@ async function matchCards(signals: ParsedSignals): Promise<any[]> {
     p_name:             signals.name,
     p_set_hint:         setHint,
     p_copyright_year:   signals.copyright_year,
+    p_is_promo:         signals.is_promo,
   })
   if (error) throw new Error(`scan_card_match RPC failed: ${error.message}`)
   return data || []
@@ -372,6 +386,7 @@ Deno.serve(async (req) => {
     set_hint: signals.set_hint,
     set_abbreviation: signals.set_abbreviation,
     copyright_year: signals.copyright_year,
+    is_promo: signals.is_promo,
   }))
 
   // Match

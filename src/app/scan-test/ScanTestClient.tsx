@@ -16,11 +16,13 @@ const SCAN_URL = `${SUPABASE_URL}/functions/v1/${SCAN_FN_SLUG}`
 
 const MAX_LONG_EDGE = 1600
 const JPEG_QUALITY = 0.85
-// Bottom-strip crop (25% of card height) sent at this higher resolution
-// for crisp number OCR. Vision often misses the small printed collector
-// number at full-card scale.
-const NUMBER_STRIP_PCT = 0.27            // bottom fraction of cropped card to crop again
-const NUMBER_STRIP_MAX_LONG_EDGE = 1400  // higher res, smaller area => much more pixels per character
+// Bottom-strip crop sent at higher resolution for crisp number OCR. Vision
+// often misses the small printed collector number at full-card scale.
+// Bumped from 0.27 to 0.35 so older cards (bottom-RIGHT corner numbers)
+// and promo badges (bottom-LEFT) are both firmly inside the strip with
+// margin to spare.
+const NUMBER_STRIP_PCT = 0.35            // bottom fraction of cropped card to crop again
+const NUMBER_STRIP_MAX_LONG_EDGE = 1600  // higher res, smaller area => much more pixels per character
 const NUMBER_STRIP_QUALITY = 0.92
 // Mirror of the overlay rect (see CardOverlay) so the capture step can crop
 // to roughly the same region the user framed against.
@@ -170,6 +172,7 @@ interface Candidate {
   match_quality?: MatchQuality
   number_match: boolean
   denom_match?: boolean
+  promo_match?: boolean
   name_similarity: number
   set_match: boolean
   year_match?: boolean
@@ -189,6 +192,7 @@ interface ScanResult {
     set_hint: string | null
     set_abbreviation: string | null
     copyright_year: number | null
+    is_promo: boolean
     full_text: string
   }
   candidates: Candidate[]
@@ -718,6 +722,7 @@ function ResultPanel({
         <SignalRow label="Set abbreviation" value={p.set_abbreviation} />
         <SignalRow label="Set hint" value={p.set_hint} />
         <SignalRow label="Copyright year" value={p.copyright_year != null ? String(p.copyright_year) : null} />
+        <SignalRow label="Promo card" value={p.is_promo ? 'yes — filtering to promo sets' : null} />
       </div>
 
       {holo && <HoloPanel holo={holo} />}
@@ -934,6 +939,7 @@ function CandidateCard({
           <QualityTag q={c.match_quality} />
           <Tag on={c.number_match} label="num" />
           <Tag on={!!c.denom_match} label={c.set_printed_total ? `/${c.set_printed_total}` : '/?'} />
+          <Tag on={!!c.promo_match} label="promo" />
           <Tag on={c.set_match} label="set" />
           <Tag on={!!c.year_match} label="year" />
           <Tag on={c.name_similarity >= 0.5} label={`name ${c.name_similarity.toFixed(2)}`} />
