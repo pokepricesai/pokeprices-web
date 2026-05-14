@@ -659,7 +659,9 @@ function ResultPanel({
 }) {
   const p = result.parsed
   const noText = !p.full_text || p.full_text.trim().length === 0
-  const top = result.candidates[0]
+  const candidates = reorderByHolo(result.candidates, holo)
+  const reordered = candidates !== result.candidates && candidates[0] !== result.candidates[0]
+  const top = candidates[0]
   const scannedDenom = p.collector_number?.split('/')[1] || null
   const variantNote = (() => {
     if (!top) {
@@ -734,10 +736,15 @@ function ResultPanel({
         {variantNote && (
           <p style={{ ...mutedNoteStyle, fontWeight: 700, color: 'var(--text)' }}>{variantNote}</p>
         )}
+        {reordered && holo && (
+          <p style={{ ...mutedNoteStyle, color: 'var(--primary)', fontWeight: 700 }}>
+            Reordered to match surface verdict ({holo.verdict.replace('_', ' ')}) — the {holo.verdict === 'reverse_holo' ? 'reverse holo' : holo.verdict} variant is now on top.
+          </p>
+        )}
         {result.match_error && (
           <p style={{ ...mutedNoteStyle, color: '#ef4444' }}>Match error: {result.match_error}</p>
         )}
-        {result.candidates.length === 0 && !result.match_error && (
+        {candidates.length === 0 && !result.match_error && (
           <p style={mutedNoteStyle}>
             {p.collector_number || p.name
               ? 'No matches found for these signals.'
@@ -745,12 +752,12 @@ function ResultPanel({
           </p>
         )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
-          {result.candidates.map((c, i) => (
+          {candidates.map((c, i) => (
             <CandidateCard
               key={c.card_slug + i}
               c={c}
               rank={i + 1}
-              displayConfidence={displayConfidenceFor(result.candidates, i)}
+              displayConfidence={displayConfidenceFor(candidates, i)}
               confirmed={confirmed === c.card_slug}
               onConfirm={() => onConfirm(c)}
             />
@@ -782,6 +789,40 @@ function displayConfidenceFor(cands: Candidate[], i: number): number {
   if (gap >= 0.20) return Math.min(1.0, c.confidence + 0.06)
   if (gap >= 0.10) return Math.min(1.0, c.confidence + 0.03)
   return c.confidence
+}
+
+// Variant detection from card_name. Variants are encoded in the stored name
+// as bracket suffixes — e.g. "Granbull [Reverse Holo] #38" or "Toxtricity
+// [Holo] #68". Match these patterns to identify which candidate is which.
+function isReverseHoloVariant(c: Candidate): boolean {
+  return /\[\s*reverse\s*holo\s*\]/i.test(c.card_name)
+}
+function isHoloVariant(c: Candidate): boolean {
+  // "[Holo]" but not "[Reverse Holo]" or "[Cosmos Holo]" etc.
+  return /\[\s*holo\s*\]/i.test(c.card_name)
+}
+function isFullArtVariant(c: Candidate): boolean {
+  return /\[\s*(full\s*art|special\s*art|illustration\s*rare|alt\s*art|secret\s*rare|rainbow\s*rare)\s*\]/i.test(c.card_name)
+}
+
+// Re-rank candidates so the variant matching the surface verdict floats to
+// the top — provided the verdict is reasonably confident. The RPC has no
+// idea about holo state; this is a client-side overlay.
+function reorderByHolo(candidates: Candidate[], holo: HoloAnalysis | null): Candidate[] {
+  if (!holo || holo.confidence < 0.7) return candidates
+  const matchesVariant = (c: Candidate): boolean => {
+    if (holo.verdict === 'reverse_holo') return isReverseHoloVariant(c)
+    if (holo.verdict === 'holo')         return isHoloVariant(c) && !isReverseHoloVariant(c)
+    if (holo.verdict === 'full_art')     return isFullArtVariant(c)
+    return false
+  }
+  const anyMatch = candidates.some(matchesVariant)
+  if (!anyMatch) return candidates
+  // Stable partition: matching variants first, rest preserved in order.
+  const matched: Candidate[] = []
+  const rest:    Candidate[] = []
+  for (const c of candidates) (matchesVariant(c) ? matched : rest).push(c)
+  return [...matched, ...rest]
 }
 
 function confidenceLabel(conf: number): { text: string; color: string } {

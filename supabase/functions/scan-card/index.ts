@@ -218,12 +218,19 @@ function parseSignals(fullResponse: any, numberStripResponse: any | null): Parse
   const fullText = String(fullResponse?.fullTextAnnotation?.text || fullResponse?.textAnnotations?.[0]?.description || "")
   const stripText = String(numberStripResponse?.fullTextAnnotation?.text || numberStripResponse?.textAnnotations?.[0]?.description || "")
 
-  // Prefer the bottom-strip's reading for the collector number — that crop
-  // is high-resolution and isolated, so Vision typically gets it cleaner
-  // there than at full-card scale. Fall back to the full-card text if the
-  // strip turned up nothing.
-  let number = stripText ? extractCollectorNumber(stripText) : { value: null, pattern: null }
-  if (!number.value) number = extractCollectorNumber(fullText)
+  // Run BOTH extractions and prefer whichever returned a denominator (N/M
+  // form). The strip-first approach we used previously could lock in a
+  // denominator-less reading even when the full-card text actually had the
+  // complete number — and downstream matching needs the denominator to
+  // narrow to the right set.
+  const stripNum = stripText ? extractCollectorNumber(stripText) : { value: null, pattern: null }
+  const fullNum  = fullText  ? extractCollectorNumber(fullText)  : { value: null, pattern: null }
+  const hasDenom = (v: string | null) => v != null && v.includes("/")
+  let number: { value: string | null; pattern: string | null }
+  if (hasDenom(stripNum.value))      number = stripNum
+  else if (hasDenom(fullNum.value))  number = fullNum
+  else if (stripNum.value)           number = stripNum
+  else                               number = fullNum
 
   // Set abbreviation is also printed near the number, so try the strip first.
   let abbreviation: string | null = stripText ? extractSetAbbreviation(stripText) : null
