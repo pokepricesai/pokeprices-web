@@ -5,7 +5,7 @@ export default function robots(): MetadataRoute.Robots {
     rules: {
       userAgent: '*',
       allow: '/',
-      disallow: ['/admin', '/intel', '/dealer', '/portfolio', '/api'],
+      disallow: ['/admin', '/intel', '/dealer', '/portfolio', '/api', '/scan-test'],
     },
     sitemap: 'https://www.pokeprices.io/sitemap.xml',
   }
