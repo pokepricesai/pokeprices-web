@@ -79,9 +79,15 @@ async function callVision(imageBase64: string, feature: VisionFeature, numberStr
 
 // ── Parsing helpers ─────────────────────────────────────────────────────────
 
-const NUMBER_PATTERNS: { name: string; re: RegExp }[] = [
+const NUMBER_PATTERNS: { name: string; re: RegExp; reassemble?: (m: RegExpMatchArray) => string }[] = [
   { name: "fraction-prefixed", re: /\b((?:TG|GG|SV|SWSH|XY|SM|BW|DP|HGSS)\d{1,3}\s*\/\s*(?:TG|GG|SV|SWSH|XY|SM|BW|DP|HGSS)\d{1,3})\b/i },
   { name: "fraction-numeric",  re: /\b(\d{1,3}\s*\/\s*\d{1,3})\b/ },
+  // Loose separator: Vision sometimes reads the slash as -, |, _, or even
+  // a space. Reassemble as N/M so downstream normalisation handles it.
+  { name: "fraction-loose",    re: /\b(\d{1,3})\s*[\-_|]\s*(\d{1,3})\b/, reassemble: (m) => `${m[1]}/${m[2]}` },
+  // "130 086" with whitespace only — only when both look like valid card
+  // numbers (1-3 digit each, denom >= 30 to avoid noise like year fragments).
+  { name: "fraction-space",    re: /\b(\d{1,3})\s+(\d{2,3})\b/, reassemble: (m) => parseInt(m[2], 10) >= 30 ? `${m[1]}/${m[2]}` : "" },
   { name: "promo-prefixed",    re: /\b((?:TG|GG|SV|SWSH|XY|SM|BW|DP|HGSS)\d{1,3})\b/i },
 ]
 
@@ -114,7 +120,9 @@ function extractCollectorNumber(text: string): { value: string | null; pattern: 
   for (const p of NUMBER_PATTERNS) {
     const m = norm.match(p.re)
     if (m) {
-      return { value: m[1].toUpperCase().replace(/\s+/g, ""), pattern: p.name }
+      const raw = p.reassemble ? p.reassemble(m) : m[1]
+      if (!raw) continue
+      return { value: raw.toUpperCase().replace(/\s+/g, ""), pattern: p.name }
     }
   }
   return { value: null, pattern: null }
@@ -188,11 +196,18 @@ function extractName(response: any): string | null {
   rows.sort((a, b) => b.length - a.length)
   const chosen = rows[0].sort((a, b) => a.left - b.left)
 
-  const cleaned = chosen
+  let cleaned = chosen
     .map(w => w.text)
     .filter(t => !/^\d+$/.test(t))
     .filter(t => !/^HP$/i.test(t))
     .join(" ")
+  // Vision sometimes returns "Name 70" as a single annotation that passes
+  // the per-token filters above. Strip "HP NN", "HP", and a trailing 2-3
+  // digit number (HP is always 30-340 on a Pokemon card).
+  cleaned = cleaned
+    .replace(/\bHP\s*\d{1,3}\b/gi, "")
+    .replace(/\bHP\b/gi, "")
+    .replace(/\s+\d{2,3}\s*$/u, "")
     .replace(/\s+/g, " ")
     .trim()
 

@@ -130,23 +130,28 @@ function computeShimmerStats(seriesPerPoint: number[][]): RegionStats {
 }
 
 function verdictFromShimmer(artwork: RegionStats, frame: RegionStats): { verdict: HoloVerdict; confidence: number } {
-  const ratio = artwork.shimmer_density / Math.max(0.01, frame.shimmer_density)
-  // Significant shimmer in artwork only.
-  if (artwork.shimmer_density > 0.20 && ratio > 2.0) {
-    return { verdict: 'holo', confidence: Math.min(0.95, 0.55 + artwork.shimmer_density * 0.5) }
+  const a = artwork.shimmer_density
+  const f = frame.shimmer_density
+  const diff = f - a   // positive = frame dominates
+
+  // Asymmetry test — frame meaningfully more active than artwork → reverse
+  // holo. A real reverse holo often has SOME artwork shimmer too (the
+  // protective coating reflects), so we test the gap, not just a ratio.
+  if (diff > 0.10 && f > 0.20) {
+    return { verdict: 'reverse_holo', confidence: Math.min(0.95, 0.55 + diff * 2.0) }
   }
-  // Significant shimmer in frame only.
-  if (frame.shimmer_density > 0.20 && ratio < 0.5) {
-    return { verdict: 'reverse_holo', confidence: Math.min(0.95, 0.55 + frame.shimmer_density * 0.5) }
+  if (-diff > 0.10 && a > 0.20) {
+    return { verdict: 'holo', confidence: Math.min(0.95, 0.55 + (-diff) * 2.0) }
   }
-  // Both regions shimmer — full art / textured card.
-  if (artwork.shimmer_density > 0.25 && frame.shimmer_density > 0.25) {
+  // Both regions equally hot AND both high → genuine full art / textured.
+  if (a > 0.30 && f > 0.30 && Math.abs(diff) <= 0.10) {
     return { verdict: 'full_art', confidence: 0.7 }
   }
-  // Both static — non-holo.
-  if (artwork.shimmer_density < 0.08 && frame.shimmer_density < 0.08) {
+  // Both equally static AND both low → non-holo.
+  if (a < 0.08 && f < 0.08) {
     return { verdict: 'non_holo', confidence: 0.8 }
   }
+  // Anything else — partial signal, can't commit.
   return { verdict: 'uncertain', confidence: 0.4 }
 }
 
