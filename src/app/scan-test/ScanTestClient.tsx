@@ -16,6 +16,13 @@ const SCAN_URL = `${SUPABASE_URL}/functions/v1/${SCAN_FN_SLUG}`
 
 const MAX_LONG_EDGE = 1600
 const JPEG_QUALITY = 0.85
+// Mirror of the overlay rect (see CardOverlay) so the capture step can crop
+// to roughly the same region the user framed against. Smaller, focused
+// payload + Vision stops trying to read background text.
+const PREVIEW_CONTAINER_ASPECT = 3 / 4   // width / height
+const OVERLAY_WIDTH_PCT = 0.78           // of container width
+const CARD_ASPECT = 3.5 / 2.5            // height / width
+const CROP_PADDING_PCT = 0.06            // pad each edge so we do not clip the printed border
 
 type Stage = 'idle' | 'starting' | 'live' | 'captured' | 'scanning' | 'result' | 'error'
 type Feature = 'DOCUMENT_TEXT_DETECTION' | 'TEXT_DETECTION'
@@ -32,10 +39,14 @@ interface Candidate {
   number_match: boolean
   name_similarity: number
   set_match: boolean
+  year_match?: boolean
+  pool_size?: number
+  rank_in_pool?: number
   confidence: number
 }
 
 interface ScanResult {
+  scan_log_id: number | null
   feature_used: Feature
   vision: { full_text: string; word_count: number }
   parsed: {
@@ -43,12 +54,13 @@ interface ScanResult {
     collector_number_pattern: string | null
     name: string | null
     set_hint: string | null
+    set_abbreviation: string | null
     copyright_year: number | null
     full_text: string
   }
   candidates: Candidate[]
   match_error: string | null
-  timing_ms: { vision: number; parse: number; match: number; total: number }
+  timing_ms: { vision: number; parse: number; match: number; log?: number; total: number }
 }
 
 export default function ScanTestClient() {
@@ -61,6 +73,8 @@ export default function ScanTestClient() {
   const [result, setResult] = useState<ScanResult | null>(null)
   const [feature, setFeature] = useState<Feature>('DOCUMENT_TEXT_DETECTION')
   const [showRawText, setShowRawText] = useState(false)
+  const [confirmed, setConfirmed] = useState<string | null>(null)
+  const [confirmError, setConfirmError] = useState<string | null>(null)
 
   useEffect(() => {
     return () => stopCamera()
@@ -112,21 +126,81 @@ export default function ScanTestClient() {
     const video = videoRef.current
     if (!video || !video.videoWidth) return
 
-    // Downscale so long edge ≤ MAX_LONG_EDGE — Vision does not benefit from
-    // a 4K source and big payloads slow round-trip.
     const vw = video.videoWidth, vh = video.videoHeight
-    const scale = Math.min(1, MAX_LONG_EDGE / Math.max(vw, vh))
-    const w = Math.round(vw * scale), h = Math.round(vh * scale)
+
+    // Smart crop: figure out where the on-screen card overlay maps to in
+    // native video pixels, then crop to just that region (plus padding).
+    // The preview uses object-fit:cover into a container with aspect
+    // PREVIEW_CONTAINER_ASPECT, so part of the native video is cropped
+    // out of view — we need to undo that to find the visible region.
+    const videoAspect = vw / vh
+    let visibleW: number, visibleH: number, visibleX: number, visibleY: number
+    if (videoAspect > PREVIEW_CONTAINER_ASPECT) {
+      visibleH = vh
+      visibleW = vh * PREVIEW_CONTAINER_ASPECT
+      visibleX = (vw - visibleW) / 2
+      visibleY = 0
+    } else {
+      visibleW = vw
+      visibleH = vw / PREVIEW_CONTAINER_ASPECT
+      visibleX = 0
+      visibleY = (vh - visibleH) / 2
+    }
+
+    const cardW = visibleW * OVERLAY_WIDTH_PCT
+    const cardH = cardW * CARD_ASPECT
+    const cardX = visibleX + (visibleW - cardW) / 2
+    const cardY = visibleY + (visibleH - cardH) / 2
+
+    const padX = cardW * CROP_PADDING_PCT
+    const padY = cardH * CROP_PADDING_PCT
+    const srcX = Math.max(0, cardX - padX)
+    const srcY = Math.max(0, cardY - padY)
+    const srcW = Math.min(vw - srcX, cardW + padX * 2)
+    const srcH = Math.min(vh - srcY, cardH + padY * 2)
+
+    const scale = Math.min(1, MAX_LONG_EDGE / Math.max(srcW, srcH))
+    const dstW = Math.round(srcW * scale)
+    const dstH = Math.round(srcH * scale)
 
     const canvas = document.createElement('canvas')
-    canvas.width = w; canvas.height = h
+    canvas.width = dstW; canvas.height = dstH
     const ctx = canvas.getContext('2d')
     if (!ctx) { setError('Canvas not available'); setStage('error'); return }
-    ctx.drawImage(video, 0, 0, w, h)
+    ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, dstW, dstH)
     const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY)
     setCapturedDataUrl(dataUrl)
     stopCamera()
     setStage('captured')
+  }
+
+  async function confirmTopCandidate(candidate: Candidate) {
+    if (!result?.scan_log_id) {
+      setConfirmError('No scan_log_id from server — confirm not available')
+      return
+    }
+    setConfirmError(null)
+    try {
+      const res = await fetch(SCAN_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${ANON_KEY}`,
+          'apikey': ANON_KEY,
+        },
+        body: JSON.stringify({
+          action: 'confirm',
+          scan_log_id: result.scan_log_id,
+          card_slug: candidate.card_slug,
+        }),
+      })
+      let data: any = null
+      try { data = await res.json() } catch {}
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+      setConfirmed(candidate.card_slug)
+    } catch (e: any) {
+      setConfirmError(e?.message || String(e))
+    }
   }
 
   async function sendScan() {
@@ -164,6 +238,8 @@ export default function ScanTestClient() {
     setResult(null)
     setError(null)
     setShowRawText(false)
+    setConfirmed(null)
+    setConfirmError(null)
     setStage('idle')
   }
 
@@ -218,6 +294,9 @@ export default function ScanTestClient() {
           showRawText={showRawText}
           onToggleRawText={() => setShowRawText(v => !v)}
           onReset={reset}
+          confirmed={confirmed}
+          confirmError={confirmError}
+          onConfirm={confirmTopCandidate}
         />
       )}
     </div>
@@ -325,15 +404,23 @@ function ErrorPanel({ message, onReset }: { message: string; onReset: () => void
 
 function ResultPanel({
   result, capturedDataUrl, showRawText, onToggleRawText, onReset,
+  confirmed, confirmError, onConfirm,
 }: {
   result: ScanResult
   capturedDataUrl: string
   showRawText: boolean
   onToggleRawText: () => void
   onReset: () => void
+  confirmed: string | null
+  confirmError: string | null
+  onConfirm: (c: Candidate) => void
 }) {
   const p = result.parsed
   const noText = !p.full_text || p.full_text.trim().length === 0
+  const topPool = result.candidates[0]?.pool_size
+  const variantNote = topPool && topPool > 1
+    ? `${topPool} cards share this number — confirm the right variant below.`
+    : null
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -362,6 +449,7 @@ function ResultPanel({
         ) : null}
         <SignalRow label="Collector number" value={p.collector_number} extra={p.collector_number_pattern ? `(${p.collector_number_pattern})` : null} />
         <SignalRow label="Card name" value={p.name} />
+        <SignalRow label="Set abbreviation" value={p.set_abbreviation} />
         <SignalRow label="Set hint" value={p.set_hint} />
         <SignalRow label="Copyright year" value={p.copyright_year != null ? String(p.copyright_year) : null} />
       </div>
@@ -380,6 +468,9 @@ function ResultPanel({
         <SectionTitle>
           Top {result.candidates.length} match{result.candidates.length === 1 ? '' : 'es'}
         </SectionTitle>
+        {variantNote && (
+          <p style={{ ...mutedNoteStyle, fontWeight: 700, color: 'var(--text)' }}>{variantNote}</p>
+        )}
         {result.match_error && (
           <p style={{ ...mutedNoteStyle, color: '#ef4444' }}>Match error: {result.match_error}</p>
         )}
@@ -397,9 +488,19 @@ function ResultPanel({
               c={c}
               rank={i + 1}
               displayConfidence={displayConfidenceFor(result.candidates, i)}
+              confirmed={confirmed === c.card_slug}
+              onConfirm={() => onConfirm(c)}
             />
           ))}
         </div>
+        {confirmed && (
+          <p style={{ ...mutedNoteStyle, color: 'var(--green)' }}>
+            Logged — thanks. This scan is now a training-data row for tuning.
+          </p>
+        )}
+        {confirmError && (
+          <p style={{ ...mutedNoteStyle, color: '#ef4444' }}>Confirm failed: {confirmError}</p>
+        )}
       </div>
 
       <button onClick={onReset} style={primaryButtonStyle}>Scan another</button>
@@ -427,7 +528,12 @@ function confidenceLabel(conf: number): { text: string; color: string } {
   return                   { text: 'Unsure',         color: '#ef4444' }
 }
 
-function CandidateCard({ c, rank, displayConfidence }: { c: Candidate; rank: number; displayConfidence: number }) {
+function CandidateCard({
+  c, rank, displayConfidence, confirmed, onConfirm,
+}: {
+  c: Candidate; rank: number; displayConfidence: number
+  confirmed: boolean; onConfirm: () => void
+}) {
   const isTop = rank === 1
   const conf = Math.round(displayConfidence * 100)
   const label = confidenceLabel(displayConfidence)
@@ -436,29 +542,29 @@ function CandidateCard({ c, rank, displayConfidence }: { c: Candidate; rank: num
     ? `/set/${encodeURIComponent(c.set_name)}/card/${cardSlugPart}`
     : '#'
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener"
+    <div
       style={{
         display: 'flex', gap: 12, padding: 10, borderRadius: 10,
-        border: `1px solid ${isTop ? label.color : 'var(--border)'}`,
-        background: isTop ? 'rgba(96, 165, 250, 0.06)' : 'var(--bg-light)',
-        textDecoration: 'none', color: 'var(--text)',
+        border: `1px solid ${confirmed ? 'var(--green)' : (isTop ? label.color : 'var(--border)')}`,
+        background: confirmed ? 'rgba(34, 197, 94, 0.08)' : (isTop ? 'rgba(96, 165, 250, 0.06)' : 'var(--bg-light)'),
+        color: 'var(--text)',
       }}
     >
-      <div style={{ width: 60, flexShrink: 0 }}>
+      <a href={href} target="_blank" rel="noopener" style={{ width: 60, flexShrink: 0 }}>
         {c.image_url
           ? <img src={c.image_url} alt={c.clean_name} style={{ width: '100%', borderRadius: 6, display: 'block' }} />
           : <div style={{ width: '100%', aspectRatio: '2.5/3.5', background: 'var(--border)', borderRadius: 6 }} />}
-      </div>
+      </a>
       <div style={{ flex: 1, minWidth: 0, fontFamily: "'Figtree', sans-serif" }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, justifyContent: 'space-between' }}>
-          <strong style={{ fontSize: 14 }}>#{rank} {c.clean_name}</strong>
+          <a href={href} target="_blank" rel="noopener" style={{ textDecoration: 'none', color: 'var(--text)' }}>
+            <strong style={{ fontSize: 14 }}>#{rank} {c.clean_name}</strong>
+          </a>
           <span style={{ fontSize: 12, color: label.color, fontWeight: 700 }}>{conf}%</span>
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
           {c.set_name} · {c.card_number_display || c.card_number}
+          {c.pool_size && c.pool_size > 1 ? ` · variant ${c.rank_in_pool} of ${c.pool_size}` : ''}
         </div>
         <div style={{ fontSize: 11, marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
           {isTop && (
@@ -468,10 +574,25 @@ function CandidateCard({ c, rank, displayConfidence }: { c: Candidate; rank: num
           )}
           <Tag on={c.number_match} label="number" />
           <Tag on={c.set_match} label="set" />
+          <Tag on={!!c.year_match} label="year" />
           <Tag on={c.name_similarity >= 0.5} label={`name ${c.name_similarity.toFixed(2)}`} />
         </div>
+        <button
+          onClick={onConfirm}
+          disabled={confirmed}
+          style={{
+            marginTop: 10, padding: '8px 12px', borderRadius: 8,
+            border: confirmed ? '1px solid var(--green)' : '1px solid var(--border)',
+            background: confirmed ? 'var(--green)' : 'transparent',
+            color: confirmed ? '#fff' : 'var(--text)',
+            fontFamily: "'Figtree', sans-serif", fontSize: 12, fontWeight: 700,
+            cursor: confirmed ? 'default' : 'pointer',
+          }}
+        >
+          {confirmed ? '✓ Logged as correct' : 'This is the card'}
+        </button>
       </div>
-    </a>
+    </div>
   )
 }
 

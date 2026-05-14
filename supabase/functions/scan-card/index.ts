@@ -1,24 +1,16 @@
 // scan-card — diagnostic test harness for /scan-test.
 //
-// Takes a base64 JPEG of a Pokemon card, runs it through Google Cloud
-// Vision text detection, parses out candidate signals (collector number,
-// name, set hint), and ranks the top 5 matches from the `cards` table
-// via the scan_card_match RPC.
+// Two actions:
+//   { image_base64, feature? }                          -> recognise a card scan
+//   { action: "confirm", scan_log_id, card_slug }       -> mark which candidate
+//                                                          the user accepted, so
+//                                                          we accumulate labelled
+//                                                          tuning data over time.
 //
-// Returns the raw Vision output AND the parsed signals AND the
-// candidates AND timing — the whole point of this function is letting
-// us see exactly which stage failed when a scan goes wrong.
-//
-// Env vars expected (set via `supabase secrets set ...`):
+// Env vars (set via `supabase secrets set ...`):
 //   SUPABASE_URL                — auto-set
 //   SUPABASE_SERVICE_ROLE_KEY   — auto-set
 //   GOOGLE_VISION_API_KEY       — manual, add this one
-//
-// Request body:
-//   {
-//     "image_base64": "iVBORw0KGgo..."   // no data: prefix
-//     "feature": "DOCUMENT_TEXT_DETECTION" | "TEXT_DETECTION"  // optional, default DOCUMENT_TEXT_DETECTION
-//   }
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
@@ -71,32 +63,38 @@ async function callVision(imageBase64: string, feature: VisionFeature): Promise<
 }
 
 // ── Parsing helpers ─────────────────────────────────────────────────────────
-// Kept in clearly separated functions so the regex set is easy to iterate
-// on as we find real cards that fail.
 
-// Collector-number patterns, ordered most-specific first.
-// Examples handled:
-//   123/198, 045/102            standard set numbers
-//   TG12/TG30, GG01/GG70        trainer gallery / galarian gallery
-//   SV123, SWSH123, XY12        promo prefixes
-//   SM01, BW01, DP01, HGSS01    older promo prefixes
 const NUMBER_PATTERNS: { name: string; re: RegExp }[] = [
   { name: "fraction-prefixed", re: /\b((?:TG|GG|SV|SWSH|XY|SM|BW|DP|HGSS)\d{1,3}\s*\/\s*(?:TG|GG|SV|SWSH|XY|SM|BW|DP|HGSS)\d{1,3})\b/i },
   { name: "fraction-numeric",  re: /\b(\d{1,3}\s*\/\s*\d{1,3})\b/ },
   { name: "promo-prefixed",    re: /\b((?:TG|GG|SV|SWSH|XY|SM|BW|DP|HGSS)\d{1,3})\b/i },
 ]
 
+// Modern set abbreviations printed on the bottom-right of cards (Sword & Shield
+// onwards). Strong set signal when present. Word/group split so the regex stays
+// readable.
+const SET_ABBREVIATIONS = [
+  // Scarlet & Violet
+  "SVI", "PAL", "OBF", "MEW", "PAR", "PAF", "TEF", "TWM", "SFA", "SCR", "SSP", "PRE", "JTG",
+  // Sword & Shield
+  "SSH", "RCL", "DAA", "VIV", "BST", "CRE", "EVS", "FST", "BRS", "ASR", "LOR", "SIT", "CRZ", "SVE",
+  // Sun & Moon (less common, included for completeness)
+  "SUM", "GRI", "BUS", "CIN", "UPR", "FLI", "CES", "LOT", "TEU", "DRM", "UNB", "UNM", "CEC", "HIF",
+]
+
+const SET_HINT_WORDS_RE = /\b(scarlet\s*&?\s*violet|sword\s*&?\s*shield|sun\s*&?\s*moon|black\s*&?\s*white|paldea(?:n)?(?:\s*evolved)?|paradox\s*rift|obsidian\s*flames|151|crown\s*zenith|silver\s*tempest|lost\s*origin|brilliant\s*stars|fusion\s*strike|evolving\s*skies|chilling\s*reign|battle\s*styles|vivid\s*voltage|champion's\s*path|darkness\s*ablaze|rebel\s*clash|hidden\s*fates|cosmic\s*eclipse|unified\s*minds|unbroken\s*bonds|temporal\s*forces|twilight\s*masquerade|shrouded\s*fable|stellar\s*crown|surging\s*sparks|prismatic\s*evolutions|journey\s*together)\b/gi
+
 export interface ParsedSignals {
   collector_number: string | null
   collector_number_pattern: string | null
   name: string | null
   set_hint: string | null
+  set_abbreviation: string | null
   copyright_year: number | null
   full_text: string
 }
 
 function extractCollectorNumber(text: string): { value: string | null; pattern: string | null } {
-  // Vision tends to put a space between digits and slash. Normalise.
   const norm = text.replace(/\s*\/\s*/g, "/")
   for (const p of NUMBER_PATTERNS) {
     const m = norm.match(p.re)
@@ -108,32 +106,38 @@ function extractCollectorNumber(text: string): { value: string | null; pattern: 
 }
 
 function extractCopyrightYear(text: string): number | null {
-  // "©2023 Pokémon" / "(C) 2024 Nintendo" / loose "2022 Pokemon"
   const m = text.match(/(?:©|\(c\)|\bcopyright\b)?\s*((?:19|20)\d{2})\s*(?:pok[eé]?mon|nintendo|creatures|game\s*freak)/i)
   if (m) return parseInt(m[1], 10)
+  // Loose fallback: any 19xx/20xx year near a copyright symbol.
+  const m2 = text.match(/[©Cc]\s*((?:19|20)\d{2})/)
+  if (m2) return parseInt(m2[1], 10)
+  return null
+}
+
+function extractSetAbbreviation(text: string): string | null {
+  // Set abbreviations appear bottom-right alongside the collector number, often
+  // as standalone 3-letter all-caps tokens. Match against the curated list to
+  // avoid false positives on random uppercase noise.
+  const upper = text.toUpperCase()
+  for (const abbr of SET_ABBREVIATIONS) {
+    const re = new RegExp(`\\b${abbr}\\b`)
+    if (re.test(upper)) return abbr
+  }
   return null
 }
 
 function extractSetHint(text: string): string | null {
-  // Look for known set abbreviations / series words. Loose on purpose — this
-  // is only a soft tie-breaker for ranking, never a hard filter.
+  // Series/set words anywhere in the text. Loose — soft signal only.
   const candidates: string[] = []
-  const setHintRe = /\b(scarlet\s*&?\s*violet|sword\s*&?\s*shield|sun\s*&?\s*moon|black\s*&?\s*white|paldea(?:n)?(?:\s*evolved)?|paradox\s*rift|obsidian\s*flames|151|crown\s*zenith|silver\s*tempest|lost\s*origin|brilliant\s*stars|fusion\s*strike|evolving\s*skies|chilling\s*reign|battle\s*styles|vivid\s*voltage|champion's\s*path|darkness\s*ablaze|rebel\s*clash|hidden\s*fates|cosmic\s*eclipse|unified\s*minds|unbroken\s*bonds|temporal\s*forces|twilight\s*masquerade|shrouded\s*fable|stellar\s*crown|surging\s*sparks|prismatic\s*evolutions)\b/gi
   let m: RegExpExecArray | null
-  while ((m = setHintRe.exec(text)) !== null) candidates.push(m[1])
+  const re = new RegExp(SET_HINT_WORDS_RE.source, SET_HINT_WORDS_RE.flags)
+  while ((m = re.exec(text)) !== null) candidates.push(m[1])
   if (candidates.length === 0) return null
-  // Return longest match (most specific).
   candidates.sort((a, b) => b.length - a.length)
   return candidates[0]
 }
 
-// Pick the most likely card-name string from Vision's per-word detection.
-// Strategy: the card name is normally the largest text in the top third of
-// the image. We use the bounding-box height of each detected word as a
-// proxy for font size, then group neighbouring large words on the same
-// y-row into a single phrase.
 function extractName(response: any): string | null {
-  // text_annotations[0] is the full detected text. [1..] are per-word.
   const ann = response?.textAnnotations
   if (!Array.isArray(ann) || ann.length < 2) return null
 
@@ -151,18 +155,14 @@ function extractName(response: any): string | null {
 
   if (words.length === 0) return null
 
-  // Restrict to top 40% of the image.
   const imageMaxY = Math.max(...words.map(w => w.bottom))
   const topZone = words.filter(w => w.top < imageMaxY * 0.4)
   if (topZone.length === 0) return null
 
-  // Take only the largest-font words (within 70% of the max height in zone).
   const maxH = Math.max(...topZone.map(w => w.height))
   const big = topZone.filter(w => w.height >= maxH * 0.7)
   if (big.length === 0) return null
 
-  // Group by y-row (within half a word-height of each other), then take the
-  // group with the most large words and string them left-to-right.
   const rowTol = maxH * 0.6
   const rows: typeof big[] = []
   for (const w of big.sort((a, b) => a.top - b.top)) {
@@ -173,7 +173,6 @@ function extractName(response: any): string | null {
   rows.sort((a, b) => b.length - a.length)
   const chosen = rows[0].sort((a, b) => a.left - b.left)
 
-  // Drop obvious non-name tokens (HP numbers, energy types).
   const cleaned = chosen
     .map(w => w.text)
     .filter(t => !/^\d+$/.test(t))
@@ -193,6 +192,7 @@ function parseSignals(visionResponse: any): ParsedSignals {
     collector_number_pattern: number.pattern,
     name: extractName(visionResponse),
     set_hint: extractSetHint(fullText),
+    set_abbreviation: extractSetAbbreviation(fullText),
     copyright_year: extractCopyrightYear(fullText),
     full_text: fullText,
   }
@@ -201,13 +201,63 @@ function parseSignals(visionResponse: any): ParsedSignals {
 // ── Matching ────────────────────────────────────────────────────────────────
 
 async function matchCards(signals: ParsedSignals): Promise<any[]> {
+  // Set hint passed to the RPC is the abbreviation if present (stronger
+  // signal: it maps to the printed set code), otherwise the long-form
+  // series words. Both get an ILIKE %hint% against cards.set_name.
+  const setHint = signals.set_abbreviation || signals.set_hint
   const { data, error } = await supabase.rpc("scan_card_match", {
     p_collector_number: signals.collector_number,
     p_name:             signals.name,
-    p_set_hint:         signals.set_hint,
+    p_set_hint:         setHint,
+    p_copyright_year:   signals.copyright_year,
   })
   if (error) throw new Error(`scan_card_match RPC failed: ${error.message}`)
   return data || []
+}
+
+// ── Logging ─────────────────────────────────────────────────────────────────
+
+async function logScan(opts: {
+  feature: VisionFeature
+  signals: ParsedSignals
+  candidates: any[]
+  timing: Record<string, number>
+}): Promise<number | null> {
+  const top = opts.candidates[0]
+  try {
+    const { data, error } = await supabase.from("scan_logs").insert([{
+      feature_used:    opts.feature,
+      vision_full_text: opts.signals.full_text?.slice(0, 4000) ?? null,
+      parsed_signals: {
+        collector_number: opts.signals.collector_number,
+        collector_number_pattern: opts.signals.collector_number_pattern,
+        name: opts.signals.name,
+        set_hint: opts.signals.set_hint,
+        set_abbreviation: opts.signals.set_abbreviation,
+        copyright_year: opts.signals.copyright_year,
+      },
+      candidates:       opts.candidates,
+      top_card_slug:    top?.card_slug ?? null,
+      top_confidence:   top?.confidence ?? null,
+      timing_ms:        opts.timing,
+    }]).select("id").single()
+    if (error) {
+      console.error("[scan-card] scan_logs insert failed:", error.message)
+      return null
+    }
+    return data?.id ?? null
+  } catch (e: any) {
+    console.error("[scan-card] scan_logs insert threw:", e?.message || e)
+    return null
+  }
+}
+
+async function confirmScan(scanLogId: number, cardSlug: string): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from("scan_logs")
+    .update({ confirmed_card_slug: cardSlug, confirmed_at: new Date().toISOString() })
+    .eq("id", scanLogId)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
 }
 
 // ── Main handler ────────────────────────────────────────────────────────────
@@ -216,13 +266,24 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS })
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405)
 
-  if (!GOOGLE_VISION_API_KEY) {
-    return json({ error: "GOOGLE_VISION_API_KEY not set on edge function" }, 500)
-  }
-
   let body: any
   try { body = await req.json() } catch {
     return json({ error: "Invalid JSON body" }, 400)
+  }
+
+  // ── Confirm branch ───────────────────────────────────────────────────────
+  if (body.action === "confirm") {
+    const id = Number(body.scan_log_id)
+    const slug = String(body.card_slug || "")
+    if (!id || !slug) return json({ error: "scan_log_id and card_slug required" }, 400)
+    const result = await confirmScan(id, slug)
+    if (!result.ok) return json({ error: result.error }, 500)
+    return json({ ok: true })
+  }
+
+  // ── Recognise branch ─────────────────────────────────────────────────────
+  if (!GOOGLE_VISION_API_KEY) {
+    return json({ error: "GOOGLE_VISION_API_KEY not set on edge function" }, 500)
   }
 
   const imageBase64: string = String(body.image_base64 || "").replace(/^data:image\/\w+;base64,/, "")
@@ -231,7 +292,7 @@ Deno.serve(async (req) => {
   const feature: VisionFeature =
     body.feature === "TEXT_DETECTION" ? "TEXT_DETECTION" : "DOCUMENT_TEXT_DETECTION"
 
-  // ── Vision stage ─────────────────────────────────────────────────────────
+  // Vision
   const tVisionStart = Date.now()
   let vision: any
   try {
@@ -242,11 +303,10 @@ Deno.serve(async (req) => {
   }
   const visionMs = Date.now() - tVisionStart
 
-  // Server-side log so we can debug from Supabase function logs.
   const previewText = String(vision?.fullTextAnnotation?.text || "").slice(0, 600)
   console.log("[scan-card] feature=", feature, " visionMs=", visionMs, " preview:\n", previewText)
 
-  // ── Parse stage ──────────────────────────────────────────────────────────
+  // Parse
   const tParseStart = Date.now()
   const signals = parseSignals(vision)
   const parseMs = Date.now() - tParseStart
@@ -254,10 +314,11 @@ Deno.serve(async (req) => {
     collector_number: signals.collector_number,
     name: signals.name,
     set_hint: signals.set_hint,
+    set_abbreviation: signals.set_abbreviation,
     copyright_year: signals.copyright_year,
   }))
 
-  // ── Match stage ──────────────────────────────────────────────────────────
+  // Match
   const tMatchStart = Date.now()
   let candidates: any[] = []
   let matchError: string | null = null
@@ -271,23 +332,29 @@ Deno.serve(async (req) => {
   }
   const matchMs = Date.now() - tMatchStart
 
+  const timing = {
+    vision: visionMs,
+    parse:  parseMs,
+    match:  matchMs,
+    total:  visionMs + parseMs + matchMs,
+  }
+
+  // Log (non-blocking on failure — we still return the result to the user).
+  const tLogStart = Date.now()
+  const scanLogId = await logScan({ feature, signals, candidates, timing })
+  const logMs = Date.now() - tLogStart
+
   return json({
+    scan_log_id: scanLogId,
     feature_used: feature,
     vision: {
       full_text: String(vision?.fullTextAnnotation?.text || vision?.textAnnotations?.[0]?.description || ""),
-      // Per-word boxes are big; include count only by default. Set
-      // `body.include_words=true` if you want them for deeper debugging.
       word_count: Array.isArray(vision?.textAnnotations) ? vision.textAnnotations.length - 1 : 0,
       words: body.include_words === true ? vision?.textAnnotations?.slice(1) : undefined,
     },
     parsed: signals,
     candidates,
     match_error: matchError,
-    timing_ms: {
-      vision: visionMs,
-      parse:  parseMs,
-      match:  matchMs,
-      total:  visionMs + parseMs + matchMs,
-    },
+    timing_ms: { ...timing, log: logMs },
   })
 })
