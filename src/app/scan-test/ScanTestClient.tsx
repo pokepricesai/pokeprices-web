@@ -16,45 +16,59 @@ const SCAN_URL = `${SUPABASE_URL}/functions/v1/${SCAN_FN_SLUG}`
 
 const MAX_LONG_EDGE = 1600
 const JPEG_QUALITY = 0.85
+// Bottom-strip crop (25% of card height) sent at this higher resolution
+// for crisp number OCR. Vision often misses the small printed collector
+// number at full-card scale.
+const NUMBER_STRIP_PCT = 0.27            // bottom fraction of cropped card to crop again
+const NUMBER_STRIP_MAX_LONG_EDGE = 1400  // higher res, smaller area => much more pixels per character
+const NUMBER_STRIP_QUALITY = 0.92
 // Mirror of the overlay rect (see CardOverlay) so the capture step can crop
-// to roughly the same region the user framed against. Smaller, focused
-// payload + Vision stops trying to read background text.
+// to roughly the same region the user framed against.
 const PREVIEW_CONTAINER_ASPECT = 3 / 4   // width / height
 const OVERLAY_WIDTH_PCT = 0.78           // of container width
 const CARD_ASPECT = 3.5 / 2.5            // height / width
 const CROP_PADDING_PCT = 0.06            // pad each edge so we do not clip the printed border
+// Multi-frame tilt capture: 5 frames over ~700ms while the user tilts the
+// card slightly. We use the cross-frame shimmer pattern to distinguish
+// holo (artwork shifts) / reverse holo (frame shifts) / non-holo (static).
+const TILT_FRAME_COUNT = 5
+const TILT_FRAME_INTERVAL_MS = 150
+const TILT_SAMPLE_POINTS = 80            // per region, per frame
 
 type Stage = 'idle' | 'starting' | 'live' | 'captured' | 'scanning' | 'result' | 'error'
 type Feature = 'DOCUMENT_TEXT_DETECTION' | 'TEXT_DETECTION'
 
-// ── Holo / reverse-holo detection ──────────────────────────────────────────
-// Single-frame heuristic. Foil pixels are simultaneously bright AND saturated
-// (spectral diffraction from foil produces saturated highlights — regular
-// printed cards have desaturated highlights). We sample two regions of the
-// cropped card: the artwork area (holo foil lives there) and the bottom
-// info / frame area (reverse-holo foil lives there), then compare densities.
+// ── Holo / reverse-holo detection (tilt-based) ─────────────────────────────
+// v1 single-still didn't work: glare and ambient lighting drowned the signal.
+// This v2 uses the physical signature the eye relies on — when you tilt a
+// holo, bright regions SHIFT and CHANGE COLOUR between frames. Paper glare
+// is stationary. We capture N frames over ~700ms while the user tilts the
+// card slightly, sample fixed grid points in two regions, then check
+// whether the lightness at each point VARIES across frames.
 //
-// Honest caveat: a single still is fooled by glare. Multi-frame "tilt"
-// detection is the robust path — capture 2-3 frames as the user tilts the
-// card, look for bright-region movement. v2 if v1 proves too noisy.
+// Verdict by ratio (not absolutes) so camera motion can't fake it:
+//   artwork shimmer >> frame shimmer → HOLO
+//   frame shimmer >> artwork shimmer → REVERSE HOLO
+//   both high → likely full art / textured
+//   both low  → NON-HOLO
 
-type HoloVerdict = 'holo' | 'reverse_holo' | 'non_holo' | 'uncertain'
+type HoloVerdict = 'holo' | 'reverse_holo' | 'non_holo' | 'full_art' | 'uncertain'
 
 interface RegionStats {
-  foil_density: number      // 0-1, fraction of sampled pixels that are bright+saturated
-  max_lightness: number     // 0-1
-  mean_saturation: number   // 0-1
-  hue_variance: number      // 0..~0.08 — high values mean rainbow/streaky
+  shimmer_count:    number    // sample points whose lightness varies > threshold across frames
+  shimmer_density:  number    // shimmer_count / total sample points
+  mean_l_stdev:     number    // average per-point lightness standard deviation across frames
+  max_l_stdev:      number    // peak per-point lightness standard deviation
 }
 
 interface HoloAnalysis {
-  artwork: RegionStats
-  frame: RegionStats
-  artwork_shine: number     // composite score
-  frame_shine:   number
-  shine_ratio:   number     // artwork_shine / frame_shine
-  verdict:       HoloVerdict
-  confidence:    number     // 0-1
+  artwork:         RegionStats
+  frame:           RegionStats
+  shimmer_ratio:   number     // artwork.shimmer_density / frame.shimmer_density
+  verdict:         HoloVerdict
+  confidence:      number
+  frame_count:     number
+  capture_ms:      number
 }
 
 function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
@@ -73,80 +87,67 @@ function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
   return [h, s, l]
 }
 
-function analyzeRegion(imageData: ImageData, x0: number, x1: number, y0: number, y1: number): RegionStats {
-  const data = imageData.data
-  const W = imageData.width
-  const stepX = Math.max(1, Math.floor((x1 - x0) / 70))
-  const stepY = Math.max(1, Math.floor((y1 - y0) / 70))
-
-  let maxL = 0, sumS = 0, count = 0, foilCount = 0
-  const hues: number[] = []
-  for (let y = y0; y < y1; y += stepY) {
-    for (let x = x0; x < x1; x += stepX) {
-      const i = (y * W + x) * 4
-      const [h, s, l] = rgbToHsl(data[i], data[i + 1], data[i + 2])
-      if (l > maxL) maxL = l
-      sumS += s
-      count++
-      // Foil signature: bright AND saturated.
-      if (l > 0.62 && s > 0.32) foilCount++
-      if (l > 0.3) hues.push(h)
+// Deterministic grid of sample points within a rectangular region. Same
+// coordinates used for every frame so per-point variance is comparable.
+function gridSamples(x0: number, x1: number, y0: number, y1: number, target: number): { x: number; y: number }[] {
+  const w = x1 - x0, h = y1 - y0
+  const cols = Math.max(2, Math.round(Math.sqrt(target * w / Math.max(1, h))))
+  const rows = Math.max(2, Math.round(target / cols))
+  const pts: { x: number; y: number }[] = []
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      pts.push({
+        x: Math.floor(x0 + (c + 0.5) * w / cols),
+        y: Math.floor(y0 + (r + 0.5) * h / rows),
+      })
     }
   }
-  const meanH = hues.reduce((a, b) => a + b, 0) / Math.max(1, hues.length)
-  const varH = hues.reduce((a, b) => a + (b - meanH) * (b - meanH), 0) / Math.max(1, hues.length)
+  return pts
+}
+
+function computeShimmerStats(seriesPerPoint: number[][]): RegionStats {
+  // For each point, compute the standard deviation of L across frames.
+  // A point is "shimmering" if its stdev exceeds SHIMMER_STDEV_THRESHOLD.
+  const SHIMMER_STDEV_THRESHOLD = 0.08   // L is 0..1 — sd 0.08 ~= swings of 0.16
+  let shimmerCount = 0
+  let sumSd = 0
+  let maxSd = 0
+  for (const ls of seriesPerPoint) {
+    if (ls.length < 2) continue
+    const mean = ls.reduce((a, b) => a + b, 0) / ls.length
+    const variance = ls.reduce((a, b) => a + (b - mean) * (b - mean), 0) / ls.length
+    const sd = Math.sqrt(variance)
+    sumSd += sd
+    if (sd > maxSd) maxSd = sd
+    if (sd > SHIMMER_STDEV_THRESHOLD) shimmerCount++
+  }
   return {
-    foil_density:    foilCount / Math.max(1, count),
-    max_lightness:   maxL,
-    mean_saturation: sumS / Math.max(1, count),
-    hue_variance:    varH,
+    shimmer_count:   shimmerCount,
+    shimmer_density: shimmerCount / Math.max(1, seriesPerPoint.length),
+    mean_l_stdev:    sumSd / Math.max(1, seriesPerPoint.length),
+    max_l_stdev:     maxSd,
   }
 }
 
-function analyzeHolo(canvas: HTMLCanvasElement): HoloAnalysis | null {
-  const ctx = canvas.getContext('2d')
-  if (!ctx || !canvas.width || !canvas.height) return null
-  let imageData: ImageData
-  try { imageData = ctx.getImageData(0, 0, canvas.width, canvas.height) }
-  catch { return null }
-
-  const W = canvas.width, H = canvas.height
-  // Our capture crops to roughly the card with 6% padding, then the card
-  // itself has its own ~5% printed border. So the artwork window sits at
-  // approx X 12-88%, Y 17-56% of the captured image. The reverse-holo
-  // bottom info strip sits at approx Y 76-93%.
-  const artwork = analyzeRegion(imageData,
-    Math.floor(W * 0.12), Math.floor(W * 0.88),
-    Math.floor(H * 0.17), Math.floor(H * 0.56))
-  const frame = analyzeRegion(imageData,
-    Math.floor(W * 0.12), Math.floor(W * 0.88),
-    Math.floor(H * 0.76), Math.floor(H * 0.93))
-
-  // Composite shine = foil-pixel density weighted by hue variance (rainbow).
-  const artworkShine = artwork.foil_density * (1 + artwork.hue_variance * 12)
-  const frameShine   = frame.foil_density   * (1 + frame.hue_variance   * 12)
-  const ratio = artworkShine / Math.max(0.001, frameShine)
-
-  let verdict: HoloVerdict = 'uncertain'
-  let confidence = 0.4
-  if (artworkShine > 0.18 && ratio > 1.5) {
-    verdict = 'holo'
-    confidence = Math.min(0.95, 0.55 + artworkShine * 0.4)
-  } else if (frameShine > 0.18 && ratio < 0.67) {
-    verdict = 'reverse_holo'
-    confidence = Math.min(0.95, 0.55 + frameShine * 0.4)
-  } else if (artworkShine < 0.06 && frameShine < 0.06) {
-    verdict = 'non_holo'
-    confidence = 0.75
+function verdictFromShimmer(artwork: RegionStats, frame: RegionStats): { verdict: HoloVerdict; confidence: number } {
+  const ratio = artwork.shimmer_density / Math.max(0.01, frame.shimmer_density)
+  // Significant shimmer in artwork only.
+  if (artwork.shimmer_density > 0.20 && ratio > 2.0) {
+    return { verdict: 'holo', confidence: Math.min(0.95, 0.55 + artwork.shimmer_density * 0.5) }
   }
-
-  return {
-    artwork, frame,
-    artwork_shine: artworkShine,
-    frame_shine:   frameShine,
-    shine_ratio:   ratio,
-    verdict, confidence,
+  // Significant shimmer in frame only.
+  if (frame.shimmer_density > 0.20 && ratio < 0.5) {
+    return { verdict: 'reverse_holo', confidence: Math.min(0.95, 0.55 + frame.shimmer_density * 0.5) }
   }
+  // Both regions shimmer — full art / textured card.
+  if (artwork.shimmer_density > 0.25 && frame.shimmer_density > 0.25) {
+    return { verdict: 'full_art', confidence: 0.7 }
+  }
+  // Both static — non-holo.
+  if (artwork.shimmer_density < 0.08 && frame.shimmer_density < 0.08) {
+    return { verdict: 'non_holo', confidence: 0.8 }
+  }
+  return { verdict: 'uncertain', confidence: 0.4 }
 }
 
 type MatchQuality = 'full' | 'with_denom' | 'numerator' | 'name_only'
@@ -203,6 +204,8 @@ export default function ScanTestClient() {
   const [confirmed, setConfirmed] = useState<string | null>(null)
   const [confirmError, setConfirmError] = useState<string | null>(null)
   const [holo, setHolo] = useState<HoloAnalysis | null>(null)
+  const [capturing, setCapturing] = useState(false)
+  const [numberStripDataUrl, setNumberStripDataUrl] = useState<string | null>(null)
 
   useEffect(() => {
     return () => stopCamera()
@@ -254,13 +257,13 @@ export default function ScanTestClient() {
     const video = videoRef.current
     if (!video || !video.videoWidth) return
 
+    setCapturing(true)
+    const tStart = Date.now()
+
     const vw = video.videoWidth, vh = video.videoHeight
 
     // Smart crop: figure out where the on-screen card overlay maps to in
     // native video pixels, then crop to just that region (plus padding).
-    // The preview uses object-fit:cover into a container with aspect
-    // PREVIEW_CONTAINER_ASPECT, so part of the native video is cropped
-    // out of view — we need to undo that to find the visible region.
     const videoAspect = vw / vh
     let visibleW: number, visibleH: number, visibleX: number, visibleY: number
     if (videoAspect > PREVIEW_CONTAINER_ASPECT) {
@@ -274,12 +277,10 @@ export default function ScanTestClient() {
       visibleX = 0
       visibleY = (vh - visibleH) / 2
     }
-
     const cardW = visibleW * OVERLAY_WIDTH_PCT
     const cardH = cardW * CARD_ASPECT
     const cardX = visibleX + (visibleW - cardW) / 2
     const cardY = visibleY + (visibleH - cardH) / 2
-
     const padX = cardW * CROP_PADDING_PCT
     const padY = cardH * CROP_PADDING_PCT
     const srcX = Math.max(0, cardX - padX)
@@ -291,17 +292,88 @@ export default function ScanTestClient() {
     const dstW = Math.round(srcW * scale)
     const dstH = Math.round(srcH * scale)
 
-    const canvas = document.createElement('canvas')
-    canvas.width = dstW; canvas.height = dstH
-    const ctx = canvas.getContext('2d')
-    if (!ctx) { setError('Canvas not available'); setStage('error'); return }
-    ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, dstW, dstH)
-    // Surface analysis on the cropped frame, before JPEG encoding so we
-    // operate on the cleanest pixel data available.
-    setHolo(analyzeHolo(canvas))
-    const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY)
-    setCapturedDataUrl(dataUrl)
+    // Sample grids — same coordinates re-used every frame, so per-point
+    // variance across frames is comparable.
+    const artworkPts = gridSamples(
+      Math.floor(dstW * 0.12), Math.floor(dstW * 0.88),
+      Math.floor(dstH * 0.17), Math.floor(dstH * 0.56),
+      TILT_SAMPLE_POINTS,
+    )
+    const framePts = gridSamples(
+      Math.floor(dstW * 0.12), Math.floor(dstW * 0.88),
+      Math.floor(dstH * 0.76), Math.floor(dstH * 0.93),
+      TILT_SAMPLE_POINTS,
+    )
+    const artworkLs: number[][] = artworkPts.map(() => [])
+    const frameLs:   number[][] = framePts.map(() => [])
+
+    const tempCanvas = document.createElement('canvas')
+    tempCanvas.width = dstW; tempCanvas.height = dstH
+    const tempCtx = tempCanvas.getContext('2d')
+    if (!tempCtx) { setError('Canvas not available'); setStage('error'); setCapturing(false); return }
+
+    let mainCanvas: HTMLCanvasElement | null = null
+    const midFrameIdx = Math.floor(TILT_FRAME_COUNT / 2)
+
+    for (let f = 0; f < TILT_FRAME_COUNT; f++) {
+      if (f > 0) await new Promise(r => setTimeout(r, TILT_FRAME_INTERVAL_MS))
+      tempCtx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, dstW, dstH)
+      const imageData = tempCtx.getImageData(0, 0, dstW, dstH)
+      const data = imageData.data
+      for (let i = 0; i < artworkPts.length; i++) {
+        const p = artworkPts[i]
+        const idx = (p.y * dstW + p.x) * 4
+        const [, , l] = rgbToHsl(data[idx], data[idx + 1], data[idx + 2])
+        artworkLs[i].push(l)
+      }
+      for (let i = 0; i < framePts.length; i++) {
+        const p = framePts[i]
+        const idx = (p.y * dstW + p.x) * 4
+        const [, , l] = rgbToHsl(data[idx], data[idx + 1], data[idx + 2])
+        frameLs[i].push(l)
+      }
+      // Keep the middle frame as the canonical capture image.
+      if (f === midFrameIdx) {
+        mainCanvas = document.createElement('canvas')
+        mainCanvas.width = dstW; mainCanvas.height = dstH
+        mainCanvas.getContext('2d')!.drawImage(tempCanvas, 0, 0)
+      }
+    }
+
+    if (!mainCanvas) { setError('No frame captured'); setStage('error'); setCapturing(false); return }
+
+    const artworkStats = computeShimmerStats(artworkLs)
+    const frameStats   = computeShimmerStats(frameLs)
+    const { verdict, confidence } = verdictFromShimmer(artworkStats, frameStats)
+
+    setHolo({
+      artwork: artworkStats,
+      frame:   frameStats,
+      shimmer_ratio: artworkStats.shimmer_density / Math.max(0.01, frameStats.shimmer_density),
+      verdict, confidence,
+      frame_count: TILT_FRAME_COUNT,
+      capture_ms:  Date.now() - tStart,
+    })
+
+    // Main JPEG to send to Vision.
+    const mainDataUrl = mainCanvas.toDataURL('image/jpeg', JPEG_QUALITY)
+    setCapturedDataUrl(mainDataUrl)
+
+    // High-res bottom-strip crop for crisper collector-number OCR.
+    const stripSrcY = Math.floor(dstH * (1 - NUMBER_STRIP_PCT))
+    const stripSrcH = dstH - stripSrcY
+    const stripScale = Math.min(2, NUMBER_STRIP_MAX_LONG_EDGE / Math.max(dstW, stripSrcH))
+    const stripDstW = Math.round(dstW * stripScale)
+    const stripDstH = Math.round(stripSrcH * stripScale)
+    const stripCanvas = document.createElement('canvas')
+    stripCanvas.width = stripDstW; stripCanvas.height = stripDstH
+    const stripCtx = stripCanvas.getContext('2d')!
+    stripCtx.imageSmoothingQuality = 'high'
+    stripCtx.drawImage(mainCanvas, 0, stripSrcY, dstW, stripSrcH, 0, 0, stripDstW, stripDstH)
+    setNumberStripDataUrl(stripCanvas.toDataURL('image/jpeg', NUMBER_STRIP_QUALITY))
+
     stopCamera()
+    setCapturing(false)
     setStage('captured')
   }
 
@@ -348,7 +420,14 @@ export default function ScanTestClient() {
           'Authorization': `Bearer ${ANON_KEY}`,
           'apikey': ANON_KEY,
         },
-        body: JSON.stringify({ image_base64: base64, feature, holo_analysis: holo }),
+        body: JSON.stringify({
+          image_base64: base64,
+          image_base64_number: numberStripDataUrl
+            ? numberStripDataUrl.replace(/^data:image\/\w+;base64,/, '')
+            : undefined,
+          feature,
+          holo_analysis: holo,
+        }),
       })
       let data: any = null
       try { data = await res.json() } catch {}
@@ -372,6 +451,8 @@ export default function ScanTestClient() {
     setConfirmed(null)
     setConfirmError(null)
     setHolo(null)
+    setCapturing(false)
+    setNumberStripDataUrl(null)
     setStage('idle')
   }
 
@@ -397,7 +478,8 @@ export default function ScanTestClient() {
         <LivePanel
           videoRef={videoRef}
           onCapture={capture}
-          ready={stage === 'live'}
+          ready={stage === 'live' && !capturing}
+          capturing={capturing}
         />
       )}
 
@@ -441,8 +523,12 @@ export default function ScanTestClient() {
 function StartPanel({ onStart }: { onStart: () => void }) {
   return (
     <div style={panelStyle}>
-      <p style={{ fontFamily: "'Figtree', sans-serif", fontSize: 14, lineHeight: 1.6, margin: '0 0 16px' }}>
-        Fill the frame with the card, avoid glare, good lighting helps. Hold the camera steady and parallel to the card.
+      <p style={{ fontFamily: "'Figtree', sans-serif", fontSize: 14, lineHeight: 1.6, margin: '0 0 12px' }}>
+        Fill the frame with the card, avoid glare, good lighting helps.
+      </p>
+      <p style={{ fontFamily: "'Figtree', sans-serif", fontSize: 13, lineHeight: 1.5, margin: '0 0 16px', color: 'var(--text-muted)' }}>
+        When you tap capture, <strong style={{ color: 'var(--text)' }}>tilt the card slightly</strong> over the next second
+        — that motion is how we tell holos and reverse holos apart (foil shifts; paper does not).
       </p>
       <button onClick={onStart} style={primaryButtonStyle}>Start camera</button>
       <p style={{ fontFamily: "'Figtree', sans-serif", fontSize: 11, color: 'var(--text-muted)', margin: '12px 0 0' }}>
@@ -453,11 +539,12 @@ function StartPanel({ onStart }: { onStart: () => void }) {
 }
 
 function LivePanel({
-  videoRef, onCapture, ready,
+  videoRef, onCapture, ready, capturing,
 }: {
   videoRef: React.RefObject<HTMLVideoElement | null>
   onCapture: () => void
   ready: boolean
+  capturing: boolean
 }) {
   return (
     <div style={panelStyle}>
@@ -470,9 +557,25 @@ function LivePanel({
           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
         />
         <CardOverlay />
+        {capturing && (
+          <div style={{
+            position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(0,0,0,0.45)', pointerEvents: 'none',
+          }}>
+            <div style={{
+              padding: '14px 22px', borderRadius: 12,
+              background: 'rgba(0,0,0,0.7)', color: '#fff',
+              fontFamily: "'Outfit', sans-serif", fontSize: 18, fontWeight: 700,
+              textAlign: 'center', lineHeight: 1.4,
+            }}>
+              Tilt the card<br />
+              <span style={{ fontSize: 13, fontWeight: 500, opacity: 0.85 }}>capturing 5 frames...</span>
+            </div>
+          </div>
+        )}
       </div>
       <button onClick={onCapture} disabled={!ready} style={{ ...primaryButtonStyle, marginTop: 16, opacity: ready ? 1 : 0.5 }}>
-        {ready ? 'Capture' : 'Loading...'}
+        {capturing ? 'Capturing...' : ready ? 'Capture (then tilt)' : 'Loading...'}
       </button>
     </div>
   )
@@ -762,13 +865,14 @@ function HoloPanel({ holo }: { holo: HoloAnalysis }) {
   const verdictMap: Record<HoloVerdict, { label: string; color: string }> = {
     holo:          { label: 'HOLO',          color: 'var(--green)' },
     reverse_holo:  { label: 'REVERSE HOLO',  color: 'var(--primary)' },
+    full_art:      { label: 'FULL ART / TEXTURED', color: 'var(--green)' },
     non_holo:      { label: 'NON-HOLO',      color: 'var(--text-muted)' },
     uncertain:     { label: 'UNCERTAIN',     color: '#f59e0b' },
   }
   const v = verdictMap[holo.verdict]
   return (
     <div style={panelStyle}>
-      <SectionTitle>Surface analysis</SectionTitle>
+      <SectionTitle>Surface analysis (tilt)</SectionTitle>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 8 }}>
         <span style={{
           fontFamily: "'Outfit', sans-serif", fontSize: 20, fontWeight: 700,
@@ -779,27 +883,26 @@ function HoloPanel({ holo }: { holo: HoloAnalysis }) {
         </span>
       </div>
       <p style={{ ...mutedNoteStyle, fontSize: 12 }}>
-        Single-frame heuristic — glare can fool it. After ~20 known cards we will
-        have data to tune the thresholds (or add tilt detection if v1 is too noisy).
+        Detects bright regions that SHIFT between {holo.frame_count} captured frames as you tilt.
+        Foil moves with angle; paper does not. If you did not tilt, both regions will read low.
       </p>
       <div style={statsRowStyle}>
-        <Stat label="Artwork shine" value={holo.artwork_shine.toFixed(3)} />
-        <Stat label="Frame shine"   value={holo.frame_shine.toFixed(3)} />
-        <Stat label="Ratio (A/F)"   value={holo.shine_ratio.toFixed(2)} />
+        <Stat label="Artwork shimmer" value={`${(holo.artwork.shimmer_density * 100).toFixed(0)}%`} />
+        <Stat label="Frame shimmer"   value={`${(holo.frame.shimmer_density * 100).toFixed(0)}%`} />
+        <Stat label="Ratio (A/F)"     value={holo.shimmer_ratio.toFixed(2)} />
+        <Stat label="Captured in"     value={`${holo.capture_ms} ms`} />
       </div>
       <div style={{ marginTop: 10, fontFamily: "'Figtree', sans-serif", fontSize: 11, color: 'var(--text-muted)' }}>
         <strong style={{ color: 'var(--text)' }}>Artwork region</strong>
-        {' — '}foil density {(holo.artwork.foil_density * 100).toFixed(1)}%,
-        {' '}max L {holo.artwork.max_lightness.toFixed(2)},
-        {' '}mean S {holo.artwork.mean_saturation.toFixed(2)},
-        {' '}hue var {holo.artwork.hue_variance.toFixed(4)}
+        {' — '}{holo.artwork.shimmer_count} shimmering sample points,
+        {' '}mean L stdev {holo.artwork.mean_l_stdev.toFixed(3)},
+        {' '}max L stdev {holo.artwork.max_l_stdev.toFixed(3)}
       </div>
       <div style={{ marginTop: 4, fontFamily: "'Figtree', sans-serif", fontSize: 11, color: 'var(--text-muted)' }}>
         <strong style={{ color: 'var(--text)' }}>Frame region</strong>
-        {' — '}foil density {(holo.frame.foil_density * 100).toFixed(1)}%,
-        {' '}max L {holo.frame.max_lightness.toFixed(2)},
-        {' '}mean S {holo.frame.mean_saturation.toFixed(2)},
-        {' '}hue var {holo.frame.hue_variance.toFixed(4)}
+        {' — '}{holo.frame.shimmer_count} shimmering sample points,
+        {' '}mean L stdev {holo.frame.mean_l_stdev.toFixed(3)},
+        {' '}max L stdev {holo.frame.max_l_stdev.toFixed(3)}
       </div>
     </div>
   )

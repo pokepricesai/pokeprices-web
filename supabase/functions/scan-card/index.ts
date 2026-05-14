@@ -38,28 +38,43 @@ function json(body: unknown, status = 200) {
 
 type VisionFeature = "TEXT_DETECTION" | "DOCUMENT_TEXT_DETECTION"
 
-async function callVision(imageBase64: string, feature: VisionFeature): Promise<any> {
+async function callVision(imageBase64: string, feature: VisionFeature, numberStripBase64?: string | null): Promise<{ full: any; numberStrip: any | null }> {
+  // Batch request: full card crop + (optional) high-res bottom-strip crop.
+  // Both run in a single round-trip so wall-clock is the same as one call.
+  // Bottom strip is for the small printed collector number — Vision often
+  // misses that at full-card resolution but reads it cleanly when given a
+  // tight high-res crop.
   const url = `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_VISION_API_KEY}`
-  const body = {
-    requests: [
-      {
-        image: { content: imageBase64 },
-        features: [{ type: feature, maxResults: 50 }],
-        imageContext: { languageHints: ["en"] },
-      },
-    ],
+  const requests: any[] = [
+    {
+      image: { content: imageBase64 },
+      features: [{ type: feature, maxResults: 50 }],
+      imageContext: { languageHints: ["en"] },
+    },
+  ]
+  if (numberStripBase64) {
+    requests.push({
+      image: { content: numberStripBase64 },
+      // TEXT_DETECTION (not DOCUMENT_) tends to do better on short isolated
+      // alphanumeric strings like collector numbers.
+      features: [{ type: "TEXT_DETECTION", maxResults: 20 }],
+      imageContext: { languageHints: ["en"] },
+    })
   }
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ requests }),
   })
   if (!res.ok) {
     const txt = await res.text()
     throw new Error(`Vision ${res.status}: ${txt.slice(0, 400)}`)
   }
   const data = await res.json()
-  return data?.responses?.[0] ?? {}
+  return {
+    full:        data?.responses?.[0] ?? {},
+    numberStrip: numberStripBase64 ? (data?.responses?.[1] ?? null) : null,
+  }
 }
 
 // ── Parsing helpers ─────────────────────────────────────────────────────────
@@ -184,17 +199,29 @@ function extractName(response: any): string | null {
   return cleaned || null
 }
 
-function parseSignals(visionResponse: any): ParsedSignals {
-  const fullText = String(visionResponse?.fullTextAnnotation?.text || visionResponse?.textAnnotations?.[0]?.description || "")
-  const number = extractCollectorNumber(fullText)
+function parseSignals(fullResponse: any, numberStripResponse: any | null): ParsedSignals {
+  const fullText = String(fullResponse?.fullTextAnnotation?.text || fullResponse?.textAnnotations?.[0]?.description || "")
+  const stripText = String(numberStripResponse?.fullTextAnnotation?.text || numberStripResponse?.textAnnotations?.[0]?.description || "")
+
+  // Prefer the bottom-strip's reading for the collector number — that crop
+  // is high-resolution and isolated, so Vision typically gets it cleaner
+  // there than at full-card scale. Fall back to the full-card text if the
+  // strip turned up nothing.
+  let number = stripText ? extractCollectorNumber(stripText) : { value: null, pattern: null }
+  if (!number.value) number = extractCollectorNumber(fullText)
+
+  // Set abbreviation is also printed near the number, so try the strip first.
+  let abbreviation: string | null = stripText ? extractSetAbbreviation(stripText) : null
+  if (!abbreviation) abbreviation = extractSetAbbreviation(fullText)
+
   return {
     collector_number: number.value,
     collector_number_pattern: number.pattern,
-    name: extractName(visionResponse),
+    name: extractName(fullResponse),
     set_hint: extractSetHint(fullText),
-    set_abbreviation: extractSetAbbreviation(fullText),
+    set_abbreviation: abbreviation,
     copyright_year: extractCopyrightYear(fullText),
-    full_text: fullText,
+    full_text: fullText + (stripText ? `\n--- bottom strip ---\n${stripText}` : ""),
   }
 }
 
@@ -291,26 +318,31 @@ Deno.serve(async (req) => {
   const imageBase64: string = String(body.image_base64 || "").replace(/^data:image\/\w+;base64,/, "")
   if (!imageBase64) return json({ error: "Missing image_base64" }, 400)
 
+  const numberStripBase64: string | null = body.image_base64_number
+    ? String(body.image_base64_number).replace(/^data:image\/\w+;base64,/, "")
+    : null
+
   const feature: VisionFeature =
     body.feature === "TEXT_DETECTION" ? "TEXT_DETECTION" : "DOCUMENT_TEXT_DETECTION"
 
-  // Vision
+  // Vision (batch: full card + optional bottom-strip)
   const tVisionStart = Date.now()
-  let vision: any
+  let visionResult: { full: any; numberStrip: any | null }
   try {
-    vision = await callVision(imageBase64, feature)
+    visionResult = await callVision(imageBase64, feature, numberStripBase64)
   } catch (e: any) {
     console.error("Vision error", e?.message || e)
     return json({ error: String(e?.message || e), stage: "vision" }, 500)
   }
   const visionMs = Date.now() - tVisionStart
 
-  const previewText = String(vision?.fullTextAnnotation?.text || "").slice(0, 600)
-  console.log("[scan-card] feature=", feature, " visionMs=", visionMs, " preview:\n", previewText)
+  const previewText = String(visionResult.full?.fullTextAnnotation?.text || "").slice(0, 600)
+  const stripPreview = String(visionResult.numberStrip?.fullTextAnnotation?.text || "").slice(0, 200)
+  console.log("[scan-card] feature=", feature, " visionMs=", visionMs, " full preview:\n", previewText, "\n strip preview:\n", stripPreview)
 
   // Parse
   const tParseStart = Date.now()
-  const signals = parseSignals(vision)
+  const signals = parseSignals(visionResult.full, visionResult.numberStrip)
   const parseMs = Date.now() - tParseStart
   console.log("[scan-card] parsed:", JSON.stringify({
     collector_number: signals.collector_number,
@@ -353,9 +385,10 @@ Deno.serve(async (req) => {
     scan_log_id: scanLogId,
     feature_used: feature,
     vision: {
-      full_text: String(vision?.fullTextAnnotation?.text || vision?.textAnnotations?.[0]?.description || ""),
-      word_count: Array.isArray(vision?.textAnnotations) ? vision.textAnnotations.length - 1 : 0,
-      words: body.include_words === true ? vision?.textAnnotations?.slice(1) : undefined,
+      full_text: signals.full_text,
+      word_count: Array.isArray(visionResult.full?.textAnnotations) ? visionResult.full.textAnnotations.length - 1 : 0,
+      words: body.include_words === true ? visionResult.full?.textAnnotations?.slice(1) : undefined,
+      number_strip_text: String(visionResult.numberStrip?.fullTextAnnotation?.text || visionResult.numberStrip?.textAnnotations?.[0]?.description || ""),
     },
     parsed: signals,
     candidates,
