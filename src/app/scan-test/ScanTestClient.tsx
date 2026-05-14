@@ -837,28 +837,48 @@ function isFullArtVariant(c: Candidate): boolean {
 }
 
 // Re-rank candidates so the variant matching the surface verdict floats to
-// the top. Threshold lowered to 0.55 — when the tilt analysis is even
-// moderately confident, the variant cue is more reliable than the RPC's
-// default name-similarity tiebreaker.
+// the top — but ONLY among candidates that are already tied at the top of
+// the confidence ranking. The RPC's confidence score is the source of
+// truth; the holo verdict is a tiebreaker, never a promotion above a
+// higher-scoring match.
+//
+// Rationale: previous versions could promote a lower-confidence variant
+// above a 100% match because the holo signal said so. That is wrong —
+// number + name pin down the card; the holo signal only distinguishes
+// reverse-holo vs regular when both are present in the candidates at
+// equal confidence.
+const HOLO_TIE_WINDOW = 0.04   // within 4% confidence counts as tied
+const HOLO_MIN_CONFIDENCE = 0.65
+
 function reorderByHolo(candidates: Candidate[], holo: HoloAnalysis | null): Candidate[] {
-  if (!holo || holo.confidence < 0.55) return candidates
+  if (!holo || holo.confidence < HOLO_MIN_CONFIDENCE) return candidates
+  if (candidates.length < 2) return candidates
+
+  // Tied group at the top: all candidates within HOLO_TIE_WINDOW of #1's confidence.
+  const topConf = candidates[0].confidence
+  let tieEnd = 1
+  while (tieEnd < candidates.length && topConf - candidates[tieEnd].confidence <= HOLO_TIE_WINDOW) {
+    tieEnd++
+  }
+  if (tieEnd < 2) return candidates   // no tie at top — leave the highest-confidence card alone
+
   const matchesVariant = (c: Candidate): boolean => {
     if (holo.verdict === 'reverse_holo') return isReverseHoloVariant(c)
     if (holo.verdict === 'holo')         return isHoloVariant(c)
     if (holo.verdict === 'full_art')     return isFullArtVariant(c)
     return false
   }
-  const anyMatch = candidates.some(matchesVariant)
-  if (!anyMatch) return candidates
-  const matched: Candidate[] = []
-  const rest:    Candidate[] = []
-  for (const c of candidates) (matchesVariant(c) ? matched : rest).push(c)
-  return [...matched, ...rest]
+
+  const tied = candidates.slice(0, tieEnd)
+  const tail = candidates.slice(tieEnd)
+  const matched = tied.filter(matchesVariant)
+  if (matched.length === 0) return candidates   // verdict not represented in the tied group
+
+  const unmatched = tied.filter(c => !matchesVariant(c))
+  return [...matched, ...unmatched, ...tail]
 }
 
-// Diagnose why the holo verdict could not be honored — separates "DB
-// doesn't have this variant" from "holo wasn't confident enough" so the
-// user sees the real reason, not just an unranked list.
+// Diagnose why the holo verdict did or did not influence ordering.
 function holoReorderDiagnosis(
   candidates: Candidate[],
   holo: HoloAnalysis | null,
@@ -868,18 +888,33 @@ function holoReorderDiagnosis(
     return { reordered: false, reason: null }
   }
   const verdictLabel = holo.verdict.replace('_', ' ')
-  if (holo.confidence < 0.55) {
-    return { reordered: false, reason: `Tilt verdict was ${verdictLabel} but only ${Math.round(holo.confidence * 100)}% confident — not strong enough to override the database ordering.` }
+  const confPct = Math.round(holo.confidence * 100)
+
+  if (holo.confidence < HOLO_MIN_CONFIDENCE) {
+    return { reordered: false, reason: `Tilt verdict was ${verdictLabel} but only ${confPct}% confident — not strong enough to reorder.` }
   }
-  const hasMatch = candidates.some(c =>
+  if (candidates.length < 2) return { reordered: false, reason: null }
+
+  const topConf = candidates[0].confidence
+  const tied = candidates.filter(c => topConf - c.confidence <= HOLO_TIE_WINDOW)
+  if (tied.length < 2) {
+    return { reordered: false, reason: `Top match is alone at ${Math.round(topConf * 100)}% — holo verdict is not used as a tiebreaker when there is nothing to tiebreak.` }
+  }
+
+  const matchesVariant = (c: Candidate) =>
     holo.verdict === 'reverse_holo' ? isReverseHoloVariant(c) :
     holo.verdict === 'holo'         ? isHoloVariant(c) :
                                       isFullArtVariant(c)
-  )
-  if (!hasMatch) {
-    return { reordered: false, reason: `Tilt verdict was ${verdictLabel} (${Math.round(holo.confidence * 100)}% confident) but no ${verdictLabel} variant for this card exists in our database — the scraper may not track that variant yet.` }
+  const matchedInTied = tied.filter(matchesVariant)
+  if (matchedInTied.length === 0) {
+    return { reordered: false, reason: `Tilt verdict was ${verdictLabel} (${confPct}% confident) but none of the top ${tied.length} tied candidates are the ${verdictLabel} variant — leaving DB ordering alone.` }
   }
-  return { reordered: true, reason: `Reordered: ${verdictLabel} variant moved to top to match surface verdict.` }
+
+  // Did we actually move anything? (Only if the first tied candidate did not already match.)
+  if (matchesVariant(tied[0])) {
+    return { reordered: false, reason: null }   // already at top, no reorder needed, no message
+  }
+  return { reordered: true, reason: `Tiebreak: ${verdictLabel} variant promoted to top among ${tied.length} candidates within ${Math.round(HOLO_TIE_WINDOW * 100)}% of each other.` }
 }
 
 function confidenceLabel(conf: number): { text: string; color: string } {
