@@ -79,8 +79,14 @@ async function callVision(imageBase64: string, feature: VisionFeature, numberStr
 
 // ── Parsing helpers ─────────────────────────────────────────────────────────
 
+// Promo-prefix codes that appear in modern Pokemon collector numbers.
+// Optional dash / underscore between prefix and digits — Vision and the
+// scraper format these inconsistently. Downstream normalisation strips
+// the separator so "SWSH123" and "SWSH-123" match the same DB row.
+const PROMO_PREFIXES = "TG|GG|SV|SVP|SWSH|XY|SM|BW|DP|HGSS|POP|BS"
+
 const NUMBER_PATTERNS: { name: string; re: RegExp; reassemble?: (m: RegExpMatchArray) => string }[] = [
-  { name: "fraction-prefixed", re: /\b((?:TG|GG|SV|SWSH|XY|SM|BW|DP|HGSS)\d{1,3}\s*\/\s*(?:TG|GG|SV|SWSH|XY|SM|BW|DP|HGSS)\d{1,3})\b/i },
+  { name: "fraction-prefixed", re: new RegExp(`\\b((?:${PROMO_PREFIXES})[-_]?\\d{1,3}\\s*\\/\\s*(?:${PROMO_PREFIXES})[-_]?\\d{1,3})\\b`, "i") },
   { name: "fraction-numeric",  re: /\b(\d{1,3}\s*\/\s*\d{1,3})\b/ },
   // Loose separator: Vision sometimes reads the slash as -, |, _, or even
   // a space. Reassemble as N/M so downstream normalisation handles it.
@@ -88,7 +94,7 @@ const NUMBER_PATTERNS: { name: string; re: RegExp; reassemble?: (m: RegExpMatchA
   // "130 086" with whitespace only — only when both look like valid card
   // numbers (1-3 digit each, denom >= 30 to avoid noise like year fragments).
   { name: "fraction-space",    re: /\b(\d{1,3})\s+(\d{2,3})\b/, reassemble: (m) => parseInt(m[2], 10) >= 30 ? `${m[1]}/${m[2]}` : "" },
-  { name: "promo-prefixed",    re: /\b((?:TG|GG|SV|SWSH|XY|SM|BW|DP|HGSS)\d{1,3})\b/i },
+  { name: "promo-prefixed",    re: new RegExp(`\\b((?:${PROMO_PREFIXES})[-_]?\\d{1,3})\\b`, "i") },
 ]
 
 // Modern set abbreviations printed on the bottom-right of cards (Sword & Shield
