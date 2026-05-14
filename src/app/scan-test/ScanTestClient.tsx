@@ -392,7 +392,12 @@ function ResultPanel({
         )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
           {result.candidates.map((c, i) => (
-            <CandidateCard key={c.card_slug + i} c={c} rank={i + 1} />
+            <CandidateCard
+              key={c.card_slug + i}
+              c={c}
+              rank={i + 1}
+              displayConfidence={displayConfidenceFor(result.candidates, i)}
+            />
           ))}
         </div>
       </div>
@@ -402,9 +407,30 @@ function ResultPanel({
   )
 }
 
-function CandidateCard({ c, rank }: { c: Candidate; rank: number }) {
+// Uniqueness boost: if the top candidate scores meaningfully above #2,
+// nudge its displayed confidence up. Rationale — when number+name both
+// match for exactly one card and the next-best is much weaker, that is a
+// near-certain pick even if neither raw signal hit 1.0.
+function displayConfidenceFor(cands: Candidate[], i: number): number {
+  const c = cands[i]
+  if (i !== 0 || cands.length < 2) return c.confidence
+  const gap = c.confidence - cands[1].confidence
+  if (gap >= 0.20) return Math.min(1.0, c.confidence + 0.06)
+  if (gap >= 0.10) return Math.min(1.0, c.confidence + 0.03)
+  return c.confidence
+}
+
+function confidenceLabel(conf: number): { text: string; color: string } {
+  if (conf >= 0.85) return { text: 'Very confident', color: 'var(--green)' }
+  if (conf >= 0.65) return { text: 'Likely',         color: 'var(--primary)' }
+  if (conf >= 0.45) return { text: 'Possible',       color: 'var(--text-muted)' }
+  return                   { text: 'Unsure',         color: '#ef4444' }
+}
+
+function CandidateCard({ c, rank, displayConfidence }: { c: Candidate; rank: number; displayConfidence: number }) {
   const isTop = rank === 1
-  const conf = Math.round(c.confidence * 100)
+  const conf = Math.round(displayConfidence * 100)
+  const label = confidenceLabel(displayConfidence)
   const cardSlugPart = (c.card_url_slug || c.card_slug || '').replace(/^pc-/, '')
   const href = c.set_name
     ? `/set/${encodeURIComponent(c.set_name)}/card/${cardSlugPart}`
@@ -416,7 +442,7 @@ function CandidateCard({ c, rank }: { c: Candidate; rank: number }) {
       rel="noopener"
       style={{
         display: 'flex', gap: 12, padding: 10, borderRadius: 10,
-        border: `1px solid ${isTop ? 'var(--primary)' : 'var(--border)'}`,
+        border: `1px solid ${isTop ? label.color : 'var(--border)'}`,
         background: isTop ? 'rgba(96, 165, 250, 0.06)' : 'var(--bg-light)',
         textDecoration: 'none', color: 'var(--text)',
       }}
@@ -429,12 +455,17 @@ function CandidateCard({ c, rank }: { c: Candidate; rank: number }) {
       <div style={{ flex: 1, minWidth: 0, fontFamily: "'Figtree', sans-serif" }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, justifyContent: 'space-between' }}>
           <strong style={{ fontSize: 14 }}>#{rank} {c.clean_name}</strong>
-          <span style={{ fontSize: 12, color: isTop ? 'var(--primary)' : 'var(--text-muted)', fontWeight: 700 }}>{conf}%</span>
+          <span style={{ fontSize: 12, color: label.color, fontWeight: 700 }}>{conf}%</span>
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
           {c.set_name} · {c.card_number_display || c.card_number}
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        <div style={{ fontSize: 11, marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+          {isTop && (
+            <span style={{ color: label.color, fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              {label.text}
+            </span>
+          )}
           <Tag on={c.number_match} label="number" />
           <Tag on={c.set_match} label="set" />
           <Tag on={c.name_similarity >= 0.5} label={`name ${c.name_similarity.toFixed(2)}`} />
