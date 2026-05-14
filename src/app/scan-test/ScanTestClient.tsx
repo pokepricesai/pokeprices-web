@@ -27,6 +27,8 @@ const CROP_PADDING_PCT = 0.06            // pad each edge so we do not clip the 
 type Stage = 'idle' | 'starting' | 'live' | 'captured' | 'scanning' | 'result' | 'error'
 type Feature = 'DOCUMENT_TEXT_DETECTION' | 'TEXT_DETECTION'
 
+type MatchQuality = 'full' | 'with_denom' | 'numerator' | 'name_only'
+
 interface Candidate {
   card_slug: string
   card_name: string
@@ -34,9 +36,12 @@ interface Candidate {
   set_name: string
   card_number: string | null
   card_number_display: string | null
+  set_printed_total?: string | null
   card_url_slug: string
   image_url: string | null
+  match_quality?: MatchQuality
   number_match: boolean
+  denom_match?: boolean
   name_similarity: number
   set_match: boolean
   year_match?: boolean
@@ -417,10 +422,20 @@ function ResultPanel({
 }) {
   const p = result.parsed
   const noText = !p.full_text || p.full_text.trim().length === 0
-  const topPool = result.candidates[0]?.pool_size
-  const variantNote = topPool && topPool > 1
-    ? `${topPool} cards share this number — confirm the right variant below.`
-    : null
+  const top = result.candidates[0]
+  const variantNote = (() => {
+    if (!top) return null
+    if (top.match_quality === 'full' || top.match_quality === 'with_denom') {
+      if ((top.pool_size ?? 1) > 1) {
+        return `${top.pool_size} variants of this exact card (regular / reverse holo / etc) — confirm below.`
+      }
+      return null
+    }
+    if (top.match_quality === 'numerator') {
+      return `No denominator match in DB — these are cards numbered ${p.collector_number?.split('/')[0] || '?'} across different sets. Pick the right one or skip.`
+    }
+    return null
+  })()
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -563,8 +578,11 @@ function CandidateCard({
           <span style={{ fontSize: 12, color: label.color, fontWeight: 700 }}>{conf}%</span>
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-          {c.set_name} · {c.card_number_display || c.card_number}
-          {c.pool_size && c.pool_size > 1 ? ` · variant ${c.rank_in_pool} of ${c.pool_size}` : ''}
+          {c.set_name}
+          {' · '}
+          {c.card_number_display || (c.card_number && c.set_printed_total ? `${c.card_number}/${c.set_printed_total}` : c.card_number)}
+          {(c.pool_size ?? 1) > 1 && (c.match_quality === 'full' || c.match_quality === 'with_denom')
+            ? ` · variant ${c.rank_in_pool} of ${c.pool_size}` : ''}
         </div>
         <div style={{ fontSize: 11, marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
           {isTop && (
@@ -572,7 +590,9 @@ function CandidateCard({
               {label.text}
             </span>
           )}
-          <Tag on={c.number_match} label="number" />
+          <QualityTag q={c.match_quality} />
+          <Tag on={c.number_match} label="num" />
+          <Tag on={!!c.denom_match} label={c.set_printed_total ? `/${c.set_printed_total}` : '/?'} />
           <Tag on={c.set_match} label="set" />
           <Tag on={!!c.year_match} label="year" />
           <Tag on={c.name_similarity >= 0.5} label={`name ${c.name_similarity.toFixed(2)}`} />
@@ -604,6 +624,24 @@ function Tag({ on, label }: { on: boolean; label: string }) {
       color: on ? '#fff' : 'var(--text-muted)',
       fontWeight: 600, fontSize: 10, letterSpacing: 0.3,
     }}>{label}</span>
+  )
+}
+
+function QualityTag({ q }: { q?: MatchQuality }) {
+  if (!q) return null
+  const cfg: Record<MatchQuality, { label: string; bg: string; fg: string }> = {
+    full:       { label: 'FULL MATCH', bg: 'var(--green)',  fg: '#fff' },
+    with_denom: { label: 'NUM + /TOTAL', bg: 'var(--green)', fg: '#fff' },
+    numerator:  { label: 'NUM ONLY',   bg: '#f59e0b',       fg: '#fff' },
+    name_only:  { label: 'NAME ONLY',  bg: 'var(--border)', fg: 'var(--text-muted)' },
+  }
+  const c = cfg[q]
+  return (
+    <span style={{
+      padding: '2px 6px', borderRadius: 4,
+      background: c.bg, color: c.fg,
+      fontWeight: 700, fontSize: 10, letterSpacing: 0.4,
+    }}>{c.label}</span>
   )
 }
 
