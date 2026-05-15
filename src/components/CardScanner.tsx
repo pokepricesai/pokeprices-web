@@ -93,7 +93,12 @@ export default function CardScanner({
   const [userId, setUserId] = useState<string | null>(null)
   const [scansRemaining, setScansRemaining] = useState<number | null>(null)
   const [isMobile, setIsMobile] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
+  // Two refs because mobile needs TWO inputs: one with capture="environment"
+  // (opens the camera straight to a single shot) and one without (lets iOS
+  // multi-select from the gallery, so users can pre-shoot N cards with the
+  // native Camera app and then bulk-pick them here).
+  const cameraInputRef  = useRef<HTMLInputElement>(null)
+  const galleryInputRef = useRef<HTMLInputElement>(null)
 
   // Width-based mobile detection. Tablets in landscape will see the
   // desktop copy, which is fine — the underlying file input behaviour
@@ -122,9 +127,8 @@ export default function CardScanner({
     })()
   }, [])
 
-  function pickFiles() {
-    inputRef.current?.click()
-  }
+  function openCamera()  { cameraInputRef.current?.click()  }
+  function openGallery() { galleryInputRef.current?.click() }
 
   async function handleFilesChosen(files: FileList | null) {
     if (!files || files.length === 0) return
@@ -253,7 +257,8 @@ export default function CardScanner({
     setError(null)
     setRetriedWithAlternate(false)
     setEngine('vision_ocr')
-    if (inputRef.current) inputRef.current.value = ''
+    if (cameraInputRef.current)  cameraInputRef.current.value  = ''
+    if (galleryInputRef.current) galleryInputRef.current.value = ''
   }
 
   const candidates = response?.candidates ?? []
@@ -263,22 +268,33 @@ export default function CardScanner({
     <div style={panelStyle}>
       <Header onClose={onClose} scansRemaining={scansRemaining} />
 
-      {/* Hidden file input — drives every entry point. capture=environment
-          opens the camera on mobile, falls through to the file picker on
-          desktop. multiple lets desktop users bulk-process. */}
+      {/* Camera input — capture="environment" opens the rear camera
+          straight to a single photo on mobile. On desktop the attribute
+          is ignored and it falls through to the file picker. */}
       <input
-        ref={inputRef}
+        ref={cameraInputRef}
         type="file"
         accept="image/*"
-        multiple
         // @ts-expect-error capture is valid HTML, not in React typings yet
         capture="environment"
         style={{ display: 'none' }}
         onChange={e => handleFilesChosen(e.target.files)}
       />
+      {/* Gallery input — no capture attribute, multiple files. On iOS this
+          opens the photo library with multi-select, so a user can take
+          20 photos with the native Camera app first then upload them
+          all here in one go. On desktop this is the file picker. */}
+      <input
+        ref={galleryInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        style={{ display: 'none' }}
+        onChange={e => handleFilesChosen(e.target.files)}
+      />
 
       {stage === 'idle' && (
-        <IdlePanel onPick={pickFiles} isMobile={isMobile} />
+        <IdlePanel onCamera={openCamera} onGallery={openGallery} isMobile={isMobile} />
       )}
 
       {stage === 'scanning' && currentImageUrl && (
@@ -309,7 +325,7 @@ export default function CardScanner({
       )}
 
       {stage === 'error' && error && (
-        <ErrorPanel message={error} onRetry={pickFiles} onClose={reset} />
+        <ErrorPanel message={error} onRetry={isMobile ? openCamera : openGallery} onClose={reset} />
       )}
     </div>
   )
@@ -340,19 +356,42 @@ function Header({ onClose, scansRemaining }: { onClose?: () => void; scansRemain
   )
 }
 
-function IdlePanel({ onPick, isMobile }: { onPick: () => void; isMobile: boolean }) {
+function IdlePanel({
+  onCamera, onGallery, isMobile,
+}: {
+  onCamera: () => void
+  onGallery: () => void
+  isMobile: boolean
+}) {
+  if (isMobile) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, lineHeight: 1.55 }}>
+          Take one card at a time, or shoot a stack with your normal Camera app first and upload them all at once.
+        </p>
+        <button onClick={onCamera} style={primaryButtonStyle}>
+          Take a photo
+        </button>
+        <button onClick={onGallery} style={secondaryButtonStyle}>
+          Choose from gallery — bulk OK
+        </button>
+        <p style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '4px 0 0', lineHeight: 1.5 }}>
+          Pick as many photos as you like — the scanner steps through them one by one and you confirm each match before it moves on. Avoid glare, fill the frame, good lighting helps.
+        </p>
+      </div>
+    )
+  }
+  // Desktop — single button, file picker with multi-select.
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, lineHeight: 1.55 }}>
-        {isMobile
-          ? 'Tap below to open your camera and take a photo of the card. You can also pick from your phone gallery — bulk uploads are processed one at a time.'
-          : 'On desktop there is no camera scan — tap below to upload one or more card photos from your computer. They are processed one by one and you confirm each match as it appears.'}
+        On desktop there is no camera scan — tap below to upload one or more card photos from your computer. They are processed one by one and you confirm each match as it appears.
       </p>
-      <button onClick={onPick} style={primaryButtonStyle}>
-        {isMobile ? 'Scan a card' : 'Upload card image(s)'}
+      <button onClick={onGallery} style={primaryButtonStyle}>
+        Upload card image(s)
       </button>
       <p style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '4px 0 0', lineHeight: 1.5 }}>
-        Avoid glare, fill the frame with the card, good lighting helps. If the read looks wrong on the result screen, the &quot;Try AI mode&quot; button reruns the same image through Claude vision.
+        Avoid glare, fill the frame, good lighting helps. If the read looks wrong on the result screen, the &quot;Try AI mode&quot; button reruns the same image through Claude vision.
       </p>
     </div>
   )
