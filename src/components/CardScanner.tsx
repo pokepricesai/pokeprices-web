@@ -22,6 +22,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { getDeviceId } from '@/lib/deviceId'
+import { HOLDING_TYPES } from '@/lib/portfolioGrades'
 
 const SCAN_FN_SLUG = process.env.NEXT_PUBLIC_SCAN_CARD_FN_SLUG || 'quick-action'
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://egidpsrkqvymvioidatc.supabase.co'
@@ -74,16 +75,23 @@ export interface ConfirmContext {
   isBulk: boolean        // true when the scanner has more than 1 image in queue
   queueLength: number    // total images chosen
   queueIndex: number     // 0-based index of the current image
+  // When showGradeSelector is true on the scanner, the host receives the
+  // user's chosen grade and quantity for each confirmed card. Unset
+  // otherwise — host should default to ('raw', 1).
+  holdingType?: string
+  quantity?: number
 }
 
 export default function CardScanner({
   onCardConfirmed,
   onClose,
   ctaLabel = 'Use this card',
+  showGradeSelector = false,
 }: {
   onCardConfirmed: (card: ConfirmedCard, ctx: ConfirmContext) => void | Promise<void>
   onClose?: () => void
   ctaLabel?: string
+  showGradeSelector?: boolean
 }) {
   const [stage, setStage] = useState<'idle' | 'collecting' | 'scanning' | 'results' | 'limit' | 'error'>('idle')
   // Pending stack for the mobile "take many photos" flow — each camera
@@ -91,6 +99,10 @@ export default function CardScanner({
   // normal processing queue.
   const [pending, setPending] = useState<File[]>([])
   const [mode, setMode] = useState<'single' | 'multi-camera'>('single')
+  // Per-scan grade + quantity, used when showGradeSelector=true. Reset
+  // back to defaults after each confirm so the next card starts fresh.
+  const [holdingType, setHoldingType] = useState<string>('raw')
+  const [quantity, setQuantity] = useState<number>(1)
   const [error, setError] = useState<string | null>(null)
   const [queue, setQueue] = useState<File[]>([])
   const [queueIndex, setQueueIndex] = useState(0)
@@ -277,13 +289,18 @@ export default function CardScanner({
       isBulk:     queue.length > 1,
       queueLength: queue.length,
       queueIndex,
+      holdingType: showGradeSelector ? holdingType : undefined,
+      quantity:    showGradeSelector ? Math.max(1, quantity) : undefined,
     })
-    // Move to next in queue or reset.
+    // Move to next in queue or reset. Reset the grade picker so the next
+    // card in the bulk starts at raw / qty 1 — the most common case.
     if (queueIndex + 1 < queue.length) {
       const nextIdx = queueIndex + 1
       setQueueIndex(nextIdx)
       setRetriedWithAlternate(false)
       setEngine('vision_ocr')
+      setHoldingType('raw')
+      setQuantity(1)
       await processFile(queue[nextIdx], 'vision_ocr')
     } else {
       reset()
@@ -313,6 +330,8 @@ export default function CardScanner({
     setEngine('vision_ocr')
     setPending([])
     setMode('single')
+    setHoldingType('raw')
+    setQuantity(1)
     if (cameraInputRef.current)  cameraInputRef.current.value  = ''
     if (galleryInputRef.current) galleryInputRef.current.value = ''
   }
@@ -387,6 +406,11 @@ export default function CardScanner({
           onRetryAlternate={retryWithAlternate}
           onSkip={skipCurrent}
           onCancel={reset}
+          showGradeSelector={showGradeSelector}
+          holdingType={holdingType}
+          onHoldingTypeChange={setHoldingType}
+          quantity={quantity}
+          onQuantityChange={setQuantity}
         />
       )}
 
@@ -514,6 +538,55 @@ function CollectingPanel({
   )
 }
 
+function GradeQtyPicker({
+  holdingType, onHoldingTypeChange, quantity, onQuantityChange,
+}: {
+  holdingType: string
+  onHoldingTypeChange: (v: string) => void
+  quantity: number
+  onQuantityChange: (n: number) => void
+}) {
+  // Group grades by company for an optgroup-style select. The list comes
+  // from src/lib/portfolioGrades which is the single source of truth.
+  const companies = Array.from(new Set(HOLDING_TYPES.map(t => t.company)))
+  return (
+    <div style={{
+      display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 8,
+      padding: 10, borderRadius: 10,
+      background: 'var(--bg-light)', border: '1px solid var(--border)',
+    }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <label style={pickerLabelStyle}>Grade for this scan</label>
+        <select
+          value={holdingType}
+          onChange={e => onHoldingTypeChange(e.target.value)}
+          style={pickerInputStyle}
+        >
+          {companies.map(company => (
+            <optgroup key={company} label={company}>
+              {HOLDING_TYPES.filter(t => t.company === company).map(t => (
+                <option key={t.value} value={t.value}>
+                  {t.label}{t.manual ? ' — manual value' : ''}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <label style={pickerLabelStyle}>Quantity</label>
+        <input
+          type="number"
+          min={1}
+          value={quantity}
+          onChange={e => onQuantityChange(Math.max(1, parseInt(e.target.value) || 1))}
+          style={pickerInputStyle}
+        />
+      </div>
+    </div>
+  )
+}
+
 function ThumbnailTile({ file }: { file: File }) {
   const [url, setUrl] = useState<string | null>(null)
   useEffect(() => {
@@ -542,6 +615,7 @@ function ScanningPanel({ imageUrl, queueLabel }: { imageUrl: string; queueLabel:
 function ResultsPanel({
   response, candidates, imageUrl, queueLabel, queueRemaining,
   ctaLabel, retriedWithAlternate, onConfirm, onRetryAlternate, onSkip, onCancel,
+  showGradeSelector, holdingType, onHoldingTypeChange, quantity, onQuantityChange,
 }: {
   response: ScanResponse
   candidates: Candidate[]
@@ -554,6 +628,11 @@ function ResultsPanel({
   onRetryAlternate: () => void
   onSkip: () => void
   onCancel: () => void
+  showGradeSelector: boolean
+  holdingType: string
+  onHoldingTypeChange: (v: string) => void
+  quantity: number
+  onQuantityChange: (n: number) => void
 }) {
   const top = candidates[0]
   const noResults = candidates.length === 0
@@ -578,6 +657,15 @@ function ResultsPanel({
           )}
         </div>
       </div>
+
+      {showGradeSelector && !noResults && (
+        <GradeQtyPicker
+          holdingType={holdingType}
+          onHoldingTypeChange={onHoldingTypeChange}
+          quantity={quantity}
+          onQuantityChange={onQuantityChange}
+        />
+      )}
 
       {noResults ? (
         <div style={emptyStateStyle}>
@@ -736,4 +824,16 @@ const emptyStateStyle: React.CSSProperties = {
   display: 'flex', flexDirection: 'column', gap: 10,
   padding: 12, borderRadius: 10, border: '1px dashed var(--border)',
   background: 'var(--bg-light)',
+}
+
+const pickerLabelStyle: React.CSSProperties = {
+  fontSize: 10, fontWeight: 800, letterSpacing: 1.0, textTransform: 'uppercase',
+  color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif",
+}
+
+const pickerInputStyle: React.CSSProperties = {
+  padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)',
+  background: 'var(--card)', color: 'var(--text)',
+  fontSize: 14, fontFamily: "'Figtree', sans-serif", outline: 'none',
+  width: '100%', boxSizing: 'border-box',
 }

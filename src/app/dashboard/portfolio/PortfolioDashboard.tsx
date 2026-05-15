@@ -1170,22 +1170,24 @@ export default function PortfolioDashboard() {
     await loadPortfolio()
   }
 
-  // Silent quick-add for bulk-scan flow. Pre-existing raw holding for the
-  // same card -> increment quantity. New holding -> insert at quantity 1.
-  // Always uses holding_type='raw' since the scanner cannot tell grade
-  // from the image — user can edit afterwards if needed.
-  async function handleQuickScanAdd(card: ConfirmedCard) {
+  // Silent quick-add for scanner-confirmed cards. Honours the grade and
+  // quantity the user picked in the scanner. If a holding for the same
+  // (card, grade) already exists, quantity is incremented by `qty` —
+  // someone with 1 PSA 10 and 2 raw of the same card ends up with two
+  // rows (raw and psa10) with their own quantities.
+  async function handleQuickScanAdd(card: ConfirmedCard, holdingType = 'raw', qty = 1) {
     if (!portfolioId || !user) return
+    const safeQty = Math.max(1, qty)
     const { data: existing } = await supabase
       .from('portfolio_items')
       .select('id, quantity')
       .eq('portfolio_id', portfolioId)
       .eq('card_slug', card.card_url_slug)
-      .eq('holding_type', 'raw')
+      .eq('holding_type', holdingType)
       .maybeSingle()
     if (existing) {
       await supabase.from('portfolio_items')
-        .update({ quantity: (existing.quantity || 1) + 1 })
+        .update({ quantity: (existing.quantity || 1) + safeQty })
         .eq('id', existing.id)
     } else {
       await supabase.from('portfolio_items').insert([{
@@ -1195,8 +1197,8 @@ export default function PortfolioDashboard() {
         card_name_snapshot: card.card_name,
         set_name_snapshot: card.set_name,
         image_url_snapshot: card.image_url,
-        holding_type: 'raw',
-        quantity: 1,
+        holding_type: holdingType,
+        quantity: safeQty,
         purchase_currency: currency,
       }])
     }
@@ -1750,19 +1752,14 @@ export default function PortfolioDashboard() {
              onClick={e => e.target === e.currentTarget && setShowScanner(false)}>
           <div style={{ width: '100%', maxWidth: 520, maxHeight: '90vh', overflowY: 'auto' }}>
             <CardScanner
+              showGradeSelector
               onCardConfirmed={async (card, ctx: ConfirmContext) => {
-                if (ctx.isBulk) {
-                  // Bulk run: silent quick-add (raw, qty 1, increment if
-                  // duplicate). Scanner stays open and auto-advances to
-                  // the next image.
-                  await handleQuickScanAdd(card)
-                } else {
-                  // Single scan: close scanner, open the full Add modal
-                  // so the user can set grade / purchase price / notes.
-                  setScannedCard(card)
-                  setShowScanner(false)
-                  setShowAddModal(true)
-                }
+                // Grade + qty come from the scanner's inline picker. Use
+                // them straight away so single and bulk both honour the
+                // user's choice without ever opening a separate modal.
+                const grade = ctx.holdingType || 'raw'
+                const qty   = ctx.quantity   || 1
+                await handleQuickScanAdd(card, grade, qty)
               }}
               onClose={() => setShowScanner(false)}
               ctaLabel="Add to portfolio"
