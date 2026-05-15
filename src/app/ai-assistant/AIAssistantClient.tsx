@@ -16,10 +16,13 @@ export default function AIAssistantClient() {
   const [scannedCard, setScannedCard] = useState<ConfirmedCard | null>(null)
 
   // Build the cardContext string that InlineChat already understands.
-  // Format mirrors what other card-page chats use so the Haiku system
-  // prompt picks it up the same way.
+  // Match the format card detail pages use exactly — "<card_name> from
+  // <set_name>" — because card_name carries the "#NN" suffix that
+  // anchors the chat backend's search to the specific variant. Without
+  // the "#NN" suffix the backend's search_cards tool can return both
+  // "Mega Starmie ex #21" and "#118" and the answer covers both.
   const cardContext = scannedCard
-    ? `${scannedCard.clean_name} | ${scannedCard.set_name} | ${scannedCard.card_number_display ?? ''}`
+    ? `${scannedCard.card_name} from ${scannedCard.set_name}`
     : undefined
 
   function handleConfirmed(card: ConfirmedCard) {
