@@ -93,7 +93,12 @@ export default function CardScanner({
   ctaLabel?: string
   showGradeSelector?: boolean
 }) {
-  const [stage, setStage] = useState<'idle' | 'collecting' | 'scanning' | 'results' | 'limit' | 'error'>('idle')
+  const [stage, setStage] = useState<'idle' | 'collecting' | 'scanning' | 'results' | 'manual' | 'limit' | 'error'>('idle')
+  // Manual search fallback state. Used when OCR + AI both fail to ID a
+  // card, or when the user just wants to add by name without a photo.
+  const [manualQuery, setManualQuery] = useState('')
+  const [manualResults, setManualResults] = useState<any[]>([])
+  const [manualSearching, setManualSearching] = useState(false)
   // Pending stack for the mobile "take many photos" flow — each camera
   // shot accumulates here, user taps "Done" to flush the stack into the
   // normal processing queue.
@@ -197,6 +202,63 @@ export default function CardScanner({
     setPending([])
     setMode('single')
     setStage('idle')
+  }
+
+  function openManualSearch() {
+    setManualQuery('')
+    setManualResults([])
+    setStage('manual')
+  }
+
+  // Debounced manual-search effect. Uses the same search_global RPC the
+  // rest of the site uses, so behaviour matches the navbar / portfolio /
+  // dealer search experience.
+  useEffect(() => {
+    if (stage !== 'manual') return
+    if (manualQuery.length < 2) { setManualResults([]); return }
+    const timer = setTimeout(async () => {
+      setManualSearching(true)
+      const { data } = await supabase.rpc('search_global', { query: manualQuery })
+      const cardRows = (data || []).filter((r: any) => r.result_type === 'card').slice(0, 12)
+      setManualResults(cardRows)
+      setManualSearching(false)
+    }, 200)
+    return () => clearTimeout(timer)
+  }, [manualQuery, stage])
+
+  // Confirm a manually-picked search result. Behaves the same as
+  // confirmCandidate for downstream — queue advance, host save — so a
+  // manual rescue mid-bulk doesn't lose the user's place in the queue.
+  async function confirmManualPick(result: any) {
+    const card: ConfirmedCard = {
+      card_slug:    result.url_slug,
+      card_name:    result.name,
+      clean_name:   result.name,
+      set_name:     result.subtitle || '',
+      card_url_slug: result.url_slug,
+      image_url:    result.image_url,
+      card_number_display: result.card_number_display,
+      variant:      null,
+    }
+    await onCardConfirmed(card, {
+      isBulk:     queue.length > 1,
+      queueLength: queue.length,
+      queueIndex,
+      holdingType: showGradeSelector ? holdingType : undefined,
+      quantity:    showGradeSelector ? Math.max(1, quantity) : undefined,
+    })
+    // Same advance-or-reset as scan confirm.
+    if (queueIndex + 1 < queue.length) {
+      const nextIdx = queueIndex + 1
+      setQueueIndex(nextIdx)
+      setRetriedWithAlternate(false)
+      setEngine('vision_ocr')
+      setHoldingType('raw')
+      setQuantity(1)
+      await processFile(queue[nextIdx], 'vision_ocr')
+    } else {
+      reset()
+    }
   }
 
   async function processFile(file: File, useEngine: Engine) {
@@ -332,6 +394,8 @@ export default function CardScanner({
     setMode('single')
     setHoldingType('raw')
     setQuantity(1)
+    setManualQuery('')
+    setManualResults([])
     if (cameraInputRef.current)  cameraInputRef.current.value  = ''
     if (galleryInputRef.current) galleryInputRef.current.value = ''
   }
@@ -373,7 +437,27 @@ export default function CardScanner({
           onCameraSingle={openCameraSingle}
           onCameraMulti={openCameraMulti}
           onGallery={openGallery}
+          onManualSearch={openManualSearch}
           isMobile={isMobile}
+        />
+      )}
+
+      {stage === 'manual' && (
+        <ManualSearchPanel
+          query={manualQuery}
+          onQueryChange={setManualQuery}
+          results={manualResults}
+          searching={manualSearching}
+          showGradeSelector={showGradeSelector}
+          holdingType={holdingType}
+          onHoldingTypeChange={setHoldingType}
+          quantity={quantity}
+          onQuantityChange={setQuantity}
+          ctaLabel={ctaLabel}
+          queueLabel={queue.length > 1 ? `Card ${queueIndex + 1} of ${queue.length}` : null}
+          onPick={confirmManualPick}
+          onBackToScan={() => setStage(queue.length > 0 ? 'results' : 'idle')}
+          onCancel={reset}
         />
       )}
 
@@ -406,6 +490,7 @@ export default function CardScanner({
           onRetryAlternate={retryWithAlternate}
           onSkip={skipCurrent}
           onCancel={reset}
+          onManualSearch={openManualSearch}
           showGradeSelector={showGradeSelector}
           holdingType={holdingType}
           onHoldingTypeChange={setHoldingType}
@@ -419,7 +504,7 @@ export default function CardScanner({
       )}
 
       {stage === 'error' && error && (
-        <ErrorPanel message={error} onRetry={isMobile ? openCameraSingle : openGallery} onClose={reset} />
+        <ErrorPanel message={error} onRetry={isMobile ? openCameraSingle : openGallery} onManualSearch={openManualSearch} onClose={reset} />
       )}
     </div>
   )
@@ -451,11 +536,12 @@ function Header({ onClose, scansRemaining }: { onClose?: () => void; scansRemain
 }
 
 function IdlePanel({
-  onCameraSingle, onCameraMulti, onGallery, isMobile,
+  onCameraSingle, onCameraMulti, onGallery, onManualSearch, isMobile,
 }: {
   onCameraSingle: () => void
   onCameraMulti:  () => void
   onGallery:      () => void
+  onManualSearch: () => void
   isMobile:       boolean
 }) {
   if (isMobile) {
@@ -473,6 +559,9 @@ function IdlePanel({
         <button onClick={onGallery} style={secondaryButtonStyle}>
           Choose from gallery — bulk OK
         </button>
+        <button onClick={onManualSearch} style={secondaryButtonStyle}>
+          Search by name — no photo
+        </button>
         <p style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '4px 0 0', lineHeight: 1.5 }}>
           Bulk modes step through your photos one by one, confirm each match before moving on. Avoid glare, fill the frame, good lighting helps.
         </p>
@@ -486,6 +575,9 @@ function IdlePanel({
       </p>
       <button onClick={onGallery} style={primaryButtonStyle}>
         Upload card image(s)
+      </button>
+      <button onClick={onManualSearch} style={secondaryButtonStyle}>
+        Search by name — no photo
       </button>
       <p style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '4px 0 0', lineHeight: 1.5 }}>
         Avoid glare, fill the frame, good lighting helps. If the read looks wrong on the result screen, the &quot;Try AI mode&quot; button reruns the same image through Claude vision.
@@ -534,6 +626,105 @@ function CollectingPanel({
       <button onClick={onCancel} style={linkButtonStyle}>
         Cancel — discard photos
       </button>
+    </div>
+  )
+}
+
+function ManualSearchPanel({
+  query, onQueryChange, results, searching,
+  showGradeSelector, holdingType, onHoldingTypeChange, quantity, onQuantityChange,
+  ctaLabel, queueLabel, onPick, onBackToScan, onCancel,
+}: {
+  query: string
+  onQueryChange: (q: string) => void
+  results: any[]
+  searching: boolean
+  showGradeSelector: boolean
+  holdingType: string
+  onHoldingTypeChange: (v: string) => void
+  quantity: number
+  onQuantityChange: (n: number) => void
+  ctaLabel: string
+  queueLabel: string | null
+  onPick: (r: any) => void | Promise<void>
+  onBackToScan: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {queueLabel && (
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase' }}>
+          {queueLabel} — manual fallback
+        </span>
+      )}
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, lineHeight: 1.55 }}>
+        Type the card name and pick from the list. Set the grade and quantity below before tapping a result.
+      </p>
+      <div style={{ position: 'relative' }}>
+        <input
+          autoFocus
+          value={query}
+          onChange={e => onQueryChange(e.target.value)}
+          placeholder="e.g. Charizard Base Set, Pikachu Promo..."
+          style={{
+            width: '100%', padding: '10px 14px', fontSize: 16, borderRadius: 10,
+            border: '1px solid var(--border)', background: 'var(--bg-light)', color: 'var(--text)',
+            fontFamily: "'Figtree', sans-serif", outline: 'none', boxSizing: 'border-box',
+          }}
+        />
+        {searching && (
+          <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--text-muted)' }}>...</span>
+        )}
+      </div>
+
+      {showGradeSelector && (
+        <GradeQtyPicker
+          holdingType={holdingType}
+          onHoldingTypeChange={onHoldingTypeChange}
+          quantity={quantity}
+          onQuantityChange={onQuantityChange}
+        />
+      )}
+
+      {results.length > 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 360, overflowY: 'auto', paddingRight: 2 }}>
+          {results.map((r, i) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: 8, borderRadius: 10,
+              border: '1px solid var(--border)', background: 'var(--bg-light)',
+            }}>
+              {r.image_url
+                ? <img src={r.image_url} alt={r.name} style={{ width: 40, borderRadius: 6, flexShrink: 0 }} />
+                : <div style={{ width: 40, height: 56, background: 'var(--border)', borderRadius: 6, flexShrink: 0 }} />}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {r.name}{r.card_number_display ? ` · ${r.card_number_display}` : ''}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {r.subtitle}
+                </div>
+              </div>
+              <button onClick={() => onPick(r)} style={{
+                padding: '6px 12px', borderRadius: 8, border: 'none',
+                background: 'var(--primary)', color: '#fff',
+                fontFamily: "'Figtree', sans-serif", fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                whiteSpace: 'nowrap', flexShrink: 0,
+              }}>
+                {ctaLabel}
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : query.length >= 2 && !searching ? (
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, padding: '8px 0' }}>
+          No cards match &quot;{query}&quot;.
+        </p>
+      ) : null}
+
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 4 }}>
+        <button onClick={onBackToScan} style={linkButtonStyle}>Back to scan</button>
+        <button onClick={onCancel} style={linkButtonStyle}>Cancel</button>
+      </div>
     </div>
   )
 }
@@ -615,6 +806,7 @@ function ScanningPanel({ imageUrl, queueLabel }: { imageUrl: string; queueLabel:
 function ResultsPanel({
   response, candidates, imageUrl, queueLabel, queueRemaining,
   ctaLabel, retriedWithAlternate, onConfirm, onRetryAlternate, onSkip, onCancel,
+  onManualSearch,
   showGradeSelector, holdingType, onHoldingTypeChange, quantity, onQuantityChange,
 }: {
   response: ScanResponse
@@ -628,6 +820,7 @@ function ResultsPanel({
   onRetryAlternate: () => void
   onSkip: () => void
   onCancel: () => void
+  onManualSearch: () => void
   showGradeSelector: boolean
   holdingType: string
   onHoldingTypeChange: (v: string) => void
@@ -675,6 +868,7 @@ function ResultsPanel({
           {!retriedWithAlternate && (
             <button onClick={onRetryAlternate} style={secondaryButtonStyle}>Try AI mode instead</button>
           )}
+          <button onClick={onManualSearch} style={secondaryButtonStyle}>Search by name instead</button>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -687,6 +881,9 @@ function ResultsPanel({
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 4 }}>
         {!retriedWithAlternate && !noResults && top && (
           <button onClick={onRetryAlternate} style={linkButtonStyle}>None of these? Try AI mode</button>
+        )}
+        {!noResults && (
+          <button onClick={onManualSearch} style={linkButtonStyle}>Search by name</button>
         )}
         {queueRemaining > 0 && (
           <button onClick={onSkip} style={linkButtonStyle}>Skip — next ({queueRemaining})</button>
@@ -737,14 +934,22 @@ function LimitPanel({ message, onClose }: { message: string; onClose: () => void
   )
 }
 
-function ErrorPanel({ message, onRetry, onClose }: { message: string; onRetry: () => void; onClose: () => void }) {
+function ErrorPanel({
+  message, onRetry, onManualSearch, onClose,
+}: {
+  message: string
+  onRetry: () => void
+  onManualSearch: () => void
+  onClose: () => void
+}) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <p style={{ margin: 0, fontFamily: "'Figtree', sans-serif", fontSize: 13, color: '#ef4444', lineHeight: 1.5 }}>
         {message}
       </p>
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button onClick={onRetry} style={primaryButtonStyle}>Try again</button>
+        <button onClick={onManualSearch} style={secondaryButtonStyle}>Search by name instead</button>
         <button onClick={onClose} style={secondaryButtonStyle}>Close</button>
       </div>
     </div>
