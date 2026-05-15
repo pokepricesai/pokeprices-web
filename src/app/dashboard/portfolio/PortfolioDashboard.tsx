@@ -1056,20 +1056,61 @@ export default function PortfolioDashboard() {
             // other, otherwise this enrichment never matches and every
             // non-(raw/psa9/psa10) grade silently falls back to the
             // RPC's raw value.
+            //
+            // Two extra wrinkles handled below:
+            //   (a) Multiple rows in `cards` can share the same
+            //       card_url_slug (set re-imports, scraping dupes).
+            //       Keep ALL the candidate numeric slugs and try each.
+            //   (b) An older portfolio_item's card_slug might not match
+            //       any current cards.card_url_slug (slug drift). For
+            //       those we fall back to a (card_name, set_name)
+            //       lookup so the grade price still resolves.
             const urlSlugs = Array.from(new Set(
               extraTierItems.map(i => (i.card_slug || '').toString().replace(/^pc-/, ''))
             ))
-            const { data: cardRows } = await supabase
+            const { data: cardRowsBySlug } = await supabase
               .from('cards')
-              .select('card_url_slug, card_slug')
+              .select('card_url_slug, card_slug, card_name, set_name')
               .in('card_url_slug', urlSlugs)
-            const urlToNumeric = new Map<string, string>()
-            for (const c of ((cardRows || []) as any[])) {
-              if (c.card_url_slug && c.card_slug) urlToNumeric.set(c.card_url_slug, c.card_slug)
+            const urlToNumerics = new Map<string, string[]>()
+            for (const c of ((cardRowsBySlug || []) as any[])) {
+              if (!c.card_url_slug || !c.card_slug) continue
+              const arr = urlToNumerics.get(c.card_url_slug) || []
+              arr.push(c.card_slug)
+              urlToNumerics.set(c.card_url_slug, arr)
             }
-            const dailySlugs = Array.from(new Set(
-              Array.from(urlToNumeric.values()).map(num => `pc-${num}`)
-            ))
+
+            // Identify items that did NOT resolve via slug and look them
+            // up by (card_name, set_name) instead.
+            const unresolved = extraTierItems.filter(i => {
+              const u = (i.card_slug || '').toString().replace(/^pc-/, '')
+              return !urlToNumerics.has(u)
+            })
+            const nameSetToNumerics = new Map<string, string[]>()
+            if (unresolved.length > 0) {
+              const names = Array.from(new Set(unresolved.map(i => i.card_name).filter(Boolean)))
+              const sets  = Array.from(new Set(unresolved.map(i => i.set_name ).filter(Boolean)))
+              if (names.length > 0 && sets.length > 0) {
+                const { data: cardRowsByName } = await supabase
+                  .from('cards')
+                  .select('card_name, set_name, card_slug')
+                  .in('card_name', names)
+                  .in('set_name',  sets)
+                for (const c of ((cardRowsByName || []) as any[])) {
+                  if (!c.card_slug) continue
+                  const key = `${c.card_name}::${c.set_name}`
+                  const arr = nameSetToNumerics.get(key) || []
+                  arr.push(c.card_slug)
+                  nameSetToNumerics.set(key, arr)
+                }
+              }
+            }
+
+            const allNumerics = new Set<string>()
+            for (const arr of urlToNumerics.values()) for (const n of arr) allNumerics.add(n)
+            for (const arr of nameSetToNumerics.values()) for (const n of arr) allNumerics.add(n)
+            const dailySlugs = Array.from(allNumerics).map(n => `pc-${n}`)
+
             const { data: dpRows } = dailySlugs.length === 0
               ? { data: [] as any[] }
               : await supabase
@@ -1088,15 +1129,30 @@ export default function PortfolioDashboard() {
             for (const r of ((dpRows || []) as any[])) {
               if (!latestBySlug.has(r.card_slug)) latestBySlug.set(r.card_slug, r)
             }
+
+            // For a given item, return the first numeric slug that has a
+            // non-null value in the target column. This way a sibling
+            // duplicate in `cards` whose daily_prices entry is populated
+            // still resolves the price.
+            function resolveValue(item: any, col: string): number | null {
+              const urlSlug = (item.card_slug || '').toString().replace(/^pc-/, '')
+              const candidates = [
+                ...(urlToNumerics.get(urlSlug) || []),
+                ...(nameSetToNumerics.get(`${item.card_name}::${item.set_name}`) || []),
+              ]
+              for (const num of candidates) {
+                const dp = latestBySlug.get(`pc-${num}`)
+                if (!dp) continue
+                const v = dp[col]
+                if (v != null) return v
+              }
+              return null
+            }
+
             dedupedById = dedupedById.map(i => {
               const col = HOLDING_TYPE_TO_PRICE_COLUMN[i.holding_type]
               if (!col || ['raw', 'psa9', 'psa10'].includes(i.holding_type)) return i
-              const urlSlug = (i.card_slug || '').toString().replace(/^pc-/, '')
-              const numeric = urlToNumeric.get(urlSlug)
-              if (!numeric) return i
-              const dp = latestBySlug.get(`pc-${numeric}`)
-              if (!dp) return i
-              const tier = dp[col]
+              const tier = resolveValue(i, col)
               if (tier == null) return i
               const qty = Math.max(1, i.quantity || 1)
               return {
