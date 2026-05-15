@@ -1049,21 +1049,41 @@ export default function PortfolioDashboard() {
             !['raw', 'psa9', 'psa10'].includes(i.holding_type)
           )
           if (extraTierItems.length > 0) {
-            const extraSlugs = Array.from(new Set(
-              extraTierItems.map(i => `pc-${(i.card_slug || '').toString().replace(/^pc-/, '')}`)
+            // portfolio_items.card_slug holds the URL slug (e.g.
+            // "charizard-base-set-4-102"). daily_prices.card_slug is
+            // "pc-" + the numeric cards.card_slug (e.g. "pc-959616").
+            // We have to go through `cards` to translate one to the
+            // other, otherwise this enrichment never matches and every
+            // non-(raw/psa9/psa10) grade silently falls back to the
+            // RPC's raw value.
+            const urlSlugs = Array.from(new Set(
+              extraTierItems.map(i => (i.card_slug || '').toString().replace(/^pc-/, ''))
             ))
-            const { data: dpRows } = await supabase
-              .from('daily_prices')
-              .select(
-                'card_slug, date, ' +
-                'grade1_usd, grade2_usd, grade3_usd, grade4_usd, grade5_usd, grade6_usd, ' +
-                'psa7_usd, psa8_usd, ' +
-                'cgc95_usd, cgc10_usd, cgc10pristine_usd, ' +
-                'bgs10_usd, bgs10black_usd, ' +
-                'sgc10_usd, tag10_usd, ace10_usd'
-              )
-              .in('card_slug', extraSlugs)
-              .order('date', { ascending: false })
+            const { data: cardRows } = await supabase
+              .from('cards')
+              .select('card_url_slug, card_slug')
+              .in('card_url_slug', urlSlugs)
+            const urlToNumeric = new Map<string, string>()
+            for (const c of ((cardRows || []) as any[])) {
+              if (c.card_url_slug && c.card_slug) urlToNumeric.set(c.card_url_slug, c.card_slug)
+            }
+            const dailySlugs = Array.from(new Set(
+              Array.from(urlToNumeric.values()).map(num => `pc-${num}`)
+            ))
+            const { data: dpRows } = dailySlugs.length === 0
+              ? { data: [] as any[] }
+              : await supabase
+                  .from('daily_prices')
+                  .select(
+                    'card_slug, date, ' +
+                    'grade1_usd, grade2_usd, grade3_usd, grade4_usd, grade5_usd, grade6_usd, ' +
+                    'psa7_usd, psa8_usd, ' +
+                    'cgc95_usd, cgc10_usd, cgc10pristine_usd, ' +
+                    'bgs10_usd, bgs10black_usd, ' +
+                    'sgc10_usd, tag10_usd, ace10_usd'
+                  )
+                  .in('card_slug', dailySlugs)
+                  .order('date', { ascending: false })
             const latestBySlug = new Map<string, any>()
             for (const r of ((dpRows || []) as any[])) {
               if (!latestBySlug.has(r.card_slug)) latestBySlug.set(r.card_slug, r)
@@ -1071,7 +1091,10 @@ export default function PortfolioDashboard() {
             dedupedById = dedupedById.map(i => {
               const col = HOLDING_TYPE_TO_PRICE_COLUMN[i.holding_type]
               if (!col || ['raw', 'psa9', 'psa10'].includes(i.holding_type)) return i
-              const dp = latestBySlug.get(`pc-${(i.card_slug || '').toString().replace(/^pc-/, '')}`)
+              const urlSlug = (i.card_slug || '').toString().replace(/^pc-/, '')
+              const numeric = urlToNumeric.get(urlSlug)
+              if (!numeric) return i
+              const dp = latestBySlug.get(`pc-${numeric}`)
               if (!dp) return i
               const tier = dp[col]
               if (tier == null) return i
