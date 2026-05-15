@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase, CHAT_ENDPOINT } from '@/lib/supabase'
 import DashboardNav from '../DashboardNav'
+import CardScanner, { ConfirmedCard } from '@/components/CardScanner'
 import {
   HOLDING_TYPES as ALL_HOLDING_TYPES,
   GRADE_LABELS as ALL_GRADE_LABELS,
@@ -327,10 +328,25 @@ function EditHoldingModal({
 
 // ── Add Card Modal ────────────────────────────────────────────────────────────
 
-function AddCardModal({ onAdd, onClose, currency }: { onAdd: (item: any) => Promise<void>; onClose: () => void; currency: Currency }) {
+function AddCardModal({
+  onAdd, onClose, currency, prefilledCard,
+}: {
+  onAdd: (item: any) => Promise<void>
+  onClose: () => void
+  currency: Currency
+  prefilledCard?: ConfirmedCard | null
+}) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<any[]>([])
-  const [selected, setSelected] = useState<any>(null)
+  // Map a scanner result into the same shape the search list produces so
+  // the "selected" branch of the modal can render it without changes.
+  const [selected, setSelected] = useState<any>(prefilledCard ? {
+    name: prefilledCard.clean_name,
+    subtitle: prefilledCard.set_name,
+    url_slug: prefilledCard.card_url_slug,
+    image_url: prefilledCard.image_url,
+    card_number_display: prefilledCard.card_number_display,
+  } : null)
   const [holdingType, setHoldingType] = useState('raw')
   const [quantity, setQuantity] = useState(1)
   const [purchasePrice, setPurchasePrice] = useState('')
@@ -881,6 +897,8 @@ export default function PortfolioDashboard() {
   const [summary, setSummary] = useState<PortfolioSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showScanner, setShowScanner] = useState(false)
+  const [scannedCard, setScannedCard] = useState<ConfirmedCard | null>(null)
   const [sortBy, setSortBy] = useState<'value' | 'pct_30d' | 'name'>('value')
   const [activeTab, setActiveTab] = useState<'holdings' | 'insights'>('holdings')
   const [editingItem, setEditingItem] = useState<PortfolioItem | null>(null)
@@ -1223,7 +1241,12 @@ export default function PortfolioDashboard() {
           <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 26, margin: '0 0 2px', color: 'var(--text)' }}>My Collection</h1>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0 }}>Track what you own — value, P&amp;L, grading insights.</p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={() => setShowScanner(true)}
+            style={{ padding: '9px 16px', borderRadius: 10, border: '1px solid var(--primary)', background: 'transparent', color: 'var(--primary)', fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif", cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            Scan a card
+            <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.2, padding: '2px 6px', borderRadius: 4, background: 'var(--accent)', color: '#1a3a6b' }}>BETA</span>
+          </button>
           <button onClick={() => setShowAddModal(true)}
             style={{ padding: '9px 20px', borderRadius: 10, border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif", cursor: 'pointer' }}>
             + Add Card
@@ -1614,7 +1637,30 @@ export default function PortfolioDashboard() {
         </>
       )}
 
-      {showAddModal && <AddCardModal onAdd={handleAddCard} onClose={() => setShowAddModal(false)} currency={currency} />}
+      {showAddModal && (
+        <AddCardModal
+          onAdd={handleAddCard}
+          onClose={() => { setShowAddModal(false); setScannedCard(null) }}
+          currency={currency}
+          prefilledCard={scannedCard}
+        />
+      )}
+      {showScanner && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}
+             onClick={e => e.target === e.currentTarget && setShowScanner(false)}>
+          <div style={{ width: '100%', maxWidth: 520, maxHeight: '90vh', overflowY: 'auto' }}>
+            <CardScanner
+              onCardConfirmed={(card) => {
+                setScannedCard(card)
+                setShowScanner(false)
+                setShowAddModal(true)
+              }}
+              onClose={() => setShowScanner(false)}
+              ctaLabel="Add to portfolio"
+            />
+          </div>
+        </div>
+      )}
       {editingItem && (
         <EditHoldingModal
           item={editingItem}

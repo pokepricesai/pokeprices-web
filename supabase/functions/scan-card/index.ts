@@ -405,10 +405,14 @@ async function logScan(opts: {
   holoAnalysis: any | null
   aiVariant: string | null
   aiVariantConfidence: string | null
+  userId: string | null
+  deviceId: string | null
 }): Promise<number | null> {
   const top = opts.candidates[0]
   try {
     const { data, error } = await supabase.from("scan_logs").insert([{
+      user_id:         opts.userId,
+      device_id:       opts.deviceId,
       feature_used:    opts.engine === "ai_vision" ? "AI_VISION" : opts.feature,
       vision_full_text: opts.signals.full_text?.slice(0, 4000) ?? null,
       parsed_signals: {
@@ -472,6 +476,39 @@ Deno.serve(async (req) => {
   // ── Recognise branch ─────────────────────────────────────────────────────
   const imageBase64: string = String(body.image_base64 || "").replace(/^data:image\/\w+;base64,/, "")
   if (!imageBase64) return json({ error: "Missing image_base64" }, 400)
+
+  // Identity for quota: prefer authenticated user, fall back to anonymous
+  // device id from the browser's localStorage. At least one must be set
+  // or quota cannot be tracked and we reject the request.
+  const userId:   string | null = body.user_id   ? String(body.user_id)   : null
+  const deviceId: string | null = body.device_id ? String(body.device_id) : null
+  if (!userId && !deviceId) {
+    return json({ error: "user_id or device_id required for quota tracking" }, 400)
+  }
+
+  // Quota check (100/month). Diagnostic /scan-test page can bypass with
+  // body.skip_quota = true so internal testing does not eat the limit.
+  if (body.skip_quota !== true) {
+    try {
+      const { data: quotaRow, error: quotaErr } = await supabase.rpc("scan_quota_remaining", {
+        p_user_id:   userId,
+        p_device_id: deviceId,
+      }).single()
+      if (quotaErr) {
+        console.error("[scan-card] quota lookup failed:", quotaErr.message)
+      } else if (quotaRow && (quotaRow as any).scans_remaining <= 0) {
+        return json({
+          error: "quota_exceeded",
+          message: `Free tier limit of ${(quotaRow as any).monthly_limit} scans per month reached. Resets on the 1st.`,
+          scans_used:      (quotaRow as any).scans_used,
+          scans_remaining: 0,
+          monthly_limit:   (quotaRow as any).monthly_limit,
+        }, 429)
+      }
+    } catch (e: any) {
+      console.error("[scan-card] quota exception:", e?.message || e)
+    }
+  }
 
   const engine: "vision_ocr" | "ai_vision" =
     body.engine === "ai_vision" ? "ai_vision" : "vision_ocr"
@@ -563,6 +600,7 @@ Deno.serve(async (req) => {
     feature, engine, signals, candidates, timing,
     holoAnalysis: body.holo_analysis ?? null,
     aiVariant, aiVariantConfidence,
+    userId, deviceId,
   })
   const logMs = Date.now() - tLogStart
 

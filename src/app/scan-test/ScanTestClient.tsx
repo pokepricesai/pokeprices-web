@@ -1,5 +1,6 @@
 'use client'
 // Diagnostic UI for /scan-test. Mobile-first.
+import { getDeviceId } from '@/lib/deviceId'
 // Layout is intentionally utilitarian — every parsed signal, the raw
 // Vision text, and the top 5 DB matches are all visible at once so we can
 // see which stage of the pipeline failed when a recognition misses.
@@ -473,8 +474,6 @@ export default function ScanTestClient() {
         },
         body: JSON.stringify({
           image_base64: base64,
-          // The AI engine works from the single full image — no need to
-          // send the extra crops, saving payload size.
           image_base64_number: engine === 'vision_ocr' && numberStripDataUrl
             ? numberStripDataUrl.replace(/^data:image\/\w+;base64,/, '')
             : undefined,
@@ -484,6 +483,11 @@ export default function ScanTestClient() {
           engine,
           feature,
           holo_analysis: holo,
+          // /scan-test is a diagnostic harness — supply device_id so the
+          // edge function does not 400, but skip the quota count so
+          // internal testing does not eat the public free tier.
+          device_id:  getDeviceId(),
+          skip_quota: true,
         }),
       })
       let data: any = null
