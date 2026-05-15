@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase, CHAT_ENDPOINT } from '@/lib/supabase'
 import DashboardNav from '../DashboardNav'
-import CardScanner, { ConfirmedCard } from '@/components/CardScanner'
+import CardScanner, { ConfirmedCard, ConfirmContext } from '@/components/CardScanner'
 import {
   HOLDING_TYPES as ALL_HOLDING_TYPES,
   GRADE_LABELS as ALL_GRADE_LABELS,
@@ -106,6 +106,26 @@ function fmtPct(pct: number | null): { text: string; color: string } {
   if (pct == null) return { text: '—', color: 'var(--text-muted)' }
   const color = pct > 0 ? '#22c55e' : pct < 0 ? '#ef4444' : 'var(--text-muted)'
   return { text: `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%`, color }
+}
+
+// Inline style helper for the set-filter chips. Keeps the active/inactive
+// look consistent without polluting globals.css.
+function chipStyle(active: boolean): React.CSSProperties {
+  return {
+    padding: '5px 11px',
+    borderRadius: 16,
+    border: active ? '1px solid var(--primary)' : '1px solid var(--border)',
+    background: active ? 'rgba(26,95,173,0.10)' : 'var(--card)',
+    color: active ? 'var(--primary)' : 'var(--text-muted)',
+    fontSize: 11,
+    fontWeight: 700,
+    fontFamily: "'Figtree', sans-serif",
+    cursor: 'pointer',
+    maxWidth: 220,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  }
 }
 
 // Pattern-based sealed-product detection. Used as a fallback when
@@ -900,6 +920,7 @@ export default function PortfolioDashboard() {
   const [showScanner, setShowScanner] = useState(false)
   const [scannedCard, setScannedCard] = useState<ConfirmedCard | null>(null)
   const [sortBy, setSortBy] = useState<'value' | 'pct_30d' | 'name'>('value')
+  const [setFilter, setSetFilter] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'holdings' | 'insights'>('holdings')
   const [editingItem, setEditingItem] = useState<PortfolioItem | null>(null)
   const [currency, setCurrency] = useState<Currency>('GBP')
@@ -1149,6 +1170,39 @@ export default function PortfolioDashboard() {
     await loadPortfolio()
   }
 
+  // Silent quick-add for bulk-scan flow. Pre-existing raw holding for the
+  // same card -> increment quantity. New holding -> insert at quantity 1.
+  // Always uses holding_type='raw' since the scanner cannot tell grade
+  // from the image — user can edit afterwards if needed.
+  async function handleQuickScanAdd(card: ConfirmedCard) {
+    if (!portfolioId || !user) return
+    const { data: existing } = await supabase
+      .from('portfolio_items')
+      .select('id, quantity')
+      .eq('portfolio_id', portfolioId)
+      .eq('card_slug', card.card_url_slug)
+      .eq('holding_type', 'raw')
+      .maybeSingle()
+    if (existing) {
+      await supabase.from('portfolio_items')
+        .update({ quantity: (existing.quantity || 1) + 1 })
+        .eq('id', existing.id)
+    } else {
+      await supabase.from('portfolio_items').insert([{
+        portfolio_id: portfolioId,
+        user_id: user.id,
+        card_slug: card.card_url_slug,
+        card_name_snapshot: card.card_name,
+        set_name_snapshot: card.set_name,
+        image_url_snapshot: card.image_url,
+        holding_type: 'raw',
+        quantity: 1,
+        purchase_currency: currency,
+      }])
+    }
+    await loadPortfolio()
+  }
+
   async function handleRemove(itemId: string, cardName?: string) {
     const label = cardName ? `Remove "${cardName}" from your portfolio?` : 'Remove this card from your portfolio?'
     if (!confirm(label)) return
@@ -1188,7 +1242,17 @@ export default function PortfolioDashboard() {
   const items = summary?.items || []
   const totalValue = summary?.total_value_cents || 0
 
-  const sortedItems = [...items].sort((a, b) => {
+  // Unique set list with per-set counts, ordered by count desc. Drives the
+  // set filter chips so the most-populated sets show first.
+  const setCounts = items.reduce<Record<string, number>>((acc, i) => {
+    acc[i.set_name] = (acc[i.set_name] || 0) + 1
+    return acc
+  }, {})
+  const availableSets = Object.entries(setCounts)
+    .sort((a, b) => b[1] - a[1])
+
+  const filteredItems = setFilter ? items.filter(i => i.set_name === setFilter) : items
+  const sortedItems = [...filteredItems].sort((a, b) => {
     if (sortBy === 'value') return (b.position_value_cents || 0) - (a.position_value_cents || 0)
     if (sortBy === 'pct_30d') return (b.pct_30d || -999) - (a.pct_30d || -999)
     return a.card_name.localeCompare(b.card_name)
@@ -1308,6 +1372,30 @@ export default function PortfolioDashboard() {
                   </button>
                 ))}
               </div>
+              {/* Set filter chips — appears only when 2+ sets are represented. */}
+              {availableSets.length > 1 && (
+                <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6, marginRight: 4 }}>
+                    Filter set
+                  </span>
+                  <button
+                    onClick={() => setSetFilter(null)}
+                    style={chipStyle(setFilter === null)}
+                  >
+                    All ({items.length})
+                  </button>
+                  {availableSets.map(([name, count]) => (
+                    <button
+                      key={name}
+                      onClick={() => setSetFilter(name)}
+                      style={chipStyle(setFilter === name)}
+                      title={name}
+                    >
+                      {name} ({count})
+                    </button>
+                  ))}
+                </div>
+              )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {sortedItems.map(item => {
                   const pct30    = fmtPct(item.pct_30d)
@@ -1347,7 +1435,15 @@ export default function PortfolioDashboard() {
                           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.3, marginBottom: 2 }}>{item.card_name}</div>
                         </Link>
                         <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-                          {item.set_name} · {grade}{item.quantity > 1 ? ` × ${item.quantity}` : ''}
+                          {item.set_name} · {grade}
+                          <span style={{
+                            marginLeft: 6, padding: '1px 7px', borderRadius: 6,
+                            background: item.quantity > 1 ? 'var(--primary)' : 'var(--bg-light)',
+                            color: item.quantity > 1 ? '#fff' : 'var(--text)',
+                            fontWeight: 700, fontSize: 11,
+                          }}>
+                            × {item.quantity}
+                          </span>
                           {isManual && manualPerCard != null && (
                             <span
                               style={{
@@ -1651,10 +1747,19 @@ export default function PortfolioDashboard() {
              onClick={e => e.target === e.currentTarget && setShowScanner(false)}>
           <div style={{ width: '100%', maxWidth: 520, maxHeight: '90vh', overflowY: 'auto' }}>
             <CardScanner
-              onCardConfirmed={(card) => {
-                setScannedCard(card)
-                setShowScanner(false)
-                setShowAddModal(true)
+              onCardConfirmed={async (card, ctx: ConfirmContext) => {
+                if (ctx.isBulk) {
+                  // Bulk run: silent quick-add (raw, qty 1, increment if
+                  // duplicate). Scanner stays open and auto-advances to
+                  // the next image.
+                  await handleQuickScanAdd(card)
+                } else {
+                  // Single scan: close scanner, open the full Add modal
+                  // so the user can set grade / purchase price / notes.
+                  setScannedCard(card)
+                  setShowScanner(false)
+                  setShowAddModal(true)
+                }
               }}
               onClose={() => setShowScanner(false)}
               ctaLabel="Add to portfolio"

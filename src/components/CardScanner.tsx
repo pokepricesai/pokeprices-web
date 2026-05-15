@@ -70,16 +70,27 @@ interface ScanResponse {
   scans_remaining?: number
 }
 
+export interface ConfirmContext {
+  isBulk: boolean        // true when the scanner has more than 1 image in queue
+  queueLength: number    // total images chosen
+  queueIndex: number     // 0-based index of the current image
+}
+
 export default function CardScanner({
   onCardConfirmed,
   onClose,
   ctaLabel = 'Use this card',
 }: {
-  onCardConfirmed: (card: ConfirmedCard) => void
+  onCardConfirmed: (card: ConfirmedCard, ctx: ConfirmContext) => void | Promise<void>
   onClose?: () => void
   ctaLabel?: string
 }) {
-  const [stage, setStage] = useState<'idle' | 'scanning' | 'results' | 'limit' | 'error'>('idle')
+  const [stage, setStage] = useState<'idle' | 'collecting' | 'scanning' | 'results' | 'limit' | 'error'>('idle')
+  // Pending stack for the mobile "take many photos" flow — each camera
+  // shot accumulates here, user taps "Done" to flush the stack into the
+  // normal processing queue.
+  const [pending, setPending] = useState<File[]>([])
+  const [mode, setMode] = useState<'single' | 'multi-camera'>('single')
   const [error, setError] = useState<string | null>(null)
   const [queue, setQueue] = useState<File[]>([])
   const [queueIndex, setQueueIndex] = useState(0)
@@ -127,17 +138,53 @@ export default function CardScanner({
     })()
   }, [])
 
-  function openCamera()  { cameraInputRef.current?.click()  }
-  function openGallery() { galleryInputRef.current?.click() }
+  function openCameraSingle() {
+    setMode('single')
+    cameraInputRef.current?.click()
+  }
+  function openCameraMulti() {
+    setMode('multi-camera')
+    cameraInputRef.current?.click()
+  }
+  function openGallery() {
+    setMode('single')
+    galleryInputRef.current?.click()
+  }
 
   async function handleFilesChosen(files: FileList | null) {
     if (!files || files.length === 0) return
     const arr = Array.from(files)
+    // Multi-camera mode: accumulate into pending, show "take another"
+    // panel instead of starting the scan run.
+    if (mode === 'multi-camera') {
+      setPending(prev => [...prev, ...arr])
+      setStage('collecting')
+      // Reset input value so the same file can be re-selected if needed.
+      if (cameraInputRef.current) cameraInputRef.current.value = ''
+      return
+    }
     setQueue(arr)
     setQueueIndex(0)
     setRetriedWithAlternate(false)
     setEngine('vision_ocr')
     await processFile(arr[0], 'vision_ocr')
+  }
+
+  async function startProcessingPending() {
+    if (pending.length === 0) return
+    setQueue(pending)
+    setQueueIndex(0)
+    setPending([])
+    setMode('single')
+    setRetriedWithAlternate(false)
+    setEngine('vision_ocr')
+    await processFile(pending[0], 'vision_ocr')
+  }
+
+  function cancelPending() {
+    setPending([])
+    setMode('single')
+    setStage('idle')
   }
 
   async function processFile(file: File, useEngine: Engine) {
@@ -214,7 +261,10 @@ export default function CardScanner({
         }),
       }).catch(() => {})
     }
-    onCardConfirmed({
+    // Await the host so it can do an async save (e.g. silent quick-add to
+    // portfolio) before the scanner advances. The ctx tells the host
+    // whether this is part of a bulk run or a one-off.
+    await onCardConfirmed({
       card_slug: c.card_slug,
       card_name: c.card_name,
       clean_name: c.clean_name,
@@ -223,6 +273,10 @@ export default function CardScanner({
       image_url: c.image_url,
       card_number_display: c.card_number_display,
       variant: response?.ai_variant ?? null,
+    }, {
+      isBulk:     queue.length > 1,
+      queueLength: queue.length,
+      queueIndex,
     })
     // Move to next in queue or reset.
     if (queueIndex + 1 < queue.length) {
@@ -257,6 +311,8 @@ export default function CardScanner({
     setError(null)
     setRetriedWithAlternate(false)
     setEngine('vision_ocr')
+    setPending([])
+    setMode('single')
     if (cameraInputRef.current)  cameraInputRef.current.value  = ''
     if (galleryInputRef.current) galleryInputRef.current.value = ''
   }
@@ -294,7 +350,21 @@ export default function CardScanner({
       />
 
       {stage === 'idle' && (
-        <IdlePanel onCamera={openCamera} onGallery={openGallery} isMobile={isMobile} />
+        <IdlePanel
+          onCameraSingle={openCameraSingle}
+          onCameraMulti={openCameraMulti}
+          onGallery={openGallery}
+          isMobile={isMobile}
+        />
+      )}
+
+      {stage === 'collecting' && (
+        <CollectingPanel
+          pending={pending}
+          onTakeAnother={() => cameraInputRef.current?.click()}
+          onDone={startProcessingPending}
+          onCancel={cancelPending}
+        />
       )}
 
       {stage === 'scanning' && currentImageUrl && (
@@ -325,7 +395,7 @@ export default function CardScanner({
       )}
 
       {stage === 'error' && error && (
-        <ErrorPanel message={error} onRetry={isMobile ? openCamera : openGallery} onClose={reset} />
+        <ErrorPanel message={error} onRetry={isMobile ? openCameraSingle : openGallery} onClose={reset} />
       )}
     </div>
   )
@@ -357,31 +427,34 @@ function Header({ onClose, scansRemaining }: { onClose?: () => void; scansRemain
 }
 
 function IdlePanel({
-  onCamera, onGallery, isMobile,
+  onCameraSingle, onCameraMulti, onGallery, isMobile,
 }: {
-  onCamera: () => void
-  onGallery: () => void
-  isMobile: boolean
+  onCameraSingle: () => void
+  onCameraMulti:  () => void
+  onGallery:      () => void
+  isMobile:       boolean
 }) {
   if (isMobile) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, lineHeight: 1.55 }}>
-          Take one card at a time, or shoot a stack with your normal Camera app first and upload them all at once.
+          One card, a whole stack with the camera, or photos you took earlier — all work.
         </p>
-        <button onClick={onCamera} style={primaryButtonStyle}>
+        <button onClick={onCameraSingle} style={primaryButtonStyle}>
           Take a photo
+        </button>
+        <button onClick={onCameraMulti} style={secondaryButtonStyle}>
+          Take many photos in a row
         </button>
         <button onClick={onGallery} style={secondaryButtonStyle}>
           Choose from gallery — bulk OK
         </button>
         <p style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '4px 0 0', lineHeight: 1.5 }}>
-          Pick as many photos as you like — the scanner steps through them one by one and you confirm each match before it moves on. Avoid glare, fill the frame, good lighting helps.
+          Bulk modes step through your photos one by one, confirm each match before moving on. Avoid glare, fill the frame, good lighting helps.
         </p>
       </div>
     )
   }
-  // Desktop — single button, file picker with multi-select.
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, lineHeight: 1.55 }}>
@@ -394,6 +467,63 @@ function IdlePanel({
         Avoid glare, fill the frame, good lighting helps. If the read looks wrong on the result screen, the &quot;Try AI mode&quot; button reruns the same image through Claude vision.
       </p>
     </div>
+  )
+}
+
+function CollectingPanel({
+  pending, onTakeAnother, onDone, onCancel,
+}: {
+  pending: File[]
+  onTakeAnother: () => void
+  onDone: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <p style={{ fontSize: 14, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", margin: 0, fontWeight: 700 }}>
+        {pending.length} photo{pending.length === 1 ? '' : 's'} so far
+      </p>
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, lineHeight: 1.55 }}>
+        Take more photos one after another, then tap &quot;Process them all&quot; when you are done. The scanner will work through them one by one.
+      </p>
+      {/* Tiny thumbnail strip so users can see roughly what was captured. */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {pending.slice(-12).map((f, i) => (
+          <ThumbnailTile key={i} file={f} />
+        ))}
+        {pending.length > 12 && (
+          <div style={{
+            width: 48, height: 64, borderRadius: 6,
+            background: 'var(--bg-light)', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', fontSize: 11, color: 'var(--text-muted)', fontWeight: 700,
+          }}>
+            +{pending.length - 12}
+          </div>
+        )}
+      </div>
+      <button onClick={onTakeAnother} style={primaryButtonStyle}>
+        Take another
+      </button>
+      <button onClick={onDone} style={secondaryButtonStyle} disabled={pending.length === 0}>
+        Process {pending.length} {pending.length === 1 ? 'photo' : 'photos'}
+      </button>
+      <button onClick={onCancel} style={linkButtonStyle}>
+        Cancel — discard photos
+      </button>
+    </div>
+  )
+}
+
+function ThumbnailTile({ file }: { file: File }) {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    const u = URL.createObjectURL(file)
+    setUrl(u)
+    return () => URL.revokeObjectURL(u)
+  }, [file])
+  if (!url) return null
+  return (
+    <img src={url} alt="captured" style={{ width: 48, height: 64, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)' }} />
   )
 }
 
