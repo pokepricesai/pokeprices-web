@@ -1231,7 +1231,10 @@ export default function PortfolioDashboard() {
     router.push('/')
   }
 
-  if (loading) return (
+  // Only show the full-page skeleton on the FIRST load (summary === null).
+  // Background refreshes (e.g. after bulk-scan-add) keep the rendered UI
+  // intact so the CardScanner modal does not get unmounted mid-flow.
+  if (loading && !summary) return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '40px 24px' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {[1,2,3].map(i => <div key={i} className="skeleton" style={{ height: 80, borderRadius: 12 }} />)}
