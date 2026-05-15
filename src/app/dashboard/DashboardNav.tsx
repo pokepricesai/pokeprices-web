@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import ComingSoonBadge from '@/components/ComingSoonBadge'
 
-type ToolId = 'portfolio' | 'watchlist' | 'sets' | 'grading' | 'card-shows' | 'alerts' | 'settings'
+type ToolId = 'portfolio' | 'watchlist' | 'sets' | 'grading' | 'card-shows' | 'alerts' | 'settings' | 'quick-price'
 
 type Tool = { id: ToolId; label: string; href: string; icon: string; soon?: boolean }
 type Group = { label: string; tools: Tool[] }
@@ -22,8 +22,9 @@ const GROUPS: Group[] = [
   {
     label: 'Tools',
     tools: [
-      { id: 'grading',    label: 'Grading',    href: '/dashboard/grading',    icon: '🎯' },
-      { id: 'card-shows', label: 'Card Shows', href: '/dashboard/card-shows', icon: '📍' },
+      { id: 'grading',     label: 'Grading',           href: '/dashboard/grading',     icon: '🎯' },
+      { id: 'quick-price', label: 'Quick Price',       href: '/dashboard/quick-price', icon: '⚡' },
+      { id: 'card-shows',  label: 'Card Shows',        href: '/dashboard/card-shows',  icon: '📍' },
     ],
   },
   {

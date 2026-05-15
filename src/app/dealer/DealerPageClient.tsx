@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import CardScanner, { ConfirmedCard, ConfirmContext } from '@/components/CardScanner'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -891,6 +892,66 @@ export default function DealerPageClient() {
   const [tradePct, setTradePct]           = useState(DEFAULT_TRADE_PCT)
   const [dealerCards, setDealerCards]     = useState<DealerCard[]>([])
   const [customerCards, setCustomerCards] = useState<CustomerCard[]>([])
+  // Scanner state — which side of the deal we are scanning into.
+  const [scannerSide, setScannerSide] = useState<'dealer' | 'customer' | null>(null)
+
+  // Map the scanner's HOLDING_TYPES to the dealer page's 5-grade set. Any
+  // grade we cannot represent falls back to raw — the user can re-grade
+  // the row by tapping the inline grade buttons.
+  function mapToDealerGrade(holdingType: string | undefined): Grade {
+    switch (holdingType) {
+      case 'psa10': return 'psa10'
+      case 'psa9':  return 'psa9'
+      case 'cgc10': return 'cgc10'
+      case 'cgc95': return 'cgc95'
+      default:      return 'raw'
+    }
+  }
+
+  // Fetch raw + graded prices in one query — used by the scanner-add path.
+  async function fetchAllPrices(urlSlug: string) {
+    try {
+      const { data: cardRow } = await supabase
+        .from('cards').select('card_slug').eq('card_url_slug', urlSlug).maybeSingle()
+      if (!cardRow?.card_slug) return { rawUsd: null, psa9Usd: null, psa10Usd: null, cgc95Usd: null, cgc10Usd: null }
+      const { data: dp } = await supabase
+        .from('daily_prices').select('raw_usd, psa9_usd, psa10_usd, cgc95_usd, cgc10_usd')
+        .eq('card_slug', 'pc-' + cardRow.card_slug)
+        .order('date', { ascending: false }).limit(1).maybeSingle()
+      return {
+        rawUsd:   dp?.raw_usd   ? dp.raw_usd   / 100 : null,
+        psa9Usd:  dp?.psa9_usd  ? dp.psa9_usd  / 100 : null,
+        psa10Usd: dp?.psa10_usd ? dp.psa10_usd / 100 : null,
+        cgc95Usd: dp?.cgc95_usd ? dp.cgc95_usd / 100 : null,
+        cgc10Usd: dp?.cgc10_usd ? dp.cgc10_usd / 100 : null,
+      }
+    } catch {
+      return { rawUsd: null, psa9Usd: null, psa10Usd: null, cgc95Usd: null, cgc10Usd: null }
+    }
+  }
+
+  async function addScannedCard(card: ConfirmedCard, side: 'dealer' | 'customer', holdingType?: string) {
+    const prices = await fetchAllPrices(card.card_url_slug)
+    const rawUsd = prices.rawUsd ?? 0
+    if (!rawUsd && !prices.psa10Usd && !prices.psa9Usd && !prices.cgc10Usd && !prices.cgc95Usd) {
+      // Nothing in daily_prices for this card — skip silently rather than
+      // adding a row with no value.
+      return
+    }
+    const id = `${card.card_url_slug}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    const grade = mapToDealerGrade(holdingType)
+    const base = {
+      id, name: card.clean_name, set: card.set_name, image: card.image_url,
+      rawUsd, psa9Usd: prices.psa9Usd, psa10Usd: prices.psa10Usd,
+      cgc95Usd: prices.cgc95Usd, cgc10Usd: prices.cgc10Usd,
+      grade, urlSlug: card.card_url_slug,
+    }
+    if (side === 'dealer') {
+      setDealerCards(prev => [...prev, { ...base, sellingPrice: null }])
+    } else {
+      setCustomerCards(prev => [...prev, { ...base, customPct: null, marketOverride: null }])
+    }
+  }
 
   async function addDealerCard(r: SearchResult) {
     if (!r.price_usd) return
@@ -1047,6 +1108,19 @@ export default function DealerPageClient() {
               ))}
           </div>
           <SearchBox region={region} onAdd={addDealerCard} />
+          <button
+            onClick={() => setScannerSide('dealer')}
+            style={{
+              padding: '8px 14px', borderRadius: 10, border: '1px solid var(--primary)',
+              background: 'transparent', color: 'var(--primary)',
+              fontSize: 12, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
+              cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8,
+              alignSelf: 'flex-start',
+            }}
+          >
+            Scan / upload card
+            <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.2, padding: '2px 6px', borderRadius: 4, background: 'var(--accent)', color: '#1a3a6b' }}>BETA</span>
+          </button>
         </div>
 
         {/* Customer panel */}
@@ -1085,8 +1159,51 @@ export default function DealerPageClient() {
               ))}
           </div>
           <SearchBox region={region} onAdd={addCustomerCard} />
+          <button
+            onClick={() => setScannerSide('customer')}
+            style={{
+              padding: '8px 14px', borderRadius: 10, border: '1px solid #b45309',
+              background: 'transparent', color: '#b45309',
+              fontSize: 12, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
+              cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8,
+              alignSelf: 'flex-start',
+            }}
+          >
+            Scan / upload card
+            <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.2, padding: '2px 6px', borderRadius: 4, background: 'var(--accent)', color: '#1a3a6b' }}>BETA</span>
+          </button>
         </div>
       </div>
+
+      {/* Scanner modal — shared between dealer + customer sides. */}
+      {scannerSide && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}
+             onClick={e => e.target === e.currentTarget && setScannerSide(null)}>
+          <div style={{ width: '100%', maxWidth: 520, maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.2, padding: '6px 10px', borderRadius: 6, marginBottom: 8,
+              background: scannerSide === 'dealer' ? 'rgba(26,95,173,0.10)' : 'rgba(180,83,9,0.10)',
+              color: scannerSide === 'dealer' ? 'var(--primary)' : '#b45309',
+              textTransform: 'uppercase', fontFamily: "'Figtree', sans-serif", textAlign: 'center',
+            }}>
+              Adding to {scannerSide === 'dealer' ? 'Dealer side · Cards going out' : 'Customer side · Cards coming in'}
+            </div>
+            <CardScanner
+              showGradeSelector
+              onCardConfirmed={async (card: ConfirmedCard, ctx: ConfirmContext) => {
+                const qty = Math.max(1, ctx.quantity || 1)
+                // Dealer panel has no qty concept — add the card N times so
+                // the user sees one row per physical card. Cards can be
+                // re-graded inline if the scanner picked the wrong grade.
+                for (let i = 0; i < qty; i++) {
+                  await addScannedCard(card, scannerSide, ctx.holdingType)
+                }
+              }}
+              onClose={() => setScannerSide(null)}
+              ctaLabel={`Add to ${scannerSide === 'dealer' ? 'dealer side' : 'customer side'}`}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Verdict */}
       <DealVerdict
