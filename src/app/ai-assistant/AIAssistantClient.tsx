@@ -1,5 +1,7 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import Link from 'next/link'
+import { supabase } from '@/lib/supabase'
 import InlineChat from '@/components/InlineChat'
 import CardScanner, { ConfirmedCard } from '@/components/CardScanner'
 
@@ -14,6 +16,16 @@ const SUGGESTED_PROMPTS = [
 export default function AIAssistantClient() {
   const [showScanner, setShowScanner] = useState(false)
   const [scannedCard, setScannedCard] = useState<ConfirmedCard | null>(null)
+  // Auth gating: the scanner is only available to logged-in (free)
+  // accounts. Unauthenticated visitors see a prompt to sign up.
+  const [isAuthed, setIsAuthed] = useState<boolean | null>(null)
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setIsAuthed(!!session)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, s) => setIsAuthed(!!s))
+    return () => subscription.unsubscribe()
+  }, [])
 
   // Build the cardContext string that InlineChat already understands.
   // Match the format card detail pages use exactly — "<card_name> from
@@ -45,8 +57,8 @@ export default function AIAssistantClient() {
         </p>
       </div>
 
-      {/* Scan-a-card entry */}
-      {!showScanner && !scannedCard && (
+      {/* Scan-a-card entry — only for logged-in (free) accounts. */}
+      {!showScanner && !scannedCard && isAuthed === true && (
         <div style={{
           marginBottom: 20, padding: 14, borderRadius: 12,
           background: 'var(--bg-light)', border: '1px solid var(--border)',
@@ -58,7 +70,7 @@ export default function AIAssistantClient() {
               <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.2, padding: '2px 6px', borderRadius: 4, background: 'var(--accent)', color: '#1a3a6b' }}>BETA</span>
             </div>
             <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              Scan it with your phone camera or upload a photo. I will identify the card and you can ask anything about it.
+              On mobile, tap to open your camera. On desktop, tap to upload a photo. We will identify the card and the chat below will know exactly which card you mean.
             </p>
           </div>
           <button
@@ -70,8 +82,38 @@ export default function AIAssistantClient() {
               whiteSpace: 'nowrap',
             }}
           >
-            Scan a card
+            Scan / upload card
           </button>
+        </div>
+      )}
+
+      {/* Auth prompt — anonymous visitors see a sign-in nudge instead. */}
+      {!showScanner && !scannedCard && isAuthed === false && (
+        <div style={{
+          marginBottom: 20, padding: 14, borderRadius: 12,
+          background: 'var(--bg-light)', border: '1px dashed var(--border)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
+        }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <strong style={{ fontSize: 14, color: 'var(--text)', fontFamily: "'Outfit', sans-serif" }}>Want to scan a card?</strong>
+              <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.2, padding: '2px 6px', borderRadius: 4, background: 'var(--accent)', color: '#1a3a6b' }}>BETA</span>
+            </div>
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+              Free accounts get 100 card scans per month. Sign up takes 30 seconds — no payment, no card details.
+            </p>
+          </div>
+          <Link
+            href="/dashboard/login"
+            style={{
+              padding: '10px 16px', borderRadius: 10, border: 'none',
+              background: 'var(--primary)', color: '#fff', textDecoration: 'none',
+              fontFamily: "'Figtree', sans-serif", fontSize: 13, fontWeight: 700,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Log in / sign up
+          </Link>
         </div>
       )}
 

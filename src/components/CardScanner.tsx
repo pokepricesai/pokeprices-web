@@ -85,11 +85,25 @@ export default function CardScanner({
   const [queueIndex, setQueueIndex] = useState(0)
   const [currentImageUrl, setCurrentImageUrl] = useState<string | null>(null)
   const [response, setResponse] = useState<ScanResponse | null>(null)
-  const [engine, setEngine] = useState<Engine>('ai_vision')
-  const [retriedWithOcr, setRetriedWithOcr] = useState(false)
+  // Default to OCR. AI Vision is the fallback the user can tap when OCR
+  // gets the read wrong — it tends to be more deterministic on digits
+  // (the most common failure mode) and ~half the cost.
+  const [engine, setEngine] = useState<Engine>('vision_ocr')
+  const [retriedWithAlternate, setRetriedWithAlternate] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [scansRemaining, setScansRemaining] = useState<number | null>(null)
+  const [isMobile, setIsMobile] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Width-based mobile detection. Tablets in landscape will see the
+  // desktop copy, which is fine — the underlying file input behaviour
+  // doesn't change, only the copy around it.
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
 
   // Auth + quota lookup on mount.
   useEffect(() => {
@@ -117,8 +131,9 @@ export default function CardScanner({
     const arr = Array.from(files)
     setQueue(arr)
     setQueueIndex(0)
-    setRetriedWithOcr(false)
-    await processFile(arr[0], engine)
+    setRetriedWithAlternate(false)
+    setEngine('vision_ocr')
+    await processFile(arr[0], 'vision_ocr')
   }
 
   async function processFile(file: File, useEngine: Engine) {
@@ -167,11 +182,12 @@ export default function CardScanner({
     }
   }
 
-  async function retryWithOcr() {
+  async function retryWithAlternate() {
     if (queue.length === 0) return
-    setRetriedWithOcr(true)
-    setEngine('vision_ocr')
-    await processFile(queue[queueIndex], 'vision_ocr')
+    setRetriedWithAlternate(true)
+    // OCR is the default, so the alternate is always AI Vision.
+    setEngine('ai_vision')
+    await processFile(queue[queueIndex], 'ai_vision')
   }
 
   async function confirmCandidate(c: Candidate) {
@@ -208,9 +224,9 @@ export default function CardScanner({
     if (queueIndex + 1 < queue.length) {
       const nextIdx = queueIndex + 1
       setQueueIndex(nextIdx)
-      setRetriedWithOcr(false)
-      setEngine('ai_vision')
-      await processFile(queue[nextIdx], 'ai_vision')
+      setRetriedWithAlternate(false)
+      setEngine('vision_ocr')
+      await processFile(queue[nextIdx], 'vision_ocr')
     } else {
       reset()
     }
@@ -220,9 +236,9 @@ export default function CardScanner({
     if (queueIndex + 1 < queue.length) {
       const nextIdx = queueIndex + 1
       setQueueIndex(nextIdx)
-      setRetriedWithOcr(false)
-      setEngine('ai_vision')
-      processFile(queue[nextIdx], 'ai_vision')
+      setRetriedWithAlternate(false)
+      setEngine('vision_ocr')
+      processFile(queue[nextIdx], 'vision_ocr')
     } else {
       reset()
     }
@@ -235,8 +251,8 @@ export default function CardScanner({
     setCurrentImageUrl(null)
     setResponse(null)
     setError(null)
-    setRetriedWithOcr(false)
-    setEngine('ai_vision')
+    setRetriedWithAlternate(false)
+    setEngine('vision_ocr')
     if (inputRef.current) inputRef.current.value = ''
   }
 
@@ -262,7 +278,7 @@ export default function CardScanner({
       />
 
       {stage === 'idle' && (
-        <IdlePanel onPick={pickFiles} />
+        <IdlePanel onPick={pickFiles} isMobile={isMobile} />
       )}
 
       {stage === 'scanning' && currentImageUrl && (
@@ -280,9 +296,9 @@ export default function CardScanner({
           queueLabel={queue.length > 1 ? `Card ${queueIndex + 1} of ${queue.length}` : null}
           queueRemaining={queueRemaining}
           ctaLabel={ctaLabel}
-          retriedWithOcr={retriedWithOcr}
+          retriedWithAlternate={retriedWithAlternate}
           onConfirm={confirmCandidate}
-          onRetryOcr={retryWithOcr}
+          onRetryAlternate={retryWithAlternate}
           onSkip={skipCurrent}
           onCancel={reset}
         />
@@ -324,17 +340,19 @@ function Header({ onClose, scansRemaining }: { onClose?: () => void; scansRemain
   )
 }
 
-function IdlePanel({ onPick }: { onPick: () => void }) {
+function IdlePanel({ onPick, isMobile }: { onPick: () => void; isMobile: boolean }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, lineHeight: 1.55 }}>
-        On a phone, tapping the button opens your camera. On a desktop, it opens the file picker — pick one image or many to process in a row.
+        {isMobile
+          ? 'Tap below to open your camera and take a photo of the card. You can also pick from your phone gallery — bulk uploads are processed one at a time.'
+          : 'On desktop there is no camera scan — tap below to upload one or more card photos from your computer. They are processed one by one and you confirm each match as it appears.'}
       </p>
       <button onClick={onPick} style={primaryButtonStyle}>
-        Scan or upload card
+        {isMobile ? 'Scan a card' : 'Upload card image(s)'}
       </button>
       <p style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '4px 0 0', lineHeight: 1.5 }}>
-        Avoid glare, fill the frame with the card, good lighting helps. Bulk uploads are processed one by one — confirm each match as it appears.
+        Avoid glare, fill the frame with the card, good lighting helps. If the read looks wrong on the result screen, the &quot;Try AI mode&quot; button reruns the same image through Claude vision.
       </p>
     </div>
   )
@@ -354,7 +372,7 @@ function ScanningPanel({ imageUrl, queueLabel }: { imageUrl: string; queueLabel:
 
 function ResultsPanel({
   response, candidates, imageUrl, queueLabel, queueRemaining,
-  ctaLabel, retriedWithOcr, onConfirm, onRetryOcr, onSkip, onCancel,
+  ctaLabel, retriedWithAlternate, onConfirm, onRetryAlternate, onSkip, onCancel,
 }: {
   response: ScanResponse
   candidates: Candidate[]
@@ -362,9 +380,9 @@ function ResultsPanel({
   queueLabel: string | null
   queueRemaining: number
   ctaLabel: string
-  retriedWithOcr: boolean
+  retriedWithAlternate: boolean
   onConfirm: (c: Candidate) => void
-  onRetryOcr: () => void
+  onRetryAlternate: () => void
   onSkip: () => void
   onCancel: () => void
 }) {
@@ -397,8 +415,8 @@ function ResultsPanel({
           <p style={{ margin: 0, fontFamily: "'Figtree', sans-serif", fontSize: 13, color: 'var(--text)' }}>
             No matching card found in our database for this scan.
           </p>
-          {!retriedWithOcr && (
-            <button onClick={onRetryOcr} style={secondaryButtonStyle}>Try OCR mode instead</button>
+          {!retriedWithAlternate && (
+            <button onClick={onRetryAlternate} style={secondaryButtonStyle}>Try AI mode instead</button>
           )}
         </div>
       ) : (
@@ -410,8 +428,8 @@ function ResultsPanel({
       )}
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 4 }}>
-        {!retriedWithOcr && !noResults && top && (
-          <button onClick={onRetryOcr} style={linkButtonStyle}>None of these? Try OCR mode</button>
+        {!retriedWithAlternate && !noResults && top && (
+          <button onClick={onRetryAlternate} style={linkButtonStyle}>None of these? Try AI mode</button>
         )}
         {queueRemaining > 0 && (
           <button onClick={onSkip} style={linkButtonStyle}>Skip — next ({queueRemaining})</button>

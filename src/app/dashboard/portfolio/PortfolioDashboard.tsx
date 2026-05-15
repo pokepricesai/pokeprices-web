@@ -1243,8 +1243,9 @@ export default function PortfolioDashboard() {
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={() => setShowScanner(true)}
-            style={{ padding: '9px 16px', borderRadius: 10, border: '1px solid var(--primary)', background: 'transparent', color: 'var(--primary)', fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif", cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            Scan a card
+            style={{ padding: '9px 16px', borderRadius: 10, border: '1px solid var(--primary)', background: 'transparent', color: 'var(--primary)', fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif", cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8 }}
+            title="On mobile, opens your camera. On desktop, opens the file picker — upload one or many card photos at once.">
+            Scan / upload
             <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.2, padding: '2px 6px', borderRadius: 4, background: 'var(--accent)', color: '#1a3a6b' }}>BETA</span>
           </button>
           <button onClick={() => setShowAddModal(true)}
