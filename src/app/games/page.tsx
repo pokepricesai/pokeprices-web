@@ -1,55 +1,67 @@
 // app/games/page.tsx
 import Link from 'next/link'
+import DailyPickClient from './daily-pick/DailyPickClient'
 
 export const metadata = {
-  title: 'Daily Pokémon Games & Quizzes | PokePrices',
-  description: 'Three quick daily games for Pokémon TCG collectors. Guess the price, run a higher-or-lower streak, and vote in today\'s pick. Free, no login.',
+  title: 'Pokémon Card Games & Daily Pick | PokePrices',
+  description: 'Vote in today\'s collector matchup, then play the anytime price quiz and higher-or-lower streak game. Free, no login.',
 }
 
-const GAMES = [
+const ANYTIME_GAMES = [
   {
     href: '/games/guess-price',
-    kind: 'Daily Quiz',
+    kind: 'Anytime quiz',
     title: 'Guess the Price',
-    blurb: 'One real Pokémon card a day. Guess what it sold for. See how close you got. Share the score.',
+    blurb: 'Real Pokémon card on screen. Guess what it sold for. Play as many rounds as you like.',
     accent: 'linear-gradient(135deg, #1a5fad 0%, #2874c8 100%)',
     emoji: '🎯',
   },
   {
     href: '/games/higher-lower',
-    kind: 'Streak Game',
+    kind: 'Streak game',
     title: 'Higher or Lower',
-    blurb: 'Two cards, pick the more valuable one. Chain it as far as you can before you miss. Wordle for collectors.',
+    blurb: 'Two cards, pick the more valuable one. Chain as far as you can before you miss. Start over any time.',
     accent: 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)',
     emoji: '📈',
-  },
-  {
-    href: '/games/daily-pick',
-    kind: 'Community Vote',
-    title: "Today's Pick",
-    blurb: 'A new matchup every day. Vote your side, see what the rest of the collector community said. Share your verdict.',
-    accent: 'linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%)',
-    emoji: '🗳️',
   },
 ]
 
 export default function GamesLanding() {
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 20px 60px', fontFamily: "'Figtree', sans-serif" }}>
-      <div style={{ textAlign: 'center', marginBottom: 36 }}>
+      {/* Hero */}
+      <div style={{ textAlign: 'center', marginBottom: 28 }}>
         <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 11, fontWeight: 800, color: 'var(--primary)', background: 'rgba(26,95,173,0.10)', padding: '4px 12px', borderRadius: 14, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 12 }}>
-          Daily · Free · No login
+          Free · No login
         </div>
         <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 36, margin: '0 0 8px', color: 'var(--text)', letterSpacing: '-0.5px' }}>
           Pokémon Games & Polls
         </h1>
         <p style={{ fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.6, maxWidth: 560, margin: '0 auto' }}>
-          Three quick games built on real PokePrices sales data. Fresh ones every day, played by everyone at the same time. Beat your streak and post the result.
+          A daily community matchup plus a couple of anytime games built on real PokePrices sales data.
+        </p>
+      </div>
+
+      {/* Today's Pick — daily matchup, embedded inline so it's the centrepiece. */}
+      <div style={{
+        background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 18,
+        padding: '22px 18px', marginBottom: 32,
+      }}>
+        <DailyPickClient embedded />
+      </div>
+
+      {/* Anytime games */}
+      <div style={{ marginBottom: 14 }}>
+        <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, margin: '0 0 4px', color: 'var(--text)' }}>
+          Play anytime
+        </h2>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+          These two reset every game — play as many rounds as you like, no waiting for tomorrow.
         </p>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
-        {GAMES.map(g => (
+        {ANYTIME_GAMES.map(g => (
           <Link key={g.href} href={g.href}
             style={{
               display: 'flex', flexDirection: 'column', textDecoration: 'none',
@@ -58,23 +70,23 @@ export default function GamesLanding() {
             }}>
             <div style={{
               background: g.accent, color: '#fff',
-              padding: '36px 22px', display: 'flex', flexDirection: 'column',
-              alignItems: 'flex-start', gap: 10, minHeight: 160,
+              padding: '28px 20px', display: 'flex', flexDirection: 'column',
+              alignItems: 'flex-start', gap: 8, minHeight: 130,
             }}>
-              <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 2, opacity: 0.85 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 2, opacity: 0.85 }}>
                 {g.kind}
               </div>
-              <div style={{ fontSize: 28, fontWeight: 900, fontFamily: "'Outfit', sans-serif", lineHeight: 1.1 }}>
+              <div style={{ fontSize: 24, fontWeight: 900, fontFamily: "'Outfit', sans-serif", lineHeight: 1.1 }}>
                 {g.title}
               </div>
-              <div style={{ marginTop: 'auto', fontSize: 32 }}>{g.emoji}</div>
+              <div style={{ marginTop: 'auto', fontSize: 26 }}>{g.emoji}</div>
             </div>
-            <div style={{ padding: '18px 20px 22px', flex: 1, display: 'flex', flexDirection: 'column' }}>
-              <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, margin: '0 0 14px' }}>
+            <div style={{ padding: '16px 18px 20px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55, margin: '0 0 12px' }}>
                 {g.blurb}
               </p>
               <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 'auto' }}>
-                Play today's →
+                Play →
               </span>
             </div>
           </Link>
@@ -82,7 +94,7 @@ export default function GamesLanding() {
       </div>
 
       <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', marginTop: 36, lineHeight: 1.6 }}>
-        Everyone plays the same daily card / streak / matchup. Results reset at midnight UTC.<br />
+        Today's Pick refreshes once a day, voted on by the whole community.<br />
         Built on real sold-listing data — no asking prices, no guesses.
       </p>
     </div>

@@ -18,7 +18,7 @@ interface CardData {
 interface Tallies { option_a_votes: number; option_b_votes: number }
 interface VotedState { choice: 'a' | 'b'; tallies: Tallies; date: string }
 
-export default function DailyPickClient() {
+export default function DailyPickClient({ embedded = false }: { embedded?: boolean }) {
   const matchup = todaysMatchup()
   const [aCard, setACard] = useState<CardData | null>(null)
   const [bCard, setBCard] = useState<CardData | null>(null)
@@ -85,10 +85,14 @@ export default function DailyPickClient() {
     : ''
 
   return (
-    <div style={{ maxWidth: 820, margin: '0 auto', padding: '28px 16px 60px', fontFamily: "'Figtree', sans-serif" }}>
-      <BackBar />
+    <div style={{
+      maxWidth: 820, margin: '0 auto',
+      padding: embedded ? 0 : '28px 16px 60px',
+      fontFamily: "'Figtree', sans-serif",
+    }}>
+      {!embedded && <BackBar />}
 
-      <div style={{ textAlign: 'center', marginTop: 16, marginBottom: 22 }}>
+      <div style={{ textAlign: 'center', marginTop: embedded ? 0 : 16, marginBottom: 22 }}>
         <div style={{ display: 'inline-block', fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--text-muted)', marginBottom: 6 }}>
           Today's Pick · {todayKey()}
         </div>

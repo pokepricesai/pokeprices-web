@@ -68,7 +68,16 @@ h1, h2, h3 { font-family: 'Nunito', sans-serif; font-weight: 800; }
 details summary::-webkit-details-marker { display: none; }
 details summary::marker { display: none; }
 
-.dashnav-strip { scrollbar-width: none; }
+/* Horizontal chip strip used by DashboardNav. Hidden scrollbar for a
+   clean look, momentum scroll on iOS, and a right-edge fade hint so
+   users see there is more content when the strip overflows. */
+.dashnav-strip {
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+          mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+}
 .dashnav-strip::-webkit-scrollbar { height: 0; width: 0; display: none; }
 
 .sort-btn { background: white; border: 1.5px solid var(--border); border-radius: 20px; padding: 6px 16px; font-size: 13px; font-weight: 700; color: var(--text-muted); cursor: pointer; transition: all 0.15s; font-family: inherit; }

@@ -1,12 +1,21 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import {
-  dailySeed, seededShuffle, todayKey,
   readLs, writeLs, buildXShareUrl,
   fmtUsd, cleanCardName,
 } from '@/lib/gamesUtil'
+
+// Fisher-Yates with Math.random for a fresh shuffle every game.
+function randomShuffle<T>(arr: T[]): T[] {
+  const out = [...arr]
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[out[i], out[j]] = [out[j], out[i]]
+  }
+  return out
+}
 
 interface HLCard {
   card_name: string
@@ -22,12 +31,12 @@ interface HLCard {
 interface HLResult {
   best_streak: number
   finished: boolean
-  date: string
 }
 
 const CHAIN_LENGTH = 25
 
 export default function HigherLowerClient() {
+  const [pool, setPool] = useState<HLCard[]>([])
   const [chain, setChain] = useState<HLCard[]>([])
   const [loading, setLoading] = useState(true)
   const [idx, setIdx] = useState(0)            // index of "current" card (next is idx+1)
@@ -37,9 +46,11 @@ export default function HigherLowerClient() {
   const [result, setResult] = useState<HLResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // Pull the candidate pool once. The actual chain is built fresh per
+  // game via buildChain so users can hit "Play again" without another
+  // network round-trip.
   useEffect(() => {
     (async () => {
-      const prev = readLs<HLResult>('higher-lower')
       const { data, error: e } = await supabase.from('popular_card_trends')
         .select('card_name, set_name, image_url, card_url_slug, card_number, card_number_display, set_printed_total, current_raw, is_sealed')
         .gte('current_raw', 500)
@@ -54,22 +65,33 @@ export default function HigherLowerClient() {
         return true
       }) as HLCard[]
       if (cleaned.length < CHAIN_LENGTH) { setError('Not enough cards'); setLoading(false); return }
-      // Seeded shuffle so everyone playing today gets the same sequence.
-      const shuffled = seededShuffle(cleaned, dailySeed())
-      // Drop consecutive same-name cards to avoid awkward duplicate pairs.
-      const out: HLCard[] = []
-      const seenNames = new Set<string>()
-      for (const c of shuffled) {
-        if (seenNames.has(c.card_name)) continue
-        seenNames.add(c.card_name)
-        out.push(c)
-        if (out.length >= CHAIN_LENGTH) break
-      }
-      setChain(out)
-      if (prev) setResult(prev)
+      setPool(cleaned)
+      setChain(buildChain(cleaned))
       setLoading(false)
     })()
   }, [])
+
+  function buildChain(src: HLCard[]): HLCard[] {
+    const shuffled = randomShuffle(src)
+    const out: HLCard[] = []
+    const seenNames = new Set<string>()
+    for (const c of shuffled) {
+      if (seenNames.has(c.card_name)) continue
+      seenNames.add(c.card_name)
+      out.push(c)
+      if (out.length >= CHAIN_LENGTH) break
+    }
+    return out
+  }
+
+  const startNewGame = useCallback(() => {
+    if (pool.length < CHAIN_LENGTH) return
+    setChain(buildChain(pool))
+    setIdx(0)
+    setStreak(0)
+    setPhase('play')
+    setLastPick(null)
+  }, [pool])
 
   function pick(choice: 'higher' | 'lower') {
     if (phase !== 'play' || idx >= chain.length - 1) return
@@ -81,21 +103,23 @@ export default function HigherLowerClient() {
     setPhase('reveal')
     setTimeout(() => {
       if (!correct) {
-        const r: HLResult = { best_streak: streak, finished: false, date: todayKey() }
+        // Persist all-time best for nice "session best" displays — does
+        // not gate the game anymore.
         const prior = readLs<HLResult>('higher-lower')
         const newBest = Math.max(prior?.best_streak || 0, streak)
-        const final: HLResult = { ...r, best_streak: newBest }
+        const final: HLResult = { best_streak: newBest, finished: false }
         writeLs('higher-lower', final)
-        setResult(final)
+        setResult({ best_streak: streak, finished: false })
         setPhase('over')
         return
       }
       const newStreak = streak + 1
       setStreak(newStreak)
       if (idx + 2 >= chain.length) {
-        const final: HLResult = { best_streak: newStreak, finished: true, date: todayKey() }
-        writeLs('higher-lower', final)
-        setResult(final)
+        const prior = readLs<HLResult>('higher-lower')
+        const newBest = Math.max(prior?.best_streak || 0, newStreak)
+        writeLs('higher-lower', { best_streak: newBest, finished: true })
+        setResult({ best_streak: newStreak, finished: true })
         setPhase('win')
         return
       }
@@ -105,17 +129,18 @@ export default function HigherLowerClient() {
     }, 1100)
   }
 
-  if (loading) return <Center>Building today's chain…</Center>
+  if (loading) return <Center>Building your chain…</Center>
   if (error)   return <Center>Error: {error}</Center>
-  if (chain.length < 2) return <Center>Not enough data today.</Center>
+  if (chain.length < 2) return <Center>Not enough cards available.</Center>
 
   const current = chain[idx]
   const next    = chain[idx + 1]
 
   if (phase === 'over' || phase === 'win') {
+    const allTimeBest = (readLs<HLResult>('higher-lower')?.best_streak) ?? result?.best_streak ?? 0
     const shareText = phase === 'win'
-      ? `I cleared today's PokePrices Higher or Lower with a perfect run. ${chain.length}/${chain.length}. Beat me?`
-      : `Today's PokePrices Higher or Lower: ${result?.best_streak} streak before I tripped up. Beat me?`
+      ? `I cleared a perfect ${chain.length}/${chain.length} on PokePrices Higher or Lower. Beat me?`
+      : `${result?.best_streak} streak on PokePrices Higher or Lower before I tripped up. Beat me?`
     return (
       <div style={{ maxWidth: 720, margin: '0 auto', padding: '28px 16px 60px', fontFamily: "'Figtree', sans-serif" }}>
         <BackBar />
@@ -127,12 +152,21 @@ export default function HigherLowerClient() {
             {phase === 'win' ? `Perfect ${chain.length}/${chain.length}.` : `You strung ${result?.best_streak} correct in a row.`}
           </p>
           <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 18, padding: 28, display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 260 }}>
-            <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--text-muted)' }}>Best streak today</div>
+            <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--text-muted)' }}>This run</div>
             <div style={{ fontSize: 72, fontWeight: 900, fontFamily: "'Outfit', sans-serif", color: 'var(--accent)', lineHeight: 1 }}>
               {result?.best_streak ?? 0}
             </div>
+            {allTimeBest > (result?.best_streak ?? 0) && (
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                All-time best: <strong style={{ color: 'var(--text)' }}>{allTimeBest}</strong>
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 18, flexWrap: 'wrap' }}>
+            <button onClick={startNewGame}
+              style={{ padding: '10px 18px', borderRadius: 10, background: 'var(--primary)', color: '#fff', fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+              Play again
+            </button>
             <a href={buildXShareUrl(shareText)} target="_blank" rel="noopener noreferrer"
               style={{ padding: '10px 18px', borderRadius: 10, background: '#000', color: '#fff', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
               Post on X
@@ -142,7 +176,7 @@ export default function HigherLowerClient() {
             </Link>
           </div>
           <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 24 }}>
-            Same chain for everyone today. Comes back fresh tomorrow.
+            Fresh shuffle every game — play as often as you like.
           </p>
         </div>
       </div>
@@ -156,7 +190,7 @@ export default function HigherLowerClient() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, marginBottom: 14 }}>
         <div>
           <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--text-muted)' }}>
-            Higher or Lower · {todayKey()}
+            Higher or Lower · play anytime
           </div>
           <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 24, margin: '4px 0 0' }}>
             Which sold for more (raw)?

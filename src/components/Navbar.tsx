@@ -57,17 +57,19 @@ const NAV: NavGroup[] = [
   },
   {
     label: 'Tools',
+    href: '/tools',   // header itself is clickable on desktop — hover still opens the dropdown
     items: [
       // Free first — advertises that value is accessible immediately
       { label: 'Grading Calculator', href: '/dashboard/grading' },
       { label: 'Trade Evaluator',    href: '/dealer' },
       { label: 'Studio',             href: '/studio' },
       // Gated (still clickable — tool pages handle login wall)
-      { label: 'Card Show Planner',  href: '/dashboard/card-shows', gated: true },
-      { label: 'Portfolio',          href: '/dashboard/portfolio',  gated: true },
-      { label: 'Watchlist',          href: '/dashboard/watchlist',  gated: true },
-      { label: 'Set Completion',     href: '/dashboard/sets',       gated: true },
-      { label: 'Smart Alerts',       href: '/dashboard/alerts',     gated: true },
+      { label: 'Quick Price Checker',href: '/dashboard/quick-price', gated: true },
+      { label: 'Card Show Planner',  href: '/dashboard/card-shows',  gated: true },
+      { label: 'Portfolio',          href: '/dashboard/portfolio',   gated: true },
+      { label: 'Watchlist',          href: '/dashboard/watchlist',   gated: true },
+      { label: 'Set Completion',     href: '/dashboard/sets',        gated: true },
+      { label: 'Smart Alerts',       href: '/dashboard/alerts',      gated: true },
     ],
     footer: { label: 'View All Tools →', href: '/tools' },
   },
@@ -377,23 +379,34 @@ export default function Navbar() {
     }
     // Hover container — wraps both trigger and the dropdown panel so the
     // pointer can move from the trigger into the menu without closing it.
+    // When the group has its own href (e.g. Tools -> /tools), the trigger
+    // becomes a Link so clicking the header navigates while hover still
+    // shows the dropdown of nested items.
+    const triggerSharedStyle: React.CSSProperties = {
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      background: isOpen ? 'rgba(255,255,255,0.12)' : 'transparent',
+      border: 'none', cursor: 'pointer',
+      color: 'rgba(255,255,255,0.92)',
+      fontSize: 13, fontWeight: 700, letterSpacing: 0.3,
+      padding: '6px 10px', borderRadius: 8, whiteSpace: 'nowrap',
+      fontFamily: "'Figtree', sans-serif",
+      textDecoration: 'none',
+    }
     return (
       <div style={{ position: 'relative' }}
         onMouseEnter={() => hoverOpen(group.label)}
         onMouseLeave={hoverClose}
       >
-        <button onClick={() => setOpenGroup(isOpen ? null : group.label)}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 5,
-            background: isOpen ? 'rgba(255,255,255,0.12)' : 'transparent',
-            border: 'none', cursor: 'pointer',
-            color: 'rgba(255,255,255,0.92)',
-            fontSize: 13, fontWeight: 700, letterSpacing: 0.3,
-            padding: '6px 10px', borderRadius: 8, whiteSpace: 'nowrap',
-            fontFamily: "'Figtree', sans-serif",
-          }}>
-          {group.label} <ChevronDown />
-        </button>
+        {group.href ? (
+          <Link href={group.href} style={triggerSharedStyle}>
+            {group.label} <ChevronDown />
+          </Link>
+        ) : (
+          <button onClick={() => setOpenGroup(isOpen ? null : group.label)}
+            style={triggerSharedStyle}>
+            {group.label} <ChevronDown />
+          </button>
+        )}
         {isOpen && group.items && (
           <div style={{
             position: 'absolute', top: 'calc(100% + 6px)', left: 0,

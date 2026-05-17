@@ -1,10 +1,9 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import {
-  dailySeed, seededRandom, todayKey,
-  readLs, writeLs, buildXShareUrl,
+  buildXShareUrl,
   fmtUsd, fmtGbp, priceAccuracyPct, cleanCardName,
 } from '@/lib/gamesUtil'
 
@@ -25,10 +24,10 @@ interface Result {
   guess: number      // user's guess in cents
   actual: number     // actual raw_usd in cents
   accuracy: number   // 0-100
-  date: string
 }
 
 export default function GuessPriceClient() {
+  const [pool, setPool] = useState<DailyCard[]>([])
   const [card, setCard] = useState<DailyCard | null>(null)
   const [loading, setLoading] = useState(true)
   const [guess, setGuess] = useState('')
@@ -36,13 +35,9 @@ export default function GuessPriceClient() {
   const [reveal, setReveal] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Load today's card + previous result from localStorage.
+  // Load the candidate pool once, then pick a fresh card per game.
   useEffect(() => {
     (async () => {
-      const prev = readLs<Result>('guess-price')
-      // Pull the pool of popular cards and pick deterministically. We exclude
-      // anything that looks like a sealed product so the quiz is always
-      // single cards.
       const { data, error: e } = await supabase.from('popular_card_trends')
         .select('card_name, set_name, image_url, card_url_slug, card_number, card_number_display, set_printed_total, current_raw, current_psa10, sales_30d, is_sealed')
         .gte('current_raw', 1500)
@@ -50,21 +45,37 @@ export default function GuessPriceClient() {
         .order('sales_30d', { ascending: false })
         .limit(200)
       if (e) { setError(e.message); setLoading(false); return }
-      const pool = (data || []).filter((c: any) => {
+      const cleaned = (data || []).filter((c: any) => {
         if (c.is_sealed) return false
         const n = c.card_name || ''
         if (/booster|elite|tin|blister|bundle|binder|collection|deck|2[-\s]*pack|3[-\s]*pack/i.test(n)) return false
         return true
-      })
-      if (pool.length === 0) { setError('No cards available'); setLoading(false); return }
-      // Deterministic pick by day seed.
-      const rng = seededRandom(dailySeed())
-      const idx = Math.floor(rng() * pool.length)
-      setCard(pool[idx] as DailyCard)
-      if (prev) { setResult(prev); setReveal(true) }
+      }) as DailyCard[]
+      if (cleaned.length === 0) { setError('No cards available'); setLoading(false); return }
+      setPool(cleaned)
+      setCard(pickRandom(cleaned, null))
       setLoading(false)
     })()
   }, [])
+
+  function pickRandom(src: DailyCard[], avoid: DailyCard | null): DailyCard {
+    if (src.length === 1) return src[0]
+    // Try a few times to pick a different card from the previous one so
+    // "play another" never gives the same card twice in a row.
+    for (let i = 0; i < 5; i++) {
+      const candidate = src[Math.floor(Math.random() * src.length)]
+      if (!avoid || candidate.card_url_slug !== avoid.card_url_slug) return candidate
+    }
+    return src[Math.floor(Math.random() * src.length)]
+  }
+
+  const startNewGame = useCallback(() => {
+    if (pool.length === 0) return
+    setCard(pickRandom(pool, card))
+    setGuess('')
+    setResult(null)
+    setReveal(false)
+  }, [pool, card])
 
   function submitGuess(e: React.FormEvent) {
     e.preventDefault()
@@ -74,22 +85,20 @@ export default function GuessPriceClient() {
     const guessCents = Math.round(value * 100)
     const actual = card.current_raw
     const accuracy = priceAccuracyPct(guessCents, actual)
-    const r: Result = { guess: guessCents, actual, accuracy, date: todayKey() }
-    writeLs('guess-price', r)
-    setResult(r)
+    setResult({ guess: guessCents, actual, accuracy })
     setReveal(true)
   }
 
-  if (loading) return <Center>Loading today's card…</Center>
+  if (loading) return <Center>Loading a card…</Center>
   if (error) return <Center>Error: {error}</Center>
-  if (!card) return <Center>No card available today.</Center>
+  if (!card) return <Center>No cards available right now.</Center>
 
   const numLabel = card.card_number_display && Number(card.set_printed_total || 0) > 1
     ? card.card_number_display
     : card.card_number ? `#${card.card_number}` : ''
 
   const shareText = result
-    ? `I scored ${result.accuracy}% on today's PokePrices price quiz. ${result.accuracy === 100 ? 'Nailed it.' : result.accuracy >= 80 ? 'Pretty close.' : 'Tough one.'} Beat me?`
+    ? `Scored ${result.accuracy}% on PokePrices Guess the Price. ${result.accuracy === 100 ? 'Nailed it.' : result.accuracy >= 80 ? 'Pretty close.' : 'Tough one.'} Beat me?`
     : ''
 
   return (
@@ -98,7 +107,7 @@ export default function GuessPriceClient() {
 
       <div style={{ textAlign: 'center', marginBottom: 18 }}>
         <div style={{ display: 'inline-block', fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--text-muted)', marginBottom: 6 }}>
-          Daily Quiz · {todayKey()}
+          Quick Quiz · play anytime
         </div>
         <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 32, margin: '0 0 4px', color: 'var(--text)' }}>
           Guess the Price
@@ -145,18 +154,18 @@ export default function GuessPriceClient() {
             </button>
           </form>
         ) : (
-          <Result card={card} result={result!} shareText={shareText} />
+          <Result card={card} result={result!} shareText={shareText} onPlayAgain={startNewGame} />
         )}
       </div>
 
       <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', marginTop: 18, lineHeight: 1.6 }}>
-        Price = current raw market value from confirmed sold listings. Resets at midnight UTC.
+        Price = current raw market value from confirmed sold listings. Play as many rounds as you like.
       </p>
     </div>
   )
 }
 
-function Result({ card, result, shareText }: { card: DailyCard; result: Result; shareText: string }) {
+function Result({ card, result, shareText, onPlayAgain }: { card: DailyCard; result: Result; shareText: string; onPlayAgain: () => void }) {
   const off = result.guess - result.actual
   const offLabel = off === 0 ? 'Exact' : off > 0 ? `Over by ${fmtUsd(off)}` : `Under by ${fmtUsd(-off)}`
   const bandColor =
@@ -201,6 +210,10 @@ function Result({ card, result, shareText }: { card: DailyCard; result: Result; 
       )}
 
       <div style={{ display: 'flex', gap: 8, width: '100%', justifyContent: 'center', flexWrap: 'wrap' }}>
+        <button onClick={onPlayAgain}
+          style={{ padding: '10px 18px', borderRadius: 10, background: 'var(--primary)', color: '#fff', fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+          Play another
+        </button>
         <a href={buildXShareUrl(shareText)} target="_blank" rel="noopener noreferrer"
           style={{ padding: '10px 18px', borderRadius: 10, background: '#000', color: '#fff', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
           Post on X
@@ -212,10 +225,6 @@ function Result({ card, result, shareText }: { card: DailyCard; result: Result; 
           </Link>
         )}
       </div>
-
-      <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', marginTop: 4 }}>
-        Come back tomorrow for a new card.
-      </p>
     </div>
   )
 }

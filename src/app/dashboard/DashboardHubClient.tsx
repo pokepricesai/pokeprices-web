@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AvatarPicker from '@/components/AvatarPicker'
 import ComingSoonBadge from '@/components/ComingSoonBadge'
+import DashboardNav from './DashboardNav'
 
 interface Counts {
   portfolio: number | null
@@ -69,11 +70,6 @@ export default function DashboardHubClient() {
     loadCounts()
   }, [user])
 
-  async function handleSignOut() {
-    await supabase.auth.signOut()
-    router.push('/')
-  }
-
   if (loading) {
     return (
       <div style={{ maxWidth: 880, margin: '0 auto', padding: '40px 24px' }}>
@@ -127,6 +123,16 @@ export default function DashboardHubClient() {
       colour: '#f59e0b',
     },
     {
+      id: 'quick-price',
+      title: 'Quick Price Checker',
+      desc: 'Scan or upload a batch of cards, set grade + quantity, apply a percentage. Built for live pricing on the move.',
+      href: '/dashboard/quick-price',
+      count: null,
+      countLabel: '',
+      icon: '⚡',
+      colour: '#f97316',
+    },
+    {
       id: 'card-shows',
       title: 'Card Show Planner',
       desc: 'Star upcoming Pokémon card shows + TCG events. Sort by nearest to your city.',
@@ -177,7 +183,11 @@ export default function DashboardHubClient() {
   }
 
   return (
-    <div style={{ maxWidth: 880, margin: '0 auto', padding: '32px 16px' }}>
+    <div style={{ maxWidth: 880, margin: '0 auto', padding: '20px 16px 32px' }}>
+
+      {/* Same chip strip as every dashboard sub-page so users can jump
+          between tools quickly. Scrolls horizontally on narrow screens. */}
+      <DashboardNav email={user?.email} />
 
       {!avatarPokemonId && !bannerDismissed && (
         <div style={{
@@ -211,23 +221,12 @@ export default function DashboardHubClient() {
         </div>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28, flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 30, margin: '0 0 4px', color: 'var(--text)' }}>
-            Dashboard
-          </h1>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0 }}>
-            {user?.email}
-          </p>
-        </div>
-        <button onClick={handleSignOut} style={{
-          padding: '8px 14px', borderRadius: 10,
-          border: '1px solid var(--border)', background: 'transparent',
-          color: 'var(--text-muted)', fontSize: 12, fontWeight: 600,
-          fontFamily: "'Figtree', sans-serif", cursor: 'pointer',
-        }}>
-          Sign out
-        </button>
+      {/* Header — sign out + email already live on DashboardNav, so the
+          page header is just the title now. */}
+      <div style={{ marginBottom: 24 }}>
+        <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 30, margin: 0, color: 'var(--text)' }}>
+          Dashboard
+        </h1>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>
