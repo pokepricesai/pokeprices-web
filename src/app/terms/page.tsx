@@ -5,6 +5,7 @@ import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 export const metadata = {
   title: 'Terms of Service — PokePrices',
   description: 'Terms of Service for PokePrices.io',
+  alternates: { canonical: 'https://www.pokeprices.io/terms' },
 }
 
 export default function TermsPage() {

@@ -5,6 +5,7 @@ import DailyPickClient from './daily-pick/DailyPickClient'
 export const metadata = {
   title: 'Pokémon Card Games & Daily Pick | PokePrices',
   description: 'Vote in today\'s collector matchup, then play the anytime price quiz and higher-or-lower streak game. Free, no login.',
+  alternates: { canonical: 'https://www.pokeprices.io/games' },
 }
 
 const ANYTIME_GAMES = [

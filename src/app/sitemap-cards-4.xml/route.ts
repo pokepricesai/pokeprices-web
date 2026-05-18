@@ -1,4 +1,14 @@
 // app/sitemap-cards-4.xml/route.ts
+// ┌──────────────────────────────────────────────────────────────────────┐
+// │ ⚠ HARD CAP: the four cards-N.xml routes cover rows 0–49,999 only.    │
+// │ Any card with an offset ≥ 50,000 is SILENTLY DROPPED from indexing.  │
+// │ As of audit on 2026-05-18 the cards table held ~40,953 rows in       │
+// │ this sitemap, leaving ~9k headroom. Once the count crosses 50k,      │
+// │ new cards stop being submitted to Google.                            │
+// │                                                                      │
+// │ Fix queued separately: replace this hand-sliced sharding with a      │
+// │ dynamic [n].xml route that emits as many shards as needed.           │
+// └──────────────────────────────────────────────────────────────────────┘
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 

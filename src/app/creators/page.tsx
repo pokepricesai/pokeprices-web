@@ -1,33 +1,34 @@
 // app/creators/page.tsx
-'use client'
-import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
+import type { Metadata } from 'next'
+import { createClient } from '@supabase/supabase-js'
 import CreatorsClient from './CreatorsClient'
 
-export default function CreatorsPage() {
-  const [creators, setCreators] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
+export const revalidate = 3600
 
-  useEffect(() => {
-    async function load() {
-      const { data, error } = await supabase
-        .from('creators')
-        .select('*')
-        .eq('status', 'approved')
-        .order('featured', { ascending: false })
-        .order('created_at', { ascending: false })
-      if (error) console.error('Creators fetch error:', error)
-      setCreators(data || [])
-      setLoading(false)
-    }
-    load()
-  }, [])
+export const metadata: Metadata = {
+  title: 'Pokémon TCG Creators & Content Directory | PokePrices',
+  description: 'Browse Pokémon TCG creators on YouTube, X, TikTok, Instagram and beyond. Featured collectors, openers, investors and grading reviewers.',
+  alternates: { canonical: 'https://www.pokeprices.io/creators' },
+  openGraph: {
+    title: 'Pokémon TCG Creators & Content Directory',
+    description: 'Browse Pokémon TCG creators on YouTube, X, TikTok, Instagram and beyond.',
+    url: 'https://www.pokeprices.io/creators',
+    siteName: 'PokePrices',
+    type: 'website',
+  },
+}
 
-  if (loading) return (
-    <div style={{ textAlign: 'center', padding: '80px 24px', color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-      Loading creators...
-    </div>
-  )
+const supabaseServer = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
-  return <CreatorsClient creators={creators} />
+export default async function CreatorsPage() {
+  const { data: creators } = await supabaseServer
+    .from('creators')
+    .select('*')
+    .eq('status', 'approved')
+    .order('featured', { ascending: false })
+    .order('created_at', { ascending: false })
+  return <CreatorsClient creators={creators || []} />
 }

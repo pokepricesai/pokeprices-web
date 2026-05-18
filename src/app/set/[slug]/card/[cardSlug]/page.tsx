@@ -1,6 +1,8 @@
 // app/set/[slug]/card/[cardSlug]/page.tsx
 import type { Metadata } from 'next'
+import { cache } from 'react'
 import { createClient } from '@supabase/supabase-js'
+import { notFound } from 'next/navigation'
 import CardPageClient from './CardPageClient'
 
 // ISR: regenerate every 24h. Prices refresh nightly, so this aligns with data cadence.
@@ -12,6 +14,17 @@ const supabaseServer = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
+// Shared fetch — generateMetadata and the page handler de-dupe to one
+// query via React.cache. Returning null here means "no row" cleanly,
+// so the caller can notFound() rather than rendering a soft-404 page.
+const getCard = cache(async (setName: string, cardSlug: string) => {
+  const { data } = await supabaseServer.rpc('get_card_detail_by_url_slug', {
+    p_set_name: setName,
+    p_card_url_slug: cardSlug,
+  })
+  return data
+})
+
 function fmt(cents: number): string {
   const v = cents / 100
   return v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${v.toFixed(0)}`
@@ -21,12 +34,12 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const { slug, cardSlug } = await params
   const setName = decodeURIComponent(slug)
 
-  const { data: card } = await supabaseServer.rpc('get_card_detail_by_url_slug', {
-    p_set_name: setName,
-    p_card_url_slug: cardSlug,
-  })
+  const card = await getCard(setName, cardSlug)
 
-  if (!card) return { title: 'Card Not Found | PokePrices' }
+  // Soft-404 fix: prior version returned { title: 'Card Not Found' } and
+  // 200 OK, letting Google index a half-empty page for any URL slug.
+  // Now we throw a true 404.
+  if (!card) notFound()
 
   // Strip trailing " #NN" from card_name (DB stores "Pikachu #55")
   // Regex handles "Pikachu #55", "Pikachu [1st Edition] #55", and trailing suffixes
@@ -94,5 +107,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 export default async function CardPage({ params }: { params: Promise<{ slug: string; cardSlug: string }> }) {
   const { slug, cardSlug } = await params
   const setName = decodeURIComponent(slug)
+  const card = await getCard(setName, cardSlug)
+  if (!card) notFound()
   return <CardPageClient setName={setName} cardUrlSlug={cardSlug} />
 }

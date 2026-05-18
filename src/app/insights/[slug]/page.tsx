@@ -1,5 +1,6 @@
 // app/insights/[slug]/page.tsx
 import type { Metadata } from 'next'
+import { cache } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { notFound } from 'next/navigation'
 import InsightsArticleClient from './InsightsArticleClient'
@@ -11,54 +12,72 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
-  const { slug } = await params
-
-  const { data } = await supabase
+// Shared fetcher. React.cache de-dupes the call within a single render,
+// so generateMetadata and the page handler get the SAME row from a SINGLE
+// query. They can no longer diverge — previously the metadata function
+// could return null (yielding "Article Not Found" + homepage metadata)
+// while the page body simultaneously rendered the real article from a
+// second query that happened to succeed. .maybeSingle() (rather than
+// .single()) makes the zero-row case explicit rather than an error
+// silently swallowed by destructuring.
+const getArticle = cache(async (slug: string) => {
+  const { data, error } = await supabase
     .from('insights')
-    .select('title, slug, excerpt, seo_title, seo_description, theme')
+    .select('*')
     .eq('slug', slug)
     .eq('status', 'published')
-    .single()
+    .maybeSingle()
+  if (error) {
+    // Don't swallow — surface in build/runtime logs so future flakes are
+    // visible. Still return null so callers handle the missing case.
+    console.error('[insights/[slug]] fetch error for slug=' + slug + ':', error.message)
+    return null
+  }
+  return data
+})
 
-  if (!data) return { title: 'Article Not Found | PokePrices' }
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params
+  const article = await getArticle(slug)
 
-  // Priority: seo_title > article title
-  const title = data.seo_title || data.title
-  // Priority: seo_description > excerpt > computed fallback
-  const description = data.seo_description
-    || data.excerpt
-    || `${data.title} — practical Pokémon card collecting guide from PokePrices.`
+  // If the article truly does not exist (or status != published), let
+  // Next route to the 404 page. Don't return a half-set metadata object —
+  // that fills in title only and leaves description/og/canonical to
+  // inherit the homepage defaults from layout.tsx, which is exactly the
+  // bug we're fixing.
+  if (!article) notFound()
 
+  const title       = article.seo_title       || article.title
+  const description = article.seo_description
+                   || article.excerpt
+                   || `${article.title} — practical Pokémon card collecting guide from PokePrices.`
   const canonical = `https://www.pokeprices.io/insights/${slug}`
+  const image = article.image_url || null
 
   return {
     title,
     description,
+    alternates: { canonical },
     openGraph: {
       title,
       description,
       url: canonical,
       siteName: 'PokePrices',
       type: 'article',
+      ...(image ? { images: [{ url: image }] } : {}),
     },
     twitter: {
       card: 'summary_large_image',
       title,
       description,
+      ...(image ? { images: [image] } : {}),
     },
-    alternates: { canonical },
   }
 }
 
 export default async function InsightsArticlePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params
-  const { data } = await supabase
-    .from('insights')
-    .select('*')
-    .eq('slug', slug)
-    .eq('status', 'published')
-    .single()
-  if (!data) notFound()
-  return <InsightsArticleClient article={data} />
+  const article = await getArticle(slug)
+  if (!article) notFound()
+  return <InsightsArticleClient article={article} />
 }
