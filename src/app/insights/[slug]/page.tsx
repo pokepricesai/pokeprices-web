@@ -47,10 +47,17 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   // bug we're fixing.
   if (!article) notFound()
 
-  const title       = article.seo_title       || article.title
+  // Column source-of-truth (verified against InsightsArticleClient):
+  //   - headline = article H1 (PRIMARY, always populated)
+  //   - intro    = lead paragraph (used as the meta description fallback)
+  //   - title / excerpt = legacy/optional columns; kept as fallbacks
+  //   - seo_title / seo_description = explicit per-article overrides
+  const headline = article.headline || article.title || 'Pokémon card insight'
+  const title       = article.seo_title       || headline
   const description = article.seo_description
+                   || article.intro
                    || article.excerpt
-                   || `${article.title} — practical Pokémon card collecting guide from PokePrices.`
+                   || `${headline} — practical Pokémon card collecting guide from PokePrices.`
   const canonical = `https://www.pokeprices.io/insights/${slug}`
   const image = article.image_url || null
 
