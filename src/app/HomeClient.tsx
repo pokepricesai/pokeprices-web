@@ -597,7 +597,7 @@ export default function HomeClient() {
         </section>
       )}
 
-      {/* ── JUST RELEASED ── */}
+      {/* ── JUST RELEASED (Chaos Rising) ── */}
       <section style={{ padding: '36px 24px 8px', maxWidth: 900, margin: '0 auto' }}>
         <div style={{ background: 'var(--card)', borderRadius: 18, border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 2px 15px rgba(37,99,168,0.06)' }}>
           <Link href="/set/Chaos%20Rising" style={{
