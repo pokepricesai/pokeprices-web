@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { supabase, formatPrice } from '@/lib/supabase'
-import { getSetAssets } from '@/lib/setAssets'
+import { getSetAssets, ERA_ORDER, ERA_DISPLAY_NAMES } from '@/lib/setAssets'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import FAQ from '@/components/FAQ'
 import { getBrowseFaqItems } from '@/lib/faqs'
@@ -217,6 +217,7 @@ export default function BrowsePageClient() {
   const [sets, setSets]                 = useState<SetInfo[]>([])
   const [loading, setLoading]           = useState(true)
   const [sort, setSort]                 = useState<SortOption>('release_desc')
+  const [eraFilter, setEraFilter]       = useState<string>('all')
   const [trendingSets, setTrendingSets] = useState<{ rising: TrendingSet[]; falling: TrendingSet[] } | null>(null)
 
   useEffect(() => {
@@ -235,8 +236,14 @@ export default function BrowsePageClient() {
     loadSets()
   }, [])
 
+  // Eras that actually have at least one set in the current data, newest era first
+  const availableEras = [...ERA_ORDER]
+    .reverse()
+    .filter(era => sets.some(s => getSetAssets(s.set_name).eraName === era))
+
   const filtered = sets
     .filter(s => s.set_name.toLowerCase().includes(search.toLowerCase()))
+    .filter(s => eraFilter === 'all' || getSetAssets(s.set_name).eraName === eraFilter)
     .sort((a, b) => {
       switch (sort) {
         case 'release_desc': return new Date(b.set_release_date || '1900-01-01').getTime() - new Date(a.set_release_date || '1900-01-01').getTime()
@@ -294,6 +301,21 @@ export default function BrowsePageClient() {
           placeholder="Search sets..."
           style={{ flex: 1, minWidth: 200, padding: '10px 16px', fontSize: 14, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--card)', color: 'var(--text)', fontFamily: "'Figtree', sans-serif", outline: 'none' }}
         />
+        <select
+          value={eraFilter}
+          onChange={e => setEraFilter(e.target.value)}
+          aria-label="Filter sets by era"
+          style={{
+            padding: '10px 14px', fontSize: 14, border: '1px solid var(--border)', borderRadius: 10,
+            background: 'var(--card)', color: 'var(--text)', fontFamily: "'Figtree', sans-serif",
+            outline: 'none', cursor: 'pointer', minWidth: 180,
+          }}
+        >
+          <option value="all">All Eras</option>
+          {availableEras.map(era => (
+            <option key={era} value={era}>{ERA_DISPLAY_NAMES[era] ?? era}</option>
+          ))}
+        </select>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
           {(([
             ['release_desc', 'Newest First'],
@@ -358,7 +380,9 @@ export default function BrowsePageClient() {
 
       {!loading && filtered.length === 0 && (
         <p style={{ color: 'var(--text-muted)', textAlign: 'center' as const, padding: 40, fontFamily: "'Figtree', sans-serif" }}>
-          No sets found matching &ldquo;{search}&rdquo;
+          {search
+            ? <>No sets found matching &ldquo;{search}&rdquo;{eraFilter !== 'all' && ` in the ${ERA_DISPLAY_NAMES[eraFilter] ?? eraFilter}`}</>
+            : <>No sets in the {ERA_DISPLAY_NAMES[eraFilter] ?? eraFilter}</>}
         </p>
       )}
 

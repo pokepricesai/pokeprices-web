@@ -368,6 +368,29 @@ const ERA_MAP: Record<string, string> = {
   'Ascended Heroes': 'Mega Evolution',   'Chaos Rising': 'Mega Evolution',
 }
 
+// Chronological order, oldest → newest. The current Mega Evolution era sits at
+// the end (it now covers Phantasmal Flames, Perfect Order, Ascended Heroes,
+// Chaos Rising and the upcoming Pitch Black — same bucket as the legacy XY-era
+// Mega Evolution set).
+export const ERA_ORDER: string[] = [
+  'Base',
+  'Gym',
+  'Neo',
+  'e-Card',
+  'Legendary Collection',
+  'EX Ruby & Sapphire',
+  'Diamond & Pearl',
+  'Platinum',
+  'HeartGold SoulSilver',
+  'Call of Legends',
+  'Black & White',
+  'XY',
+  'Sun & Moon',
+  'Sword & Shield',
+  'Scarlet & Violet',
+  'Mega Evolution',
+]
+
 export const ERA_DISPLAY_NAMES: Record<string, string> = {
   'Base': 'Base Era',
   'Gym': 'Gym Era',
