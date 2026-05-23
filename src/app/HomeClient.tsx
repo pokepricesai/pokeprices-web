@@ -181,10 +181,9 @@ function formatInsightDate(iso: string): string {
 }
 
 const upcomingReleases = [
-  { name: 'Chaos Rising',       date: 'May 22, 2026', confirmed: true  },
-  { name: 'Destined Rivals 2',  date: 'Jul 2026',      confirmed: false },
-  { name: 'Mega Evolution Set', date: 'Aug 2026',      confirmed: false },
-  { name: 'Journey Together 2', date: 'Q4 2026',       confirmed: false },
+  { name: 'Destined Rivals 2',  date: 'Jul 2026', confirmed: false },
+  { name: 'Mega Evolution Set', date: 'Aug 2026', confirmed: false },
+  { name: 'Journey Together 2', date: 'Q4 2026',  confirmed: false },
 ]
 
 const features = [
@@ -197,28 +196,12 @@ const features = [
 // ── Main ──────────────────────────────────────────────────────────────────
 
 export default function HomeClient() {
-  const nextRelease = new Date('2026-05-22T00:00:00')
-  const [countdown, setCountdown] = useState({ days: 0, hours: 0, mins: 0 })
   const [marketIndex, setMarketIndex] = useState<MarketIndexRow[]>([])
   const [totalMarket, setTotalMarket] = useState<{ value: number, pct30d: number | null, cardsTracked: number } | null>(null)
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReportRow[]>([])
   const [hiddenGems, setHiddenGems] = useState<HiddenGem[]>([])
   const [latestInsights, setLatestInsights] = useState<Insight[]>([])
   const [weeklyUpdated, setWeeklyUpdated] = useState<string | null>(null)
-
-  useEffect(() => {
-    const tick = () => {
-      const diff = nextRelease.getTime() - Date.now()
-      if (diff > 0) setCountdown({
-        days: Math.floor(diff / 86400000),
-        hours: Math.floor((diff % 86400000) / 3600000),
-        mins: Math.floor((diff % 3600000) / 60000),
-      })
-    }
-    tick()
-    const id = setInterval(tick, 60000)
-    return () => clearInterval(id)
-  }, [])
 
   useEffect(() => {
     async function loadAnalytics() {
@@ -595,25 +578,48 @@ export default function HomeClient() {
         </section>
       )}
 
-      {/* ── NEXT RELEASE ── */}
+      {/* ── JUST RELEASED ── */}
       <section style={{ padding: '36px 24px 8px', maxWidth: 900, margin: '0 auto' }}>
         <div style={{ background: 'var(--card)', borderRadius: 18, border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 2px 15px rgba(37,99,168,0.06)' }}>
-          <div style={{ background: 'linear-gradient(135deg, #1a5fad, #2874c8)', padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14 }}>
-            <div>
-              <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, letterSpacing: 2, margin: '0 0 2px', textTransform: 'uppercase', fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>Next Release</p>
+          <Link href="/set/Chaos%20Rising" style={{
+            display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap',
+            background: 'linear-gradient(135deg, #1a5fad, #2874c8)', padding: '22px 24px',
+            textDecoration: 'none', transition: 'filter 0.15s',
+          }}
+            onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.filter = 'brightness(1.08)'}
+            onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.filter = ''}
+          >
+            <img src="/set-assets/logos/Chaos Rising.webp" alt="Chaos Rising"
+              style={{ height: 64, width: 'auto', maxWidth: 220, objectFit: 'contain',
+                filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.25))', flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <span style={{
+                  background: 'var(--accent)', color: '#1a1a1a', fontSize: 10, fontWeight: 900,
+                  padding: '3px 8px', borderRadius: 4, letterSpacing: 1, textTransform: 'uppercase',
+                  fontFamily: "'Figtree', sans-serif",
+                }}>New Set</span>
+                <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>
+                  Just Released
+                </span>
+              </div>
               <h3 style={{ color: '#fff', fontSize: 22, margin: 0, fontWeight: 800, fontFamily: "'Outfit', sans-serif" }}>Chaos Rising</h3>
-              <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, margin: '2px 0 0', fontFamily: "'Figtree', sans-serif" }}>May 22, 2026</p>
+              <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, margin: '2px 0 0', fontFamily: "'Figtree', sans-serif" }}>
+                Released May 22, 2026 · Scarlet &amp; Violet era
+              </p>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {[{ val: countdown.days, label: 'Days' }, { val: countdown.hours, label: 'Hrs' }, { val: countdown.mins, label: 'Min' }].map(t => (
-                <div key={t.label} style={{ background: 'rgba(255,255,255,0.1)', borderRadius: 12, padding: '8px 12px', textAlign: 'center', minWidth: 46, border: '1px solid rgba(255,203,5,0.2)' }}>
-                  <div style={{ color: 'var(--accent)', fontSize: 20, fontWeight: 800, lineHeight: 1, fontFamily: "'Figtree', sans-serif" }}>{t.val}</div>
-                  <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 10, marginTop: 2, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>{t.label}</div>
-                </div>
-              ))}
-            </div>
-          </div>
+            <span style={{
+              background: 'rgba(255,255,255,0.15)', color: '#fff', fontSize: 13, fontWeight: 800,
+              padding: '10px 18px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.25)',
+              fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap',
+            }}>
+              Explore the set →
+            </span>
+          </Link>
           <div style={{ padding: '16px 24px' }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', margin: '0 0 10px', fontFamily: "'Figtree', sans-serif" }}>
+              Coming next
+            </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
               {upcomingReleases.map(r => (
                 <div key={r.name} style={{ padding: '12px 14px', background: 'var(--bg-light)', borderRadius: 12, border: '1px solid var(--border-light)' }}>
