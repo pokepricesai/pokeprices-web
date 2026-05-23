@@ -136,6 +136,7 @@ const LOGO_MAP: Record<string, string> = {
   'Journey Together':       'Journey Together.webp',
   'Destined Rivals':        'Destined Rivals.webp',
   'Perfect Order':          'Perfect Order.webp',
+  'Chaos Rising':           'Chaos Rising.webp',
   // ── Misc / promos ─────────────────────────────────────────────────────────
   'Rumble':                 'Pokemon Rumble.webp',
   'Southern Islands':       'Southern Islands.webp',
@@ -286,6 +287,7 @@ const SYMBOL_MAP: Record<string, string> = {
   'Journey Together':       'Journey Together.png',
   'Destined Rivals':        'Destined Rivals.png',
   'Perfect Order':          'Perfect Order.png',
+  'Chaos Rising':           'Chaos Rising.png',
   // ── Misc ──────────────────────────────────────────────────────────────────
   'Southern Islands':       'Southern Islands.png',
   'Pikachu Libre & Suicune':'Pikachu Libre & Suicune.png',
@@ -362,7 +364,7 @@ const ERA_MAP: Record<string, string> = {
   'Surging Sparks': 'Scarlet & Violet', 'Prismatic Evolutions': 'Scarlet & Violet',
   'Phantasmal Flames': 'Scarlet & Violet', 'Journey Together': 'Scarlet & Violet',
   'Destined Rivals': 'Scarlet & Violet', 'Perfect Order': 'Scarlet & Violet',
-  'Ascended Heroes': 'Scarlet & Violet',
+  'Ascended Heroes': 'Scarlet & Violet', 'Chaos Rising': 'Scarlet & Violet',
 }
 
 export const ERA_DISPLAY_NAMES: Record<string, string> = {
