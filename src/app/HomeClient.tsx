@@ -624,7 +624,7 @@ export default function HomeClient() {
               </div>
               <h3 style={{ color: '#fff', fontSize: 22, margin: 0, fontWeight: 800, fontFamily: "'Outfit', sans-serif" }}>Chaos Rising</h3>
               <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, margin: '2px 0 0', fontFamily: "'Figtree', sans-serif" }}>
-                Released May 22, 2026 · Scarlet &amp; Violet era
+                Released May 22, 2026 · Mega Evolution era
               </p>
             </div>
             <span style={{

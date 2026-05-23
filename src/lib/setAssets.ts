@@ -362,9 +362,10 @@ const ERA_MAP: Record<string, string> = {
   'Temporal Forces': 'Scarlet & Violet', 'Twilight Masquerade': 'Scarlet & Violet',
   'Shrouded Fable': 'Scarlet & Violet', 'Stellar Crown': 'Scarlet & Violet',
   'Surging Sparks': 'Scarlet & Violet', 'Prismatic Evolutions': 'Scarlet & Violet',
-  'Phantasmal Flames': 'Scarlet & Violet', 'Journey Together': 'Scarlet & Violet',
-  'Destined Rivals': 'Scarlet & Violet', 'Perfect Order': 'Scarlet & Violet',
-  'Ascended Heroes': 'Scarlet & Violet', 'Chaos Rising': 'Scarlet & Violet',
+  'Journey Together': 'Scarlet & Violet', 'Destined Rivals': 'Scarlet & Violet',
+  // ── Mega Evolution era ────────────────────────────────────────────────────
+  'Phantasmal Flames': 'Mega Evolution', 'Perfect Order': 'Mega Evolution',
+  'Ascended Heroes': 'Mega Evolution',   'Chaos Rising': 'Mega Evolution',
 }
 
 export const ERA_DISPLAY_NAMES: Record<string, string> = {
