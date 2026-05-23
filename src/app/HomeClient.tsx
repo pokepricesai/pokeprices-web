@@ -181,9 +181,8 @@ function formatInsightDate(iso: string): string {
 }
 
 const upcomingReleases = [
-  { name: 'Destined Rivals 2',  date: 'Jul 2026', confirmed: false },
-  { name: 'Mega Evolution Set', date: 'Aug 2026', confirmed: false },
-  { name: 'Journey Together 2', date: 'Q4 2026',  confirmed: false },
+  { name: 'Mega Evolution — Pitch Black', date: 'Jul 17, 2026', confirmed: true  },
+  { name: 'Journey Together 2',           date: 'Q4 2026',      confirmed: false },
 ]
 
 const features = [
@@ -269,7 +268,7 @@ export default function HomeClient() {
             animation: 'float 4s ease-in-out infinite',
           }} />
 
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
             {['100% Free', 'No Login', 'No Data Collection'].map(pill => (
               <span key={pill} style={{
                 background: 'rgba(255,255,255,0.15)', color: '#fff', fontSize: 11, fontWeight: 700,
@@ -277,6 +276,26 @@ export default function HomeClient() {
                 letterSpacing: 0.3, backdropFilter: 'blur(4px)',
               }}>{pill}</span>
             ))}
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}>
+            <Link href="/set/Chaos%20Rising" style={{
+              display: 'inline-flex', alignItems: 'center', gap: 10,
+              background: 'var(--accent)', color: '#1a1a1a', textDecoration: 'none',
+              padding: '9px 16px 9px 12px', borderRadius: 24, fontWeight: 800,
+              fontSize: 13, fontFamily: "'Figtree', sans-serif",
+              boxShadow: '0 4px 14px rgba(255,203,5,0.35)',
+              transition: 'transform 0.15s, box-shadow 0.15s',
+            }}
+              onMouseEnter={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.transform = 'translateY(-1px)'; el.style.boxShadow = '0 6px 18px rgba(255,203,5,0.45)' }}
+              onMouseLeave={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.transform = ''; el.style.boxShadow = '0 4px 14px rgba(255,203,5,0.35)' }}
+            >
+              <span style={{
+                background: '#1a1a1a', color: 'var(--accent)', fontSize: 9, fontWeight: 900,
+                padding: '3px 7px', borderRadius: 4, letterSpacing: 1, textTransform: 'uppercase',
+              }}>New</span>
+              Explore Latest Set: Chaos Rising →
+            </Link>
           </div>
 
           <h1 style={{
