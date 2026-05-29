@@ -21,9 +21,10 @@ const productLinks = [
 ]
 
 const companyLinks = [
-  { label: 'Contact', href: '/contact' },
-  { label: 'Privacy', href: '/privacy' },
-  { label: 'Terms',   href: '/terms'   },
+  { label: 'Features & Roadmap', href: '/roadmap' },
+  { label: 'Contact',            href: '/contact' },
+  { label: 'Privacy',            href: '/privacy' },
+  { label: 'Terms',              href: '/terms'   },
 ]
 
 export default function Footer() {

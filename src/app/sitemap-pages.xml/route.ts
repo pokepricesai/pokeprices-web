@@ -41,6 +41,9 @@ export async function GET() {
     { url: `${BASE_URL}/card-shows/us`,       priority: '0.6', changefreq: 'weekly'  },
     { url: `${BASE_URL}/card-shows/ca`,       priority: '0.6', changefreq: 'weekly'  },
 
+    // About / project
+    { url: `${BASE_URL}/roadmap`,             priority: '0.7', changefreq: 'weekly'  },
+
     // Footer / legal
     { url: `${BASE_URL}/contact`,             priority: '0.3', changefreq: 'monthly' },
     { url: `${BASE_URL}/privacy`,             priority: '0.3', changefreq: 'yearly'  },
