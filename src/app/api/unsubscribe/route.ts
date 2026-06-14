@@ -3,8 +3,10 @@
 // Token is generated per-user in user_email_preferences.unsubscribe_token.
 
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { getSupabaseServiceClient } from '@/lib/supabaseService'
 
+// Edge runtime is preserved from the previous version. server-only is
+// compatible with both edge and node — it only blocks client bundles.
 export const runtime = 'edge'
 
 export async function GET(req: Request) {
@@ -23,13 +25,12 @@ async function handle(req: Request) {
     return new NextResponse(html('Missing token.'), { headers: { 'Content-Type': 'text/html' } })
   }
 
-  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!SUPABASE_URL || !SERVICE_KEY) {
+  let supa
+  try {
+    supa = getSupabaseServiceClient()
+  } catch {
     return new NextResponse(html('Server misconfigured.'), { status: 500, headers: { 'Content-Type': 'text/html' } })
   }
-
-  const supa = createClient(SUPABASE_URL, SERVICE_KEY)
 
   const { data: prefs } = await supa
     .from('user_email_preferences')

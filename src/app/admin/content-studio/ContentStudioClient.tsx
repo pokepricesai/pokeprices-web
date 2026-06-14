@@ -119,6 +119,64 @@ async function copyToClipboard(text: string): Promise<void> {
   }
 }
 
+// ── Admin mutation helpers (Block 1A) ───────────────────────────────────────
+// social_content_posts no longer accepts anon writes. All status changes and
+// deletes route through /api/admin/content-studio/posts, which requires a
+// Supabase Auth bearer token plus an email on the server-only allow-list
+// ADMIN_ALLOWED_EMAILS.
+
+async function getAccessToken(): Promise<string | null> {
+  try {
+    const { data } = await supabase.auth.getSession()
+    return data.session?.access_token ?? null
+  } catch {
+    return null
+  }
+}
+
+type AdminMutateResult = {
+  ok:     boolean
+  status: number
+  data:   any
+  error:  string
+}
+
+async function adminMutate(
+  method: 'PATCH' | 'DELETE',
+  body: any,
+): Promise<AdminMutateResult> {
+  const token = await getAccessToken()
+  if (!token) {
+    return { ok: false, status: 401, data: null, error: 'sign-in required' }
+  }
+  let res: Response
+  try {
+    res = await fetch('/api/admin/content-studio/posts', {
+      method,
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    })
+  } catch (e: any) {
+    return { ok: false, status: 0, data: null, error: e?.message || 'network error' }
+  }
+  let data: any = null
+  try { data = await res.json() } catch {}
+  if (!res.ok) {
+    return { ok: false, status: res.status, data, error: data?.error || `HTTP ${res.status}` }
+  }
+  return { ok: true, status: res.status, data, error: '' }
+}
+
+function adminMutateErrorMessage(res: AdminMutateResult): string {
+  if (res.status === 401) return 'Sign in as an admin to make changes (top right).'
+  if (res.status === 403) return 'Your account is not on the admin allow-list.'
+  if (res.status === 503) return 'Admin allow-list is not configured on the server.'
+  return res.error || 'Action failed.'
+}
+
 // ── Options panels ──────────────────────────────────────────────────────────
 
 const fieldStyle: React.CSSProperties = {
@@ -499,12 +557,11 @@ function PostCard({ post, selected, onSelectChange, onUpdate, onDelete, onRegene
 
   async function setStatus(status: SocialContentPost['status']) {
     setBusy(true)
-    const { data, error } = await supabase.from('social_content_posts')
-      .update({ status }).eq('id', post.id).select('*').single()
-    if (error) {
-      onActionError(`Couldn't update status: ${error.message}. Did you run migration 2026-05-11b-social-content-rls-fix.sql?`)
-    } else if (data) {
-      onUpdate(data as SocialContentPost)
+    const res = await adminMutate('PATCH', { ids: [post.id], status })
+    if (!res.ok) {
+      onActionError(`Couldn't update status: ${adminMutateErrorMessage(res)}`)
+    } else if (res.data?.rows?.[0]) {
+      onUpdate(res.data.rows[0] as SocialContentPost)
     }
     setBusy(false)
   }
@@ -644,6 +701,114 @@ function PostCard({ post, selected, onSelectChange, onUpdate, onDelete, onRegene
   )
 }
 
+// ── Admin Supabase Auth session bar ────────────────────────────────────────
+// Mutations now require a real Supabase Auth session whose email is in
+// ADMIN_ALLOWED_EMAILS server-side. This widget shows the current session
+// status and offers an inline sign-in so the admin doesn't have to leave
+// the page. The legacy password gate above is preserved purely as a UI
+// convenience — it carries no security authority.
+
+function AdminSessionBar() {
+  const [email, setEmail] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
+  const [showSignIn, setShowSignIn] = useState(false)
+  const [signinEmail, setSigninEmail] = useState('')
+  const [signinPw, setSigninPw] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    let mounted = true
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return
+      setEmail(data.session?.user?.email ?? null)
+      setLoaded(true)
+    })
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (!mounted) return
+      setEmail(session?.user?.email ?? null)
+    })
+    return () => {
+      mounted = false
+      sub.subscription.unsubscribe()
+    }
+  }, [])
+
+  async function handleSignIn() {
+    if (!signinEmail.trim() || !signinPw) return
+    setBusy(true); setErr(null)
+    const { error } = await supabase.auth.signInWithPassword({
+      email:    signinEmail.trim(),
+      password: signinPw,
+    })
+    setBusy(false)
+    if (error) { setErr(error.message); return }
+    setShowSignIn(false)
+    setSigninPw('')
+  }
+
+  async function handleSignOut() {
+    await supabase.auth.signOut()
+  }
+
+  if (!loaded) return null
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+      padding: '10px 14px', borderRadius: 10, marginBottom: 14,
+      background: email ? 'rgba(34,197,94,0.06)' : 'rgba(239,68,68,0.06)',
+      border: `1px solid ${email ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`,
+      fontFamily: "'Figtree', sans-serif", fontSize: 12,
+    }}>
+      <span style={{ fontWeight: 700, color: email ? '#16a34a' : '#b91c1c' }}>
+        {email ? `Signed in as ${email}` : 'Not signed in'}
+      </span>
+      <span style={{ color: 'var(--text-muted)', flex: 1 }}>
+        {email
+          ? 'Approve / reject / delete actions will be allowed if this email is on the admin allow-list.'
+          : 'Sign in with your admin Supabase account to approve, reject, or delete posts.'}
+      </span>
+      {email
+        ? (
+          <button onClick={handleSignOut}
+            style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+            Sign out
+          </button>
+        )
+        : (
+          <button onClick={() => setShowSignIn(s => !s)}
+            style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid var(--primary)', background: 'var(--primary)', color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+            {showSignIn ? 'Cancel' : 'Sign in'}
+          </button>
+        )}
+
+      {showSignIn && !email && (
+        <div style={{ flexBasis: '100%', display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+          <input
+            type="email" autoComplete="email" value={signinEmail}
+            onChange={e => setSigninEmail(e.target.value)}
+            placeholder="admin@email"
+            style={{ flex: 1, minWidth: 180, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-light)', color: 'var(--text)', fontSize: 13, fontFamily: "'Figtree', sans-serif", outline: 'none' }}
+          />
+          <input
+            type="password" autoComplete="current-password" value={signinPw}
+            onChange={e => setSigninPw(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !busy) handleSignIn() }}
+            placeholder="Password"
+            style={{ flex: 1, minWidth: 180, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-light)', color: 'var(--text)', fontSize: 13, fontFamily: "'Figtree', sans-serif", outline: 'none' }}
+          />
+          <button onClick={handleSignIn} disabled={busy || !signinEmail.trim() || !signinPw}
+            style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.7 : 1 }}>
+            {busy ? 'Signing in…' : 'Sign in'}
+          </button>
+          {err && <p style={{ flexBasis: '100%', fontSize: 11, color: '#b91c1c', margin: 0 }}>{err}</p>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Main client ─────────────────────────────────────────────────────────────
 
 export default function ContentStudioClient() {
@@ -756,8 +921,15 @@ export default function ContentStudioClient() {
       const newPost = await callGenerate(post.template_type, post.generated_options || {})
       // Delete the old draft, keep approved/used.
       if (post.status === 'draft' || post.status === 'rejected') {
-        await supabase.from('social_content_posts').delete().eq('id', post.id)
-        setPosts(prev => [newPost, ...prev.filter(p => p.id !== post.id)])
+        const del = await adminMutate('DELETE', { ids: [post.id] })
+        if (!del.ok) {
+          // Generation succeeded but old draft couldn't be removed; surface
+          // the auth failure but keep the new post so work is not lost.
+          setLastError(`Regenerated, but old draft was not removed: ${adminMutateErrorMessage(del)}`)
+          setPosts(prev => [newPost, ...prev])
+        } else {
+          setPosts(prev => [newPost, ...prev.filter(p => p.id !== post.id)])
+        }
       } else {
         setPosts(prev => [newPost, ...prev])
       }
@@ -768,9 +940,9 @@ export default function ContentStudioClient() {
 
   async function deletePost(id: string) {
     if (!confirm('Delete this post?')) return
-    const { error } = await supabase.from('social_content_posts').delete().eq('id', id)
-    if (error) {
-      setLastError(`Couldn't delete: ${error.message}. Did you run migration 2026-05-11b-social-content-rls-fix.sql?`)
+    const res = await adminMutate('DELETE', { ids: [id] })
+    if (!res.ok) {
+      setLastError(`Couldn't delete: ${adminMutateErrorMessage(res)}`)
       return
     }
     setPosts(prev => prev.filter(p => p.id !== id))
@@ -793,13 +965,13 @@ export default function ContentStudioClient() {
     if (selectedIds.size === 0) return
     if (!confirm(`Set ${selectedIds.size} posts to "${status}"?`)) return
     const ids = Array.from(selectedIds)
-    const { data, error } = await supabase.from('social_content_posts')
-      .update({ status }).in('id', ids).select('*')
-    if (error) {
-      setLastError(`Bulk status update failed: ${error.message}. Did you run migration 2026-05-11b-social-content-rls-fix.sql?`)
+    const res = await adminMutate('PATCH', { ids, status })
+    if (!res.ok) {
+      setLastError(`Bulk status update failed: ${adminMutateErrorMessage(res)}`)
       return
     }
-    const updatedById = new Map((data || []).map((r: any) => [r.id, r as SocialContentPost]))
+    const rows: any[] = res.data?.rows ?? []
+    const updatedById = new Map(rows.map((r: any) => [r.id, r as SocialContentPost]))
     setPosts(prev => prev.map(p => updatedById.get(p.id) || p))
     setSelectedIds(new Set())
   }
@@ -808,9 +980,9 @@ export default function ContentStudioClient() {
     if (selectedIds.size === 0) return
     if (!confirm(`Delete ${selectedIds.size} posts? This can't be undone.`)) return
     const ids = Array.from(selectedIds)
-    const { error } = await supabase.from('social_content_posts').delete().in('id', ids)
-    if (error) {
-      setLastError(`Bulk delete failed: ${error.message}. Did you run migration 2026-05-11b-social-content-rls-fix.sql?`)
+    const res = await adminMutate('DELETE', { ids })
+    if (!res.ok) {
+      setLastError(`Bulk delete failed: ${adminMutateErrorMessage(res)}`)
       return
     }
     const idSet = new Set(ids)
@@ -837,6 +1009,9 @@ export default function ContentStudioClient() {
 
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 16px', fontFamily: "'Figtree', sans-serif" }}>
+      {/* Admin Supabase Auth session status (Block 1A) */}
+      <AdminSessionBar />
+
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
         <div>
