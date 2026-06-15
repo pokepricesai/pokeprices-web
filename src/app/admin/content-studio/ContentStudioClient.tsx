@@ -821,6 +821,38 @@ export default function ContentStudioClient() {
   const [lastError, setLastError] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
+  // Resend smoke test — sends one fixed-recipient email via the
+  // server-only /api/admin/test-resend route. Recipient is set on the
+  // server (EMAIL_TEST_RECIPIENT); the button cannot override it.
+  const [resendBusy,   setResendBusy]   = useState(false)
+  const [resendStatus, setResendStatus] = useState<{ ok: boolean; text: string } | null>(null)
+  const sendResendTest = useCallback(async () => {
+    setResendBusy(true)
+    setResendStatus(null)
+    try {
+      const token = await getAccessToken()
+      if (!token) {
+        setResendStatus({ ok: false, text: 'Sign in first.' })
+        return
+      }
+      const res = await fetch('/api/admin/test-resend', {
+        method:  'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      })
+      let data: { success?: boolean; emailId?: string | null; error?: string } = {}
+      try { data = await res.json() } catch { /* fine */ }
+      if (res.ok && data.success) {
+        setResendStatus({ ok: true, text: data.emailId ? `Sent (id ${data.emailId})` : 'Sent.' })
+      } else {
+        setResendStatus({ ok: false, text: data.error || `Failed (HTTP ${res.status})` })
+      }
+    } catch (e: any) {
+      setResendStatus({ ok: false, text: e?.message || 'Network error' })
+    } finally {
+      setResendBusy(false)
+    }
+  }, [])
+
   // Global options per template type
   const [cardBattleOpts,     setCardBattleOpts]     = useState<CardBattleOptions>(defaultOptionsFor('card_battle')      as CardBattleOptions)
   const [marketMoverOpts,    setMarketMoverOpts]    = useState<MarketMoverOptions>(defaultOptionsFor('market_mover')    as MarketMoverOptions)
@@ -1020,7 +1052,17 @@ export default function ContentStudioClient() {
             Generate a balanced pack of 21 social posts per week. Each template uses the settings configured on its tile below — adjust before clicking Generate.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button onClick={sendResendTest} disabled={resendBusy}
+            title="Sends one email to EMAIL_TEST_RECIPIENT via the Vercel Resend API. Recipient is server-controlled."
+            style={{ padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontSize: 12, fontWeight: 700, cursor: resendBusy ? 'not-allowed' : 'pointer', opacity: resendBusy ? 0.7 : 1 }}>
+            {resendBusy ? 'Sending…' : 'Send Resend test email'}
+          </button>
+          {resendStatus && (
+            <span style={{ fontSize: 11, color: resendStatus.ok ? '#22c55e' : '#b91c1c', fontFamily: "'Figtree', sans-serif" }}>
+              {resendStatus.text}
+            </span>
+          )}
           <button onClick={generateWeeklyPack} disabled={generating}
             style={{ padding: '10px 16px', borderRadius: 10, border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 14, fontWeight: 700, cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.7 : 1 }}>
             {generating && progress

@@ -191,7 +191,13 @@ export const ENV_CATALOGUE: ReadonlyArray<EnvVarSpec> = [
     name:        'RESEND_API_KEY',
     scope:       'server',
     required:    false,
-    description: 'Resend transactional email API key. Read only by the send-pending-emails edge function.',
+    description: 'Resend transactional email API key. Read by the send-pending-emails edge function and by /api/admin/test-resend (a temporary admin-only smoke test).',
+  },
+  {
+    name:        'EMAIL_TEST_RECIPIENT',
+    scope:       'server',
+    required:    false,
+    description: 'Single recipient address used by /api/admin/test-resend. The route never accepts a recipient from the request body — only this server-only value is ever sent to.',
   },
 ]
 
