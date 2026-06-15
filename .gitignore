@@ -4,3 +4,11 @@
 .env
 *.log
 .DS_Store
+
+# Block 1C additions
+tsconfig.tsbuildinfo
+coverage/
+.vitest-cache/
+.claude/
+response.html
+response2.html

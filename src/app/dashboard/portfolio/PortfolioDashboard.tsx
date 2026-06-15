@@ -1107,8 +1107,11 @@ export default function PortfolioDashboard() {
             }
 
             const allNumerics = new Set<string>()
-            for (const arr of urlToNumerics.values()) for (const n of arr) allNumerics.add(n)
-            for (const arr of nameSetToNumerics.values()) for (const n of arr) allNumerics.add(n)
+            // Array.from() wraps the MapIterator so the ES5 target can
+            // iterate over a plain array. Inner string[] iteration is
+            // already fine under ES5.
+            for (const arr of Array.from(urlToNumerics.values())) for (const n of arr) allNumerics.add(n)
+            for (const arr of Array.from(nameSetToNumerics.values())) for (const n of arr) allNumerics.add(n)
             const dailySlugs = Array.from(allNumerics).map(n => `pc-${n}`)
 
             const { data: dpRows } = dailySlugs.length === 0
@@ -1134,7 +1137,10 @@ export default function PortfolioDashboard() {
             // non-null value in the target column. This way a sibling
             // duplicate in `cards` whose daily_prices entry is populated
             // still resolves the price.
-            function resolveValue(item: any, col: string): number | null {
+            //
+            // Declared as a typed const-arrow so ES5 strict mode does not
+            // reject a nested function declaration inside this block.
+            const resolveValue = (item: any, col: string): number | null => {
               const urlSlug = (item.card_slug || '').toString().replace(/^pc-/, '')
               const candidates = [
                 ...(urlToNumerics.get(urlSlug) || []),

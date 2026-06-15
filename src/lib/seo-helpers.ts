@@ -1,3 +1,7 @@
+// Canonical site origin used in metadata canonicals. Matches every other
+// canonical-URL site-constant in the repository.
+const SITE = 'https://www.pokeprices.io'
+
 // ── Card page ─────────────────────────────────────────────
 // Variant A: grading-focused — when PSA 10 multiple is strong
 // Variant B: price-focused — when grading upside is modest

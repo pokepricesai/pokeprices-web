@@ -1364,7 +1364,17 @@ function Placeholder({ message = 'Search for a card above to get started' }: { m
 
 // -- Main component ------------------------------------------------------------
 
-export default function StudioPageClient() {
+// Props match what `src/app/studio/page.tsx` already passes through
+// from the page's `searchParams`. They are intentionally typed as
+// optional so the existing call signature compiles; the component does
+// not yet consume them. Wiring them into initial state would be a
+// behaviour change and is deferred.
+type StudioPageClientProps = {
+  initialCardSlug?: string
+  initialVisual?:   string
+}
+
+export default function StudioPageClient(_props: StudioPageClientProps = {}) {
   const [visualType,   setVisualType]   = useState<VisualType>('insight')
   const [theme,        setTheme]        = useState<Theme>('dark')
   const [gradeView,    setGradeView]    = useState<GradeView>('raw')

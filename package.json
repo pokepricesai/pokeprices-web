@@ -6,7 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:web": "tsc --noEmit -p tsconfig.json",
+    "typecheck:edge:diagnostic": "tsc --noEmit -p tsconfig.edge.json",
+    "test": "vitest",
+    "test:run": "vitest run",
     "indexnow": "node scripts/submit-indexnow.js"
   },
   "dependencies": {
@@ -23,9 +28,14 @@
   "devDependencies": {
     "@types/node": "^20.19.39",
     "@types/react": "^18",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
     "autoprefixer": "^10.4.0",
+    "eslint": "^8.57.1",
+    "eslint-plugin-react-hooks": "^4.6.2",
     "postcss": "^8.4.0",
     "tailwindcss": "^3.4.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^1.6.1"
   }
 }

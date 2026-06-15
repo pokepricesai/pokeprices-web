@@ -414,7 +414,6 @@ export default function CardScanner({
         ref={cameraInputRef}
         type="file"
         accept="image/*"
-        // @ts-expect-error capture is valid HTML, not in React typings yet
         capture="environment"
         style={{ display: 'none' }}
         onChange={e => handleFilesChosen(e.target.files)}

@@ -9,9 +9,7 @@ import ScrollToTop from '@/components/ScrollToTop'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://www.pokeprices.io'),
-  title: {
-    default: 'PokePrices — Pokémon Card Value Checker & Price Guide',
-  },
+  title: 'PokePrices — Pokémon Card Value Checker & Price Guide',
   description: 'Free Pokémon card value checker — live raw and PSA 10 prices for 40,000+ cards. Price guide with grading spreads, PSA population and 30-day trends. No login.',
   authors: [{ name: 'PokePrices' }],
   creator: 'PokePrices',
