@@ -9,9 +9,16 @@ import {
   cleanDisplayName,
   cleanCountryCode,
   cleanMarketplacePreference,
+  LEGACY_MARKETPLACE_VALUES,
   PROFILE_LIMITS,
   type MarketplacePreference,
 } from '@/lib/profileValidation'
+import {
+  MARKETPLACE_DEFINITIONS,
+  selectableMarketplaces,
+  isMarketplaceSelectable,
+  type MarketplaceCode,
+} from '@/lib/marketplaces'
 import { trackEvent } from '@/lib/analytics'
 
 interface Prefs {
@@ -255,16 +262,50 @@ export default function SettingsClient() {
                 <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.8, fontFamily: "'Figtree', sans-serif", display: 'block', marginBottom: 6 }}>
                   Preferred marketplace
                 </label>
-                <select
-                  value={profileDraft.marketplace_preference ?? ''}
-                  onChange={e => setProfileDraft(d => ({ ...d, marketplace_preference: (e.target.value || null) as MarketplacePreference | null }))}
-                  style={{ width: '100%', padding: '10px 12px', fontSize: 13, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontFamily: "'Figtree', sans-serif", outline: 'none', boxSizing: 'border-box' }}
-                >
-                  <option value="">No preference</option>
-                  {PROFILE_LIMITS.marketplacePreference.values.map(v => (
-                    <option key={v} value={v}>{v}</option>
-                  ))}
-                </select>
+                {(() => {
+                  const selectable = selectableMarketplaces()
+                  const savedRaw   = profileDraft.marketplace_preference
+                  const savedIsSelectable =
+                    typeof savedRaw === 'string' && isMarketplaceSelectable(savedRaw as MarketplaceCode)
+                  const savedIsLegacy =
+                    typeof savedRaw === 'string'
+                    && (LEGACY_MARKETPLACE_VALUES.includes(savedRaw)
+                        || (!savedIsSelectable && !selectable.includes(savedRaw as MarketplaceCode)))
+                  return (
+                    <>
+                      <select
+                        value={savedRaw ?? ''}
+                        onChange={e => setProfileDraft(d => ({ ...d, marketplace_preference: (e.target.value || null) as MarketplacePreference | null }))}
+                        style={{ width: '100%', padding: '10px 12px', fontSize: 13, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontFamily: "'Figtree', sans-serif", outline: 'none', boxSizing: 'border-box' }}
+                      >
+                        <option value="">Auto (detect from location)</option>
+                        {selectable.map(code => {
+                          const def = MARKETPLACE_DEFINITIONS[code]
+                          return (
+                            <option key={code} value={code}>
+                              {def.flag} {def.label}
+                            </option>
+                          )
+                        })}
+                        {savedIsLegacy && savedRaw && (
+                          <option value={savedRaw} disabled>
+                            {savedRaw} (legacy — not currently available)
+                          </option>
+                        )}
+                      </select>
+                      {savedIsLegacy && savedRaw && (
+                        <p style={{ fontSize: 11, color: '#b8741f', fontFamily: "'Figtree', sans-serif", margin: '6px 0 0' }}>
+                          Your saved preference “{savedRaw}” is no longer available. Pick Auto, {selectable.map(c => c).join(' or ')} and save to update it.
+                        </p>
+                      )}
+                      {selectable.length === 0 && (
+                        <p style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '6px 0 0' }}>
+                          No marketplaces are available right now.
+                        </p>
+                      )}
+                    </>
+                  )
+                })()}
               </div>
             </div>
 

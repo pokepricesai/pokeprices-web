@@ -39,6 +39,13 @@ const ALLOW = new Set([
   'src/lib/ebayAffiliate.ts',
   'src/lib/__tests__/ebayAffiliate.test.ts',
   'src/lib/__tests__/ebayAffiliate.engine.test.ts',
+  'src/lib/__tests__/ebayAffiliate.placements.test.ts',
+
+  // Block 2D — central marketplace registry: hostnames + per-marketplace
+  // MKRIDs live here so the engine can compose URLs per marketplace.
+  'src/lib/marketplaces.ts',
+  'src/lib/__tests__/marketplaces.test.ts',
+  'src/lib/__tests__/marketplaceResolver.test.ts',
 
   // Reusable component (uses the engine only)
   'src/components/affiliate/EbayAffiliateAction.tsx',

@@ -8,6 +8,7 @@ import GradeLadder, { type GradePrices } from '@/components/GradeLadder'
 import CardStructuredData from '@/components/CardStructuredData'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import CardQuickActions from '@/components/CardQuickActions'
+import EbayCardPriceActions from '@/components/affiliate/EbayCardPriceActions'
 import FAQ from '@/components/FAQ'
 import { getCardFaqItems } from '@/lib/faqs'
 import { getSetAssets } from '@/lib/setAssets'
@@ -598,6 +599,17 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
           <div style={{ background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)', padding: '14px 16px', marginBottom: 14 }}>
             <SectionLabel>Current Prices (USD)</SectionLabel>
             <GradeLadder prices={gradeLadderPrices} mode={card.is_sealed ? 'sealed' : 'card'} />
+            <EbayCardPriceActions
+              cardName={card.card_name}
+              setName={card.set_name}
+              cardNumber={card.card_number_display ?? card.card_number ?? null}
+              cardSlug={(card.card_url_slug || card.card_slug || '').toString().replace(/^pc-/, '') || null}
+              setSlug={card.set_name}
+              isSealed={!!card.is_sealed}
+              rawPriceCents={card.raw_usd ?? null}
+              psa9PriceCents={card.psa9_usd ?? null}
+              psa10PriceCents={card.psa10_usd ?? null}
+            />
           </div>
 
           {trendPeriods.length > 0 && (

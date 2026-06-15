@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import DashboardNav from '../DashboardNav'
 import { CardPortfolioAddModal } from '@/components/CardQuickActions'
+import EbayHoldingAction from '@/components/affiliate/EbayHoldingAction'
 
 interface WatchItem {
   id: string
@@ -368,7 +369,16 @@ export default function WatchlistClient() {
                         Since added: <span style={{ color: sinceFmt.color, fontWeight: 700 }}>{sinceFmt.text}</span>
                       </div>
                     )}
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center' }}>
+                      <EbayHoldingAction
+                        holdingType="raw"
+                        cardName={item.card_name}
+                        setName={item.set_name}
+                        cardNumber={item.card_number ?? null}
+                        cardSlug={(item.card_url_slug || item.card_slug || '').replace(/^pc-/, '') || null}
+                        setSlug={item.set_name}
+                        placement="watchlist_row"
+                      />
                       <button onClick={() => setPortfolioAddItem(item)}
                         style={{ fontSize: 11, padding: '4px 10px', borderRadius: 8, border: '1px solid var(--primary)', background: 'rgba(26,95,173,0.08)', color: 'var(--primary)', cursor: 'pointer', fontFamily: "'Figtree', sans-serif", fontWeight: 700 }}
                       >+ Add to portfolio</button>

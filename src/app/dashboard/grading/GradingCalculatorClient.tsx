@@ -10,6 +10,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import DashboardNav from '../DashboardNav'
+import EbayGradingScenarioAction from '@/components/affiliate/EbayGradingScenarioAction'
 
 type Currency = 'GBP' | 'USD'
 
@@ -338,6 +339,38 @@ export default function GradingCalculatorClient() {
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>{selected.set_name}</div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 4 }}>
                   Raw {fmt(selected.raw_usd, currency)} · PSA 9 {fmt(selected.psa9_usd, currency)} · PSA 10 {fmt(selected.psa10_usd, currency)}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                  {(selected.raw_usd ?? 0) > 0 && (
+                    <EbayGradingScenarioAction
+                      scenario="raw"
+                      cardName={selected.card_name}
+                      setName={selected.set_name}
+                      cardNumber={selected.card_number_display ?? null}
+                      cardSlug={(selected.card_url_slug || selected.card_slug || '').replace(/^pc-/, '') || null}
+                      setSlug={selected.set_name}
+                    />
+                  )}
+                  {(selected.psa9_usd ?? 0) > 0 && (
+                    <EbayGradingScenarioAction
+                      scenario="psa9"
+                      cardName={selected.card_name}
+                      setName={selected.set_name}
+                      cardNumber={selected.card_number_display ?? null}
+                      cardSlug={(selected.card_url_slug || selected.card_slug || '').replace(/^pc-/, '') || null}
+                      setSlug={selected.set_name}
+                    />
+                  )}
+                  {(selected.psa10_usd ?? 0) > 0 && (
+                    <EbayGradingScenarioAction
+                      scenario="psa10"
+                      cardName={selected.card_name}
+                      setName={selected.set_name}
+                      cardNumber={selected.card_number_display ?? null}
+                      cardSlug={(selected.card_url_slug || selected.card_slug || '').replace(/^pc-/, '') || null}
+                      setSlug={selected.set_name}
+                    />
+                  )}
                 </div>
               </div>
               <button onClick={() => setSelected(null)} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontSize: 12, fontWeight: 600, fontFamily: "'Figtree', sans-serif", cursor: 'pointer' }}>

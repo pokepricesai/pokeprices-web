@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { supabase, CHAT_ENDPOINT } from '@/lib/supabase'
 import DashboardNav from '../DashboardNav'
 import CardScanner, { ConfirmedCard, ConfirmContext } from '@/components/CardScanner'
+import EbayHoldingAction from '@/components/affiliate/EbayHoldingAction'
 import {
   HOLDING_TYPES as ALL_HOLDING_TYPES,
   GRADE_LABELS as ALL_GRADE_LABELS,
@@ -1614,7 +1615,15 @@ export default function PortfolioDashboard() {
                           </div>
                         )
                       })()}
-                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                      <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
+                        <EbayHoldingAction
+                          holdingType={item.holding_type}
+                          cardName={item.card_name}
+                          setName={item.set_name}
+                          cardSlug={(item.card_slug || '').replace(/^pc-/, '') || null}
+                          setSlug={item.set_name}
+                          placement="portfolio_row"
+                        />
                         <button
                           onClick={() => setEditingItem(item)}
                           aria-label="Edit holding"

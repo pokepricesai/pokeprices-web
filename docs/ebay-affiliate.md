@@ -25,25 +25,116 @@ Components that already render affiliate UI:
 | `DealerEbaySoldLink` | `src/app/dealer/DealerPageClient.tsx` | Single graded sold-search link per dealer row |
 | `ChatLink` | `src/components/InlineChat.tsx` | Wraps any eBay URL that appears in an AI answer |
 | `EbayAffiliateAction` | `src/components/affiliate/EbayAffiliateAction.tsx` | Reusable foundation for the next affiliate block |
+| `EbayCompactLink` | `src/components/affiliate/EbayCompactLink.tsx` | Block 2D core compact link, marketplace-aware via `useMarketplace()` |
+| `EbayCardPriceActions` | `src/components/affiliate/EbayCardPriceActions.tsx` | Block 2D — "Find raw / PSA 9 / PSA 10 copies on eBay" row beside `<GradeLadder>` |
+| `EbayHoldingAction` | `src/components/affiliate/EbayHoldingAction.tsx` | Block 2D — single "Check current listings" link on portfolio + watchlist rows |
+| `EbayGradingScenarioAction` | `src/components/affiliate/EbayGradingScenarioAction.tsx` | Block 2D — "Compare raw / PSA 9 / PSA 10 listings" beside the grading calculator's selected card |
+| `MarketplaceSelector` | `src/components/affiliate/MarketplaceSelector.tsx` | Compact marketplace dropdown in the navbar; hidden when <2 marketplaces configured |
 
 ## Supported marketplaces
 
-`uk` and `us` today. Other markets are reserved for the marketplace
-localisation block. Adding a marketplace requires:
+Block 2D introduces a central registry in `src/lib/marketplaces.ts`. UK
+and US ship implemented AND configured. CA, AU, DE, FR, IT and ES are
+documented in the registry with hostnames, site IDs and MKRIDs but are
+**not selectable** today — see the readiness model below.
 
-1. A working campaign ID in EPN.
-2. A new `Marketplace` literal in `ebayAffiliate.ts`.
-3. A new MKRID, hostname, siteid block in the engine constants.
-4. Tests covering the new marketplace's URL shape.
+`MarketplaceCode = 'UK' | 'US' | 'CA' | 'AU' | 'DE' | 'FR' | 'IT' | 'ES'`.
+
+### Marketplace readiness model
+
+A marketplace passes through three independent states:
+
+| State | Meaning | Source of truth |
+|---|---|---|
+| **implemented** | The central URL engine in `ebayAffiliate.ts` can emit a NATIVE affiliate URL for this marketplace. | `IMPLEMENTED_MARKETPLACES` in `src/lib/marketplaces.ts`. Today: `UK`, `US`. |
+| **configured** | A non-empty campaign id is present in the static `PUBLIC_EBAY_CAMPAIGN_IDS` map (built from a `NEXT_PUBLIC_EBAY_CAMPID_<CODE>` env var at build time). | `PUBLIC_EBAY_CAMPAIGN_IDS` in `src/lib/marketplaces.ts`. |
+| **selectable** | implemented AND configured. The selector and the settings dropdown only show selectable marketplaces. | `isMarketplaceSelectable()` / `selectableMarketplaces()`. |
+
+`configured` alone is **not enough**. Until a marketplace is also
+implemented (i.e. the engine can produce a correctly-attributed URL for
+it), it will not appear in the selector or be surfaced as a choice.
+
+### Deployment flow for a new marketplace
+
+NEXT_PUBLIC variables are baked into the browser bundle at **build
+time**. Populating a campaign id in Vercel without redeploying does
+**not** activate the marketplace. The real activation sequence is:
+
+1. Add the marketplace's campaign id to Vercel project environment as
+   `NEXT_PUBLIC_EBAY_CAMPID_<CODE>`.
+2. Confirm the central URL engine (`ebayAffiliate.ts`) supports that
+   marketplace and add it to `IMPLEMENTED_MARKETPLACES` once it does.
+3. Trigger a Vercel deployment so the new env var lands in the client
+   bundle.
+4. Sanity-check one affiliate URL end-to-end on a deployed preview:
+   correct domain, MKRID, site id, campaign id, custom id, search
+   query, and (for `sold_search` only) the sold filters.
+5. Verify EPN attribution arrives under the new campaign id in the
+   partner dashboard within the next reporting cycle.
+6. Only then does the marketplace surface in the selector and the
+   settings dropdown.
+
+## Marketplace selection precedence
+
+Resolved client-side by `resolveMarketplace(...)` in
+`src/lib/marketplaceResolver.ts`:
+
+1. **Manual cookie** — `pp_marketplace`. Set by `MarketplaceSelector`
+   on every click (365-day persistence, lax, secure on HTTPS). The
+   **explicit user choice always wins**: even when the user is signed
+   in with a stored profile preference, even if the best-effort profile
+   save fails after the selector click. The cookie is never cleared by
+   the app — only an explicit re-selection replaces it.
+2. **Profile preference** — `profiles.marketplace_preference` for
+   signed-in users. Legacy values `'EU'` and `'other'` are coerced at
+   read time (`'EU'` → the first SELECTABLE European marketplace,
+   `'other'` → null so the resolver continues to step 3).
+3. **Geolocation cookie** — `pp_geo_country` populated lazily from
+   `/api/geo` (route handler returns the `x-vercel-ip-country` header).
+   No IP is stored, no third-party geolocation provider is called.
+4. **Ultimate fallback** — UK if selectable, else US if selectable,
+   else any selectable marketplace. When zero marketplaces are
+   selectable, every affiliate component renders nothing.
+
+Only **selectable** marketplaces are ever returned by the resolver.
+
+The resolver is pure (no React, no fetch) so it can be unit-tested in
+isolation. `useMarketplace()` in `src/lib/marketplaceClient.ts` wires it
+to the live cookies and the optional `/api/geo` lookup.
+
+## Cookies
+
+| Cookie | Purpose | Notes |
+|---|---|---|
+| `pp_marketplace` | Manual marketplace selection from the selector. | 365d, `SameSite=Lax`, `Secure` on HTTPS. Cleared on logout if the user signed in and chose a profile preference. |
+| `pp_geo_country` | Result of `/api/geo` lookup. Stored to avoid re-hitting the route on every page. | 30d, `SameSite=Lax`, `Secure` on HTTPS. Stores a two-letter country code or empty — never IPs. |
 
 ## Campaign environment variables
+
+All campaign IDs are read through the static
+`PUBLIC_EBAY_CAMPAIGN_IDS` map in `src/lib/marketplaces.ts`. Each entry
+in that map is a literal `process.env.NEXT_PUBLIC_EBAY_CAMPID_<CODE>`
+access so Next.js's build-time inliner replaces it in the browser
+bundle. **Dynamic access via `process.env[someName]` is not inlined on
+the client and silently resolves to `undefined` in production** — never
+read campaign IDs that way.
 
 | Variable | Scope | Required? | Notes |
 |---|---|---|---|
 | `NEXT_PUBLIC_EBAY_CAMPID_UK` | public | recommended | When missing, the engine returns `url: null` for UK and the calling component hides the action. |
 | `NEXT_PUBLIC_EBAY_CAMPID_US` | public | recommended | Same behaviour for US. |
+| `NEXT_PUBLIC_EBAY_CAMPID_CA` | public | optional | Reserved. Populating it alone does NOT activate Canada; the URL engine must also be extended and a new deployment shipped. |
+| `NEXT_PUBLIC_EBAY_CAMPID_AU` | public | optional | Reserved (same as CA). |
+| `NEXT_PUBLIC_EBAY_CAMPID_DE` | public | optional | Reserved (same as CA). |
+| `NEXT_PUBLIC_EBAY_CAMPID_FR` | public | optional | Reserved (same as CA). |
+| `NEXT_PUBLIC_EBAY_CAMPID_IT` | public | optional | Reserved (same as CA). |
+| `NEXT_PUBLIC_EBAY_CAMPID_ES` | public | optional | Reserved (same as CA). |
 
-The IDs must be public because the affiliate URL is built client-side
+Adding or changing any `NEXT_PUBLIC_*` value requires a new Vercel
+deployment to land in the browser bundle. Setting it in the Vercel
+dashboard without redeploying changes nothing on the live site.
+
+The IDs are public because the affiliate URL is built client-side
 for analytics dimension visibility. They are not secrets in the
 traditional sense; treat them like any commerce identifier — rotation
 should be coordinated with EPN.
@@ -165,25 +256,31 @@ These are also documented in `docs/analytics-events.md`.
 
 ## Known marketplace / localisation limitations
 
-- Today only UK and US are wired. There is no automatic geo-routing.
+- UK and US are implemented + configured. CA / AU / DE / FR / IT / ES
+  are reserved in the registry but **not selectable**: the URL composer
+  in `ebayAffiliate.ts` does not yet emit native URLs for them, so they
+  are deliberately hidden from the selector and the settings dropdown.
+  Configuring just the env var would create the misleading appearance
+  of marketplace support without correct attribution.
+- Geolocation uses Vercel's `x-vercel-ip-country` header only. IPs are
+  never logged or sent to a third party.
 - Sealed product searches use a parent category. eBay sub-categories
   for booster boxes / ETBs / tins may move sealed listings; the
   category will need a future refinement once we measure click quality.
-- The reusable `EbayAffiliateAction` component is implemented but
-  **deliberately not inserted at any new location** in this block.
 
-## Future rollout plan (out of scope for Block 2C)
+## Future rollout plan
 
-The next affiliate block can:
-
-1. Insert `EbayAffiliateAction` beside the raw / PSA 9 / PSA 10 price
-   tiles on card pages, portfolio rows, watchlist rows, AI answers,
-   grading report and market movers.
-2. Roll out the v2 custom-ID format to those placements alongside the
-   legacy IDs for at least one EPN reporting cycle so we can reconcile.
-3. Wire `affiliate_link_view` impressions on each new placement.
-4. Plug in geo-aware default marketplace (Vercel geo header) and a
-   user-overridable preference.
+1. Extend the URL composer in `ebayAffiliate.ts` to emit valid URLs for
+   CA / AU / DE / FR / IT / ES once each marketplace's preferred query
+   shape is confirmed.
+2. Add each newly-implemented marketplace to `IMPLEMENTED_MARKETPLACES`
+   in `src/lib/marketplaces.ts`.
+3. Populate the corresponding `NEXT_PUBLIC_EBAY_CAMPID_<CODE>` env var
+   in Vercel and trigger a deployment.
+4. After at least one EPN reporting cycle, retire any remaining legacy
+   custom IDs that the v2 format has fully reconciled with.
+5. Optional dealer-page marketplace override — separate from the
+   primary selector — once dealer rows route through `EbayCompactLink`.
 
 ## Repository audit
 

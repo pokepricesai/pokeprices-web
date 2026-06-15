@@ -62,14 +62,23 @@ describe('cleanDisplayName', () => {
 })
 
 describe('cleanMarketplacePreference', () => {
-  it('accepts known values', () => {
-    expect(cleanMarketplacePreference('UK')).toBe('UK')
-    expect(cleanMarketplacePreference('US')).toBe('US')
+  it('accepts every canonical Block 2D marketplace code', () => {
+    for (const v of ['UK', 'US', 'CA', 'AU', 'DE', 'FR', 'IT', 'ES']) {
+      expect(cleanMarketplacePreference(v)).toBe(v)
+    }
   })
 
-  it('rejects unknown values', () => {
+  it('uppercases lowercase input', () => {
+    expect(cleanMarketplacePreference('uk')).toBe('UK')
+    expect(cleanMarketplacePreference(' fr ')).toBe('FR')
+  })
+
+  it('rejects values outside the canonical set, including legacy EU/other', () => {
     expect(cleanMarketplacePreference('XX')).toBeNull()
-    expect(cleanMarketplacePreference('uk')).toBeNull()
+    expect(cleanMarketplacePreference('EU')).toBeNull()
+    expect(cleanMarketplacePreference('other')).toBeNull()
+    expect(cleanMarketplacePreference('')).toBeNull()
+    expect(cleanMarketplacePreference(null)).toBeNull()
   })
 })
 
@@ -88,8 +97,12 @@ describe('cleanProfilePatch', () => {
     expect(cleanProfilePatch({ country_code: 'USA' }).country_code).toBeNull()
   })
 
-  it('accepts a known marketplace', () => {
-    expect(cleanProfilePatch({ marketplace_preference: 'EU' }).marketplace_preference).toBe('EU')
+  it('accepts a canonical marketplace code', () => {
+    expect(cleanProfilePatch({ marketplace_preference: 'UK' }).marketplace_preference).toBe('UK')
+  })
+
+  it('coerces the legacy EU value to null on write (legacy values stay readable in the DB but new writes use canonical codes only)', () => {
+    expect(cleanProfilePatch({ marketplace_preference: 'EU' }).marketplace_preference).toBeNull()
   })
 
   it('returns an empty patch for a non-object input', () => {

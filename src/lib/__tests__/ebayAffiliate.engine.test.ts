@@ -1,14 +1,31 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   buildAffiliateLink,
   buildSearchQuery,
   affiliateWrapEbayUrl,
   hasMarketplaceCampaign,
 } from '../ebayAffiliate'
+import { PUBLIC_EBAY_CAMPAIGN_IDS, type MarketplaceCode } from '../marketplaces'
+
+// The engine's new buildAffiliateLink path reads campaign IDs from
+// PUBLIC_EBAY_CAMPAIGN_IDS (captured at module load). vi.stubEnv only
+// affects process.env at runtime — which would be silently ignored by
+// the new path. Tests must mutate the map directly to set up state.
+const MAP = PUBLIC_EBAY_CAMPAIGN_IDS as Record<MarketplaceCode, string | undefined>
+let mapSnapshot: Record<MarketplaceCode, string | undefined>
 
 beforeEach(() => {
+  mapSnapshot = { ...MAP } as Record<MarketplaceCode, string | undefined>
+  MAP.UK = 'TEST-UK'
+  MAP.US = 'TEST-US'
+  // Keep the legacy exports' process.env reads in sync with the map
+  // for the legacy URL builders that still consult process.env.
   vi.stubEnv('NEXT_PUBLIC_EBAY_CAMPID_UK', 'TEST-UK')
   vi.stubEnv('NEXT_PUBLIC_EBAY_CAMPID_US', 'TEST-US')
+})
+
+afterEach(() => {
+  for (const code of Object.keys(MAP) as MarketplaceCode[]) MAP[code] = mapSnapshot[code]
 })
 
 describe('buildSearchQuery', () => {
@@ -142,7 +159,7 @@ describe('buildAffiliateLink — URL composition', () => {
   })
 
   it('returns url: null when the campaign id is empty', () => {
-    vi.stubEnv('NEXT_PUBLIC_EBAY_CAMPID_UK', '')
+    MAP.UK = ''
     const r = buildAffiliateLink({ marketplace: 'uk', intent: 'raw', cardName: 'Pikachu', setName: 'Base Set' })
     expect(r.url).toBeNull()
     expect(r.campaignId).toBeNull()
@@ -150,7 +167,7 @@ describe('buildAffiliateLink — URL composition', () => {
   })
 
   it('returns url: null when the campaign id is whitespace', () => {
-    vi.stubEnv('NEXT_PUBLIC_EBAY_CAMPID_US', '   ')
+    MAP.US = '   '
     const r = buildAffiliateLink({ marketplace: 'us', intent: 'raw', cardName: 'Pikachu' })
     expect(r.url).toBeNull()
   })
@@ -224,7 +241,7 @@ describe('affiliateWrapEbayUrl', () => {
   })
 
   it('returns url: null when the marketplace campaign id is missing', () => {
-    vi.stubEnv('NEXT_PUBLIC_EBAY_CAMPID_UK', '')
+    MAP.UK = ''
     const r = affiliateWrapEbayUrl('https://www.ebay.co.uk/itm/12345678')
     expect(r).not.toBeNull()
     expect(r!.url).toBeNull()
@@ -245,7 +262,7 @@ describe('hasMarketplaceCampaign', () => {
   })
 
   it('false when env is missing', () => {
-    vi.stubEnv('NEXT_PUBLIC_EBAY_CAMPID_UK', '')
+    MAP.UK = ''
     expect(hasMarketplaceCampaign('uk')).toBe(false)
   })
 })

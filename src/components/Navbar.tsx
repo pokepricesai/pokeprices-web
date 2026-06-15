@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { trackEvent } from '@/lib/analytics'
 import Avatar from './Avatar'
 import ComingSoonBadge from './ComingSoonBadge'
+import MarketplaceSelector from './affiliate/MarketplaceSelector'
 
 interface SearchResult {
   result_type: string
@@ -497,6 +498,11 @@ export default function Navbar() {
         <span aria-hidden style={{ fontSize: 13, lineHeight: 1 }}>✨</span>
         <span className="ai-cta-label">Ask me anything</span>
       </Link>
+
+      {/* Marketplace selector — only renders when 2+ marketplaces configured */}
+      <div className="marketplace-selector-wrap" style={{ flexShrink: 0 }}>
+        <MarketplaceSelector size="sm" ariaLabel="eBay marketplace" />
+      </div>
 
       {/* Auth area — Sign in + Sign up free when logged out; profile menu when logged in */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }} className="auth-area">

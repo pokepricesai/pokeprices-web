@@ -63,6 +63,42 @@ export const ENV_CATALOGUE: ReadonlyArray<EnvVarSpec> = [
     description: 'eBay Partner Network US campaign ID. Missing → affiliate links render with empty campid.',
   },
   {
+    name:        'NEXT_PUBLIC_EBAY_CAMPID_CA',
+    scope:       'public',
+    required:    false,
+    description: 'eBay Partner Network Canada campaign ID. Block 2D — populating this activates the Canadian marketplace in the resolver; missing → marketplace stays hidden in the selector.',
+  },
+  {
+    name:        'NEXT_PUBLIC_EBAY_CAMPID_AU',
+    scope:       'public',
+    required:    false,
+    description: 'eBay Partner Network Australia campaign ID. Block 2D — populating this activates the Australian marketplace.',
+  },
+  {
+    name:        'NEXT_PUBLIC_EBAY_CAMPID_DE',
+    scope:       'public',
+    required:    false,
+    description: 'eBay Partner Network Germany campaign ID. Block 2D — populating this activates the German marketplace.',
+  },
+  {
+    name:        'NEXT_PUBLIC_EBAY_CAMPID_FR',
+    scope:       'public',
+    required:    false,
+    description: 'eBay Partner Network France campaign ID. Block 2D — populating this activates the French marketplace.',
+  },
+  {
+    name:        'NEXT_PUBLIC_EBAY_CAMPID_IT',
+    scope:       'public',
+    required:    false,
+    description: 'eBay Partner Network Italy campaign ID. Block 2D — populating this activates the Italian marketplace.',
+  },
+  {
+    name:        'NEXT_PUBLIC_EBAY_CAMPID_ES',
+    scope:       'public',
+    required:    false,
+    description: 'eBay Partner Network Spain campaign ID. Block 2D — populating this activates the Spanish marketplace.',
+  },
+  {
     name:        'NEXT_PUBLIC_GA4_MEASUREMENT_ID',
     scope:       'public',
     required:    false,

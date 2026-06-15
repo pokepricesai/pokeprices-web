@@ -27,6 +27,13 @@
 //     whole string sanitised to [A-Za-z0-9._:-] and length-capped at 200.
 
 // ── Marketplaces / categories ───────────────────────────────────────────────
+//
+// Block 2D moved per-marketplace configuration into
+// src/lib/marketplaces.ts. The constants below are KEPT for backwards
+// compatibility (the legacy exports getEbayUkUrl etc. continue to read
+// them) but new code goes through buildAffiliateLink + the registry.
+
+import { PUBLIC_EBAY_CAMPAIGN_IDS } from './marketplaces'
 
 const UK_BASE   = 'https://www.ebay.co.uk/sch/i.html'
 const US_BASE   = 'https://www.ebay.com/sch/i.html'
@@ -242,9 +249,11 @@ function categoryFor(intent: AffiliateIntent): string {
 }
 
 function readCampaignId(mp: Marketplace): string | null {
-  const raw = mp === 'uk'
-    ? (process.env.NEXT_PUBLIC_EBAY_CAMPID_UK ?? '')
-    : (process.env.NEXT_PUBLIC_EBAY_CAMPID_US ?? '')
+  // Reads from the static PUBLIC_EBAY_CAMPAIGN_IDS map so the campaign
+  // ID is inlined into the client bundle at build time. Dynamic
+  // `process.env[name]` is NOT inlined on the client and would silently
+  // resolve to undefined in production.
+  const raw = (mp === 'uk' ? PUBLIC_EBAY_CAMPAIGN_IDS.UK : PUBLIC_EBAY_CAMPAIGN_IDS.US) ?? ''
   const trimmed = String(raw).trim()
   return trimmed.length > 0 ? trimmed : null
 }

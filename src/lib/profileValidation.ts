@@ -2,12 +2,22 @@
 // Pure validators for the public.profiles fields written from the
 // dashboard settings UI.
 
+// Block 2D: accepted marketplace_preference values are now the
+// marketplace codes from src/lib/marketplaces.ts. Legacy 'EU' and
+// 'other' rows already saved in production stay as-is and are coerced
+// to the resolver's fallback at read time — see
+// marketplaceResolver.coerceLegacyMarketplace.
 export const PROFILE_LIMITS = {
   displayName:           { min: 1, max: 60 },
-  marketplacePreference: { values: ['UK', 'US', 'EU', 'AU', 'CA', 'other'] as const },
+  marketplacePreference: { values: ['UK', 'US', 'CA', 'AU', 'DE', 'FR', 'IT', 'ES'] as const },
 } as const
 
 export type MarketplacePreference = typeof PROFILE_LIMITS.marketplacePreference.values[number]
+
+/** Legacy values still tolerated in the database. The settings UI may
+ *  show them as the current value when reading an old row, but new
+ *  writes must use one of the canonical codes above. */
+export const LEGACY_MARKETPLACE_VALUES: ReadonlyArray<string> = ['EU', 'other']
 
 const COUNTRY_RE = /^[A-Z]{2}$/
 
@@ -36,11 +46,12 @@ export function cleanDisplayName(raw: unknown): string | null {
 
 export function cleanMarketplacePreference(raw: unknown): MarketplacePreference | null {
   if (raw == null) return null
-  const s = String(raw).trim()
+  const s = String(raw).trim().toUpperCase()
   if (!s) return null
-  return (PROFILE_LIMITS.marketplacePreference.values as readonly string[]).includes(s)
-    ? (s as MarketplacePreference)
-    : null
+  if ((PROFILE_LIMITS.marketplacePreference.values as readonly string[]).includes(s)) {
+    return s as MarketplacePreference
+  }
+  return null
 }
 
 export type ProfilePatch = {
