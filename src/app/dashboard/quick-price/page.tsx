@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { requireAuthUser } from '@/lib/auth-server'
 import QuickPriceClient from './QuickPriceClient'
 
 export const metadata: Metadata = {
@@ -7,6 +8,7 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 }
 
-export default function QuickPricePage() {
+export default async function QuickPricePage() {
+  await requireAuthUser('/dashboard/quick-price')
   return <QuickPriceClient />
 }

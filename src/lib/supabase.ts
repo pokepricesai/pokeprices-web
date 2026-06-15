@@ -1,9 +1,20 @@
-import { createClient } from '@supabase/supabase-js'
+// Browser-side Supabase client backed by COOKIES so the server can read
+// the session in React Server Components and route handlers. Block 2A.
+//
+// One-time effect on deploy: any existing session that lives only in
+// localStorage will appear signed-out until the user signs in once more.
+// This is intentional — without cookie-backed sessions the new server-
+// side auth boundary cannot work.
+//
+// `supabase` is the singleton; importing this file multiple times still
+// produces one client thanks to @supabase/ssr's internal de-dup.
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://egidpsrkqvymvioidatc.supabase.co'
+import { createBrowserClient } from '@supabase/ssr'
+
+const supabaseUrl     = process.env.NEXT_PUBLIC_SUPABASE_URL     || 'https://egidpsrkqvymvioidatc.supabase.co'
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey)
 
 export const CHAT_ENDPOINT = `${supabaseUrl}/functions/v1/smart-endpoint`
 

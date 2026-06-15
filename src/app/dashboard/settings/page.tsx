@@ -1,5 +1,6 @@
 // src/app/dashboard/settings/page.tsx
 import type { Metadata } from 'next'
+import { requireAuthUser } from '@/lib/auth-server'
 import SettingsClient from './SettingsClient'
 
 export const metadata: Metadata = {
@@ -7,6 +8,7 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 }
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  await requireAuthUser('/dashboard/settings')
   return <SettingsClient />
 }

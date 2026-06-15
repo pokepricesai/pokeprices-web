@@ -1,5 +1,6 @@
 // src/app/dashboard/grading/page.tsx
 import type { Metadata } from 'next'
+import { requireAuthUser } from '@/lib/auth-server'
 import GradingCalculatorClient from './GradingCalculatorClient'
 
 export const metadata: Metadata = {
@@ -7,6 +8,7 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 }
 
-export default function GradingPage() {
+export default async function GradingPage() {
+  await requireAuthUser('/dashboard/grading')
   return <GradingCalculatorClient />
 }

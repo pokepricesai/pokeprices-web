@@ -1,12 +1,21 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
+import { safeReturnTo } from '@/lib/returnTo'
 
 type Mode = 'signin' | 'signup' | 'magic'
 
-export default function PortfolioLoginPage() {
-  const router = useRouter()
+function PortfolioLoginInner() {
+  const router       = useRouter()
+  const searchParams = useSearchParams()
+
+  // returnTo + initial error from the auth callback are now first-class
+  // query inputs on this page.
+  const safeReturn = safeReturnTo(searchParams.get('returnTo')) ?? '/dashboard'
+  const callbackError = searchParams.get('error')
+
   const [mode, setMode] = useState<Mode>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -14,15 +23,24 @@ export default function PortfolioLoginPage() {
   const [magicSent, setMagicSent] = useState(false)
   const [signupSent, setSignupSent] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState(callbackError || '')
   const [info, setInfo] = useState('')
+
+  // Build a fresh callback URL for OAuth / magic-link / signup with the
+  // current safe returnTo. Encoded once at the boundary.
+  function buildCallbackUrl(extra: Record<string, string> = {}): string {
+    const u = new URL('/auth/callback', window.location.origin)
+    u.searchParams.set('returnTo', safeReturn)
+    for (const [k, v] of Object.entries(extra)) u.searchParams.set(k, v)
+    return u.toString()
+  }
 
   // If a session is already live, skip the login screen.
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) router.replace('/dashboard')
+      if (session) router.replace(safeReturn)
     })
-  }, [router])
+  }, [router, safeReturn])
 
   function clearMessages() { setError(''); setInfo('') }
 
@@ -30,7 +48,7 @@ export default function PortfolioLoginPage() {
     clearMessages()
     await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: `${window.location.origin}/dashboard` },
+      options: { redirectTo: buildCallbackUrl() },
     })
   }
 
@@ -50,7 +68,7 @@ export default function PortfolioLoginPage() {
         : error.message)
       return
     }
-    router.push('/dashboard')
+    router.push(safeReturn)
   }
 
   async function handleSignUp() {
@@ -66,7 +84,7 @@ export default function PortfolioLoginPage() {
     const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
       password,
-      options: { emailRedirectTo: `${window.location.origin}/dashboard` },
+      options: { emailRedirectTo: buildCallbackUrl() },
     })
     setLoading(false)
     if (error) { setError(error.message); return }
@@ -75,7 +93,7 @@ export default function PortfolioLoginPage() {
     if (!data.session) {
       setSignupSent(true)
     } else {
-      router.push('/dashboard')
+      router.push(safeReturn)
     }
   }
 
@@ -85,7 +103,7 @@ export default function PortfolioLoginPage() {
     setLoading(true)
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
-      options: { emailRedirectTo: `${window.location.origin}/dashboard` },
+      options: { emailRedirectTo: buildCallbackUrl() },
     })
     setLoading(false)
     if (error) { setError(error.message); return }
@@ -99,8 +117,13 @@ export default function PortfolioLoginPage() {
       return
     }
     setLoading(true)
+    // Recovery flow always routes through /auth/callback?type=recovery
+    // and lands on /auth/reset-password.
+    const recoveryReturn = new URL('/auth/callback', window.location.origin)
+    recoveryReturn.searchParams.set('type',     'recovery')
+    recoveryReturn.searchParams.set('returnTo', '/auth/reset-password')
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: `${window.location.origin}/dashboard/login`,
+      redirectTo: recoveryReturn.toString(),
     })
     setLoading(false)
     if (error) { setError(error.message); return }
@@ -304,5 +327,14 @@ function Divider({ label }: { label: string }) {
       <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>{label}</span>
       <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
     </div>
+  )
+}
+
+// useSearchParams() requires a Suspense boundary during static prerender.
+export default function PortfolioLoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <PortfolioLoginInner />
+    </Suspense>
   )
 }

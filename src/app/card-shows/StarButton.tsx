@@ -6,6 +6,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { setIntendedAction, consumeIntendedAction } from '@/lib/intendedAction'
 
 export default function StarButton({
   showId,
@@ -41,6 +42,26 @@ export default function StarButton({
     return () => { live = false }
   }, [showId, initialStarred])
 
+  // ── Replay a pending star intent after login (Block 2A) ──────────────────
+  // Triggered on mount when the user is now signed in AND a card_show_star
+  // intent in sessionStorage matches THIS show.
+  useEffect(() => {
+    let live = true
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!live || !session) return
+      const intent = consumeIntendedAction()
+      if (!intent || intent.type !== 'card_show_star') return
+      if (intent.payload.show_id !== showId) return
+      const { error } = await supabase
+        .from('card_show_stars')
+        .insert([{ user_id: session.user.id, show_id: showId }])
+      if (!error || error.code === '23505') {
+        if (live) setStarred(true)
+      }
+    })
+    return () => { live = false }
+  }, [showId])
+
   async function toggle(e: React.MouseEvent) {
     e.preventDefault()
     e.stopPropagation()
@@ -48,8 +69,10 @@ export default function StarButton({
     setBusy(true)
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) {
-      // Send to login with a return path so they come back here.
-      router.push('/dashboard/login?next=' + encodeURIComponent(window.location.pathname))
+      // Store the intent + return to this exact page after login.
+      setIntendedAction({ type: 'card_show_star', payload: { show_id: showId } })
+      const returnTo = window.location.pathname + window.location.search
+      router.push('/dashboard/login?returnTo=' + encodeURIComponent(returnTo))
       setBusy(false)
       return
     }

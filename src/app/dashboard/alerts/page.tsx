@@ -1,6 +1,7 @@
 // src/app/dashboard/alerts/page.tsx
 import type { Metadata } from 'next'
 import { Suspense } from 'react'
+import { requireAuthUser } from '@/lib/auth-server'
 import AlertsClient from './AlertsClient'
 
 export const metadata: Metadata = {
@@ -10,7 +11,8 @@ export const metadata: Metadata = {
 
 // AlertsClient uses useSearchParams() (deep-link from /watchlist?new=…),
 // which requires a Suspense boundary for static prerender.
-export default function AlertsPage() {
+export default async function AlertsPage() {
+  await requireAuthUser('/dashboard/alerts')
   return (
     <Suspense fallback={null}>
       <AlertsClient />

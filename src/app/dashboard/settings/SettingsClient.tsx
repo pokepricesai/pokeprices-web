@@ -5,6 +5,13 @@ import { supabase } from '@/lib/supabase'
 import DashboardNav from '../DashboardNav'
 import Avatar from '@/components/Avatar'
 import AvatarPicker from '@/components/AvatarPicker'
+import {
+  cleanDisplayName,
+  cleanCountryCode,
+  cleanMarketplacePreference,
+  PROFILE_LIMITS,
+  type MarketplacePreference,
+} from '@/lib/profileValidation'
 
 interface Prefs {
   weekly_digest_enabled: boolean
@@ -15,10 +22,26 @@ interface Prefs {
   last_digest_sent_at: string | null
 }
 
+interface Profile {
+  display_name:           string | null
+  country_code:           string | null
+  marketplace_preference: MarketplacePreference | null
+}
+
+// Currency intentionally stays on user_email_preferences in Block 2A.
+// A future block will consolidate it onto profiles.preferred_currency.
+
 export default function SettingsClient() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [prefs, setPrefs] = useState<Prefs | null>(null)
+  // profileDraft holds the editable view; the persisted snapshot from
+  // the database is loaded straight into the draft and the draft is what
+  // every save reads from.
+  const [profileDraft, setProfileDraft] = useState<Profile>({ display_name: '', country_code: '', marketplace_preference: null })
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [profileSavedAt, setProfileSavedAt] = useState<number | null>(null)
+  const [profileError, setProfileError]   = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<number | null>(null)
@@ -79,6 +102,67 @@ export default function SettingsClient() {
     setSavedAt(Date.now())
   }
 
+  // ── Profile load ────────────────────────────────────────────────────────
+  // The Block 2A migration backfills a row for every existing user and a
+  // trigger creates one for every new signup, so a row should always be
+  // present. The defensive `maybeSingle` allows the page to keep loading
+  // if the migration has not yet been applied.
+  useEffect(() => {
+    if (!user) return
+    let live = true
+    supabase
+      .from('profiles')
+      .select('display_name, country_code, marketplace_preference')
+      .eq('user_id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!live) return
+        setProfileDraft({
+          display_name:           ((data as any)?.display_name           ?? '') as string,
+          country_code:           ((data as any)?.country_code           ?? '') as string,
+          marketplace_preference: ((data as any)?.marketplace_preference ?? null) as MarketplacePreference | null,
+        })
+      })
+    return () => { live = false }
+  }, [user])
+
+  async function saveProfile() {
+    if (!user) return
+    setProfileError(null)
+    const displayName  = cleanDisplayName(profileDraft.display_name)
+    const countryInput = (profileDraft.country_code ?? '').toString().trim()
+    const countryCode  = countryInput === '' ? null : cleanCountryCode(countryInput)
+    if (countryInput !== '' && countryCode === null) {
+      setProfileError('Country must be a two-letter code, e.g. GB or US.')
+      return
+    }
+    const marketplace = cleanMarketplacePreference(profileDraft.marketplace_preference)
+    const patch = {
+      display_name:           displayName,
+      country_code:           countryCode,
+      marketplace_preference: marketplace,
+      updated_at:             new Date().toISOString(),
+    }
+    setProfileSaving(true)
+    const { error } = await supabase
+      .from('profiles')
+      .update(patch)
+      .eq('user_id', user.id)
+    setProfileSaving(false)
+    if (error) {
+      setProfileError(error.message || 'Could not save profile.')
+      return
+    }
+    // Reflect the clean values back into the editor so the user sees
+    // exactly what hit the database (e.g. uppercased country code).
+    setProfileDraft({
+      display_name:           displayName ?? '',
+      country_code:           countryCode ?? '',
+      marketplace_preference: marketplace,
+    })
+    setProfileSavedAt(Date.now())
+  }
+
   async function deleteAccount() {
     if (!confirm('Permanently delete your account and all watchlist / alerts / portfolio data? This cannot be undone.')) return
     if (!confirm('Really delete? This wipes everything.')) return
@@ -128,6 +212,79 @@ export default function SettingsClient() {
                   }}
                 >{avatarPokemonId ? 'Change avatar' : 'Choose avatar'}</button>
               </div>
+            </div>
+          </div>
+
+          {/* Profile (Block 2A) */}
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: 22, marginBottom: 16 }}>
+            <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 17, margin: '0 0 4px', color: 'var(--text)' }}>Profile</h2>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 18px' }}>
+              Used to personalise your dashboard and to default new affiliate links to the marketplace closest to you.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.8, fontFamily: "'Figtree', sans-serif", display: 'block', marginBottom: 6 }}>
+                  Display name
+                </label>
+                <input
+                  type="text"
+                  value={profileDraft.display_name ?? ''}
+                  onChange={e => setProfileDraft(d => ({ ...d, display_name: e.target.value }))}
+                  maxLength={PROFILE_LIMITS.displayName.max}
+                  placeholder="What should we call you?"
+                  style={{ width: '100%', padding: '10px 12px', fontSize: 13, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontFamily: "'Figtree', sans-serif", outline: 'none', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.8, fontFamily: "'Figtree', sans-serif", display: 'block', marginBottom: 6 }}>
+                  Country (ISO code)
+                </label>
+                <input
+                  type="text"
+                  value={profileDraft.country_code ?? ''}
+                  onChange={e => setProfileDraft(d => ({ ...d, country_code: e.target.value.toUpperCase().slice(0, 2) }))}
+                  placeholder="GB, US…"
+                  style={{ width: '100%', padding: '10px 12px', fontSize: 13, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontFamily: "'Figtree', sans-serif", outline: 'none', boxSizing: 'border-box', textTransform: 'uppercase' }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.8, fontFamily: "'Figtree', sans-serif", display: 'block', marginBottom: 6 }}>
+                  Preferred marketplace
+                </label>
+                <select
+                  value={profileDraft.marketplace_preference ?? ''}
+                  onChange={e => setProfileDraft(d => ({ ...d, marketplace_preference: (e.target.value || null) as MarketplacePreference | null }))}
+                  style={{ width: '100%', padding: '10px 12px', fontSize: 13, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontFamily: "'Figtree', sans-serif", outline: 'none', boxSizing: 'border-box' }}
+                >
+                  <option value="">No preference</option>
+                  {PROFILE_LIMITS.marketplacePreference.values.map(v => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {profileError && (
+              <p style={{ fontSize: 12, color: '#ef4444', fontFamily: "'Figtree', sans-serif", margin: '12px 0 0' }}>
+                {profileError}
+              </p>
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 18 }}>
+              <button onClick={saveProfile} disabled={profileSaving}
+                style={{
+                  background: 'var(--primary)', color: '#fff', border: 'none',
+                  padding: '8px 16px', borderRadius: 10, fontSize: 13, fontWeight: 800,
+                  fontFamily: "'Figtree', sans-serif", cursor: profileSaving ? 'not-allowed' : 'pointer',
+                  opacity: profileSaving ? 0.6 : 1,
+                }}
+              >
+                {profileSaving ? 'Saving…' : 'Save profile'}
+              </button>
+              <span style={{ fontSize: 12, color: profileSavedAt ? '#22c55e' : 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+                {profileSavedAt && Date.now() - profileSavedAt < 2500 ? 'Saved.' : ''}
+              </span>
             </div>
           </div>
 

@@ -1,5 +1,6 @@
 // src/app/dashboard/sets/page.tsx
 import type { Metadata } from 'next'
+import { requireAuthUser } from '@/lib/auth-server'
 import SetTrackerClient from './SetTrackerClient'
 
 export const metadata: Metadata = {
@@ -7,6 +8,7 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 }
 
-export default function SetsPage() {
+export default async function SetsPage() {
+  await requireAuthUser('/dashboard/sets')
   return <SetTrackerClient />
 }

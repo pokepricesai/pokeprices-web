@@ -1,5 +1,6 @@
 // src/app/dashboard/watchlist/page.tsx
 import type { Metadata } from 'next'
+import { requireAuthUser } from '@/lib/auth-server'
 import WatchlistClient from './WatchlistClient'
 
 export const metadata: Metadata = {
@@ -7,6 +8,7 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 }
 
-export default function WatchlistPage() {
+export default async function WatchlistPage() {
+  await requireAuthUser('/dashboard/watchlist')
   return <WatchlistClient />
 }

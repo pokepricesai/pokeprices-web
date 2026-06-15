@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import {
@@ -15,6 +16,7 @@ import {
   getEbayUsSoldUrl,
   buildCardEbayQuery,
 } from '@/lib/ebayAffiliate'
+import { setIntendedAction, consumeIntendedAction } from '@/lib/intendedAction'
 
 interface Card {
   card_slug: string
@@ -39,6 +41,7 @@ const GRADE_GROUPS: { company: string; types: HoldingType[] }[] = (() => {
 })()
 
 export default function CardQuickActions({ card }: { card: Card }) {
+  const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [watchId, setWatchId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -66,6 +69,32 @@ export default function CardQuickActions({ card }: { card: Card }) {
       .then(({ data }) => setWatchId(data?.id ?? null))
   }, [user, cardSlug])
 
+  // ── Watchlist insert (no-op when already present) ─────────────────────────
+  // Centralised so both the in-place click and the post-login replay use the
+  // exact same upsert-shaped logic with the same duplicate guard.
+  async function performWatchlistAdd(currentUserId: string): Promise<string | null> {
+    const { data: existing } = await supabase
+      .from('watchlist')
+      .select('id')
+      .eq('user_id', currentUserId)
+      .eq('card_slug', cardSlug)
+      .maybeSingle()
+    if (existing?.id) return existing.id
+    const { data: row, error } = await supabase.from('watchlist').insert([{
+      user_id:       currentUserId,
+      card_slug:     cardSlug,
+      card_name:     card.card_name,
+      set_name:      card.set_name,
+      card_url_slug: cardSlug,
+      image_url:     card.image_url || null,
+      card_number:   card.card_number_display || card.card_number || null,
+      raw_at_add:    card.raw_usd   ?? null,
+      psa10_at_add:  card.psa10_usd ?? null,
+    }]).select('id').single()
+    if (error) return null
+    return row?.id ?? null
+  }
+
   async function handleWatch() {
     if (!user) return
     setBusy(true)
@@ -73,20 +102,49 @@ export default function CardQuickActions({ card }: { card: Card }) {
       await supabase.from('watchlist').delete().eq('id', watchId)
       setWatchId(null)
     } else {
-      const { data: row, error } = await supabase.from('watchlist').insert([{
-        user_id: user.id,
-        card_slug: cardSlug,
-        card_name: card.card_name,
-        set_name: card.set_name,
-        card_url_slug: cardSlug,
-        image_url: card.image_url || null,
-        card_number: card.card_number_display || card.card_number || null,
-        raw_at_add: card.raw_usd ?? null,
-        psa10_at_add: card.psa10_usd ?? null,
-      }]).select('id').single()
-      if (!error && row) setWatchId(row.id)
+      const id = await performWatchlistAdd(user.id)
+      if (id) setWatchId(id)
     }
     setBusy(false)
+  }
+
+  // ── Replay a pending watchlist-add after login (Block 2A) ─────────────────
+  // Triggered on mount when:
+  //   * the user is now signed in,
+  //   * a watchlist_add intent is in sessionStorage,
+  //   * the intent points at THIS card (slug match).
+  useEffect(() => {
+    if (!user || !cardSlug) return
+    let live = true
+    ;(async () => {
+      const intent = consumeIntendedAction()
+      if (!intent) return
+      if (intent.type !== 'watchlist_add') return
+      if (intent.payload.card_slug !== cardSlug) return
+      const id = await performWatchlistAdd(user.id)
+      if (live && id) setWatchId(id)
+    })()
+    return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, cardSlug])
+
+  // ── Logged-out save: store intent + redirect ─────────────────────────────
+  function handleLoggedOutWatchClick(e: React.MouseEvent) {
+    e.preventDefault()
+    setIntendedAction({
+      type: 'watchlist_add',
+      payload: {
+        card_slug:   cardSlug,
+        card_name:   card.card_name,
+        set_name:    card.set_name,
+        image_url:   card.image_url || null,
+        card_number: card.card_number_display || card.card_number || null,
+        raw_usd:     card.raw_usd   ?? null,
+        psa10_usd:   card.psa10_usd ?? null,
+      },
+    })
+    const returnTo = window.location.pathname + window.location.search
+    router.push(`/dashboard/login?returnTo=${encodeURIComponent(returnTo)}`)
   }
 
   const baseBtn: React.CSSProperties = {
@@ -181,13 +239,19 @@ export default function CardQuickActions({ card }: { card: Card }) {
   )
 
   if (!user) {
+    // Build a returnTo for portfolio-add that drops the user back here.
+    // (Portfolio add is not auto-replayed in Block 2A — keep the UX
+    // identical to today: log in, land back on the card, click again.)
+    const portfolioReturnTo = typeof window === 'undefined'
+      ? '/'
+      : window.location.pathname + window.location.search
     return (
       <>
         <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-          <Link href="/dashboard/login" style={baseBtn}>
+          <a href="/dashboard/login" onClick={handleLoggedOutWatchClick} style={baseBtn}>
             <span>👁</span> Watch
-          </Link>
-          <Link href="/dashboard/login" style={baseBtn}>
+          </a>
+          <Link href={`/dashboard/login?returnTo=${encodeURIComponent(portfolioReturnTo)}`} style={baseBtn}>
             <span>📊</span> Add to portfolio
           </Link>
           <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", alignSelf: 'center' }}>
