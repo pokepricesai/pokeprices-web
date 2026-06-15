@@ -3,6 +3,8 @@ import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import CardScanner, { ConfirmedCard, ConfirmContext } from '@/components/CardScanner'
+import { buildAffiliateLink, type AffiliateIntent, type Marketplace } from '@/lib/ebayAffiliate'
+import { trackEvent } from '@/lib/analytics'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -97,11 +99,67 @@ function gradeAvailable(card: Pick<DealerCard, 'psa9Usd' | 'psa10Usd' | 'cgc95Us
   return false
 }
 
-function ebayUrl(name: string, set: string, grade: Grade, region: Region): string {
-  const g = grade !== 'raw' ? ` ${GRADE_LABELS[grade]}` : ''
-  const q = encodeURIComponent(`${name} ${set}${g} pokemon card`)
-  const base = region === 'UK' ? 'https://www.ebay.co.uk' : 'https://www.ebay.com'
-  return `${base}/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13`
+// Restrained shared anchor that builds + clicks via the central engine
+// and fires the affiliate_click event. Hidden when the marketplace
+// campaign id is missing (build returns url: null) so we never render an
+// unaffiliated link.
+function DealerEbaySoldLink({ card, region }: {
+  card: { name: string; set: string; grade: Grade; urlSlug?: string | null; cardSlug?: string | null; setSlug?: string | null }
+  region: Region
+}) {
+  const built = ebayAffiliateForDealer(
+    { ...card, cardSlug: card.cardSlug ?? card.urlSlug ?? null, setSlug: card.setSlug ?? card.set },
+    card.grade,
+    region,
+  )
+  if (!built.url) return null
+  return (
+    <a href={built.url} target="_blank" rel="sponsored noopener noreferrer"
+      onClick={() => trackEvent('affiliate_click', { ...built.analytics })}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 8,
+        background: 'rgba(232,121,0,0.08)', border: '1px solid rgba(232,121,0,0.2)',
+        color: '#c05500', fontSize: 11, fontWeight: 700,
+        fontFamily: "'Figtree', sans-serif", textDecoration: 'none', whiteSpace: 'nowrap' as const,
+      }}
+      onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(232,121,0,0.15)'}
+      onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(232,121,0,0.08)'}
+    >🛒 Check sold listings on eBay ↗</a>
+  )
+}
+
+// Maps the dealer-tool Grade enum onto the central affiliate engine.
+// The engine's sold_search intent now carries grading_company + grade in
+// the query when provided, so one call is enough per row.
+function ebayAffiliateForDealer(
+  card: { name: string; set: string; cardSlug?: string | null; setSlug?: string | null },
+  grade: Grade,
+  region: Region,
+) {
+  const marketplace: Marketplace = region === 'UK' ? 'uk' : 'us'
+  let gradingCompany: string | null = null
+  let gradeValue: string | null = null
+  switch (grade) {
+    case 'psa9':  gradingCompany = 'PSA'; gradeValue = '9';   break
+    case 'psa10': gradingCompany = 'PSA'; gradeValue = '10';  break
+    case 'cgc95': gradingCompany = 'CGC'; gradeValue = '9.5'; break
+    case 'cgc10': gradingCompany = 'CGC'; gradeValue = '10';  break
+    case 'raw':
+    default:      break
+  }
+  return buildAffiliateLink({
+    marketplace,
+    intent:          'sold_search',
+    cardName:        card.name,
+    setName:         card.set,
+    cardSlug:        card.cardSlug ?? null,
+    setSlug:         card.setSlug  ?? null,
+    gradingCompany:  gradingCompany ?? undefined,
+    grade:           gradeValue   ?? undefined,
+    placement:       'dealer_row',
+    pageType:        'dealer',
+    sourceComponent: 'dealer_page_client',
+  })
 }
 
 function dealerCardValue(card: DealerCard, region: Region): number {
@@ -388,16 +446,7 @@ function DealerCardRow({ card, region, onRemove, onPriceChange, onGradeChange }:
           </div>
         </div>
 
-        <a href={ebayUrl(card.name, card.set, card.grade, region)} target="_blank" rel="noopener noreferrer"
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 8,
-            background: 'rgba(232,121,0,0.08)', border: '1px solid rgba(232,121,0,0.2)',
-            color: '#c05500', fontSize: 11, fontWeight: 700,
-            fontFamily: "'Figtree', sans-serif", textDecoration: 'none', whiteSpace: 'nowrap' as const,
-          }}
-          onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(232,121,0,0.15)'}
-          onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(232,121,0,0.08)'}
-        >🛒 eBay sold ↗</a>
+        <DealerEbaySoldLink card={card} region={region} />
       </div>
     </div>
   )
@@ -536,16 +585,7 @@ function CustomerCardRow({ card, mode, cashPct, tradePct, region, onRemove, onPc
           </div>
         </div>
 
-        <a href={ebayUrl(card.name, card.set, card.grade, region)} target="_blank" rel="noopener noreferrer"
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 8,
-            background: 'rgba(232,121,0,0.08)', border: '1px solid rgba(232,121,0,0.2)',
-            color: '#c05500', fontSize: 11, fontWeight: 700,
-            fontFamily: "'Figtree', sans-serif", textDecoration: 'none', whiteSpace: 'nowrap' as const,
-          }}
-          onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(232,121,0,0.15)'}
-          onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(232,121,0,0.08)'}
-        >🛒 eBay sold ↗</a>
+        <DealerEbaySoldLink card={card} region={region} />
       </div>
     </div>
   )

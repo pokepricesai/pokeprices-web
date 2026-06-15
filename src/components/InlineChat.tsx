@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { CHAT_ENDPOINT } from '@/lib/supabase'
 import { trackEvent } from '@/lib/analytics'
+import { affiliateWrapEbayUrl } from '@/lib/ebayAffiliate'
 
 const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
@@ -27,8 +28,47 @@ interface Message { role: 'user' | 'assistant'; content: string }
 
 function ChatLink({ href, children }: { href?: string; children?: React.ReactNode }) {
   if (!href) return <>{children}</>
+
+  // Block 2C: defensive affiliate wrapping for any raw eBay URL the AI
+  // emits via ebay_listings.item_web_url. The wrapper collapses exact
+  // listings to a precise affiliate search so commission is captured.
+  // Returns null when the URL is not an eBay URL or the marketplace
+  // campaign id is missing — in either case we render the original URL
+  // unchanged.
+  const wrap = affiliateWrapEbayUrl(href, {
+    placement:       'ai_response',
+    pageType:        'ai_assistant',
+    sourceComponent: 'inline_chat_link',
+  })
+  const finalHref = (wrap && wrap.url) ? wrap.url : href
+  const isAffiliate = !!(wrap && wrap.url)
+  const isEbay      = !!wrap   // any host matched eBay, even if campaign id was missing
+
+  function onClick() {
+    if (!isEbay) return
+    if (!wrap) return
+    trackEvent('ai_ebay_clicked', {
+      marketplace:     wrap.marketplace === 'uk' ? 'UK' : 'US',
+      intent:          wrap.intent,
+      source_component:'inline_chat_link',
+    })
+    trackEvent('affiliate_click', {
+      placement:          'ai_response',
+      marketplace:        wrap.marketplace === 'uk' ? 'UK' : 'US',
+      intent:             wrap.intent,
+      custom_tracking_id: wrap.customTrackingId,
+      source_component:   'inline_chat_link',
+    })
+  }
+
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', textDecoration: 'underline', fontWeight: 700 }}>
+    <a
+      href={finalHref}
+      target="_blank"
+      rel={isAffiliate ? 'sponsored noopener noreferrer' : 'noopener noreferrer'}
+      onClick={onClick}
+      style={{ color: 'var(--primary)', textDecoration: 'underline', fontWeight: 700 }}
+    >
       {children}
     </a>
   )

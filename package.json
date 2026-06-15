@@ -12,6 +12,7 @@
     "typecheck:edge:diagnostic": "tsc --noEmit -p tsconfig.edge.json",
     "test": "vitest",
     "test:run": "vitest run",
+    "audit:ebay": "node scripts/audit-ebay-links.mjs",
     "indexnow": "node scripts/submit-indexnow.js"
   },
   "dependencies": {

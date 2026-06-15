@@ -30,7 +30,9 @@ export type ReturnContext = 'dashboard' | 'watchlist' | 'card_show' | 'portfolio
 export type AffiliateIntent =
   | 'raw' | 'psa8' | 'psa9' | 'psa10' | 'graded'
   | 'sold_search' | 'japanese'
-  | 'set_search' | 'pokemon_search' | 'other'
+  | 'set_search' | 'pokemon_search'
+  | 'sealed' | 'exact_listing'
+  | 'other'
 
 export type Marketplace = 'UK' | 'US' | 'EU' | 'AU' | 'CA' | 'JP' | 'other'
 
@@ -75,9 +77,11 @@ export type EventMap = {
   ai_ebay_clicked:           { card_slug?: string; marketplace?: Marketplace; intent?: AffiliateIntent; source_component?: string }
   ai_error:                  { failure_stage?: string; response_status?: string }
 
-  // Affiliate
-  affiliate_link_view:       { card_slug?: string; set_slug?: string; placement?: string; marketplace?: Marketplace; intent?: AffiliateIntent; grading_company?: GradingCompany; grade?: string; language?: string; custom_tracking_id?: string; source_component?: string }
-  affiliate_click:           { card_slug?: string; set_slug?: string; placement?: string; marketplace?: Marketplace; intent?: AffiliateIntent; grading_company?: GradingCompany; grade?: string; language?: string; custom_tracking_id?: string; source_component?: string }
+  // Affiliate — grading_company widened to string so the central engine
+  // (which normalises any company name to upper-case) can spread its
+  // analytics object directly into these events without a narrow cast.
+  affiliate_link_view:       { card_slug?: string; set_slug?: string; placement?: string; marketplace?: Marketplace | string; intent?: AffiliateIntent; grading_company?: string; grade?: string; language?: string; custom_tracking_id?: string; source_component?: string }
+  affiliate_click:           { card_slug?: string; set_slug?: string; placement?: string; marketplace?: Marketplace | string; intent?: AffiliateIntent; grading_company?: string; grade?: string; language?: string; custom_tracking_id?: string; source_component?: string }
 
   // Account / dashboard
   dashboard_view:            { feature_name?: string; source_component?: string }

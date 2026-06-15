@@ -604,6 +604,11 @@ async function enrichCards(
         : null,
       psa9_volume_label: psa9Vol?.volume_label ?? null,
       psa10_volume_label: psa10Vol?.volume_label ?? null,
+      // Block 2C note: the client's InlineChat/ChatLink defensively wraps
+      // any eBay URL through src/lib/ebayAffiliate.affiliateWrapEbayUrl
+      // before rendering, so commission is now captured. A follow-up can
+      // mirror that wrapping here once EBAY_CAMPID_UK/US are added to the
+      // Supabase Functions secrets.
       ebay_listings: ebay.slice(0, 3).map((e: any) => ({
         price: e.currency === "GBP"
           ? `£${(e.total_cost_cents / 100).toFixed(2)}`
@@ -920,6 +925,8 @@ async function dbGetDeals(searchTerm?: string): Promise<any> {
         fair_value: `${sym}${(d.fair_value_cents / 100).toFixed(2)}`,
         discount_pct: d.discount_pct,
         condition: d.condition,
+        // Block 2C: client renderer wraps eBay URLs into affiliate searches.
+        // Future deploy can wrap here too once EBAY_CAMPID_* secrets exist.
         url: d.item_web_url,
       };
     }),
