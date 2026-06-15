@@ -4,6 +4,16 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
 import { safeReturnTo } from '@/lib/returnTo'
+import { trackEvent, trackEventWithAttribution, type AuthMethod, type ReturnContext } from '@/lib/analytics'
+
+function classifyReturnContext(p: string): ReturnContext {
+  if (p.startsWith('/dashboard/watchlist'))   return 'watchlist'
+  if (p.startsWith('/dashboard/portfolio'))   return 'portfolio'
+  if (p.startsWith('/dashboard'))             return 'dashboard'
+  if (p.startsWith('/card-shows'))            return 'card_show'
+  if (p.startsWith('/set/') && p.includes('/card/')) return 'direct'
+  return 'direct'
+}
 
 type Mode = 'signin' | 'signup' | 'magic'
 
@@ -26,6 +36,15 @@ function PortfolioLoginInner() {
   const [error, setError] = useState(callbackError || '')
   const [info, setInfo] = useState('')
 
+  const returnContext: ReturnContext = classifyReturnContext(safeReturn)
+
+  // Surface any callback error once.
+  useEffect(() => {
+    if (callbackError) {
+      trackEvent('auth_callback_failed', { failure_stage: 'callback' })
+    }
+  }, [callbackError])
+
   // Build a fresh callback URL for OAuth / magic-link / signup with the
   // current safe returnTo. Encoded once at the boundary.
   function buildCallbackUrl(extra: Record<string, string> = {}): string {
@@ -46,6 +65,7 @@ function PortfolioLoginInner() {
 
   async function handleGoogle() {
     clearMessages()
+    trackEvent('signup_started', { auth_method: 'google', return_context: returnContext, source_component: 'login_google' })
     await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo: buildCallbackUrl() },
@@ -68,6 +88,7 @@ function PortfolioLoginInner() {
         : error.message)
       return
     }
+    trackEvent('login_completed', { auth_method: 'email_password', return_context: returnContext })
     router.push(safeReturn)
   }
 
@@ -81,6 +102,7 @@ function PortfolioLoginInner() {
       setError('Passwords don\'t match.'); return
     }
     setLoading(true)
+    trackEvent('signup_started', { auth_method: 'email_password', return_context: returnContext, source_component: 'login_signup' })
     const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
       password,
@@ -93,6 +115,7 @@ function PortfolioLoginInner() {
     if (!data.session) {
       setSignupSent(true)
     } else {
+      trackEventWithAttribution('signup_completed', { auth_method: 'email_password', return_context: returnContext })
       router.push(safeReturn)
     }
   }
@@ -101,6 +124,7 @@ function PortfolioLoginInner() {
     clearMessages()
     if (!email.trim()) return
     setLoading(true)
+    trackEvent('signup_started', { auth_method: 'magic_link', return_context: returnContext, source_component: 'login_magic' })
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
       options: { emailRedirectTo: buildCallbackUrl() },
@@ -117,6 +141,7 @@ function PortfolioLoginInner() {
       return
     }
     setLoading(true)
+    trackEvent('password_reset_requested', { source_component: 'login_forgot_password' })
     // Recovery flow always routes through /auth/callback?type=recovery
     // and lands on /auth/reset-password.
     const recoveryReturn = new URL('/auth/callback', window.location.origin)

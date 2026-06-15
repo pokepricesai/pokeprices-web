@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
@@ -17,6 +17,7 @@ import {
   buildCardEbayQuery,
 } from '@/lib/ebayAffiliate'
 import { setIntendedAction, consumeIntendedAction } from '@/lib/intendedAction'
+import { trackEvent } from '@/lib/analytics'
 
 interface Card {
   card_slug: string
@@ -101,9 +102,26 @@ export default function CardQuickActions({ card }: { card: Card }) {
     if (watchId) {
       await supabase.from('watchlist').delete().eq('id', watchId)
       setWatchId(null)
+      trackEvent('watchlist_remove', {
+        card_slug:        cardSlug,
+        set_slug:         card.set_name,
+        source_component: 'card_quick_actions',
+      })
     } else {
+      trackEvent('watchlist_add_attempt', {
+        card_slug:        cardSlug,
+        set_slug:         card.set_name,
+        source_component: 'card_quick_actions',
+      })
       const id = await performWatchlistAdd(user.id)
-      if (id) setWatchId(id)
+      if (id) {
+        setWatchId(id)
+        trackEvent('watchlist_add_success', {
+          card_slug:        cardSlug,
+          set_slug:         card.set_name,
+          source_component: 'card_quick_actions',
+        })
+      }
     }
     setBusy(false)
   }
@@ -121,8 +139,19 @@ export default function CardQuickActions({ card }: { card: Card }) {
       if (!intent) return
       if (intent.type !== 'watchlist_add') return
       if (intent.payload.card_slug !== cardSlug) return
+      trackEvent('watchlist_replay_after_auth', {
+        card_slug: cardSlug,
+        set_slug:  card.set_name,
+      })
       const id = await performWatchlistAdd(user.id)
-      if (live && id) setWatchId(id)
+      if (live && id) {
+        setWatchId(id)
+        trackEvent('watchlist_add_success', {
+          card_slug:        cardSlug,
+          set_slug:         card.set_name,
+          source_component: 'replay_after_auth',
+        })
+      }
     })()
     return () => { live = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -131,6 +160,11 @@ export default function CardQuickActions({ card }: { card: Card }) {
   // ── Logged-out save: store intent + redirect ─────────────────────────────
   function handleLoggedOutWatchClick(e: React.MouseEvent) {
     e.preventDefault()
+    trackEvent('watchlist_add_attempt', {
+      card_slug:        cardSlug,
+      set_slug:         card.set_name,
+      source_component: 'card_quick_actions_anon',
+    })
     setIntendedAction({
       type: 'watchlist_add',
       payload: {
@@ -195,25 +229,65 @@ export default function CardQuickActions({ card }: { card: Card }) {
     </svg>
   )
 
+  function trackAffiliateClick(marketplace: 'UK' | 'US', intent: 'raw' | 'sold_search') {
+    trackEvent('affiliate_click', {
+      placement:          'card_page_chips',
+      marketplace,
+      intent,
+      card_slug:          cardSlug,
+      set_slug:           card.set_name,
+      custom_tracking_id: ebayCustomId,
+      source_component:   'card_quick_actions',
+    })
+  }
+
   const ebayChips = (
     <>
-      <a href={ebayUk} target="_blank" rel="sponsored noopener noreferrer" style={baseBtn}>
+      <a href={ebayUk}     target="_blank" rel="sponsored noopener noreferrer" style={baseBtn} onClick={() => trackAffiliateClick('UK', 'raw')}>
         {ukFlag} Click here for eBay listings
       </a>
-      <a href={ebayUs} target="_blank" rel="sponsored noopener noreferrer" style={baseBtn}>
+      <a href={ebayUs}     target="_blank" rel="sponsored noopener noreferrer" style={baseBtn} onClick={() => trackAffiliateClick('US', 'raw')}>
         {usFlag} Click here for eBay listings
       </a>
-      <a href={ebayUkSold} target="_blank" rel="sponsored noopener noreferrer" style={baseBtn}>
+      <a href={ebayUkSold} target="_blank" rel="sponsored noopener noreferrer" style={baseBtn} onClick={() => trackAffiliateClick('UK', 'sold_search')}>
         {ukFlag} Show eBay Sold Listings
       </a>
-      <a href={ebayUsSold} target="_blank" rel="sponsored noopener noreferrer" style={baseBtn}>
+      <a href={ebayUsSold} target="_blank" rel="sponsored noopener noreferrer" style={baseBtn} onClick={() => trackAffiliateClick('US', 'sold_search')}>
         {usFlag} Show eBay Sold Listings
       </a>
     </>
   )
 
+  const ebayBoxRef = useRef<HTMLDivElement>(null)
+  const ebayBoxImpressionFiredRef = useRef(false)
+  useEffect(() => {
+    if (ebayBoxImpressionFiredRef.current) return
+    if (typeof window === 'undefined' || typeof IntersectionObserver === 'undefined') return
+    const el = ebayBoxRef.current
+    if (!el) return
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting && !ebayBoxImpressionFiredRef.current) {
+          ebayBoxImpressionFiredRef.current = true
+          trackEvent('affiliate_link_view', {
+            placement:          'card_page_chips',
+            intent:             'raw',
+            card_slug:          cardSlug,
+            set_slug:           card.set_name,
+            custom_tracking_id: ebayCustomId,
+            source_component:   'card_quick_actions',
+          })
+          io.disconnect()
+          break
+        }
+      }
+    }, { threshold: 0.5 })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [cardSlug, card.set_name, ebayCustomId])
+
   const ebayBox = (
-    <div style={{
+    <div ref={ebayBoxRef} style={{
       background: 'var(--bg-light)',
       border: '1px solid var(--border)',
       borderRadius: 12,
@@ -269,7 +343,10 @@ export default function CardQuickActions({ card }: { card: Card }) {
         <button onClick={handleWatch} disabled={busy} style={watchId ? watchingBtn : baseBtn}>
           {watchId ? <><span>✓</span> Watching</> : <><span>👁</span> Watch</>}
         </button>
-        <button onClick={() => setShowPortfolioModal(true)} style={baseBtn}>
+        <button onClick={() => {
+          trackEvent('portfolio_add_attempt', { card_slug: cardSlug, source_component: 'card_quick_actions' })
+          setShowPortfolioModal(true)
+        }} style={baseBtn}>
           <span>📊</span> Add to portfolio
         </button>
       </div>
@@ -380,6 +457,12 @@ export function CardPortfolioAddModal({
       })
 
       if (err) throw err
+      // Only non-sensitive fields are sent — no quantity, no price, no notes.
+      trackEvent('portfolio_add_success', {
+        card_slug:        cardSlug,
+        holding_type:     manual ? 'graded' : (holdingType === 'raw' ? 'raw' : 'graded'),
+        source_component: 'card_portfolio_add_modal',
+      })
       setDone(true)
     } catch (e: any) {
       setError(e?.message || 'Failed to add to portfolio')

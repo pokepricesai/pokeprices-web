@@ -1,5 +1,8 @@
 'use client'
+import { useEffect, useRef } from 'react'
 import { getEbayUkUrl, getEbayUsUrl } from '@/lib/ebayAffiliate'
+import { trackEvent } from '@/lib/analytics'
+import type { AffiliateIntent, Marketplace } from '@/lib/analytics'
 
 type Size = 'sm' | 'md'
 
@@ -10,6 +13,12 @@ type Props = {
   label?: string
   size?: Size
   className?: string
+  /** Analytics-only context. Defaults are conservative; UI is unaffected. */
+  placement?: string
+  intent?: AffiliateIntent
+  cardSlug?: string
+  setSlug?: string
+  sourceComponent?: string
 }
 
 const SIZE_STYLES: Record<Size, { padding: string; fontSize: number; flagSize: number; gap: number }> = {
@@ -22,16 +31,66 @@ export default function EbayLiveListings({
   customId,
   size = 'md',
   className,
+  placement,
+  intent,
+  cardSlug,
+  setSlug,
+  sourceComponent,
 }: Props) {
   const ukUrl = getEbayUkUrl(searchQuery, customId)
   const usUrl = getEbayUsUrl(searchQuery, customId)
   const s = SIZE_STYLES[size]
 
+  const containerRef = useRef<HTMLDivElement>(null)
+  const firedViewRef = useRef(false)
+
+  // Single impression event per mount. IntersectionObserver fires once
+  // when 50% of the affiliate block enters the viewport. Avoids double-
+  // fires from scrolling, React Strict Mode or re-renders.
+  useEffect(() => {
+    if (firedViewRef.current) return
+    if (typeof window === 'undefined') return
+    if (typeof IntersectionObserver === 'undefined') return
+    const el = containerRef.current
+    if (!el) return
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting && !firedViewRef.current) {
+          firedViewRef.current = true
+          trackEvent('affiliate_link_view', {
+            placement:          placement ?? 'unknown',
+            intent:             intent    ?? 'other',
+            card_slug:          cardSlug,
+            set_slug:           setSlug,
+            custom_tracking_id: customId,
+            source_component:   sourceComponent ?? 'ebay_live_listings',
+          })
+          io.disconnect()
+          break
+        }
+      }
+    }, { threshold: 0.5 })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [placement, intent, cardSlug, setSlug, customId, sourceComponent])
+
+  function onClick(marketplace: Marketplace) {
+    trackEvent('affiliate_click', {
+      placement:          placement ?? 'unknown',
+      marketplace,
+      intent:             intent    ?? 'other',
+      card_slug:          cardSlug,
+      set_slug:           setSlug,
+      custom_tracking_id: customId,
+      source_component:   sourceComponent ?? 'ebay_live_listings',
+    })
+  }
+
   return (
-    <div className={className} style={{ fontFamily: "'Figtree', sans-serif" }}>
+    <div ref={containerRef} className={className} style={{ fontFamily: "'Figtree', sans-serif" }}>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <RegionButton href={ukUrl} flag="🇬🇧" sizeStyles={s} primary />
-        <RegionButton href={usUrl} flag="🇺🇸" sizeStyles={s} />
+        <RegionButton href={ukUrl} flag="🇬🇧" sizeStyles={s} primary onClickCapture={() => onClick('UK')} />
+        <RegionButton href={usUrl} flag="🇺🇸" sizeStyles={s}         onClickCapture={() => onClick('US')} />
       </div>
       <p
         style={{
@@ -53,17 +112,70 @@ export function EbayInlineLink({
   searchQuery,
   customId,
   label = 'See eBay listings →',
+  placement,
+  intent,
+  cardSlug,
+  setSlug,
+  sourceComponent,
 }: {
   searchQuery: string
   customId: string
   label?: string
+  placement?: string
+  intent?: AffiliateIntent
+  cardSlug?: string
+  setSlug?: string
+  sourceComponent?: string
 }) {
   const url = getEbayUkUrl(searchQuery, customId)
+  const containerRef = useRef<HTMLAnchorElement>(null)
+  const firedViewRef = useRef(false)
+
+  useEffect(() => {
+    if (firedViewRef.current) return
+    if (typeof window === 'undefined' || typeof IntersectionObserver === 'undefined') return
+    const el = containerRef.current
+    if (!el) return
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting && !firedViewRef.current) {
+          firedViewRef.current = true
+          trackEvent('affiliate_link_view', {
+            placement:          placement ?? 'inline',
+            intent:             intent    ?? 'other',
+            card_slug:          cardSlug,
+            set_slug:           setSlug,
+            custom_tracking_id: customId,
+            source_component:   sourceComponent ?? 'ebay_inline_link',
+          })
+          io.disconnect()
+          break
+        }
+      }
+    }, { threshold: 0.5 })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [placement, intent, cardSlug, setSlug, customId, sourceComponent])
+
+  function handleClick() {
+    trackEvent('affiliate_click', {
+      placement:          placement ?? 'inline',
+      marketplace:        'UK',
+      intent:             intent    ?? 'other',
+      card_slug:          cardSlug,
+      set_slug:           setSlug,
+      custom_tracking_id: customId,
+      source_component:   sourceComponent ?? 'ebay_inline_link',
+    })
+  }
+
   return (
     <a
+      ref={containerRef}
       href={url}
       target="_blank"
       rel="sponsored noopener noreferrer"
+      onClick={handleClick}
       style={{
         fontSize: 10,
         color: 'var(--text-muted)',
@@ -92,17 +204,20 @@ function RegionButton({
   flag,
   sizeStyles,
   primary = false,
+  onClickCapture,
 }: {
   href: string
   flag: string
   sizeStyles: { padding: string; fontSize: number; flagSize: number; gap: number }
   primary?: boolean
+  onClickCapture?: () => void
 }) {
   return (
     <a
       href={href}
       target="_blank"
       rel="sponsored noopener noreferrer"
+      onClick={onClickCapture}
       style={{
         display: 'inline-flex',
         alignItems: 'center',

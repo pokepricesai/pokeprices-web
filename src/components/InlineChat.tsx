@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { CHAT_ENDPOINT } from '@/lib/supabase'
+import { trackEvent } from '@/lib/analytics'
 
 const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
@@ -119,6 +120,8 @@ export default function InlineChat({ cardContext, prefillMessage, suggestedPromp
     const userMsg: Message = { role: 'user', content: msg }
     setMessages((prev) => [...prev, userMsg])
     setLoading(true)
+    // Question text is intentionally NOT sent to GA4.
+    trackEvent('ai_question_submitted', { source_component: 'inline_chat' })
     try {
       const res = await fetch(CHAT_ENDPOINT, {
         method: 'POST',
@@ -128,8 +131,14 @@ export default function InlineChat({ cardContext, prefillMessage, suggestedPromp
       const data = await res.json()
       const rawAnswer = data.answer || 'Sorry, something went wrong.'
       const linkedAnswer = linkifyResponse(rawAnswer)
+      trackEvent('ai_response_received', {
+        query_type:      typeof data?.query_type === 'string' ? data.query_type : undefined,
+        response_status: res.ok ? 'ok' : `http_${res.status}`,
+        card_found:      data?.card_data_found ? 'yes' : 'no',
+      })
       setMessages((prev) => [...prev, { role: 'assistant', content: linkedAnswer }])
     } catch {
+      trackEvent('ai_error', { failure_stage: 'network', response_status: 'network_error' })
       setMessages((prev) => [...prev, { role: 'assistant', content: 'Sorry, I had trouble connecting. Please try again.' }])
     }
     setLoading(false)

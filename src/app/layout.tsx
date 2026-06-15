@@ -6,6 +6,7 @@ import Navbar from '@/components/Navbar'
 import Footer from '@/components/Footer'
 import SiteStructuredData from '@/components/SiteStructuredData'
 import ScrollToTop from '@/components/ScrollToTop'
+import AnalyticsInit from '@/components/AnalyticsInit'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://www.pokeprices.io'),
@@ -76,6 +77,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </Script>
         <SiteStructuredData />
         <ScrollToTop />
+        <AnalyticsInit />
         <Navbar />
         <main className="flex-1">{children}</main>
         <Footer />

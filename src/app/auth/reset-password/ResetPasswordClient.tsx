@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { trackEvent } from '@/lib/analytics'
 
 export default function ResetPasswordClient() {
   const router = useRouter()
@@ -37,6 +38,7 @@ export default function ResetPasswordClient() {
       setError(updErr.message || 'Could not update password.')
       return
     }
+    trackEvent('password_reset_completed', { source_component: 'reset_password_form' })
     setDone(true)
     // Brief pause so the success state is visible, then redirect.
     setTimeout(() => router.replace('/dashboard'), 1500)

@@ -12,6 +12,7 @@ import {
   PROFILE_LIMITS,
   type MarketplacePreference,
 } from '@/lib/profileValidation'
+import { trackEvent } from '@/lib/analytics'
 
 interface Prefs {
   weekly_digest_enabled: boolean
@@ -100,6 +101,7 @@ export default function SettingsClient() {
       .eq('user_id', user.id)
     setSaving(false)
     setSavedAt(Date.now())
+    trackEvent('settings_saved', { feature_name: String(key), source_component: 'settings_email_prefs' })
   }
 
   // ── Profile load ────────────────────────────────────────────────────────
@@ -161,6 +163,7 @@ export default function SettingsClient() {
       marketplace_preference: marketplace,
     })
     setProfileSavedAt(Date.now())
+    trackEvent('profile_saved', { source_component: 'settings_profile' })
   }
 
   async function deleteAccount() {

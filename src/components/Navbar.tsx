@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { useState, useRef, useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { trackEvent } from '@/lib/analytics'
 import Avatar from './Avatar'
 import ComingSoonBadge from './ComingSoonBadge'
 
@@ -195,6 +196,7 @@ export default function Navbar() {
 
   async function handleSignOut() {
     setProfileOpen(false)
+    trackEvent('logout_completed', { source_component: 'navbar' })
     await supabase.auth.signOut()
     router.push('/')
   }

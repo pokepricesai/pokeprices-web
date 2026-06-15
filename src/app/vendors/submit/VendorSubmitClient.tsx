@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
+import { trackEvent } from '@/lib/analytics'
 
 const VENDOR_TYPES = [
   { value: 'physical_shop',   label: '🏪 Physical Shop' },
@@ -229,9 +230,11 @@ export default function VendorSubmitClient() {
     setLogoError(null)
     const ok = await uploadLogoUsingCredential(credential, logoFile)
     if (ok) {
+      trackEvent('vendor_logo_upload_success', { vendor_type: form.vendor_type })
       setPhase('done')
       setSubmitted(true)
     } else {
+      trackEvent('vendor_logo_upload_failed', { vendor_type: form.vendor_type, failure_stage: 'retry' })
       setPhase('logo_failed')
     }
   }
@@ -270,6 +273,10 @@ export default function VendorSubmitClient() {
       setError('Please fill in your store name and type.')
       return
     }
+    trackEvent('vendor_submission_started', {
+      country_code: form.country,
+      vendor_type:  form.vendor_type,
+    })
     setPhase('submitting')
     setError(null)
     setLogoError(null)
@@ -324,11 +331,17 @@ export default function VendorSubmitClient() {
         if (logoFile) {
           setLogoError('Submission saved, but logo authorisation was unavailable. We will follow up by email if a logo is needed.')
         }
+        trackEvent('vendor_submission_completed', {
+          country_code: form.country,
+          vendor_type:  form.vendor_type,
+          has_logo:     logoFile ? 'no' : 'no',
+        })
         setPhase('done')
         setSubmitted(true)
         return
       } else if (json.vendorId === null && json.uploadToken === null) {
         // Honeypot caught — return a soft success to mimic a real submit.
+        // No vendor_submission_completed: nothing was actually inserted.
         setPhase('done')
         setSubmitted(true)
         return
@@ -350,11 +363,23 @@ export default function VendorSubmitClient() {
       setPhase('uploading')
       const ok = await uploadLogoUsingCredential(cred, logoFile)
       if (!ok) {
+        trackEvent('vendor_logo_upload_failed', { vendor_type: form.vendor_type, failure_stage: 'first_attempt' })
+        trackEvent('vendor_submission_completed', {
+          country_code: form.country,
+          vendor_type:  form.vendor_type,
+          has_logo:     'no',
+        })
         setPhase('logo_failed')
         return
       }
+      trackEvent('vendor_logo_upload_success', { vendor_type: form.vendor_type })
     }
 
+    trackEvent('vendor_submission_completed', {
+      country_code: form.country,
+      vendor_type:  form.vendor_type,
+      has_logo:     logoFile ? 'yes' : 'no',
+    })
     setPhase('done')
     setSubmitted(true)
   }

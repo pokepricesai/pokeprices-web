@@ -7,6 +7,14 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { setIntendedAction, consumeIntendedAction } from '@/lib/intendedAction'
+import { trackEvent } from '@/lib/analytics'
+
+function inferCountryFromShowId(showId: string | undefined | null): string | undefined {
+  if (!showId) return undefined
+  const head = showId.split('-')[0]
+  if (head === 'uk' || head === 'us' || head === 'ca') return head.toUpperCase()
+  return undefined
+}
 
 export default function StarButton({
   showId,
@@ -52,11 +60,22 @@ export default function StarButton({
       const intent = consumeIntendedAction()
       if (!intent || intent.type !== 'card_show_star') return
       if (intent.payload.show_id !== showId) return
+      trackEvent('card_show_replay_after_auth', {
+        show_id:      showId,
+        country_code: inferCountryFromShowId(showId),
+      })
       const { error } = await supabase
         .from('card_show_stars')
         .insert([{ user_id: session.user.id, show_id: showId }])
       if (!error || error.code === '23505') {
-        if (live) setStarred(true)
+        if (live) {
+          setStarred(true)
+          trackEvent('card_show_favourite_success', {
+            show_id:          showId,
+            country_code:     inferCountryFromShowId(showId),
+            source_component: 'replay_after_auth',
+          })
+        }
       }
     })
     return () => { live = false }
@@ -67,8 +86,14 @@ export default function StarButton({
     e.stopPropagation()
     if (busy) return
     setBusy(true)
+    const country = inferCountryFromShowId(showId)
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) {
+      trackEvent('card_show_favourite_attempt', {
+        show_id:          showId,
+        country_code:     country,
+        source_component: 'star_button_anon',
+      })
       // Store the intent + return to this exact page after login.
       setIntendedAction({ type: 'card_show_star', payload: { show_id: showId } })
       const returnTo = window.location.pathname + window.location.search
@@ -76,6 +101,11 @@ export default function StarButton({
       setBusy(false)
       return
     }
+    trackEvent('card_show_favourite_attempt', {
+      show_id:          showId,
+      country_code:     country,
+      source_component: 'star_button',
+    })
     // Optimistic UI: flip first, revert if the DB write fails. We surface
     // failures via alert() so the user (and we) immediately see what
     // Supabase rejected — silent failure left the planner empty before.
@@ -92,6 +122,12 @@ export default function StarButton({
         console.error('[StarButton] delete failed:', error)
         setStarred(previous)
         alert(`Could not unstar event: ${error.message}`)
+      } else {
+        trackEvent('card_show_unfavourite', {
+          show_id:          showId,
+          country_code:     country,
+          source_component: 'star_button',
+        })
       }
     } else {
       // Plain INSERT (not upsert) — the migration's RLS policies only cover
@@ -100,6 +136,13 @@ export default function StarButton({
       const { error } = await supabase
         .from('card_show_stars')
         .insert([{ user_id: session.user.id, show_id: showId }])
+      if (!error || error.code === '23505') {
+        trackEvent('card_show_favourite_success', {
+          show_id:          showId,
+          country_code:     country,
+          source_component: 'star_button',
+        })
+      }
       if (error && error.code !== '23505') {
         console.error('[StarButton] insert failed:', error)
         setStarred(previous)
