@@ -1,7 +1,6 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
 
 const VENDOR_TYPES = [
   { value: 'physical_shop',   label: '🏪 Physical Shop' },
@@ -24,13 +23,9 @@ const SPECIALISMS = [
 
 const GRADING_COMPANIES = ['PSA', 'BGS', 'CGC', 'ACE', 'TAG', 'SGC', 'Other']
 
-function slugify(text: string) {
-  return text.toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .trim()
-}
+// (Slugify was previously here but slug generation has moved to the
+// server side as part of Block 1B. The client no longer constructs the
+// final vendor slug.)
 
 function Label({ children }: { children: React.ReactNode }) {
   return (
@@ -124,6 +119,12 @@ async function geocodeAddress(address: string, city: string, postcode: string, c
   return null
 }
 
+type UploadCredential = {
+  vendorId:    string
+  uploadToken: string
+  expiresAt:   string
+}
+
 export default function VendorSubmitClient() {
   const [form, setForm] = useState({
     name: '',
@@ -153,8 +154,12 @@ export default function VendorSubmitClient() {
     grading_turnaround: '',
     grading_starting_price: '',
     grading_submission_url: '',
+    // Hidden honeypot. Real users never fill this in; bots commonly fill
+    // anything that looks like a URL field.
+    company_url: '',
   })
-  const [submitting, setSubmitting] = useState(false)
+  type Phase = 'idle' | 'submitting' | 'uploading' | 'done' | 'logo_failed'
+  const [phase, setPhase] = useState<Phase>('idle')
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -162,7 +167,15 @@ export default function VendorSubmitClient() {
   const [logoFile,    setLogoFile]    = useState<File | null>(null)
   const [logoPreview, setLogoPreview] = useState<string | null>(null)
   const [logoError,   setLogoError]   = useState<string | null>(null)
-  const [uploadingLogo, setUploadingLogo] = useState(false)
+
+  // Time the form was rendered, used by the server-side minimum-fill-time
+  // check. Bots that auto-fill and submit within a few hundred ms fail this.
+  const formStartedAtMs = useRef<number>(0)
+  useEffect(() => { formStartedAtMs.current = Date.now() }, [])
+
+  // Held in component state so a logo-only failure can be retried with the
+  // same still-valid credential rather than recreating the vendor row.
+  const [credential, setCredential] = useState<UploadCredential | null>(null)
 
   function handleLogoSelect(file: File | null) {
     setLogoError(null)
@@ -175,14 +188,52 @@ export default function VendorSubmitClient() {
       setLogoError('Logo must be under 2 MB.')
       return
     }
-    if (!/^image\/(png|jpeg|webp|gif|svg\+xml)$/.test(file.type)) {
-      setLogoError('Please upload a PNG, JPG, WEBP, GIF or SVG.')
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
+      // SVG and GIF removed per Block 1B. The server enforces the same
+      // restriction with magic-byte sniffing.
+      setLogoError('Please upload a PNG, JPG or WEBP.')
       return
     }
     setLogoFile(file)
     const reader = new FileReader()
     reader.onload = () => setLogoPreview(reader.result as string)
     reader.readAsDataURL(file)
+  }
+
+  // ── Upload helper ────────────────────────────────────────────────────────
+  // Returns true on a successful logo upload; false otherwise (caller may
+  // surface a clear partial-failure state).
+  async function uploadLogoUsingCredential(
+    cred: UploadCredential,
+    file: File,
+  ): Promise<boolean> {
+    const fd = new FormData()
+    fd.append('vendorId', cred.vendorId)
+    fd.append('token',    cred.uploadToken)
+    fd.append('file',     file)
+    try {
+      const res = await fetch('/api/vendor-logo-upload', { method: 'POST', body: fd })
+      const json = await res.json().catch(() => ({}))
+      if (res.ok && json.url) return true
+      setLogoError(json.error || 'Logo upload failed.')
+      return false
+    } catch {
+      setLogoError('Logo upload failed.')
+      return false
+    }
+  }
+
+  async function retryLogoUpload() {
+    if (!credential || !logoFile) return
+    setPhase('uploading')
+    setLogoError(null)
+    const ok = await uploadLogoUsingCredential(credential, logoFile)
+    if (ok) {
+      setPhase('done')
+      setSubmitted(true)
+    } else {
+      setPhase('logo_failed')
+    }
   }
 
   const isPhysical = ['physical_shop'].includes(form.vendor_type)
@@ -219,63 +270,141 @@ export default function VendorSubmitClient() {
       setError('Please fill in your store name and type.')
       return
     }
-    setSubmitting(true)
+    setPhase('submitting')
     setError(null)
+    setLogoError(null)
 
-    // Geocode if physical location
-    let latitude = null
-    let longitude = null
+    // Geocode if a physical location. Server validates the resulting
+    // lat/lng range; admins re-check before activation.
+    let latitude: number | null = null
+    let longitude: number | null = null
     if (showAddress && form.postcode) {
       const coords = await geocodeAddress(form.address, form.city, form.postcode, form.country)
       if (coords) {
-        latitude = coords.lat
+        latitude  = coords.lat
         longitude = coords.lng
       }
     }
 
-    // Generate slug
-    const slugBase = slugify(`${form.name} ${form.city || form.country}`)
-
-    // Upload logo first (if any). If upload fails we still submit the row,
-    // but flag it so the submitter sees what happened.
-    let logo_url: string | null = null
-    if (logoFile) {
-      setUploadingLogo(true)
-      try {
-        const fd = new FormData()
-        fd.append('file', logoFile)
-        fd.append('vendor_slug', slugBase)
-        const res = await fetch('/api/vendor-logo-upload', { method: 'POST', body: fd })
-        const json = await res.json().catch(() => ({}))
-        if (res.ok && json.url) {
-          logo_url = json.url
-        } else {
-          setLogoError(json.error || 'Logo upload failed — submission saved without logo.')
-        }
-      } catch {
-        setLogoError('Logo upload failed — submission saved without logo.')
-      } finally {
-        setUploadingLogo(false)
-      }
-    }
-
-    const { error: err } = await supabase.from('vendors').insert({
+    // Submit details to the secure server route. The route does its own
+    // validation, server-side slug generation, and duplicate check, and
+    // either returns an upload credential or a clear error.
+    const submitBody = {
       ...form,
       latitude,
       longitude,
-      slug: slugBase,
-      active: false,
-      verified: false,
-      logo_url,
-    })
-
-    if (err) {
-      setError('Something went wrong. Please try again.')
-      setSubmitting(false)
-    } else {
-      setSubmitted(true)
-      setSubmitting(false)
+      form_started_at_ms: formStartedAtMs.current,
     }
+
+    let cred: UploadCredential | null = null
+    try {
+      const res = await fetch('/api/vendors/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(submitBody),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(json.error || 'Could not save submission. Please try again.')
+        setPhase('idle')
+        return
+      }
+      // The server may save the vendor row but fail to mint a token; in
+      // that case `uploadToken` is null but `vendorId` is set. We still
+      // treat that as a successful submission without logo.
+      if (json.vendorId && json.uploadToken && json.expiresAt) {
+        cred = {
+          vendorId:    json.vendorId,
+          uploadToken: json.uploadToken,
+          expiresAt:   json.expiresAt,
+        }
+        setCredential(cred)
+      } else if (json.vendorId) {
+        // Saved, but logo upload cannot be authorised.
+        if (logoFile) {
+          setLogoError('Submission saved, but logo authorisation was unavailable. We will follow up by email if a logo is needed.')
+        }
+        setPhase('done')
+        setSubmitted(true)
+        return
+      } else if (json.vendorId === null && json.uploadToken === null) {
+        // Honeypot caught — return a soft success to mimic a real submit.
+        setPhase('done')
+        setSubmitted(true)
+        return
+      } else {
+        setError('Unexpected response from server.')
+        setPhase('idle')
+        return
+      }
+    } catch {
+      setError('Network error. Please try again.')
+      setPhase('idle')
+      return
+    }
+
+    // If a logo was selected, upload it now using the credential. A
+    // failure here does NOT recreate the vendor row — the credential is
+    // still valid for up to 10 minutes and can be retried.
+    if (cred && logoFile) {
+      setPhase('uploading')
+      const ok = await uploadLogoUsingCredential(cred, logoFile)
+      if (!ok) {
+        setPhase('logo_failed')
+        return
+      }
+    }
+
+    setPhase('done')
+    setSubmitted(true)
+  }
+
+  // Replaces the previous boolean `submitting` flag used by the submit
+  // button while keeping the existing UI behaviour intact.
+  const submitting = phase === 'submitting' || phase === 'uploading'
+  const uploadingLogo = phase === 'uploading'
+
+  if (phase === 'logo_failed') {
+    return (
+      <div style={{ maxWidth: 600, margin: '0 auto', padding: '60px 24px', textAlign: 'center' }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>📨</div>
+        <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, marginBottom: 12, color: 'var(--text)' }}>
+          Submission received
+        </h1>
+        <p style={{ color: 'var(--text-muted)', fontSize: 14, fontFamily: "'Figtree', sans-serif", lineHeight: 1.7, marginBottom: 16 }}>
+          Your store details have been saved. The logo upload did not complete.
+        </p>
+        {logoError && (
+          <p style={{ color: '#b91c1c', fontSize: 13, fontFamily: "'Figtree', sans-serif", lineHeight: 1.6, marginBottom: 20 }}>
+            {logoError}
+          </p>
+        )}
+        <div style={{ display: 'inline-flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+          {credential && logoFile && (
+            <button onClick={retryLogoUpload}
+              style={{
+                background: 'var(--primary)', color: '#fff',
+                padding: '10px 18px', borderRadius: 10, border: 'none',
+                fontSize: 14, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
+                cursor: 'pointer',
+              }}>
+              Retry logo upload
+            </button>
+          )}
+          <button
+            onClick={() => { setSubmitted(true); setPhase('done') }}
+            style={{
+              background: 'transparent', color: 'var(--text)',
+              padding: '10px 18px', borderRadius: 10,
+              border: '1px solid var(--border)',
+              fontSize: 14, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
+              cursor: 'pointer',
+            }}>
+            Skip logo for now
+          </button>
+        </div>
+      </div>
+    )
   }
 
   if (submitted) {
@@ -379,7 +508,7 @@ export default function VendorSubmitClient() {
                   {logoFile ? 'Replace logo' : 'Choose logo'}
                   <input
                     type="file"
-                    accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                    accept="image/png,image/jpeg,image/webp"
                     onChange={e => handleLogoSelect(e.target.files?.[0] ?? null)}
                     style={{ display: 'none' }}
                   />
@@ -402,7 +531,7 @@ export default function VendorSubmitClient() {
                   fontFamily: "'Figtree', sans-serif",
                   margin: '8px 0 0', lineHeight: 1.5,
                 }}>
-                  PNG, JPG, WEBP, GIF or SVG · max 2 MB. Square images look best — they'll display next to your name in the directory and on your detail page.
+                  PNG, JPG or WEBP · max 2 MB. Square images look best — they'll display next to your name in the directory and on your detail page.
                 </p>
                 {logoFile && (
                   <p style={{
@@ -659,6 +788,32 @@ export default function VendorSubmitClient() {
       <p style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textAlign: 'center', marginTop: 12, lineHeight: 1.6 }}>
         Listings are reviewed before going live. We will be in touch if we need anything.
       </p>
+
+      {/* Honeypot. Hidden from real users; bots commonly fill anything that
+          looks like a URL field. The server rejects submissions where this
+          is non-empty. */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          left: '-10000px',
+          top: 'auto',
+          width: 1,
+          height: 1,
+          overflow: 'hidden',
+        }}
+      >
+        <label htmlFor="vsf_company_url">Company URL (do not fill)</label>
+        <input
+          id="vsf_company_url"
+          name="company_url"
+          type="text"
+          tabIndex={-1}
+          autoComplete="off"
+          value={form.company_url}
+          onChange={e => set('company_url', e.target.value)}
+        />
+      </div>
     </div>
   )
 }
