@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
+import OnboardingEmailTester from '@/components/admin/OnboardingEmailTester'
 import {
   TEMPLATE_LABELS,
   TEMPLATES_IMPLEMENTED,
@@ -1082,6 +1083,12 @@ export default function ContentStudioClient() {
             style={{ background: 'transparent', border: 'none', color: '#b91c1c', fontSize: 16, cursor: 'pointer', lineHeight: 1, padding: 0 }}>×</button>
         </div>
       )}
+
+      {/* Block 3B operator-UX — onboarding email testing panel.
+          Renders alongside the existing basic Resend test button
+          (which is still in the header). Uses the Block 3A admin
+          email routes; never touches onboarding state. */}
+      <OnboardingEmailTester getAccessToken={getAccessToken} />
 
       {/* Per-template option panels */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 12, marginBottom: 18 }}>
