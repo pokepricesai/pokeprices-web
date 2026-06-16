@@ -8,6 +8,7 @@ import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/adminAuth'
 import { isApprovedTemplateKey, renderTemplate, TEMPLATE_KEYS } from '@/emails/render'
 import { sendEmail } from '@/lib/email/send'
+import type { ActivationBranch } from '@/lib/email/onboardingActivation'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -23,13 +24,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: admin.error }, { status: admin.status })
   }
 
-  let body: { template?: string } = {}
+  let body: { template?: string; branch?: string } = {}
   try { body = await req.json() } catch { /* empty body acceptable */ }
 
   const templateKey = body?.template
   if (!isApprovedTemplateKey(templateKey)) {
     return NextResponse.json({ success: false, error: 'unknown template' }, { status: 400 })
   }
+
+  const bodyBranch = body?.branch
+  const activationBranch: ActivationBranch | undefined =
+    bodyBranch === 'A' || bodyBranch === 'B' || bodyBranch === 'C' || bodyBranch === 'D'
+      ? bodyBranch
+      : undefined
 
   const recipient = (process.env.EMAIL_TEST_RECIPIENT ?? '').trim()
   if (!recipient) {
@@ -43,9 +50,14 @@ export async function POST(req: Request) {
   let rendered
   try {
     rendered = await renderTemplate({
-      key:            templateKey,
-      preferencesUrl: 'https://www.pokeprices.io/dashboard/settings',
-      displayName:    'Collector',
+      key:              templateKey,
+      preferencesUrl:   'https://www.pokeprices.io/dashboard/settings',
+      displayName:      'Collector',
+      activationBranch,
+      // Admin send-tests prefix the subject with "[TEST] " so the
+      // recipient cannot confuse the message with a real onboarding
+      // send. Block 3B §10.
+      testPrefix:       true,
     })
   } catch {
     return NextResponse.json({ success: false, error: 'render failed' }, { status: 500 })

@@ -225,6 +225,48 @@ export const ENV_CATALOGUE: ReadonlyArray<EnvVarSpec> = [
     required:    false,
     description: 'Svix signing secret for the Resend webhook receiver (/api/webhooks/resend). When missing the receiver returns 503 and stores nothing; configure in Resend dashboard → Webhooks → Signing secret.',
   },
+  {
+    name:        'EMAIL_ONBOARDING_ENABLED',
+    scope:       'server',
+    required:    false,
+    description: 'Block 3B onboarding feature flag. When set to the literal "true", new verified signups can be enrolled (subject to ONBOARDING_ELIGIBLE_AFTER) AND the processor route may send. When false/missing, the enrolment helper short-circuits and the processor returns { processed: 0, disabled: true } without sending. Admin preview + test-send routes ignore this flag.',
+  },
+  {
+    name:        'ONBOARDING_ELIGIBLE_AFTER',
+    scope:       'server',
+    required:    false,
+    description: 'ISO-8601 timestamp. Only users whose auth.users.created_at is >= this value can be enrolled. Block 3B correction-pass eligibility safeguard against silently sweeping existing users into the sequence on their next login. MISSING or INVALID values FAIL CLOSED — no enrolment happens. Must be set BEFORE flipping EMAIL_ONBOARDING_ENABLED on. Vercel env changes require a fresh deployment.',
+  },
+  {
+    name:        'ONBOARDING_CLAIM_STALE_SECONDS',
+    scope:       'server',
+    required:    false,
+    description: 'Optional. Number of seconds after which an in-flight onboarding processor claim is considered stale and may be stolen by a later processor (crash recovery). Default 300 (5 minutes). Lower values risk a slow but live processor losing its claim mid-run; higher values delay crash recovery.',
+  },
+  {
+    name:        'ONBOARDING_CRON_SECRET',
+    scope:       'server',
+    required:    false,
+    description: 'Bearer secret required by POST /api/internal/process-onboarding-emails. Missing → 401. Configure on the cron caller (Vercel Cron / pg_cron / external scheduler) AND on Vercel.',
+  },
+  {
+    name:        'ONBOARDING_WELCOME_DELAY_MS',
+    scope:       'server',
+    required:    false,
+    description: 'Optional override for the welcome-email delay. Default 10 minutes (600000 ms). Lets the operator shrink the delay during controlled rollout testing without redeploying templates.',
+  },
+  {
+    name:        'ONBOARDING_ACTIVATION_DELAY_MS',
+    scope:       'server',
+    required:    false,
+    description: 'Optional override for the activation-email delay. Default 2 days (172800000 ms).',
+  },
+  {
+    name:        'ONBOARDING_DISCOVERY_DELAY_MS',
+    scope:       'server',
+    required:    false,
+    description: 'Optional override for the discovery-email delay. Default 7 days (604800000 ms).',
+  },
 ]
 
 const CATALOGUE_BY_NAME: ReadonlyMap<string, EnvVarSpec> = new Map(

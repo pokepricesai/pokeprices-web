@@ -17,22 +17,46 @@ import TransactionalTest, {
 import MarketingPreview, {
   MARKETING_PREVIEW_KEY, MARKETING_PREVIEW_SUBJECT, marketingPreviewPlainText,
 } from './templates/MarketingPreview'
+import OnboardingWelcome, {
+  ONBOARDING_WELCOME_KEY, ONBOARDING_WELCOME_SUBJECT, onboardingWelcomePlainText,
+} from './templates/OnboardingWelcome'
+import OnboardingActivation, {
+  ONBOARDING_ACTIVATION_KEY, subjectFor as onboardingActivationSubject,
+  onboardingActivationPlainText,
+} from './templates/OnboardingActivation'
+import OnboardingDiscovery, {
+  ONBOARDING_DISCOVERY_KEY, ONBOARDING_DISCOVERY_SUBJECT, onboardingDiscoveryPlainText,
+} from './templates/OnboardingDiscovery'
 
 // Re-export the template key constants so route handlers can reference
 // a single canonical source.
-export { DELIVERY_TEST_KEY, TRANSACTIONAL_TEST_KEY, MARKETING_PREVIEW_KEY }
+export {
+  DELIVERY_TEST_KEY,
+  TRANSACTIONAL_TEST_KEY,
+  MARKETING_PREVIEW_KEY,
+  ONBOARDING_WELCOME_KEY,
+  ONBOARDING_ACTIVATION_KEY,
+  ONBOARDING_DISCOVERY_KEY,
+}
 import type { EmailCategory } from '@/lib/email/categories'
 import { EMAIL_CATEGORIES } from '@/lib/email/categories'
+import type { ActivationBranch } from '@/lib/email/onboardingActivation'
 
 export type TemplateKey =
   | typeof DELIVERY_TEST_KEY
   | typeof TRANSACTIONAL_TEST_KEY
   | typeof MARKETING_PREVIEW_KEY
+  | typeof ONBOARDING_WELCOME_KEY
+  | typeof ONBOARDING_ACTIVATION_KEY
+  | typeof ONBOARDING_DISCOVERY_KEY
 
 export const TEMPLATE_KEYS: ReadonlyArray<TemplateKey> = [
   DELIVERY_TEST_KEY,
   TRANSACTIONAL_TEST_KEY,
   MARKETING_PREVIEW_KEY,
+  ONBOARDING_WELCOME_KEY,
+  ONBOARDING_ACTIVATION_KEY,
+  ONBOARDING_DISCOVERY_KEY,
 ]
 
 export type RenderedEmail = {
@@ -47,13 +71,17 @@ export function isApprovedTemplateKey(raw: unknown): raw is TemplateKey {
 }
 
 export async function renderTemplate(input: {
-  key:            TemplateKey
+  key:               TemplateKey
   // The preview route may pass through harmless context; the send
   // service injects real values. Unknown props are ignored.
-  preferencesUrl?: string | null
-  displayName?:    string | null
-  vercelEnv?:      string
-  timestamp?:      string
+  preferencesUrl?:   string | null
+  displayName?:      string | null
+  vercelEnv?:        string
+  timestamp?:        string
+  /** Required by the onboarding_activation template; ignored otherwise. */
+  activationBranch?: ActivationBranch
+  /** When true, the admin send-test route prefixes "[TEST] " on the subject. */
+  testPrefix?:       boolean
 }): Promise<RenderedEmail> {
   switch (input.key) {
     case DELIVERY_TEST_KEY: {
@@ -62,38 +90,54 @@ export async function renderTemplate(input: {
         vercelEnv:  input.vercelEnv ?? readVercelEnv(),
       }
       const html = await render(createElement(DeliveryTest, props))
-      return {
-        subject: DELIVERY_TEST_SUBJECT,
-        html,
-        text:    deliveryTestPlainText(props),
-        category: EMAIL_CATEGORIES.TRANSACTIONAL,
-      }
+      return ok(input, DELIVERY_TEST_SUBJECT, html, deliveryTestPlainText(props), EMAIL_CATEGORIES.TRANSACTIONAL)
     }
     case TRANSACTIONAL_TEST_KEY: {
       const props = { displayName: input.displayName ?? null }
       const html = await render(createElement(TransactionalTest, props))
-      return {
-        subject: TRANSACTIONAL_TEST_SUBJECT,
-        html,
-        text:    transactionalTestPlainText(props),
-        category: EMAIL_CATEGORIES.SERVICE_PRODUCT,
-      }
+      return ok(input, TRANSACTIONAL_TEST_SUBJECT, html, transactionalTestPlainText(props), EMAIL_CATEGORIES.SERVICE_PRODUCT)
     }
     case MARKETING_PREVIEW_KEY: {
       const props = { preferencesUrl: input.preferencesUrl ?? null }
       const html = await render(createElement(MarketingPreview, props))
-      return {
-        subject: MARKETING_PREVIEW_SUBJECT,
-        html,
-        text:    marketingPreviewPlainText(props),
-        category: EMAIL_CATEGORIES.MARKETING_NEWSLETTER,
-      }
+      return ok(input, MARKETING_PREVIEW_SUBJECT, html, marketingPreviewPlainText(props), EMAIL_CATEGORIES.MARKETING_NEWSLETTER)
+    }
+    case ONBOARDING_WELCOME_KEY: {
+      const props = {}
+      const html = await render(createElement(OnboardingWelcome, props))
+      return ok(input, ONBOARDING_WELCOME_SUBJECT, html, onboardingWelcomePlainText(props), EMAIL_CATEGORIES.ONBOARDING)
+    }
+    case ONBOARDING_ACTIVATION_KEY: {
+      const branch: ActivationBranch = input.activationBranch ?? 'A'
+      const props = { branch }
+      const html = await render(createElement(OnboardingActivation, props))
+      return ok(input, onboardingActivationSubject(branch), html, onboardingActivationPlainText(props), EMAIL_CATEGORIES.ONBOARDING)
+    }
+    case ONBOARDING_DISCOVERY_KEY: {
+      const props = {}
+      const html = await render(createElement(OnboardingDiscovery, props))
+      return ok(input, ONBOARDING_DISCOVERY_SUBJECT, html, onboardingDiscoveryPlainText(props), EMAIL_CATEGORIES.ONBOARDING)
     }
     default: {
       // Defensive — the type guard above narrows callers, but in case
       // a future key is added without a switch arm we fail closed.
       throw new Error('renderTemplate: unknown key')
     }
+  }
+}
+
+function ok(
+  input:    { testPrefix?: boolean },
+  subject:  string,
+  html:     string,
+  text:     string,
+  category: EmailCategory,
+): RenderedEmail {
+  return {
+    subject:  input.testPrefix ? `[TEST] ${subject}` : subject,
+    html,
+    text,
+    category,
   }
 }
 

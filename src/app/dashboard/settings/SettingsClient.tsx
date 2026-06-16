@@ -387,6 +387,9 @@ export default function SettingsClient() {
               onChange={v => update('alert_emails_enabled', v)}
             />
 
+            <OnboardingTipsToggle />
+
+
             {prefs.alert_emails_enabled && (
               <div style={{ marginTop: 14, paddingLeft: 14, borderLeft: '2px solid var(--border)' }}>
                 <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.8, fontFamily: "'Figtree', sans-serif", display: 'block', marginBottom: 8 }}>
@@ -449,6 +452,144 @@ export default function SettingsClient() {
         onSaved={(id) => setAvatarPokemonId(id)}
       />
     </div>
+  )
+}
+
+// Block 3B (correction pass) — onboarding "Getting started tips"
+// toggle.
+//
+// UI states (per Block 3B correction §4):
+//   * sequenceStatus === 'not_enrolled' → "Not enrolled" notice.
+//     Existing pre-cutoff users see this; toggling on does NOT
+//     silently enrol them (the route would only re-grant consent
+//     without an existing email_onboarding_state row, and the
+//     processor would have nothing to drive). Wording reflects that.
+//   * sequenceStatus === 'completed'    → "Completed" notice. Toggle
+//     hidden — re-enabling does not restart a finished sequence.
+//   * sequenceStatus === 'cancelled' + optedIn=false → toggle off.
+//   * sequenceStatus is active / pending / paused → live toggle.
+function OnboardingTipsToggle() {
+  type Status = 'pending' | 'active' | 'completed' | 'paused' | 'cancelled' | 'not_enrolled'
+  const [value, setValue]   = useState<boolean | null>(null)
+  const [status, setStatus] = useState<Status | null>(null)
+  const [busy, setBusy]     = useState(false)
+  const [error, setError]   = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      try {
+        const { data } = await supabase.auth.getSession()
+        const token = data.session?.access_token
+        if (!token) { if (!cancelled) { setValue(false); setStatus('not_enrolled') } ; return }
+        const res = await fetch('/api/onboarding/preference', {
+          headers: { 'Authorization': `Bearer ${token}` },
+          cache: 'no-store',
+        })
+        if (!res.ok) { if (!cancelled) { setValue(false); setStatus('not_enrolled') } ; return }
+        const json = await res.json() as { optedIn: boolean | null; sequenceStatus: Status }
+        if (cancelled) return
+        setStatus(json.sequenceStatus)
+        // Default rendering when no consent row exists yet:
+        //   * an enrolled user (status active/pending/paused) defaults to ON
+        //   * everyone else defaults to OFF
+        if (json.optedIn === null) {
+          const enrolled = json.sequenceStatus === 'active' || json.sequenceStatus === 'pending' || json.sequenceStatus === 'paused'
+          setValue(enrolled)
+        } else {
+          setValue(!!json.optedIn)
+        }
+      } catch {
+        if (!cancelled) { setValue(false); setStatus('not_enrolled') }
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [])
+
+  const toggle = async () => {
+    if (value == null || status == null) return
+    const next = !value
+    setBusy(true); setError(null)
+    setValue(next) // optimistic
+    try {
+      const { data } = await supabase.auth.getSession()
+      const token = data.session?.access_token
+      if (!token) { setError('Sign in first.'); setBusy(false); return }
+      const res = await fetch('/api/onboarding/preference', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body:    JSON.stringify({ optedIn: next }),
+      })
+      if (!res.ok) {
+        setValue(!next) // revert
+        setError('Could not save.')
+      } else {
+        // Client-side product analytics: cancelling fires the typed
+        // event. Enrolment + send events remain server-side logs
+        // (see docs/email-onboarding.md "Analytics").
+        if (!next) {
+          try { trackEvent('onboarding_cancelled', { reason: 'manual_opt_out', source_component: 'settings_toggle' }) } catch {}
+        }
+      }
+    } catch {
+      setValue(!next)
+      setError('Network error.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (value == null || status == null) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, padding: '12px 0', borderBottom: '1px solid var(--border-light)' }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>Getting started tips</div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 3 }}>Loading…</div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Inactive states — no toggle ──
+  if (status === 'not_enrolled') {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, padding: '12px 0', borderBottom: '1px solid var(--border-light)' }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>Getting started tips</div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 3 }}>
+            Not enrolled. This was a short three-email walkthrough for new accounts; your account is not part of the sequence.
+          </div>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap' }}>—</div>
+      </div>
+    )
+  }
+  if (status === 'completed') {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, padding: '12px 0', borderBottom: '1px solid var(--border-light)' }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>Getting started tips</div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 3 }}>
+            Completed. Re-enabling does not restart the sequence.
+          </div>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap' }}>Done</div>
+      </div>
+    )
+  }
+
+  // ── Live toggle: status is active / pending / paused / cancelled ──
+  return (
+    <>
+      <Toggle
+        label="Getting started tips"
+        sub="A short, three-email walkthrough of what PokePrices can do. Stops automatically after the third email."
+        value={value}
+        onChange={() => { if (!busy) toggle() }}
+      />
+      {error && <p style={{ fontSize: 11, color: '#ef4444', fontFamily: "'Figtree', sans-serif", margin: '4px 0 0' }}>{error}</p>}
+    </>
   )
 }
 

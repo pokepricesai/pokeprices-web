@@ -94,6 +94,13 @@ export type EventMap = {
   vendor_submission_completed:  { country_code?: string; vendor_type?: string; has_logo?: 'yes' | 'no' }
   vendor_logo_upload_success:   { vendor_type?: string }
   vendor_logo_upload_failed:    { vendor_type?: string; failure_stage?: string }
+
+  // Onboarding (Block 3B)
+  onboarding_enrolled:          { auth_method?: AuthMethod; source_component?: string }
+  onboarding_email_sent:        { template_key?: string; step?: string; outcome?: string; activation_branch?: string }
+  onboarding_email_skipped:     { template_key?: string; step?: string; reason?: string }
+  onboarding_completed:         { last_step?: string }
+  onboarding_cancelled:         { reason?: string; source_component?: string }
 }
 
 export type EventName = keyof EventMap

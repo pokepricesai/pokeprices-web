@@ -30,6 +30,8 @@ class QueryBuilder {
   private orderClauses: Array<{ col: string; ascending: boolean }> = []
   private limitN: number | null = null
   private rejectInsert: (() => FakeError) | null = null
+  private countMode: 'exact' | null = null
+  private headOnly: boolean = false
 
   constructor(tableName: string, db: FakeDB) {
     this.tableName = tableName
@@ -37,7 +39,11 @@ class QueryBuilder {
     this.rejectInsert = db.rejectInsert(tableName)
   }
 
-  select(_cols?: string): this { return this }
+  select(_cols?: string, opts?: { count?: 'exact'; head?: boolean }): this {
+    if (opts?.count === 'exact') this.countMode = 'exact'
+    if (opts?.head === true)     this.headOnly  = true
+    return this
+  }
 
   eq(col: string, val: any): this {
     this.filters.push(r => r[col] === val)
@@ -45,12 +51,40 @@ class QueryBuilder {
   }
 
   is(col: string, val: any): this {
-    this.filters.push(r => r[col] === val)
+    // Postgres `IS NULL` matches both unset/null columns; the fake
+    // treats `undefined` the same as `null` for this filter.
+    this.filters.push(r => {
+      if (val === null) return r[col] === null || r[col] === undefined
+      return r[col] === val
+    })
     return this
   }
 
   in(col: string, vals: any[]): this {
     this.filters.push(r => vals.includes(r[col]))
+    return this
+  }
+
+  // Block 3B correction — used by the atomic claim's stale-recovery
+  // step. Treats null / undefined as "not less than anything" so a
+  // row with no claim does NOT accidentally match this filter; the
+  // is(processing_token, null) path handles those.
+  lt(col: string, val: any): this {
+    this.filters.push(r => {
+      const v = r[col]
+      if (v === null || v === undefined) return false
+      return v < val
+    })
+    return this
+  }
+
+  // Match the bare-claim path: token IS NULL or token IS NOT NULL.
+  // Already covered by is() above.
+  not(col: string, op: 'is', val: any): this {
+    // Used as .not('processing_token', 'is', null) — i.e. NOT NULL.
+    if (op === 'is' && val === null) {
+      this.filters.push(r => r[col] !== null && r[col] !== undefined)
+    }
     return this
   }
 
@@ -142,17 +176,20 @@ class QueryBuilder {
   }
 
   // Awaiting the builder directly (no .single/.maybeSingle).
-  then<T = { data: Row[] | null; error: FakeError }, R = never>(
-    resolve: (v: { data: Row[] | null; error: FakeError }) => T | PromiseLike<T>,
+  then<T = { data: Row[] | null; error: FakeError; count?: number | null }, R = never>(
+    resolve: (v: { data: Row[] | null; error: FakeError; count?: number | null }) => T | PromiseLike<T>,
     reject?: (r: unknown) => R | PromiseLike<R>,
   ): Promise<T | R> {
     return Promise.resolve(this.commit()).then(resolve, reject)
   }
 
-  private commit(): { data: Row[] | null; error: FakeError } {
+  private commit(): { data: Row[] | null; error: FakeError; count?: number | null } {
     if (this.op === 'insert' || this.op === 'upsert') return this.commitInsert()
     if (this.op === 'update') return this.commitUpdate()
-    return { data: this.filtered(), error: null }
+    const filtered = this.filtered()
+    const count = this.countMode === 'exact' ? filtered.length : null
+    const data  = this.headOnly ? null : filtered
+    return { data, error: null, count }
   }
 }
 

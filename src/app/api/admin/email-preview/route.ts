@@ -13,6 +13,7 @@ import 'server-only'
 import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/adminAuth'
 import { isApprovedTemplateKey, renderTemplate } from '@/emails/render'
+import type { ActivationBranch } from '@/lib/email/onboardingActivation'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -26,17 +27,24 @@ export async function GET(req: Request) {
   const url      = new URL(req.url)
   const template = url.searchParams.get('template')
   const format   = url.searchParams.get('format')
+  const branch   = url.searchParams.get('branch')
 
   if (!isApprovedTemplateKey(template)) {
     return NextResponse.json({ error: 'unknown template' }, { status: 400 })
   }
 
+  const activationBranch: ActivationBranch | undefined =
+    branch === 'A' || branch === 'B' || branch === 'C' || branch === 'D'
+      ? branch
+      : undefined
+
   let rendered
   try {
     rendered = await renderTemplate({
-      key:            template,
-      preferencesUrl: 'https://www.pokeprices.io/dashboard/settings',
-      displayName:    'Collector',
+      key:              template,
+      preferencesUrl:   'https://www.pokeprices.io/dashboard/settings',
+      displayName:      'Collector',
+      activationBranch,
     })
   } catch (e) {
     console.error('[admin/email-preview] render failed:', e instanceof Error ? e.message : 'unknown')
