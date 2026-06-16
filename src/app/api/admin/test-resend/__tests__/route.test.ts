@@ -1,61 +1,42 @@
-// Tests for the temporary /api/admin/test-resend route.
+// Tests for /api/admin/test-resend after Block 3A refactor.
 //
-// Coverage:
-//   1. anonymous request rejected
-//   2. non-admin authenticated request rejected
-//   3. missing RESEND_API_KEY returns 503 + generic message
-//   4. missing EMAIL_TEST_RECIPIENT returns 503 + generic message
-//   5. successful send (Resend SDK mocked) returns success + emailId
-//   6. recipient sent in the request body is ignored — only the
-//      EMAIL_TEST_RECIPIENT env value is ever passed to Resend
+// The route is now a thin shim over the central send service. The
+// safety contract is preserved end-to-end:
+//   * anonymous + non-admin rejected
+//   * recipient locked to EMAIL_TEST_RECIPIENT, never read from body
+//   * generic 503 when RESEND_API_KEY or EMAIL_TEST_RECIPIENT missing
+//   * generic 502 on provider error / SDK throw
+//   * API key never echoed back to the caller
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
-// ── Mocks ──────────────────────────────────────────────────────────────────
-// The route imports `server-only`, which throws by design outside a
-// React Server Component context. Vitest's `node` environment is
-// otherwise fine for testing route handlers, so we no-op the guard.
 vi.mock('server-only', () => ({}))
-
-// requireAdmin is mocked per-test by overwriting the exported binding via
-// vi.mock + a controllable handle.
 
 let mockAdmin: () => Promise<{ ok: boolean; userId: string; email: string; status: number; error: string }>
 vi.mock('@/lib/adminAuth', () => ({
-  requireAdmin: (req: Request) => mockAdmin(),
+  requireAdmin: (_req: Request) => mockAdmin(),
 }))
 
-// Resend SDK mock — the constructor returns an object with .emails.send.
-// Tests set `resendSendImpl` to control the response.
-let resendSendImpl: (args: any) => Promise<{ data: any; error: any }>
-const resendSendSpy = vi.fn()
-vi.mock('resend', () => ({
-  Resend: vi.fn().mockImplementation(() => ({
-    emails: {
-      send: (args: any) => {
-        resendSendSpy(args)
-        return resendSendImpl(args)
-      },
-    },
-  })),
+const sendEmailMock = vi.fn()
+vi.mock('@/lib/email/send', () => ({
+  sendEmail: (args: unknown) => sendEmailMock(args),
 }))
 
-// Import AFTER mocks are registered.
+// Stub the template renderer — these tests verify the route shim only.
+vi.mock('@/emails/render', () => ({
+  DELIVERY_TEST_KEY: 'delivery_test',
+  renderTemplate: async () => ({
+    subject:  'PokePrices Vercel email test',
+    html:     '<p>hi</p>',
+    text:     'hi',
+    category: 'transactional',
+  }),
+}))
+
 import { POST } from '../route'
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-function adminOk() {
-  return {
-    ok: true, userId: 'u1', email: 'admin@example.com', status: 200, error: '',
-  }
-}
-
-function adminReject(status: number, error: string) {
-  return {
-    ok: false, userId: '', email: '', status, error,
-  }
-}
+function adminOk()                       { return { ok: true,  userId: 'u1', email: 'a@x', status: 200, error: '' } }
+function adminReject(s: number, e: string) { return { ok: false, userId: '',   email: '',    status: s,   error: e  } }
 
 function postReq(headers: Record<string, string> = {}, body?: unknown): Request {
   const init: RequestInit = {
@@ -66,20 +47,16 @@ function postReq(headers: Record<string, string> = {}, body?: unknown): Request 
   return new Request('http://localhost/api/admin/test-resend', init)
 }
 
-// ── Env hygiene ────────────────────────────────────────────────────────────
-
 const ENV_VARS = ['RESEND_API_KEY', 'EMAIL_TEST_RECIPIENT', 'VERCEL_ENV'] as const
-let originalEnv: Partial<Record<string, string | undefined>> = {}
+let originalEnv: Record<string, string | undefined>
 
 beforeEach(() => {
   originalEnv = {}
   for (const name of ENV_VARS) originalEnv[name] = process.env[name]
-  // Clean slate per test.
   for (const name of ENV_VARS) delete process.env[name]
-
   mockAdmin = async () => adminOk()
-  resendSendImpl = async () => ({ data: { id: 'mock-id-123' }, error: null })
-  resendSendSpy.mockClear()
+  sendEmailMock.mockReset()
+  sendEmailMock.mockResolvedValue({ outcome: 'sent', emailId: 'mock-id-123' })
 })
 
 afterEach(() => {
@@ -89,124 +66,79 @@ afterEach(() => {
   }
 })
 
-// ── Tests ──────────────────────────────────────────────────────────────────
-
-describe('POST /api/admin/test-resend', () => {
-  it('rejects anonymous requests (no session) with the auth helper status', async () => {
+describe('POST /api/admin/test-resend (Block 3A)', () => {
+  it('rejects anonymous requests with the auth helper status', async () => {
     mockAdmin = async () => adminReject(401, 'Missing bearer token')
-    process.env.RESEND_API_KEY       = 'rk-test'
     process.env.EMAIL_TEST_RECIPIENT = 'safe@example.com'
-
     const res = await POST(postReq())
     expect(res.status).toBe(401)
-    const json = await res.json()
-    expect(json).toEqual({ success: false, error: 'Missing bearer token' })
-    expect(resendSendSpy).not.toHaveBeenCalled()
+    expect(sendEmailMock).not.toHaveBeenCalled()
   })
 
   it('rejects authenticated but non-admin callers', async () => {
     mockAdmin = async () => adminReject(403, 'Not authorised')
-    process.env.RESEND_API_KEY       = 'rk-test'
     process.env.EMAIL_TEST_RECIPIENT = 'safe@example.com'
-
     const res = await POST(postReq({ Authorization: 'Bearer not-an-admin' }))
     expect(res.status).toBe(403)
-    const json = await res.json()
-    expect(json).toEqual({ success: false, error: 'Not authorised' })
-    expect(resendSendSpy).not.toHaveBeenCalled()
-  })
-
-  it('returns 503 + generic message when RESEND_API_KEY is missing', async () => {
-    process.env.EMAIL_TEST_RECIPIENT = 'safe@example.com'
-    // RESEND_API_KEY intentionally unset.
-
-    const res = await POST(postReq())
-    expect(res.status).toBe(503)
-    const json = await res.json()
-    expect(json).toEqual({ success: false, error: 'Email service not configured' })
-    expect(resendSendSpy).not.toHaveBeenCalled()
+    expect(sendEmailMock).not.toHaveBeenCalled()
   })
 
   it('returns 503 + generic message when EMAIL_TEST_RECIPIENT is missing', async () => {
     process.env.RESEND_API_KEY = 'rk-test'
-    // EMAIL_TEST_RECIPIENT intentionally unset.
-
     const res = await POST(postReq())
     expect(res.status).toBe(503)
-    const json = await res.json()
-    expect(json).toEqual({ success: false, error: 'Email service not configured' })
-    expect(resendSendSpy).not.toHaveBeenCalled()
+    expect(await res.json()).toEqual({ success: false, error: 'Email service not configured' })
+    expect(sendEmailMock).not.toHaveBeenCalled()
+  })
+
+  it('returns 503 generic when the send service reports configuration_error (e.g. missing RESEND_API_KEY)', async () => {
+    process.env.EMAIL_TEST_RECIPIENT = 'safe@example.com'
+    sendEmailMock.mockResolvedValueOnce({ outcome: 'configuration_error', reason: 'missing_api_key' })
+    const res = await POST(postReq())
+    expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({ success: false, error: 'Email service not configured' })
   })
 
   it('returns success + emailId on a clean send', async () => {
-    process.env.RESEND_API_KEY       = 'rk-test'
     process.env.EMAIL_TEST_RECIPIENT = 'safe@example.com'
+    process.env.RESEND_API_KEY       = 'rk-test'
     process.env.VERCEL_ENV           = 'production'
-
     const res = await POST(postReq())
     expect(res.status).toBe(200)
-    const json = await res.json()
-    expect(json).toEqual({ success: true, emailId: 'mock-id-123' })
-
-    expect(resendSendSpy).toHaveBeenCalledTimes(1)
-    const callArgs = resendSendSpy.mock.calls[0][0]
-    expect(callArgs.from).toBe('PokePrices <hello@pokeprices.io>')
-    expect(callArgs.to).toBe('safe@example.com')
-    expect(callArgs.subject).toBe('PokePrices Vercel email test')
-    // Body mentions the Vercel environment and references Resend.
-    expect(String(callArgs.text)).toMatch(/Resend API/i)
-    expect(String(callArgs.text)).toMatch(/production/)
-    // ISO timestamp present.
-    expect(String(callArgs.text)).toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)
+    expect(await res.json()).toEqual({ success: true, emailId: 'mock-id-123' })
+    expect(sendEmailMock).toHaveBeenCalledTimes(1)
+    const call = sendEmailMock.mock.calls[0][0] as { toEmail: string; templateKey: string; adminBypass: unknown }
+    expect(call.toEmail).toBe('safe@example.com')
+    expect(call.templateKey).toBe('delivery_test')
+    expect(call.adminBypass).toBeDefined()
   })
 
   it('ignores any "to" / recipient supplied in the request body — only EMAIL_TEST_RECIPIENT is used', async () => {
-    process.env.RESEND_API_KEY       = 'rk-test'
     process.env.EMAIL_TEST_RECIPIENT = 'safe@example.com'
-
-    // Attacker tries to redirect the email.
+    process.env.RESEND_API_KEY       = 'rk-test'
     const res = await POST(postReq({}, {
       to:        'attacker@evil.example',
       recipient: 'attacker@evil.example',
       email:     'attacker@evil.example',
     }))
     expect(res.status).toBe(200)
-
-    expect(resendSendSpy).toHaveBeenCalledTimes(1)
-    const callArgs = resendSendSpy.mock.calls[0][0]
-    expect(callArgs.to).toBe('safe@example.com')
-    expect(callArgs.to).not.toContain('attacker')
+    const call = sendEmailMock.mock.calls[0][0] as { toEmail: string }
+    expect(call.toEmail).toBe('safe@example.com')
+    expect(call.toEmail).not.toContain('attacker')
   })
 
-  it('returns generic 502 when Resend reports an error', async () => {
-    process.env.RESEND_API_KEY       = 'rk-test'
+  it('returns 502 generic when the send service reports provider_error', async () => {
     process.env.EMAIL_TEST_RECIPIENT = 'safe@example.com'
-    resendSendImpl = async () => ({ data: null, error: { name: 'validation_error', message: 'oops' } })
-
+    process.env.RESEND_API_KEY       = 'rk-test'
+    sendEmailMock.mockResolvedValueOnce({ outcome: 'provider_error', reason: 'oops' })
     const res = await POST(postReq())
     expect(res.status).toBe(502)
-    const json = await res.json()
-    expect(json).toEqual({ success: false, error: 'Send failed' })
-    // Generic message — must not leak the Resend error text.
-    expect(JSON.stringify(json)).not.toMatch(/oops/)
-  })
-
-  it('returns generic 502 when the Resend SDK throws', async () => {
-    process.env.RESEND_API_KEY       = 'rk-test'
-    process.env.EMAIL_TEST_RECIPIENT = 'safe@example.com'
-    resendSendImpl = async () => { throw new Error('network down — full URL secrets etc') }
-
-    const res = await POST(postReq())
-    expect(res.status).toBe(502)
-    const json = await res.json()
-    expect(json).toEqual({ success: false, error: 'Send failed' })
-    expect(JSON.stringify(json)).not.toMatch(/secrets/)
+    expect(await res.json()).toEqual({ success: false, error: 'Send failed' })
   })
 
   it('never echoes the API key in any response', async () => {
     process.env.RESEND_API_KEY       = 'rk-secret-do-not-leak-XYZ'
     process.env.EMAIL_TEST_RECIPIENT = 'safe@example.com'
-
     const res = await POST(postReq())
     const json = await res.json()
     const headerPairs: string[] = []

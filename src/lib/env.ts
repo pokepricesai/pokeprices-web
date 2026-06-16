@@ -197,7 +197,33 @@ export const ENV_CATALOGUE: ReadonlyArray<EnvVarSpec> = [
     name:        'EMAIL_TEST_RECIPIENT',
     scope:       'server',
     required:    false,
-    description: 'Single recipient address used by /api/admin/test-resend. The route never accepts a recipient from the request body — only this server-only value is ever sent to.',
+    description: 'Single recipient address used by /api/admin/test-resend and /api/admin/email-send-test. The routes never accept a recipient from the request body. Also enforced by the central send service in Preview/development as the only allowed recipient unless EMAIL_ALLOW_PREVIEW_SEND=true.',
+  },
+  {
+    name:        'EMAIL_FROM_ADDRESS',
+    scope:       'server',
+    required:    false,
+    description: 'Optional override for the From header. Defaults to "PokePrices <hello@pokeprices.io>". Must be a verified Resend sender — changing this without DNS verification will cause Resend to reject sends.',
+    fallback:    'PokePrices <hello@pokeprices.io>',
+  },
+  {
+    name:        'EMAIL_REPLY_TO',
+    scope:       'server',
+    required:    false,
+    description: 'Optional Reply-To header. Defaults to "hello@pokeprices.io".',
+    fallback:    'hello@pokeprices.io',
+  },
+  {
+    name:        'EMAIL_ALLOW_PREVIEW_SEND',
+    scope:       'server',
+    required:    false,
+    description: 'When set to the literal string "true" on a non-production deployment, allows the central send service to deliver to any recipient. Default: unset (Preview/development sends are locked to EMAIL_TEST_RECIPIENT).',
+  },
+  {
+    name:        'RESEND_WEBHOOK_SECRET',
+    scope:       'server',
+    required:    false,
+    description: 'Svix signing secret for the Resend webhook receiver (/api/webhooks/resend). When missing the receiver returns 503 and stores nothing; configure in Resend dashboard → Webhooks → Signing secret.',
   },
 ]
 

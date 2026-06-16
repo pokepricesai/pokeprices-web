@@ -1,33 +1,30 @@
 // src/app/api/admin/test-resend/route.ts
-// Temporary, server-only admin endpoint that proves the Vercel
+// Block 2C/2D temporary admin endpoint that proves the Vercel
 // RESEND_API_KEY can deliver a single email through the Resend API.
 //
-// Hard rules
-//   * Recipient is read from a server-only env var (EMAIL_TEST_RECIPIENT)
-//     and is NEVER taken from the request body or query string. The
-//     route does not even parse a body — bytes from the browser are
-//     dropped on the floor.
+// Block 3A — refactored to route through the central send service
+// (src/lib/email/send.ts) and the central React Email DeliveryTest
+// template. Public contract preserved:
+//
+//   * Recipient is read from a server-only env var
+//     (EMAIL_TEST_RECIPIENT) and is NEVER taken from the request body
+//     or query string. The route does not even parse a body.
 //   * Caller must hold a valid Supabase session AND be in the
 //     ADMIN_ALLOWED_EMAILS allow-list (Block 1A).
-//   * The Resend key never leaves the server context. It is read once
-//     per request, used in-process, and never echoed back to the
-//     caller, logged, or attached to any error message.
+//   * The Resend key never leaves the server context; the central
+//     client owns instantiation.
+//
+// Same JSON shape as Block 2D so the existing admin button keeps
+// working without code changes.
 
 import 'server-only'
 import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/adminAuth'
-import { Resend } from 'resend'
+import { renderTemplate, DELIVERY_TEST_KEY } from '@/emails/render'
+import { sendEmail } from '@/lib/email/send'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-const FROM_ADDRESS = 'PokePrices <hello@pokeprices.io>'
-const SUBJECT      = 'PokePrices Vercel email test'
-
-function logMissing(names: string[]): void {
-  if (names.length === 0) return
-  console.error('[admin/test-resend] missing env vars:', names.join(', '))
-}
 
 export async function POST(req: Request) {
   // 1. Admin auth.
@@ -36,87 +33,55 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: admin.error }, { status: admin.status })
   }
 
-  // 2. Server-only configuration.
-  const apiKey    = (process.env.RESEND_API_KEY     ?? '').trim()
+  // 2. Server-only recipient lock.
   const recipient = (process.env.EMAIL_TEST_RECIPIENT ?? '').trim()
-  const missing: string[] = []
-  if (!apiKey)    missing.push('RESEND_API_KEY')
-  if (!recipient) missing.push('EMAIL_TEST_RECIPIENT')
-  if (missing.length > 0) {
-    logMissing(missing)
+  if (!recipient) {
+    console.error('[admin/test-resend] missing env vars: EMAIL_TEST_RECIPIENT')
     return NextResponse.json(
       { success: false, error: 'Email service not configured' },
       { status: 503 },
     )
   }
 
-  // 3. Compose the body. Timestamp is ISO 8601 UTC for clarity in logs.
-  //    Vercel sets VERCEL_ENV to "production" / "preview" / "development"
-  //    on every build; we report it when present.
-  const timestamp = new Date().toISOString()
-  const vercelEnv = (process.env.VERCEL_ENV ?? '').trim() || 'unknown'
-
-  const text = [
-    'This email was sent directly by the PokePrices Vercel application',
-    'through the Resend API.',
-    '',
-    `Timestamp: ${timestamp}`,
-    `Vercel environment: ${vercelEnv}`,
-    '',
-    'If you received this, the Resend API key on Vercel is wired up',
-    'correctly. No further action is required.',
-  ].join('\n')
-
-  const html =
-    `<p>This email was sent directly by the PokePrices Vercel application ` +
-    `through the Resend API.</p>` +
-    `<p><strong>Timestamp:</strong> ${timestamp}<br/>` +
-    `<strong>Vercel environment:</strong> ${vercelEnv}</p>` +
-    `<p>If you received this, the Resend API key on Vercel is wired up ` +
-    `correctly. No further action is required.</p>`
-
-  // 4. Send. Resend's SDK returns { data, error } — we forward neither
-  //    verbatim. Only a generic message ever crosses the wire to the
-  //    browser; the server-side log carries the Resend error code +
-  //    safe message for triage.
+  // 3. Render the canonical DeliveryTest template via the central
+  //    renderer. The template is allow-listed; subject/body/category
+  //    are owned by the template, not the caller.
+  let rendered
   try {
-    const resend = new Resend(apiKey)
-    const { data, error } = await resend.emails.send({
-      from:    FROM_ADDRESS,
-      to:      recipient,
-      subject: SUBJECT,
-      text,
-      html,
-    })
-
-    if (error) {
-      console.error(
-        '[admin/test-resend] resend error:',
-        // Resend errors carry { name, message }; both are operator-safe.
-        // We deliberately do NOT log any request body or the api key.
-        (error as { name?: string }).name ?? 'unknown',
-        (error as { message?: string }).message ?? '',
-      )
-      return NextResponse.json(
-        { success: false, error: 'Send failed' },
-        { status: 502 },
-      )
-    }
-
-    const emailId = (data && typeof (data as { id?: string }).id === 'string')
-      ? (data as { id: string }).id
-      : null
-
-    return NextResponse.json({ success: true, emailId })
+    rendered = await renderTemplate({ key: DELIVERY_TEST_KEY })
   } catch (e) {
-    // Network/SDK fault — never echo the raw exception to the browser.
-    console.error(
-      '[admin/test-resend] unexpected error:',
-      e instanceof Error ? e.name + ': ' + e.message : 'non-Error throw',
-    )
+    console.error('[admin/test-resend] render failed:', e instanceof Error ? e.message : 'unknown')
+    return NextResponse.json({ success: false, error: 'Send failed' }, { status: 502 })
+  }
+
+  // 4. Send through the central service with the explicit admin
+  //    bypass (recipient is already locked above; preference + suppression
+  //    checks are skipped because this is an operator smoke test).
+  const idempotencyKey =
+    `admin-test-resend:${new Date().toISOString().slice(0, 19)}:${crypto.randomUUID()}`
+
+  const result = await sendEmail({
+    toEmail:        recipient,
+    category:       rendered.category,
+    templateKey:    DELIVERY_TEST_KEY,
+    subject:        rendered.subject,
+    html:           rendered.html,
+    text:           rendered.text,
+    idempotencyKey,
+    adminBypass:    { reason: 'admin_test_resend', recipientLocked: true },
+  })
+
+  if (result.outcome === 'sent') {
+    return NextResponse.json({ success: true, emailId: result.emailId ?? null })
+  }
+  if (result.outcome === 'configuration_error') {
     return NextResponse.json(
-      { success: false, error: 'Send failed' },
-      { status: 502 },
+      { success: false, error: 'Email service not configured' },
+      { status: 503 },
     )
   }
+  return NextResponse.json(
+    { success: false, error: 'Send failed' },
+    { status: 502 },
+  )
 }
