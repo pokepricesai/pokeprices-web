@@ -78,6 +78,18 @@ class QueryBuilder {
     return this
   }
 
+  // Block 3D — used by the status snapshot to ask "which rows have
+  // their next-due timestamp at or before now?". Null/undefined values
+  // are treated as "not at or below" — they cannot be due.
+  lte(col: string, val: any): this {
+    this.filters.push(r => {
+      const v = r[col]
+      if (v === null || v === undefined) return false
+      return v <= val
+    })
+    return this
+  }
+
   // Match the bare-claim path: token IS NULL or token IS NOT NULL.
   // Already covered by is() above.
   not(col: string, op: 'is', val: any): this {

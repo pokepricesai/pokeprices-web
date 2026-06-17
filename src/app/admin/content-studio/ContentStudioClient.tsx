@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import OnboardingEmailTester from '@/components/admin/OnboardingEmailTester'
+import OnboardingAutomationStatus from '@/components/admin/OnboardingAutomationStatus'
 import {
   TEMPLATE_LABELS,
   TEMPLATES_IMPLEMENTED,
@@ -1089,6 +1090,12 @@ export default function ContentStudioClient() {
           (which is still in the header). Uses the Block 3A admin
           email routes; never touches onboarding state. */}
       <OnboardingEmailTester getAccessToken={getAccessToken} />
+
+      {/* Block 3D operator-UX — onboarding automation status.
+          Reads /api/admin/onboarding-status; "Run now" calls
+          /api/admin/run-onboarding-processor. The browser never
+          sees CRON_SECRET. */}
+      <OnboardingAutomationStatus getAccessToken={getAccessToken} />
 
       {/* Per-template option panels */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 12, marginBottom: 18 }}>

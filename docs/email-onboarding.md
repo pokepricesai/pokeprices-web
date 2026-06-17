@@ -202,9 +202,157 @@ crash recovery.
   ```
   No email addresses, no user IDs.
 
+## Scheduling (Block 3D)
+
+### Vercel Cron
+
+The repository ships a single Vercel Cron entry in `vercel.json`:
+
+```json
+{
+  "crons": [
+    { "path": "/api/internal/process-onboarding-emails", "schedule": "*/10 * * * *" }
+  ]
+}
+```
+
+- Vercel invokes the path via **HTTP GET**. The route accepts both
+  GET (cron) and POST (operator) and dispatches to the same internal
+  `runProcessor()` function.
+- The schedule is interpreted in **UTC**. PokePrices delays are
+  measured in minutes / hours / days so a 10-minute cadence is fine
+  regardless of local time.
+- **Plan limitations:** on Vercel Hobby the cron runs are limited
+  (current quota: ~2/day, daily-only) — production scheduling at
+  10-minute cadence requires the Pro plan.
+- **Timing precision:** Vercel guarantees "approximately on schedule"
+  delivery. Drift up to ~60 seconds is normal; this is well inside
+  the onboarding step delays.
+- Vercel may **deliver a cron invocation more than once** and may
+  **overlap concurrent invocations**. The processor stays safe under
+  both — see "Concurrency safety" below.
+
+### Authentication: `CRON_SECRET`
+
+Vercel automatically attaches the project's `CRON_SECRET` as
+`Authorization: Bearer <CRON_SECRET>` on every cron invocation. The
+route accepts:
+
+1. **`CRON_SECRET`** — authoritative (Block 3D).
+2. **`ONBOARDING_CRON_SECRET`** — accepted for one release as a
+   migration fallback (Block 3B). Remove after a successful cron
+   invocation has been observed in `email_onboarding_runs`.
+
+Both secrets are compared in constant time. The route never logs or
+echoes either value. Manual POST callers use the same header shape
+with whichever secret is in play.
+
+Fail-closed behaviour:
+
+- **Both missing** → 503 `unauthorised`. Operators see the misconfig
+  immediately in `vercel logs`.
+- **Wrong secret / missing header** → 401 `unauthorised`. Vercel Cron
+  treats 401 as a transient failure and retries on the next schedule.
+
+### Manual admin run
+
+`POST /api/admin/run-onboarding-processor` runs the same internal
+function with `source: 'manual'`. Protected by `requireAdmin`
+(Block 1A); admins do not need `CRON_SECRET` in the browser. Mounted
+in `/admin/content-studio` under the **Onboarding automation status**
+panel via the "Run now" button.
+
+The hard batch cap inside `runProcessor` is the safety net — admins
+cannot amplify a misconfiguration from the browser.
+
+### Run log: `email_onboarding_runs`
+
+Every invocation of the processor — cron, manual, or disabled — writes
+one row to `email_onboarding_runs`. Status is one of:
+
+| Status | Meaning |
+|---|---|
+| `running` | Row was inserted; batch in flight. Transitional only. |
+| `success` | Batch completed; `failed_count = 0` AND `retried_count = 0`. |
+| `partial` | Batch completed; `failed_count > 0` OR `retried_count > 0`. |
+| `failed`  | The processor (or its wrapper) threw before producing a summary. |
+| `disabled`| Feature flag off; no DB claims, no sends. |
+
+Each row carries the counts (processed / sent / skipped / retried /
+cancelled / failed), `duration_ms`, optional `error_code`, and the
+`source` (`cron` or `manual`). No PII. Service-role only.
+
+### Status snapshot: `/api/admin/onboarding-status`
+
+Admin-only GET that returns:
+
+- `enabled` — current feature flag state.
+- `lastRun` — most recent run (any status), startedAt + status + source + durationMs.
+- `lastSuccessfulRun` — most recent `success` run.
+- `lastSummary` — counts from the most recent run.
+- `state.active / dueNow / paused / cancelled / completed / staleClaims`.
+
+Surfaced by the Content Studio status panel in cards. The same data
+is the basis of the operator monitoring thresholds below.
+
+### Monitoring thresholds (operator-defined alerts — not auto-wired)
+
+| Trigger | Action |
+|---|---|
+| No `success` run for 30+ minutes while `enabled = true` | Treat as outage. Check Vercel function logs + `email_onboarding_runs.status='failed'`. |
+| Any row with `status = 'failed'` | Inspect `error_code`. Likely a Resend, Supabase or env-var issue. |
+| Sudden `retried_count` spike | Resend is degraded or `Resend.emails.send` is throwing. Pause the cron if needed. |
+| `cancelled_count` spike | Suppression flood — check `email_webhook_events`. |
+| Complaint or hard-bounce spike in `email_webhook_events` | Treat as standard Block 3A complaint runbook. |
+
+No paid monitoring provider is added — operators read Vercel function
+logs + this table directly.
+
+### Concurrency safety (Block 3B atomic claim, restated)
+
+- The processor's atomic per-row claim (`processing_step`,
+  `processing_token`, `processing_started_at` on
+  `email_onboarding_state`) means **overlapping cron invocations
+  cannot double-send a step** — only one processor wins the
+  per-row UPDATE.
+- The deterministic send key `onboarding:<uid>:<step>` is the second
+  safety layer at `email_delivery_log.idempotency_key UNIQUE`. Even
+  if a worker crashed after Resend sent but before clearing the
+  claim, the next run's send returns `duplicate` and the step is
+  marked sent without a second Resend call.
+- **Duplicate cron delivery** is therefore safe. The second delivery
+  finds the row already sent and writes a `success` (or `partial`)
+  run row with zero `sent_count`.
+
+### Secret migration procedure
+
+1. Generate a fresh `CRON_SECRET` of ≥ 32 random characters. Do NOT
+   reuse the test value used during Block 3B manual testing.
+2. Add it to Vercel **Production** environment.
+3. Deploy this code (`Block 3D`). Both `CRON_SECRET` and
+   `ONBOARDING_CRON_SECRET` are now accepted.
+4. Wait for one cron firing — confirm `email_onboarding_runs` shows
+   a new `cron`-source row with `status = 'success'` (or `disabled`
+   if the feature flag is still off).
+5. Remove `ONBOARDING_CRON_SECRET` from Vercel Production.
+6. Redeploy. The route now accepts only `CRON_SECRET`.
+
+If the second deployment fails for any reason, restore
+`ONBOARDING_CRON_SECRET` and redeploy — the compatibility window in
+this release means the cron stays operational.
+
+### Disabling procedure
+
+- Soft pause: set `EMAIL_ONBOARDING_ENABLED` to empty (or `false`) on
+  Vercel and redeploy. Cron continues to fire; every invocation
+  writes a `disabled` run row and returns `{ disabled: true }`. No
+  DB claims, no sends.
+- Hard stop: remove the `crons` entry from `vercel.json` and
+  redeploy. Vercel stops invoking the cron entirely.
+
 ## Recommended scheduler
 
-**Recommended for PokePrices today: Vercel Cron.**
+**Recommended for PokePrices today: Vercel Cron (now wired in `vercel.json`).**
 
 | Option | Why |
 |---|---|

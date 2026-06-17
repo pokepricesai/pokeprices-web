@@ -1,61 +1,56 @@
 // src/app/api/internal/process-onboarding-emails/route.ts
-// Block 3B — internal processor for the onboarding email sequence.
+// Block 3D — Vercel Cron-compatible processor route.
 //
-// Protected by a server-only bearer secret (ONBOARDING_CRON_SECRET).
-// No scheduler is wired in this block — the operator decides when to
-// activate Vercel Cron / pg_cron / an external trigger per
-// docs/email-onboarding.md.
+// Both GET and POST execute the same internal `runProcessor()` call.
+//   * GET   — invoked by Vercel Cron. Vercel sends
+//             `Authorization: Bearer <CRON_SECRET>` automatically.
+//   * POST  — for operator/manual testing from the CLI or future
+//             external schedulers. Body may carry an optional `limit`.
+//
+// Auth is the same for both: CRON_SECRET is authoritative; the legacy
+// ONBOARDING_CRON_SECRET is accepted for one release so the operator
+// can roll the new value out before retiring the old one (see
+// docs/email-onboarding.md → secret migration). The route never
+// echoes the secret in any response or log line.
 
 import 'server-only'
 import { NextResponse } from 'next/server'
-import { processOnboardingBatch, isOnboardingEnabled } from '@/lib/email/onboarding'
+import { runProcessor } from '@/lib/email/onboardingProcessor'
+import { isCronAuthOk } from '@/lib/email/cronAuth'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-function readSecret(): string {
-  return (process.env.ONBOARDING_CRON_SECRET ?? '').trim()
-}
-
-function authOk(req: Request): boolean {
-  const expected = readSecret()
-  if (!expected) return false
-  const header = req.headers.get('authorization') ?? ''
-  const bearer = header.startsWith('Bearer ')
-    ? header.slice('Bearer '.length).trim()
-    : ''
-  // Length-aware comparison so the timing path is at least uniform per
-  // request — the secret is never echoed.
-  if (bearer.length !== expected.length) return false
-  let diff = 0
-  for (let i = 0; i < expected.length; i++) {
-    diff |= bearer.charCodeAt(i) ^ expected.charCodeAt(i)
-  }
-  return diff === 0
-}
-
-export async function POST(req: Request) {
-  if (!authOk(req)) {
-    return NextResponse.json({ error: 'unauthorised' }, { status: 401 })
+async function handle(req: Request) {
+  const auth = isCronAuthOk(req)
+  if (!auth.ok) {
+    // Map missing_secret to 503 so operators can spot a config gap;
+    // any other rejection is a plain 401.
+    const status = auth.reason === 'missing_secret' ? 503 : 401
+    return NextResponse.json({ error: 'unauthorised' }, { status })
   }
 
-  if (!isOnboardingEnabled()) {
-    return NextResponse.json({
-      processed: 0, sent: 0, skipped: 0, retried: 0, cancelled: 0, failed: 0,
-      disabled: true,
-    })
-  }
-
-  // The optional limit is operator-controlled; bounded to the
-  // processor's internal cap.
   let limit: number | undefined
-  try {
-    const body = await req.json()
-    if (body && typeof body === 'object' && typeof (body as { limit?: number }).limit === 'number') {
-      limit = (body as { limit: number }).limit
+  if (req.method === 'POST') {
+    try {
+      const body = await req.json()
+      if (body && typeof body === 'object') {
+        const v = (body as { limit?: unknown }).limit
+        if (typeof v === 'number') limit = v
+      }
+    } catch { /* empty body acceptable */ }
+  } else {
+    const url = new URL(req.url)
+    const v = url.searchParams.get('limit')
+    if (v != null) {
+      const n = Number(v)
+      if (Number.isFinite(n)) limit = n
     }
-  } catch { /* empty body acceptable */ }
+  }
 
-  const summary = await processOnboardingBatch({ limit })
-  return NextResponse.json(summary)
+  const result = await runProcessor({ source: 'cron', limit })
+  return NextResponse.json(result)
 }
+
+export async function GET(req: Request)  { return handle(req) }
+export async function POST(req: Request) { return handle(req) }

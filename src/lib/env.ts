@@ -244,10 +244,16 @@ export const ENV_CATALOGUE: ReadonlyArray<EnvVarSpec> = [
     description: 'Optional. Number of seconds after which an in-flight onboarding processor claim is considered stale and may be stolen by a later processor (crash recovery). Default 300 (5 minutes). Lower values risk a slow but live processor losing its claim mid-run; higher values delay crash recovery.',
   },
   {
+    name:        'CRON_SECRET',
+    scope:       'server',
+    required:    false,
+    description: 'Block 3D — primary bearer secret for Vercel Cron + manual POST to /api/internal/process-onboarding-emails. Vercel automatically sends Authorization: Bearer <CRON_SECRET> when invoking a configured cron route. Generate a fresh random value (≥ 32 chars) for production. Constant-time compared on the server; never echoed or logged.',
+  },
+  {
     name:        'ONBOARDING_CRON_SECRET',
     scope:       'server',
     required:    false,
-    description: 'Bearer secret required by POST /api/internal/process-onboarding-emails. Missing → 401. Configure on the cron caller (Vercel Cron / pg_cron / external scheduler) AND on Vercel.',
+    description: 'DEPRECATED (Block 3D). Legacy bearer secret accepted for one release alongside CRON_SECRET so the operator can roll the new value out before retiring this one. Remove from Vercel after the new cron has run successfully — see docs/email-onboarding.md → "Secret migration".',
   },
   {
     name:        'ONBOARDING_WELCOME_DELAY_MS',
