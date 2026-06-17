@@ -18,15 +18,20 @@ import MarketingPreview, {
   MARKETING_PREVIEW_KEY, MARKETING_PREVIEW_SUBJECT, marketingPreviewPlainText,
 } from './templates/MarketingPreview'
 import OnboardingWelcome, {
-  ONBOARDING_WELCOME_KEY, ONBOARDING_WELCOME_SUBJECT, onboardingWelcomePlainText,
+  ONBOARDING_WELCOME_KEY, ONBOARDING_WELCOME_SUBJECT, ONBOARDING_WELCOME_PREHEADER,
+  onboardingWelcomePlainText,
 } from './templates/OnboardingWelcome'
 import OnboardingActivation, {
-  ONBOARDING_ACTIVATION_KEY, subjectFor as onboardingActivationSubject,
+  ONBOARDING_ACTIVATION_KEY,
+  subjectFor   as onboardingActivationSubject,
+  preheaderFor as onboardingActivationPreheader,
   onboardingActivationPlainText,
 } from './templates/OnboardingActivation'
 import OnboardingDiscovery, {
-  ONBOARDING_DISCOVERY_KEY, ONBOARDING_DISCOVERY_SUBJECT, onboardingDiscoveryPlainText,
+  ONBOARDING_DISCOVERY_KEY, ONBOARDING_DISCOVERY_SUBJECT, ONBOARDING_DISCOVERY_PREHEADER,
+  onboardingDiscoveryPlainText,
 } from './templates/OnboardingDiscovery'
+import { resolveReplyTo } from '@/lib/email/from'
 
 // Re-export the template key constants so route handlers can reference
 // a single canonical source.
@@ -60,10 +65,59 @@ export const TEMPLATE_KEYS: ReadonlyArray<TemplateKey> = [
 ]
 
 export type RenderedEmail = {
-  subject:  string
-  html:     string
-  text:     string
-  category: EmailCategory
+  subject:    string
+  preheader?: string
+  html:       string
+  text:       string
+  category:   EmailCategory
+}
+
+/**
+ * Operator-visible subject + preheader for a given template + branch.
+ * Block 3C — exposed so the admin preview UI can render labels above
+ * the rendered HTML without having to re-render the template.
+ */
+export function describeTemplate(input: {
+  key:              TemplateKey
+  activationBranch?: ActivationBranch
+  testPrefix?:      boolean
+}): { subject: string; preheader: string } {
+  let subject:   string
+  let preheader: string
+  switch (input.key) {
+    case DELIVERY_TEST_KEY:
+      subject   = DELIVERY_TEST_SUBJECT
+      preheader = 'Resend wiring smoke test.'
+      break
+    case TRANSACTIONAL_TEST_KEY:
+      subject   = TRANSACTIONAL_TEST_SUBJECT
+      preheader = 'A service notice from PokePrices.'
+      break
+    case MARKETING_PREVIEW_KEY:
+      subject   = MARKETING_PREVIEW_SUBJECT
+      preheader = 'A peek at what is coming to PokePrices.'
+      break
+    case ONBOARDING_WELCOME_KEY:
+      subject   = ONBOARDING_WELCOME_SUBJECT
+      preheader = ONBOARDING_WELCOME_PREHEADER
+      break
+    case ONBOARDING_ACTIVATION_KEY: {
+      const b = input.activationBranch ?? 'A'
+      subject   = onboardingActivationSubject(b)
+      preheader = onboardingActivationPreheader(b)
+      break
+    }
+    case ONBOARDING_DISCOVERY_KEY:
+      subject   = ONBOARDING_DISCOVERY_SUBJECT
+      preheader = ONBOARDING_DISCOVERY_PREHEADER
+      break
+    default:
+      throw new Error('describeTemplate: unknown key')
+  }
+  return {
+    subject:   input.testPrefix ? `[TEST] ${subject}` : subject,
+    preheader,
+  }
 }
 
 export function isApprovedTemplateKey(raw: unknown): raw is TemplateKey {
@@ -90,33 +144,33 @@ export async function renderTemplate(input: {
         vercelEnv:  input.vercelEnv ?? readVercelEnv(),
       }
       const html = await render(createElement(DeliveryTest, props))
-      return ok(input, DELIVERY_TEST_SUBJECT, html, deliveryTestPlainText(props), EMAIL_CATEGORIES.TRANSACTIONAL)
+      return ok(input, DELIVERY_TEST_SUBJECT, 'Resend wiring smoke test.', html, deliveryTestPlainText(props), EMAIL_CATEGORIES.TRANSACTIONAL)
     }
     case TRANSACTIONAL_TEST_KEY: {
       const props = { displayName: input.displayName ?? null }
       const html = await render(createElement(TransactionalTest, props))
-      return ok(input, TRANSACTIONAL_TEST_SUBJECT, html, transactionalTestPlainText(props), EMAIL_CATEGORIES.SERVICE_PRODUCT)
+      return ok(input, TRANSACTIONAL_TEST_SUBJECT, 'A service notice from PokePrices.', html, transactionalTestPlainText(props), EMAIL_CATEGORIES.SERVICE_PRODUCT)
     }
     case MARKETING_PREVIEW_KEY: {
       const props = { preferencesUrl: input.preferencesUrl ?? null }
       const html = await render(createElement(MarketingPreview, props))
-      return ok(input, MARKETING_PREVIEW_SUBJECT, html, marketingPreviewPlainText(props), EMAIL_CATEGORIES.MARKETING_NEWSLETTER)
+      return ok(input, MARKETING_PREVIEW_SUBJECT, 'A peek at what is coming to PokePrices.', html, marketingPreviewPlainText(props), EMAIL_CATEGORIES.MARKETING_NEWSLETTER)
     }
     case ONBOARDING_WELCOME_KEY: {
-      const props = {}
+      const props = { replyTo: resolveReplyTo() }
       const html = await render(createElement(OnboardingWelcome, props))
-      return ok(input, ONBOARDING_WELCOME_SUBJECT, html, onboardingWelcomePlainText(props), EMAIL_CATEGORIES.ONBOARDING)
+      return ok(input, ONBOARDING_WELCOME_SUBJECT, ONBOARDING_WELCOME_PREHEADER, html, onboardingWelcomePlainText(props), EMAIL_CATEGORIES.ONBOARDING)
     }
     case ONBOARDING_ACTIVATION_KEY: {
       const branch: ActivationBranch = input.activationBranch ?? 'A'
-      const props = { branch }
+      const props = { branch, replyTo: resolveReplyTo() }
       const html = await render(createElement(OnboardingActivation, props))
-      return ok(input, onboardingActivationSubject(branch), html, onboardingActivationPlainText(props), EMAIL_CATEGORIES.ONBOARDING)
+      return ok(input, onboardingActivationSubject(branch), onboardingActivationPreheader(branch), html, onboardingActivationPlainText(props), EMAIL_CATEGORIES.ONBOARDING)
     }
     case ONBOARDING_DISCOVERY_KEY: {
-      const props = {}
+      const props = { replyTo: resolveReplyTo() }
       const html = await render(createElement(OnboardingDiscovery, props))
-      return ok(input, ONBOARDING_DISCOVERY_SUBJECT, html, onboardingDiscoveryPlainText(props), EMAIL_CATEGORIES.ONBOARDING)
+      return ok(input, ONBOARDING_DISCOVERY_SUBJECT, ONBOARDING_DISCOVERY_PREHEADER, html, onboardingDiscoveryPlainText(props), EMAIL_CATEGORIES.ONBOARDING)
     }
     default: {
       // Defensive — the type guard above narrows callers, but in case
@@ -127,14 +181,16 @@ export async function renderTemplate(input: {
 }
 
 function ok(
-  input:    { testPrefix?: boolean },
-  subject:  string,
-  html:     string,
-  text:     string,
-  category: EmailCategory,
+  input:     { testPrefix?: boolean },
+  subject:   string,
+  preheader: string,
+  html:      string,
+  text:      string,
+  category:  EmailCategory,
 ): RenderedEmail {
   return {
-    subject:  input.testPrefix ? `[TEST] ${subject}` : subject,
+    subject:   input.testPrefix ? `[TEST] ${subject}` : subject,
+    preheader,
     html,
     text,
     category,

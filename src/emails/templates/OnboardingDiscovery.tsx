@@ -1,82 +1,143 @@
 // src/emails/templates/OnboardingDiscovery.tsx
-// Block 3B Email 3 — Discovery. Sent ~7 days after enrolment. Final
-// email of the sequence — after this we go quiet unless the user
-// opts in to other categories.
+// Block 3C — branded discovery email (final in the onboarding
+// sequence). Stacked feature cards + a feedback InfoBox using the
+// configured EMAIL_REPLY_TO address.
 
+import { Section, Text } from '@react-email/components'
 import BaseLayout from '../layouts/BaseLayout'
-import { Text, Link, Hr } from '@react-email/components'
 import PrimaryButton from '../components/PrimaryButton'
+import FeatureCard from '../components/FeatureCard'
+import InfoBox from '../components/InfoBox'
+import TextLink from '../components/TextLink'
+import { COLORS, FONT_STACK, SPACING } from '../designTokens'
 import { emailLink, unsubscribePreferencesLink } from '@/lib/email/onboardingLinks'
 
-export const ONBOARDING_DISCOVERY_KEY     = 'onboarding_discovery'
-export const ONBOARDING_DISCOVERY_SUBJECT = 'A few PokePrices features you may have missed'
-
-const REPLY_TO_NOTE = 'Reply to this email — Luke (sole developer) reads every message.'
+export const ONBOARDING_DISCOVERY_KEY        = 'onboarding_discovery'
+export const ONBOARDING_DISCOVERY_SUBJECT    = 'A few PokePrices features you may have missed'
+export const ONBOARDING_DISCOVERY_PREHEADER  =
+  'AI assistant, grading comparison, market movers and card shows.'
 
 export type OnboardingDiscoveryProps = {
-  testPrefix?: boolean
+  /**
+   * Required for the feedback InfoBox + footer. The renderer plumbs
+   * `resolveReplyTo()` into this; falls back to "hello@pokeprices.io".
+   */
+  replyTo?: string | null
 }
 
-export default function OnboardingDiscovery(_props: OnboardingDiscoveryProps) {
+const REPLY_FALLBACK = 'hello@pokeprices.io'
+
+export default function OnboardingDiscovery({ replyTo }: OnboardingDiscoveryProps) {
+  const reply = replyTo && replyTo.trim().length > 0 ? replyTo : REPLY_FALLBACK
   return (
     <BaseLayout
-      preview="A few PokePrices features you may have missed."
+      preview={ONBOARDING_DISCOVERY_PREHEADER}
+      eyebrow="Onboarding · 3 of 3"
       headline="Worth a look"
       preferencesUrl={unsubscribePreferencesLink()}
+      replyTo={reply}
     >
-      <Text>
-        You have been with PokePrices for a week. A few corners of the
-        site that early collectors tend to miss:
+      <Text style={lead}>
+        You have been with PokePrices for about a week. A few corners
+        of the site that early collectors tend to miss:
       </Text>
-      <Text style={{ margin: '12px 0' }}>
-        • <Link href={emailLink('ai_assistant')} style={inline}>AI assistant</Link> — natural-language collector questions, with real PokePrices data behind the answers.<br/>
-        • <Link href={emailLink('browse')}       style={inline}>Grading comparison</Link> — raw vs PSA premium per card so you can decide when grading is worth it.<br/>
-        • <Link href={emailLink('browse')}       style={inline}>Market movers</Link> — weekly risers, fallers and steady earners across the catalogue.<br/>
-        • <Link href={emailLink('card_shows')}   style={inline}>Card show calendar</Link> — UK + US shows with the sets traders tend to bring.<br/>
-        • <Link href={emailLink('portfolio')}    style={inline}>Saved cards</Link> — portfolio totals, raw vs graded splits, simple landed-cost.
-      </Text>
-      <Text style={{ marginTop: 18 }}>
+
+      <FeatureCard
+        glyph="💬"
+        title="AI assistant"
+        body="Natural-language collector questions, answered with real PokePrices data behind them."
+        href={emailLink('ai_assistant')}
+        cta="Try it"
+      />
+      <FeatureCard
+        glyph="🔍"
+        title="Grading comparison"
+        body="Raw vs PSA premium per card — useful when deciding whether grading is worth it."
+        href={emailLink('browse')}
+        cta="Compare grades"
+      />
+      <FeatureCard
+        glyph="📊"
+        title="Market movers"
+        body="Weekly risers, fallers and steady earners across the catalogue."
+        href={emailLink('browse')}
+        cta="See movers"
+      />
+      <FeatureCard
+        glyph="📅"
+        title="Card show calendar"
+        body="UK + US shows with the sets traders tend to bring."
+        href={emailLink('card_shows')}
+        cta="Open calendar"
+      />
+      <FeatureCard
+        glyph="🗂️"
+        title="Saved cards"
+        body="Portfolio totals, raw vs graded splits, simple landed-cost."
+        href={emailLink('portfolio')}
+        cta="Open portfolio"
+      />
+
+      <Section style={{ marginTop: SPACING.lg }}>
         <PrimaryButton href={emailLink('dashboard')}>Open your dashboard</PrimaryButton>
-      </Text>
-      <Hr style={{ margin: '20px 0 14px', borderColor: '#e6e8ef' }} />
-      <Text>
-        PokePrices is actively being built. The{' '}
-        <Link href={emailLink('roadmap')} style={inline}>roadmap</Link>{' '}
-        is public.
-      </Text>
-      <Text>
-        {REPLY_TO_NOTE}
-      </Text>
-      <Text style={{ fontSize: 12, color: '#475569', marginTop: 14 }}>
+      </Section>
+
+      <InfoBox tone="accent">
+        <strong style={{ color: COLORS.text }}>Tell us what would help.</strong>
+        {' '}
+        PokePrices is being built for collectors. If something is missing or
+        unclear, reply to this email — you can reach the team at{' '}
+        <TextLink href={`mailto:${reply}`}>{reply}</TextLink>.
+        Public roadmap: <TextLink href={emailLink('roadmap')}>www.pokeprices.io/roadmap</TextLink>.
+      </InfoBox>
+
+      <Text style={footnote}>
         This is the last of the three getting-started tips. After this,
-        we go quiet unless you opt in to other categories from{' '}
-        <Link href={unsubscribePreferencesLink()} style={inline}>your settings</Link>.
+        PokePrices goes quiet unless you opt into other categories from{' '}
+        <TextLink href={unsubscribePreferencesLink()}>your settings</TextLink>.
       </Text>
     </BaseLayout>
   )
 }
 
-const inline: React.CSSProperties = { color: '#1a5fad', textDecoration: 'underline' }
+const lead: React.CSSProperties = {
+  margin:     `0 0 ${SPACING.md}px`,
+  fontFamily: FONT_STACK,
+  fontSize:   15,
+  color:      COLORS.text,
+  lineHeight: 1.6,
+}
+const footnote: React.CSSProperties = {
+  margin:     `${SPACING.xl}px 0 0`,
+  fontFamily: FONT_STACK,
+  fontSize:   12,
+  color:      COLORS.textMuted,
+  lineHeight: 1.6,
+}
 
-export function onboardingDiscoveryPlainText(_props: OnboardingDiscoveryProps): string {
+export function onboardingDiscoveryPlainText({ replyTo }: OnboardingDiscoveryProps): string {
+  const reply = replyTo && replyTo.trim().length > 0 ? replyTo : REPLY_FALLBACK
   return [
-    'Worth a look',
+    'WORTH A LOOK',
     '',
-    'You have been with PokePrices for a week. A few corners of the site',
-    'that early collectors tend to miss:',
-    `  • AI assistant:        ${emailLink('ai_assistant')}`,
-    `  • Grading comparison:  ${emailLink('browse')}`,
-    `  • Market movers:       ${emailLink('browse')}`,
-    `  • Card show calendar:  ${emailLink('card_shows')}`,
-    `  • Saved cards:         ${emailLink('portfolio')}`,
+    'You have been with PokePrices for about a week. A few corners of',
+    'the site that early collectors tend to miss:',
     '',
-    `Open your dashboard: ${emailLink('dashboard')}`,
+    `  - AI assistant:        ${emailLink('ai_assistant')}`,
+    `  - Grading comparison:  ${emailLink('browse')}`,
+    `  - Market movers:       ${emailLink('browse')}`,
+    `  - Card show calendar:  ${emailLink('card_shows')}`,
+    `  - Saved cards:         ${emailLink('portfolio')}`,
     '',
-    `PokePrices is actively being built. Roadmap: ${emailLink('roadmap')}`,
-    REPLY_TO_NOTE,
+    `Open your dashboard:   ${emailLink('dashboard')}`,
     '',
-    'This is the last of the three getting-started tips. After this we',
-    'go quiet unless you opt in to other categories:',
+    'TELL US WHAT WOULD HELP',
+    'PokePrices is being built for collectors. If something is missing',
+    `or unclear, reply to this email or write to ${reply}.`,
+    `Public roadmap: ${emailLink('roadmap')}`,
+    '',
+    'This is the last of the three getting-started tips. After this,',
+    'PokePrices goes quiet unless you opt into other categories:',
     unsubscribePreferencesLink(),
   ].join('\n')
 }
