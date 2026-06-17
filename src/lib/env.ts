@@ -273,6 +273,38 @@ export const ENV_CATALOGUE: ReadonlyArray<EnvVarSpec> = [
     required:    false,
     description: 'Optional override for the discovery-email delay. Default 7 days (604800000 ms).',
   },
+
+  // ── Block 4B-W-1 — Recent Sales (server-only flags, never NEXT_PUBLIC) ──
+  {
+    name:        'RECENT_SALES_INGESTION_ENABLED',
+    scope:       'server',
+    required:    false,
+    description: 'Block 4B-W-1 — gates the scraper-side write path into `recent_sales`. Must be literal "true" to permit ingestion. When false/missing, no rows are ever written, regardless of any other flag. Vercel env changes require a fresh deployment.',
+  },
+  {
+    name:        'RECENT_SALES_ADMIN_VIEW_ENABLED',
+    scope:       'server',
+    required:    false,
+    description: 'Block 4B-W-1 — gates the future admin review surface at /admin/recent-sales. Must be literal "true" to expose. When false/missing, the surface returns 404.',
+  },
+  {
+    name:        'RECENT_SALES_FREE_PREVIEW_ENABLED',
+    scope:       'server',
+    required:    false,
+    description: 'Block 4B-W-1 — gates the customer-facing Free preview component on card pages (built in a later block). Must be literal "true" to render. When false/missing, the card page renders unchanged.',
+  },
+  {
+    name:        'RECENT_SALES_PRO_PREVIEW_ENABLED',
+    scope:       'server',
+    required:    false,
+    description: 'Block 4B-W-1 — gates the locked Pro preview component on card pages (built in a later block). Must be literal "true" to render. When false/missing, no Pro-locked CTA appears.',
+  },
+  {
+    name:        'RECENT_SALES_FULL_CATALOGUE',
+    scope:       'server',
+    required:    false,
+    description: 'Block 4B-W-1 — when literal "true", ingestion ignores `recent_sales_card_allow_list` and processes the full catalogue. When false/missing, ingestion is restricted to allow-list entries. Stage-5 flip.',
+  },
 ]
 
 const CATALOGUE_BY_NAME: ReadonlyMap<string, EnvVarSpec> = new Map(
