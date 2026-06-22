@@ -178,7 +178,7 @@ Full column list in the migration. The crucial CHECK constraints:
 ### `recent_sales_card_allow_list`
 
 Pilot scope. `(provider, provider_card_id) UNIQUE`. Empty initially —
-Stage 2 seeds the 100 pilot cards.
+Stage 2 seeds the technical-pilot cards (currently 58 — see "Pilot allow-list" section below).
 
 ---
 
@@ -242,12 +242,181 @@ the function body, never as a row-level policy.
 
 ## Pilot allow-list (`recent_sales_card_allow_list`)
 
-Stage 2 seeds 100 cards. The scraper will only write `recent_sales`
-rows for `(provider, provider_card_id)` present in this table (and
-where `enabled = TRUE`) until `RECENT_SALES_FULL_CATALOGUE='true'` is
-set in Stage 5.
+Stage 2 seeds the **technical pilot** into the allow-list — currently
+**58 cards** (the count returned by the most recent selector run; see
+the "Technical pilot — sizing" subsection below). The scraper
+will only write `recent_sales` rows for `(provider, provider_card_id)`
+present in this table (and where `enabled = TRUE`) until
+`RECENT_SALES_FULL_CATALOGUE='true'` is set in Stage 5.
 
-The brief explicitly forbids seeding the allow-list in this block.
+### Block 4B-W-2A — pilot cohort
+
+Block 4B-W-2A introduces three artefacts:
+
+| Artefact | Purpose |
+|---|---|
+| `scripts/select-recent-sales-pilot.sql`     | Canonical, deterministic SELECT picking up to 100 candidates across 7 categories. Read-only. The most recent run returned 58 real mapped cards; that 58 is the accepted technical-pilot cohort. |
+| `data/recent-sales-pilot-100.json`          | Reviewable JSON manifest. File path retained for stability; `_meta.intended_count` is **58**. Committed as a **scaffold** with real curated card names but synthetic 10-digit placeholder `provider_card_id` values (prefix `9999999`); operator pastes real rows and runs the regenerator before applying the seed migration. |
+| `migrations/2026-06-17-recent-sales-pilot-100.sql` | Idempotent seed migration with a `DO $$` post-condition that fails closed if any selected id is unmapped, low-confidence, duplicated, or if the count is not exactly **58**. |
+
+### Technical pilot — sizing
+
+The pilot is sized to **prove the engineering plumbing**, not to be
+statistically complete. Its acceptance criteria all concern:
+
+- scraper wiring (selector → parser → Supabase),
+- parser execution against a fixed, reviewable cohort,
+- service-role inserts into `recent_sales`,
+- `provider_sale_key` deduplication across nights,
+- correct sparse-card behaviour (zero rows is success),
+- correct sealed-product handling (sealed sections, no singles),
+- `market_import_runs` accounting (counts reconcile).
+
+Because that is the goal, we accept **58 rows** as the cohort even
+though the per-category quotas in the v3 selector intended 100. The
+selector's `LIMIT 100` is a cap, not a floor.
+
+### Cohort composition
+
+The pilot uses **minimum coverage + quality top-up**, not fixed
+quotas. Each minimum-coverage category must hit at least the floor
+below; the remainder fills from a global quality-ranked pool.
+
+| Category                | Min floor (58-card pilot) | Rationale |
+|---|---:|---|
+| `sealed`                | 10 | Sealed products only (`cards.is_sealed = TRUE`). Validates sealed-page layout signature. |
+| `sparse`                | 10 | Expected to have **zero or one** recent sales. Validates no-section behaviour. |
+| `difficult_variants`    |  8 | 1st edition / shadowless / reverse holo / promo / stamped / alt art. Validates variant disambiguation. |
+| `vintage_or_wotc`       |  8 | WOTC era (Base/Jungle/Fossil/Team Rocket/Gym/Neo + e-Card era). Condition-heavy raw + graded. |
+| `psa_or_grade_spread`   |  5 | Raw plus at least one of PSA9/PSA10. Validates grade-spread parsing. |
+| `modern_or_recent`      |  1 | SwSh + Scarlet & Violet eras with active price or sales signal. |
+| `general_quality`       |  0 (top-up) | Best available eligible cards by global quality score. Fills the remaining slots after minimums are met. |
+| **Floor**               | **42** | |
+| **Top-up**              | **16** | Filled by general_quality to reach exactly 58. |
+| **Total**               | **58** | |
+
+If a future selector run produces more real mapped rows (because the
+bridge has grown), we can re-expand the cohort — the validator and
+seed migration take `EXPECTED_TOTAL` as a single constant.
+
+### Selection methodology
+
+The selection SQL applies, in order:
+
+1. **Eligibility**: `provider='pricecharting'`, `language='en'`,
+   `is_active=TRUE`, `confidence >= 0.900`, `card_slug IS NOT NULL`,
+   `provider_card_id` is numeric.
+2. **Enrichment**: join to `cards` (for `is_sealed`, `set_name`,
+   `card_name`, `set_release_date`), latest `daily_prices` row (cents),
+   summed `card_volume.sales_30d`, aggregate `portfolio_items`
+   distinct-user count, aggregate `watchlist` distinct-user count.
+   **No user identities** are returned.
+3. **Independent candidate pools** — one per minimum-coverage category
+   plus a `general_quality` pool. A card may qualify for several pools.
+   Each pool ranks the full eligible population by a category-specific
+   quality score; **no priority cascade**, which is what caused v2's
+   `modern_high_volume` empty bucket (modern cards kept being assigned
+   to PSA / sparse / difficult before the modern pool saw them).
+4. **Sequential pick with anti-join**: minimum cohort taken in the
+   order sealed → sparse → difficult → vintage → psa → modern; each
+   pool re-ranks after excluding cards taken by earlier pools.
+5. **Hard caps** applied via window functions (≤10 Charizard, ≤8
+   Pikachu, ≤6 energy/accessory, ≤6 jumbo, ≤8 Topps, ≤20 all-prices-null,
+   ≤8 per `set_name`, ≤15 sealed). Cards busting a cap are dropped.
+6. **General quality top-up** fills the deficit (16 rows in the 58-card
+   technical pilot) with the highest-quality remaining eligibles,
+   applying cap-aware ranking so the global caps still hold.
+7. Final `LIMIT 100` (cap, not floor — accept what the selector returns).
+
+### Exclusions (hard)
+
+- Japanese-language pages.
+- Non-English `language`.
+- Confidence below 0.900.
+- Missing `card_slug` mapping.
+- Non-numeric or malformed `provider_card_id`.
+- Items mistakenly marked sealed only because they lack a card number.
+- User identifiers, emails, purchase prices, portfolio notes — at any
+  stage. The manifest schema explicitly forbids these fields, the
+  validator scans for them by name and by `@`-pattern.
+
+### Replacing a bad pilot card
+
+1. Edit `data/recent-sales-pilot-100.json`: replace the offending
+   entry (keep the same `primary_category` so totals do not drift).
+2. Run `node scripts/regenerate-pilot-migration.mjs` to rewrite
+   `migrations/2026-06-17-recent-sales-pilot-100.sql`. Only the lines
+   between the `-- BEGIN PILOT_ENTRIES` / `-- END PILOT_ENTRIES`
+   sentinels are touched.
+3. Run `node scripts/validate-recent-sales-pilot.mjs --strict`.
+4. Re-apply the migration. Its `ON CONFLICT (provider,
+   provider_card_id) DO UPDATE SET enabled=TRUE, reason=…` makes the
+   replacement idempotent; existing pilot rows are not deleted.
+
+### Disabling one row safely
+
+To disable a single pilot card without removing it from the manifest:
+
+```sql
+UPDATE public.recent_sales_card_allow_list
+   SET enabled = FALSE
+ WHERE provider = 'pricecharting'
+   AND provider_card_id = '<id>';
+```
+
+This stops the scraper from ingesting future sales for that card while
+leaving its historical `recent_sales` rows intact (when ingestion
+later turns on). The `enabled` flag is the **only** ingestion gate —
+deletion is not required and is discouraged because it loses the row's
+selection_reason metadata.
+
+### Expected parser behaviours during the pilot
+
+- Modern + vintage + PSA-heavy cards should produce mostly `parse_status='ok'`
+  rows with `parse_confidence >= 80`.
+- Sparse cards should produce **zero** rows; this is success, not
+  failure. The import-run counters should reflect "pages_processed +1,
+  rows_ok 0".
+- Difficult variants should produce a mix of `ok` and `quarantined`.
+  We expect a slightly elevated quarantine rate in this bucket;
+  measured rather than assumed.
+- Sealed pages should be classified into sealed-specific
+  `observed_section` values, never into a singles section.
+- Best Offer rows: `sale_price_cents` must equal the **accepted**
+  price; the original ask goes into `original_price_cents`.
+- `provider_sale_key` deduplication must prevent re-insertion of
+  prior nights' sales.
+
+### Acceptance criteria (five-night pilot)
+
+The pilot is considered passing if, across nights 1–5:
+
+| # | Criterion | Threshold |
+|---|---|---|
+| 1 | Nightly scraper completes normally on every pilot night | success |
+| 2 | No additional PriceCharting HTTP requests beyond current cadence | unchanged |
+| 3 | Parser does not affect current-price extraction | byte-for-byte unchanged |
+| 4 | Mapped page processing rate | ≥ 95% without parser crash |
+| 5 | Clean-row rate (`parse_status='ok'`) | ≥ 95% |
+| 6 | Quarantine rate (excluding `difficult_variants`) | < 5% |
+| 7 | Rejected rate (`parse_status='rejected'`) | < 1% |
+| 8 | `provider_sale_key` dedup | no repeated inserts across nights |
+| 9 | Layout signature on `market_import_runs` | stable across the five nights |
+| 10 | Best Offer rows | `sale_price_cents` = accepted price |
+| 11 | No duplicate sale inflation across nights | row counts reconcile to imported nights |
+| 12 | Sparse cards | return zero rows without being counted as failures |
+| 13 | Sealed products | remain mapped to sealed sections, not singles |
+| 14 | Import-run counts | reconcile with inserted/upserted rows ± 0 |
+| 15 | Storage growth | measured and reported per night, not assumed |
+
+### Public display during the pilot
+
+**None.** Throughout Blocks 4B-W-2A → 4B-W-2E the pilot is invisible
+to customers. No `/api/recent-sales/*` route exists, no card-page
+component renders a sales section, no FAQ wording changes, no
+`NEXT_PUBLIC_RECENT_SALES_*` env vars exist. Customer-facing copy is
+not introduced until the methodology and attribution components ship
+in Block 4B-W-4.
 
 ---
 
@@ -286,7 +455,7 @@ This block ships **dormant scaffolding**. Recommended:
    `market_import_runs` are empty (verification script § K).
 5. Leave every flag unset. **Stop.**
 
-Stage 2 (next block) seeds the 100-card allow-list and wires the
+Stage 2 (next block) seeds the technical-pilot allow-list (58 cards) and wires the
 scraper-side ingestion behind `RECENT_SALES_INGESTION_ENABLED`.
 
 ---
@@ -418,6 +587,24 @@ existing FAQ language is preserved unchanged.
   verification queries: table existence, RLS, no public policies,
   expected indexes, backfill counts, duplicate-identity check,
   Stage-1-invariant emptiness assertions.
+- `src/lib/recentSales/__tests__/pilot.test.ts` (Block 4B-W-2A) —
+  manifest invariants (58 entries — the technical-pilot target;
+  each minimum-coverage category meets its floor; unique provider
+  ids + card_slugs; numeric id; confidence ≥ 0.900; sealed correctness;
+  sparse correctness; no PII); migration invariants (additive,
+  ON CONFLICT idempotency, DO $$ post-condition, exactly 58 VALUES
+  rows between the BEGIN/END sentinels, no INSERT into `recent_sales`
+  or `market_import_runs`); selection and
+  verify SQL are read-only; no source file under `src/` imports the
+  manifest or references the placeholder marker.
+- `scripts/validate-recent-sales-pilot.mjs` (Block 4B-W-2A) — offline
+  Node validator with default / `--strict-ids` / `--strict-count` /
+  `--strict` modes. Default passes for the scaffold; `--strict` is
+  what the operator runs before applying the seed migration.
+- `scripts/verify-recent-sales-pilot.sql` (Block 4B-W-2A) — read-only
+  post-apply verification with category counts, link-validity check,
+  duplicate-id check, sealed/sparse counts, modern/vintage split,
+  price-band distribution, and Stage-1 emptiness invariants.
 
 ---
 
