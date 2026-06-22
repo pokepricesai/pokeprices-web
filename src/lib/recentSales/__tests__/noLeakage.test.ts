@@ -110,19 +110,48 @@ describe('public surface isolation', () => {
 // ─────────────────────────────────────────────────────────────────────
 
 describe('no public recent-sales routes', () => {
-  it('there is no /api/recent-sales/* route', () => {
+  it('there is no /api/recent-sales/* route (public)', () => {
     const dir = path.join(SRC, 'app', 'api', 'recent-sales')
     expect(existsSync(dir)).toBe(false)
   })
 
-  it('there is no /recent-sales page', () => {
+  it('there is no /recent-sales page (public)', () => {
     const dir = path.join(SRC, 'app', 'recent-sales')
     expect(existsSync(dir)).toBe(false)
   })
 
-  it('there is no /admin/recent-sales surface yet', () => {
-    const dir = path.join(SRC, 'app', 'admin', 'recent-sales')
-    expect(existsSync(dir)).toBe(false)
+  // Block 4B-W-3A — the admin-only /admin/recent-sales surface DOES
+  // exist now. It must be flag-gated, noindex, and never linked from
+  // any public surface. The next describe-block enforces those
+  // conditions.
+  it('/admin/recent-sales page is flag-gated and noindex', () => {
+    const page   = readSafe('src/app/admin/recent-sales/page.tsx')
+    const apiRt  = readSafe('src/app/api/admin/recent-sales/inspect/route.ts')
+    expect(page.length).toBeGreaterThan(0)
+    expect(apiRt.length).toBeGreaterThan(0)
+    // Flag-gated via isAdminViewEnabled
+    expect(page).toMatch(/isAdminViewEnabled/)
+    expect(apiRt).toMatch(/isAdminViewEnabled/)
+    // requireAdmin on the API
+    expect(apiRt).toMatch(/requireAdmin/)
+    // noindex
+    expect(page).toMatch(/robots:\s*\{\s*index:\s*false/)
+    // notFound when flag is off
+    expect(page).toMatch(/notFound\(\)/)
+    // No public navigation link to /admin/recent-sales anywhere in src/
+    const files = walk(SRC, { skipTests: true })
+    for (const f of files) {
+      // skip the page + route + tests themselves
+      if (f.includes(path.join('admin','recent-sales'))) continue
+      if (f.includes(path.join('api','admin','recent-sales'))) continue
+      const t = readFileSync(f, 'utf8')
+      expect(t, `${f} should not link to /admin/recent-sales`).not.toMatch(/['"]\/admin\/recent-sales['"]/)
+    }
+  })
+
+  it('robots.txt disallows /admin', () => {
+    const robots = readSafe('src/app/robots.ts')
+    expect(robots).toMatch(/['"]\/admin['"]/)
   })
 })
 
