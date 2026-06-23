@@ -90,6 +90,26 @@ class QueryBuilder {
     return this
   }
 
+  // Block 4B-W-10A — affiliate-event window queries use "events in the
+  // last N days" via `.gte('created_at', since)`. Symmetric with lt/lte.
+  gt(col: string, val: any): this {
+    this.filters.push(r => {
+      const v = r[col]
+      if (v === null || v === undefined) return false
+      return v > val
+    })
+    return this
+  }
+
+  gte(col: string, val: any): this {
+    this.filters.push(r => {
+      const v = r[col]
+      if (v === null || v === undefined) return false
+      return v >= val
+    })
+    return this
+  }
+
   // Match the bare-claim path: token IS NULL or token IS NOT NULL.
   // Already covered by is() above.
   not(col: string, op: 'is', val: any): this {

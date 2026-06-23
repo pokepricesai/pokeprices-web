@@ -78,11 +78,28 @@ type RecentSalesHealth = {
   }>
   freshness: FreshnessDistribution
 }
+type AffiliateWindowMetric = {
+  views:  number
+  clicks: number
+  ctrPct: number | null
+}
+type AffiliatePerPlacementMetric = {
+  placement: string
+  views:     number
+  clicks:    number
+  ctrPct:    number | null
+}
+type AffiliateMonitoringMetrics = {
+  last7d:           AffiliateWindowMetric
+  last30d:          AffiliateWindowMetric
+  perPlacement30d:  AffiliatePerPlacementMetric[]
+}
 type AffiliateMonitoringPanel = {
   available:  boolean
   source:     string
   note:       string
   placements: string[]
+  metrics?:   AffiliateMonitoringMetrics
 }
 type Snapshot = {
   generatedAt:        string
@@ -588,14 +605,54 @@ export default function RecentSalesAdminClient() {
             }}>
               <div style={{ fontWeight: 600, marginBottom: 4 }}>
                 {snap.affiliateMonitoring.available
-                  ? 'Server-side affiliate metrics'
-                  : 'Server-side storage unavailable — GA4 only'}
+                  ? 'Server-side affiliate metrics (last 30 days)'
+                  : 'Server-side storage not yet populated'}
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
                 <div><strong style={{ color: 'var(--text)' }}>Source:</strong> {snap.affiliateMonitoring.source}</div>
                 <div style={{ marginTop: 4 }}>{snap.affiliateMonitoring.note}</div>
               </div>
             </div>
+
+            {snap.affiliateMonitoring.metrics && (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 12, marginBottom: 16 }}>
+                  <StatTile label="views — 7d"    value={snap.affiliateMonitoring.metrics.last7d.views} />
+                  <StatTile label="clicks — 7d"   value={snap.affiliateMonitoring.metrics.last7d.clicks} />
+                  <StatTile label="CTR — 7d"      value={snap.affiliateMonitoring.metrics.last7d.ctrPct == null ? '—' : `${snap.affiliateMonitoring.metrics.last7d.ctrPct.toFixed(1)}%`} />
+                  <StatTile label="views — 30d"   value={snap.affiliateMonitoring.metrics.last30d.views} />
+                  <StatTile label="clicks — 30d"  value={snap.affiliateMonitoring.metrics.last30d.clicks} />
+                  <StatTile label="CTR — 30d"     value={snap.affiliateMonitoring.metrics.last30d.ctrPct == null ? '—' : `${snap.affiliateMonitoring.metrics.last30d.ctrPct.toFixed(1)}%`} />
+                </div>
+
+                {snap.affiliateMonitoring.metrics.perPlacement30d.length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+                      Per-placement (last 30 days)
+                    </div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead><tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
+                        <th style={{ padding: 6 }}>placement</th>
+                        <th style={{ padding: 6, textAlign: 'right' }}>views</th>
+                        <th style={{ padding: 6, textAlign: 'right' }}>clicks</th>
+                        <th style={{ padding: 6, textAlign: 'right' }}>CTR</th>
+                      </tr></thead>
+                      <tbody>
+                        {snap.affiliateMonitoring.metrics.perPlacement30d.map(p => (
+                          <tr key={p.placement} style={{ borderBottom: '1px solid var(--border)' }}>
+                            <td style={{ padding: 6, fontFamily: 'monospace', fontSize: 11 }}>{p.placement}</td>
+                            <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{p.views}</td>
+                            <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{p.clicks}</td>
+                            <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{p.ctrPct == null ? '—' : `${p.ctrPct.toFixed(1)}%`}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+
             {snap.affiliateMonitoring.placements.length > 0 && (
               <div>
                 <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>

@@ -15,6 +15,7 @@ import {
   parseRunNotes,
   getRecentSalesHealth,
   getAffiliateMonitoringPanel,
+  getAffiliateMonitoring,
 } from '../adminQueries'
 
 // ─────────────────────────────────────────────────────────────────────
@@ -61,12 +62,13 @@ describe('parseRunNotes', () => {
 // getAffiliateMonitoringPanel — static, informational
 // ─────────────────────────────────────────────────────────────────────
 
-describe('getAffiliateMonitoringPanel', () => {
-  it('reports server-side storage as unavailable', () => {
+describe('getAffiliateMonitoringPanel (fallback)', () => {
+  it('reports server-side storage as not yet populated', () => {
     const panel = getAffiliateMonitoringPanel()
     expect(panel.available).toBe(false)
     expect(panel.source).toMatch(/Google Analytics/i)
-    expect(panel.note).toMatch(/no Supabase table/i)
+    expect(panel.note).toMatch(/migration/i)
+    expect(panel.metrics).toBeUndefined()
   })
 
   it('exposes the GA4 placement filter list', () => {
@@ -78,6 +80,101 @@ describe('getAffiliateMonitoringPanel', () => {
     ]) {
       expect(panel.placements).toContain(p)
     }
+  })
+})
+
+describe('getAffiliateMonitoring (live)', () => {
+  it('reports available=true with zero counts when the table is empty', async () => {
+    const panel = await getAffiliateMonitoring(asSupa(fakeDB))
+    expect(panel.available).toBe(true)
+    expect(panel.source).toBe('public.affiliate_events')
+    expect(panel.metrics).toBeDefined()
+    expect(panel.metrics!.last7d).toEqual({ views: 0, clicks: 0, ctrPct: null })
+    expect(panel.metrics!.last30d).toEqual({ views: 0, clicks: 0, ctrPct: null })
+    expect(panel.metrics!.perPlacement30d).toEqual([])
+  })
+
+  it('counts views and clicks separately and computes CTR', async () => {
+    const now = Date.now()
+    const recent = (offsetDays: number) => new Date(now - offsetDays * 86_400_000).toISOString()
+    fakeDB.seed('affiliate_events', [
+      { event_type: 'view',  placement: 'recent_sales_psa10', created_at: recent(1) },
+      { event_type: 'view',  placement: 'recent_sales_psa10', created_at: recent(2) },
+      { event_type: 'view',  placement: 'recent_sales_psa10', created_at: recent(3) },
+      { event_type: 'view',  placement: 'recent_sales_psa10', created_at: recent(4) },
+      { event_type: 'click', placement: 'recent_sales_psa10', created_at: recent(1) },
+    ])
+    const panel = await getAffiliateMonitoring(asSupa(fakeDB))
+    expect(panel.metrics!.last7d.views).toBe(4)
+    expect(panel.metrics!.last7d.clicks).toBe(1)
+    expect(panel.metrics!.last7d.ctrPct).toBe(25)
+    expect(panel.metrics!.last30d.views).toBe(4)
+    expect(panel.metrics!.last30d.clicks).toBe(1)
+  })
+
+  it('windows the 7-day metric on creation time, anchored on now', async () => {
+    const now = Date.now()
+    const offset = (days: number) => new Date(now - days * 86_400_000).toISOString()
+    fakeDB.seed('affiliate_events', [
+      { event_type: 'view',  placement: 'recent_sales_raw', created_at: offset(2)  },
+      { event_type: 'view',  placement: 'recent_sales_raw', created_at: offset(20) }, // in 30d, not 7d
+      { event_type: 'click', placement: 'recent_sales_raw', created_at: offset(25) }, // in 30d, not 7d
+    ])
+    const panel = await getAffiliateMonitoring(asSupa(fakeDB))
+    expect(panel.metrics!.last7d.views).toBe(1)
+    expect(panel.metrics!.last7d.clicks).toBe(0)
+    expect(panel.metrics!.last30d.views).toBe(2)
+    expect(panel.metrics!.last30d.clicks).toBe(1)
+  })
+
+  it('drops events older than 30 days from both windows', async () => {
+    const now = Date.now()
+    const old = new Date(now - 45 * 86_400_000).toISOString()
+    fakeDB.seed('affiliate_events', [
+      { event_type: 'view',  placement: 'recent_sales_raw', created_at: old },
+      { event_type: 'click', placement: 'recent_sales_raw', created_at: old },
+    ])
+    const panel = await getAffiliateMonitoring(asSupa(fakeDB))
+    expect(panel.metrics!.last30d.views).toBe(0)
+    expect(panel.metrics!.last30d.clicks).toBe(0)
+  })
+
+  it('aggregates per-placement totals over the 30-day window', async () => {
+    const now = Date.now()
+    const recent = new Date(now - 2 * 86_400_000).toISOString()
+    fakeDB.seed('affiliate_events', [
+      { event_type: 'view',  placement: 'recent_sales_psa10', created_at: recent },
+      { event_type: 'view',  placement: 'recent_sales_psa10', created_at: recent },
+      { event_type: 'click', placement: 'recent_sales_psa10', created_at: recent },
+      { event_type: 'view',  placement: 'recent_sales_raw',   created_at: recent },
+      { event_type: 'click', placement: 'recent_sales_raw',   created_at: recent },
+    ])
+    const panel = await getAffiliateMonitoring(asSupa(fakeDB))
+    const psa10 = panel.metrics!.perPlacement30d.find(p => p.placement === 'recent_sales_psa10')!
+    const raw   = panel.metrics!.perPlacement30d.find(p => p.placement === 'recent_sales_raw')!
+    expect(psa10).toMatchObject({ views: 2, clicks: 1 })
+    expect(psa10.ctrPct).toBe(50)
+    expect(raw).toMatchObject({ views: 1, clicks: 1 })
+    expect(raw.ctrPct).toBe(100)
+  })
+
+  it('returns the informational fallback panel when the table is missing', async () => {
+    // Simulate "table not in schema cache" by monkey-patching the
+    // builder so awaiting it produces an error result.
+    const broken = {
+      from: () => ({
+        select: () => ({
+          gte: () => Promise.resolve({
+            data: null,
+            error: { code: 'PGRST205', message: "Could not find the table 'public.affiliate_events'" },
+          }),
+        }),
+      }),
+    } as unknown as Parameters<typeof getAffiliateMonitoring>[0]
+    const panel = await getAffiliateMonitoring(broken)
+    expect(panel.available).toBe(false)
+    expect(panel.metrics).toBeUndefined()
+    expect(panel.note).toMatch(/migration/i)
   })
 })
 

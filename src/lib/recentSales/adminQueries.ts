@@ -167,17 +167,40 @@ export type RecentSalesHealth = {
   freshness: FreshnessDistribution
 }
 
+export type AffiliateWindowMetric = {
+  views:    number
+  clicks:   number
+  /** Click-through rate as a percentage (0-100). Null when views = 0
+   *  so the panel can render a dash rather than NaN. */
+  ctrPct:   number | null
+}
+
+export type AffiliatePerPlacementMetric = {
+  placement: string
+  views:     number
+  clicks:    number
+  ctrPct:    number | null
+}
+
+export type AffiliateMonitoringMetrics = {
+  last7d:           AffiliateWindowMetric
+  last30d:          AffiliateWindowMetric
+  perPlacement30d:  AffiliatePerPlacementMetric[]
+}
+
 export type AffiliateMonitoringPanel = {
-  /** Whether server-side storage for affiliate events exists. False
-   *  today (analytics flows entirely to GA4 via gtag — see
-   *  src/lib/analytics.ts) — so this panel is informational only. */
+  /** Whether server-side storage for affiliate events is populated. */
   available:    boolean
   /** Human-readable explanation of where events live. */
   source:       string
   /** Operator note about what is and isn't available. */
   note:         string
-  /** Placement strings the operator can filter by in GA4. */
+  /** Placement strings the operator can filter by in GA4 (always shown
+   *  so the operator can cross-check our table against GA4). */
   placements:   string[]
+  /** Aggregates from public.affiliate_events. Present only when
+   *  available=true; otherwise the panel is informational only. */
+  metrics?:     AffiliateMonitoringMetrics
 }
 
 export type AdminInspectionSnapshot = {
@@ -591,11 +614,84 @@ const AFFILIATE_PLACEMENTS = [
 ]
 
 export function getAffiliateMonitoringPanel(): AffiliateMonitoringPanel {
+  // Fallback returned when the affiliate_events table is missing (i.e.
+  // the 2026-06-23 migration has not yet been applied) or its query
+  // fails. The dynamic getAffiliateMonitoring() below uses this as its
+  // no-data branch.
   return {
     available:  false,
-    source:    'Google Analytics 4 (gtag) — no server-side persistence',
-    note:      'affiliate_link_view and affiliate_click events are sent client-side to GA4 only (see src/lib/analytics.ts). No Supabase table stores them, so click-through rates can only be inspected in GA4. Filter by event "affiliate_click" with placement starting "recent_sales_".',
+    source:    'Google Analytics 4 (gtag) — server-side storage not yet populated',
+    note:      'affiliate_link_view and affiliate_click events are sent client-side to GA4 always, and to public.affiliate_events when the migration is applied. Until then, click-through rates can only be inspected in GA4. Filter by event "affiliate_click" with placement starting "recent_sales_".',
     placements: AFFILIATE_PLACEMENTS,
+  }
+}
+
+function ctr(views: number, clicks: number): number | null {
+  if (!Number.isFinite(views) || views <= 0) return null
+  return Math.round((clicks / views) * 1000) / 10  // 1 decimal place
+}
+
+export async function getAffiliateMonitoring(supa: SupabaseClient): Promise<AffiliateMonitoringPanel> {
+  try {
+    const now      = Date.now()
+    const since30  = new Date(now - 30 * 86_400_000).toISOString()
+    const since7   = new Date(now -  7 * 86_400_000).toISOString()
+    const { data, error } = await supa
+      .from('affiliate_events')
+      .select('event_type, placement, created_at')
+      .gte('created_at', since30)
+    if (error) {
+      // Either PGRST205 (table missing) or any other transient failure.
+      // The admin panel must still render — return the informational
+      // fallback in both cases.
+      return getAffiliateMonitoringPanel()
+    }
+    const rows = (data ?? []) as Array<Record<string, unknown>>
+
+    let views30 = 0, clicks30 = 0, views7 = 0, clicks7 = 0
+    const perPlacement = new Map<string, { views: number; clicks: number }>()
+    for (const r of rows) {
+      const type = String(r.event_type)
+      const placement = r.placement == null ? '(unknown)' : String(r.placement)
+      const createdAt = String(r.created_at)
+      const isView = type === 'view'
+      const isClick = type === 'click'
+
+      if (isView) views30++
+      if (isClick) clicks30++
+      if (createdAt >= since7) {
+        if (isView) views7++
+        if (isClick) clicks7++
+      }
+
+      let p = perPlacement.get(placement)
+      if (!p) { p = { views: 0, clicks: 0 }; perPlacement.set(placement, p) }
+      if (isView)  p.views++
+      if (isClick) p.clicks++
+    }
+
+    const perPlacement30d: AffiliatePerPlacementMetric[] = Array.from(perPlacement.entries())
+      .map(([placement, c]) => ({
+        placement,
+        views:  c.views,
+        clicks: c.clicks,
+        ctrPct: ctr(c.views, c.clicks),
+      }))
+      .sort((a, b) => (b.views + b.clicks) - (a.views + a.clicks))
+
+    return {
+      available:  true,
+      source:    'public.affiliate_events',
+      note:      'Counts come from server-side ingest at POST /api/affiliate/event. GA4 still receives every event in parallel for cross-checks.',
+      placements: AFFILIATE_PLACEMENTS,
+      metrics: {
+        last7d:  { views: views7,  clicks: clicks7,  ctrPct: ctr(views7,  clicks7)  },
+        last30d: { views: views30, clicks: clicks30, ctrPct: ctr(views30, clicks30) },
+        perPlacement30d,
+      },
+    }
+  } catch {
+    return getAffiliateMonitoringPanel()
   }
 }
 
@@ -606,7 +702,7 @@ export function getAffiliateMonitoringPanel(): AffiliateMonitoringPanel {
 export async function readAdminInspectionSnapshot(
   supa: SupabaseClient,
 ): Promise<AdminInspectionSnapshot> {
-  const [importRuns, recentSales, recentSalesHealth, perCard, quarantine, duplicateCheck, latestSamples] = await Promise.all([
+  const [importRuns, recentSales, recentSalesHealth, perCard, quarantine, duplicateCheck, latestSamples, affiliateMonitoring] = await Promise.all([
     getLatestImportRuns(supa, 20),
     getRecentSalesSummary(supa),
     getRecentSalesHealth(supa),
@@ -614,6 +710,7 @@ export async function readAdminInspectionSnapshot(
     getQuarantineSummary(supa),
     getDuplicateSaleKeyCheck(supa),
     getLatestSampleRows(supa, 25),
+    getAffiliateMonitoring(supa),
   ])
   return {
     generatedAt: new Date().toISOString(),
@@ -624,6 +721,6 @@ export async function readAdminInspectionSnapshot(
     quarantine,
     duplicateCheck,
     latestSamples,
-    affiliateMonitoring: getAffiliateMonitoringPanel(),
+    affiliateMonitoring,
   }
 }

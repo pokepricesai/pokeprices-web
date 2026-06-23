@@ -131,12 +131,17 @@ describe('GET /api/admin/recent-sales/inspect — success path', () => {
     expect(j.recentSalesHealth.freshness.anchorDate).toBe('2026-06-21')
     expect(j.recentSalesHealth.topActiveCards.length).toBeGreaterThanOrEqual(1)
 
-    // affiliateMonitoring panel is informational and disclosed as
-    // GA4-only (no server-side storage exists today).
-    expect(j.affiliateMonitoring.available).toBe(false)
+    // affiliateMonitoring queries public.affiliate_events; the seed in
+    // this test does not write to that table, but the empty table read
+    // still succeeds (available=true, all counts zero). The fallback
+    // (available=false) is covered by a separate test in
+    // src/lib/recentSales/__tests__/adminQueries.test.ts.
+    expect(j.affiliateMonitoring.available).toBe(true)
     expect(j.affiliateMonitoring.placements).toEqual(
       expect.arrayContaining(['recent_sales_raw', 'recent_sales_psa10']),
     )
+    expect(j.affiliateMonitoring.metrics.last7d.views).toBe(0)
+    expect(j.affiliateMonitoring.metrics.last30d.views).toBe(0)
 
     // notesParsed defaults to null when the seeded notes is null.
     expect(j.importRuns[0].notesParsed).toBeNull()

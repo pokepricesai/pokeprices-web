@@ -20,6 +20,7 @@ import {
 } from '@/lib/ebayAffiliate'
 import type { MarketplaceCode } from '@/lib/marketplaces'
 import { trackEvent } from '@/lib/analytics'
+import { postAffiliateEvent } from '@/lib/affiliateEventClient'
 import { useMarketplace } from '@/lib/marketplaceClient'
 
 export type EbayCompactLinkProps = {
@@ -100,6 +101,16 @@ export default function EbayCompactLink(props: EbayCompactLinkProps) {
         if (e.isIntersecting && !firedRef.current) {
           firedRef.current = true
           trackEvent('affiliate_link_view', { ...built.analytics })
+          postAffiliateEvent({
+            event_type:       'view',
+            placement:        built.analytics.placement ?? '',
+            page_type:        props.pageType,
+            source_component: built.analytics.source_component,
+            card_slug:        built.analytics.card_slug,
+            set_slug:         built.analytics.set_slug,
+            intent:           built.analytics.intent,
+            marketplace:      built.analytics.marketplace,
+          })
           io.disconnect()
           break
         }
@@ -107,11 +118,26 @@ export default function EbayCompactLink(props: EbayCompactLinkProps) {
     }, { threshold: 0.5 })
     io.observe(el)
     return () => io.disconnect()
-  }, [built])
+  }, [built, props.pageType])
 
   if (!built || !built.url) return null
 
   const label = props.label ?? 'See eBay listings →'
+
+  function onClick() {
+    if (!built || !built.url) return
+    trackEvent('affiliate_click', { ...built.analytics })
+    postAffiliateEvent({
+      event_type:       'click',
+      placement:        built.analytics.placement ?? '',
+      page_type:        props.pageType,
+      source_component: built.analytics.source_component,
+      card_slug:        built.analytics.card_slug,
+      set_slug:         built.analytics.set_slug,
+      intent:           built.analytics.intent,
+      marketplace:      built.analytics.marketplace,
+    })
+  }
 
   return (
     <a
@@ -120,7 +146,7 @@ export default function EbayCompactLink(props: EbayCompactLinkProps) {
       target="_blank"
       rel="sponsored noopener noreferrer"
       aria-label={props.ariaLabel ?? label}
-      onClick={() => trackEvent('affiliate_click', { ...built.analytics })}
+      onClick={onClick}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
