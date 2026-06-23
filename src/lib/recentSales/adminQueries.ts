@@ -9,6 +9,7 @@
 
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { deriveGradeKey, type CardPageRecentSale } from './cardQueries'
 
 // ─────────────────────────────────────────────────────────────────────
 // Shapes
@@ -30,6 +31,9 @@ export type ImportRunRow = {
   parserVersion:   string | null
   layoutSignature: string | null
   notes:           string | null
+  /** Parsed JSON view of `notes`. Null when notes is null, not JSON,
+   *  or the JSON root is not an object. */
+  notesParsed:     Record<string, unknown> | null
 }
 
 export type RecentSalesSummary = {
@@ -88,14 +92,104 @@ export type LatestSampleRow = {
   firstSeenAt:        string
 }
 
+/**
+ * Recognised import-run notes fields. Every field is optional — older
+ * runs only emit a subset; future scraper versions may add more.
+ * Anything not in this list is still shown via `extras`.
+ */
+export type ImportRunNotes = {
+  // Pagination / scheduling
+  allow_list_total?:        number
+  offset?:                  number
+  effective_offset?:        number
+  batch_size?:              number
+  selected_start?:          number
+  selected_end?:            number
+
+  // Grade-cap enforcement
+  max_sales_per_grade?:     number
+  rows_after_grade_cap?:    number
+  rows_dropped_by_grade_cap?: number
+  rows_pruned_old_active?:  number
+
+  // Fetch counters
+  fetched?:                 number
+  cards_allowlisted?:       number
+  cards_parsed?:            number
+  rows_upserted?:           number
+
+  // Failure counters
+  skipped_429?:             number
+  skipped_http_error?:      number
+  skipped_no_html?:         number
+  errors_count?:            number
+
+  // Scraper-managed metadata
+  import_type?:             string
+}
+
+export type GradeCapViolation = {
+  internalCardSlug: string
+  gradeKey:         string
+  gradeLabel:       string
+  activeRowCount:   number
+}
+
+export type FreshnessDistribution = {
+  /** Latest sale_date observed among ok+active rows, or null. */
+  anchorDate: string | null
+  last7d:     number
+  last30d:    number
+  last90d:    number
+  older:      number
+}
+
+export type RecentSalesHealth = {
+  totalRows:           number
+  okActiveRows:        number
+  okSupersededRows:    number
+  distinctActiveCards: number
+  /** Buckets whose (internal_card_slug, gradeKey) active-row count
+   *  exceeds the 5-per-grade cap. Should always be 0 after the cap
+   *  enforcement is live. */
+  gradeCapViolations: {
+    cap:           number
+    violationCount: number
+    samples:       GradeCapViolation[]
+  }
+  /** Top 20 cards by ok+active row count, sorted desc. */
+  topActiveCards: Array<{
+    providerCardId:   string
+    internalCardSlug: string
+    rowCount:         number
+    latestSaleDate:   string | null
+  }>
+  freshness: FreshnessDistribution
+}
+
+export type AffiliateMonitoringPanel = {
+  /** Whether server-side storage for affiliate events exists. False
+   *  today (analytics flows entirely to GA4 via gtag — see
+   *  src/lib/analytics.ts) — so this panel is informational only. */
+  available:    boolean
+  /** Human-readable explanation of where events live. */
+  source:       string
+  /** Operator note about what is and isn't available. */
+  note:         string
+  /** Placement strings the operator can filter by in GA4. */
+  placements:   string[]
+}
+
 export type AdminInspectionSnapshot = {
-  generatedAt:      string
-  importRuns:       ImportRunRow[]
-  recentSales:      RecentSalesSummary
-  perCard:          PerCardSummaryRow[]
-  quarantine:       QuarantineSummary
-  duplicateCheck:   DuplicateSaleKeyCheck
-  latestSamples:    LatestSampleRow[]
+  generatedAt:        string
+  importRuns:         ImportRunRow[]
+  recentSales:        RecentSalesSummary
+  recentSalesHealth:  RecentSalesHealth
+  perCard:            PerCardSummaryRow[]
+  quarantine:         QuarantineSummary
+  duplicateCheck:     DuplicateSaleKeyCheck
+  latestSamples:      LatestSampleRow[]
+  affiliateMonitoring: AffiliateMonitoringPanel
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -114,6 +208,58 @@ function bucket<T extends string | null | undefined>(
   return out
 }
 
+/**
+ * Safely parse a `notes` blob. Returns null when the input is null/
+ * empty, not valid JSON, or its root is not a plain object. The
+ * scraper has historically emitted both plain-text strings and JSON
+ * objects in this column, so the caller must tolerate either.
+ * Exported for unit tests.
+ */
+export function parseRunNotes(raw: string | null): Record<string, unknown> | null {
+  if (raw == null) return null
+  const trimmed = String(raw).trim()
+  if (!trimmed || trimmed[0] !== '{') return null
+  try {
+    const v = JSON.parse(trimmed)
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      return v as Record<string, unknown>
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function diffDaysIso(a: string, b: string): number {
+  // Inputs are YYYY-MM-DD ISO date strings. Returns floor((a - b) in days).
+  const am = /^(\d{4})-(\d{2})-(\d{2})$/.exec(a)
+  const bm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(b)
+  if (!am || !bm) return Number.NaN
+  const at = Date.UTC(+am[1], +am[2] - 1, +am[3])
+  const bt = Date.UTC(+bm[1], +bm[2] - 1, +bm[3])
+  return Math.floor((at - bt) / 86_400_000)
+}
+
+function gradeKeyForRawRow(r: Record<string, unknown>): { key: string; label: string } {
+  // Reuse the same key derivation the card-page query uses so admin
+  // violation counts line up exactly with what end users see in the
+  // grade tabs.
+  const synth: CardPageRecentSale = {
+    saleDate:           '',
+    marketplaceSource:  '',
+    marketplaceCountry: null,
+    observedSection:    '',
+    rawOrGraded:        r.raw_or_graded   == null ? null : String(r.raw_or_graded),
+    gradingCompany:     r.grading_company == null ? null : String(r.grading_company),
+    grade:              r.grade           == null ? null : String(r.grade),
+    conditionBucket:    null,
+    conditionText:      null,
+    bestOfferStatus:    null,
+    salePriceCents:     0,
+  }
+  return deriveGradeKey(synth)
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Individual queries (exported so the route can call selectively).
 // ─────────────────────────────────────────────────────────────────────
@@ -129,23 +275,27 @@ export async function getLatestImportRuns(
     .limit(limit)
   if (error) throw new Error(`market_import_runs select failed: ${error.message}`)
   const rows = (data ?? []) as Array<Record<string, unknown>>
-  return rows.map(r => ({
-    id:              String(r.id),
-    provider:        String(r.provider),
-    source:          String(r.source),
-    status:          String(r.status),
-    startedAt:       String(r.started_at),
-    completedAt:     r.completed_at == null ? null : String(r.completed_at),
-    durationMs:      r.duration_ms   == null ? null : Number(r.duration_ms),
-    pagesProcessed:  Number(r.pages_processed  ?? 0),
-    rowsOk:          Number(r.rows_ok          ?? 0),
-    rowsQuarantined: Number(r.rows_quarantined ?? 0),
-    rowsRejected:    Number(r.rows_rejected    ?? 0),
-    rowsDuplicate:   Number(r.rows_duplicate   ?? 0),
-    parserVersion:   r.parser_version   == null ? null : String(r.parser_version),
-    layoutSignature: r.layout_signature == null ? null : String(r.layout_signature),
-    notes:           r.notes            == null ? null : String(r.notes),
-  }))
+  return rows.map(r => {
+    const notesRaw = r.notes == null ? null : String(r.notes)
+    return {
+      id:              String(r.id),
+      provider:        String(r.provider),
+      source:          String(r.source),
+      status:          String(r.status),
+      startedAt:       String(r.started_at),
+      completedAt:     r.completed_at == null ? null : String(r.completed_at),
+      durationMs:      r.duration_ms   == null ? null : Number(r.duration_ms),
+      pagesProcessed:  Number(r.pages_processed  ?? 0),
+      rowsOk:          Number(r.rows_ok          ?? 0),
+      rowsQuarantined: Number(r.rows_quarantined ?? 0),
+      rowsRejected:    Number(r.rows_rejected    ?? 0),
+      rowsDuplicate:   Number(r.rows_duplicate   ?? 0),
+      parserVersion:   r.parser_version   == null ? null : String(r.parser_version),
+      layoutSignature: r.layout_signature == null ? null : String(r.layout_signature),
+      notes:           notesRaw,
+      notesParsed:     parseRunNotes(notesRaw),
+    }
+  })
 }
 
 export async function getRecentSalesSummary(supa: SupabaseClient): Promise<RecentSalesSummary> {
@@ -324,15 +474,142 @@ export async function getLatestSampleRows(
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Recent-sales health — combines violation, freshness and top-cards.
+// ─────────────────────────────────────────────────────────────────────
+
+const GRADE_CAP = 5
+
+export async function getRecentSalesHealth(supa: SupabaseClient): Promise<RecentSalesHealth> {
+  // Two reads in parallel:
+  //   * count(*) so the panel reports total rows (incl. non-ok) without
+  //     pulling them
+  //   * the ok rows themselves so we can compute violations / freshness
+  //     / top-cards in one pass without per-card round-trips.
+  // PII is unaffected — only marketplace facts and slugs are read.
+  const [totalRes, okRes] = await Promise.all([
+    supa.from('recent_sales').select('*', { count: 'exact', head: true }),
+    supa.from('recent_sales')
+      .select('internal_card_slug, provider_card_id, sale_date, raw_or_graded, grading_company, grade, review_status')
+      .eq('parse_status', 'ok'),
+  ])
+  if (totalRes.error) throw new Error(`recent_sales total count failed: ${totalRes.error.message}`)
+  if (okRes.error)    throw new Error(`recent_sales ok pull failed: ${okRes.error.message}`)
+  const totalRows = totalRes.count ?? 0
+  const rows = (okRes.data ?? []) as Array<Record<string, unknown>>
+
+  const activeRows = rows.filter(r => r.review_status === 'active')
+  const supersededRows = rows.filter(r => r.review_status === 'superseded')
+
+  // Distinct active cards
+  const activeSlugs = new Set<string>()
+  for (const r of activeRows) activeSlugs.add(String(r.internal_card_slug))
+
+  // Grade-cap violations (active only). Bucket on (internal_card_slug, gradeKey).
+  const bucketCounts = new Map<string, { internalCardSlug: string; gradeKey: string; gradeLabel: string; activeRowCount: number }>()
+  for (const r of activeRows) {
+    const slug = String(r.internal_card_slug)
+    const { key, label } = gradeKeyForRawRow(r)
+    const k = `${slug}|${key}`
+    const existing = bucketCounts.get(k)
+    if (existing) existing.activeRowCount++
+    else bucketCounts.set(k, { internalCardSlug: slug, gradeKey: key, gradeLabel: label, activeRowCount: 1 })
+  }
+  const violations = Array.from(bucketCounts.values())
+    .filter(b => b.activeRowCount > GRADE_CAP)
+    .sort((a, b) => b.activeRowCount - a.activeRowCount)
+
+  // Top 20 active cards
+  const perCardCounts = new Map<string, { providerCardId: string; internalCardSlug: string; rowCount: number; latestSaleDate: string | null }>()
+  for (const r of activeRows) {
+    const slug = String(r.internal_card_slug)
+    const pcid = String(r.provider_card_id)
+    const k = `${pcid}|${slug}`
+    let g = perCardCounts.get(k)
+    if (!g) {
+      g = { providerCardId: pcid, internalCardSlug: slug, rowCount: 0, latestSaleDate: null }
+      perCardCounts.set(k, g)
+    }
+    g.rowCount++
+    const sd = r.sale_date == null ? null : String(r.sale_date)
+    if (sd && (g.latestSaleDate == null || sd > g.latestSaleDate)) g.latestSaleDate = sd
+  }
+  const topActiveCards = Array.from(perCardCounts.values())
+    .sort((a, b) => b.rowCount - a.rowCount)
+    .slice(0, 20)
+
+  // Freshness — anchor on max sale_date of active rows, NOT Date.now(),
+  // so a stalled scraper does not mislead the panel into reporting
+  // "all old". Buckets are mutually exclusive.
+  let anchor: string | null = null
+  for (const r of activeRows) {
+    const sd = r.sale_date == null ? null : String(r.sale_date)
+    if (sd && (anchor == null || sd > anchor)) anchor = sd
+  }
+  const freshness: FreshnessDistribution = { anchorDate: anchor, last7d: 0, last30d: 0, last90d: 0, older: 0 }
+  if (anchor) {
+    for (const r of activeRows) {
+      const sd = r.sale_date == null ? null : String(r.sale_date)
+      if (!sd) { freshness.older++; continue }
+      const d = diffDaysIso(anchor, sd)
+      if (!Number.isFinite(d)) { freshness.older++; continue }
+      if      (d <= 7)  freshness.last7d++
+      else if (d <= 30) freshness.last30d++
+      else if (d <= 90) freshness.last90d++
+      else              freshness.older++
+    }
+  }
+
+  return {
+    totalRows,
+    okActiveRows:        activeRows.length,
+    okSupersededRows:    supersededRows.length,
+    distinctActiveCards: activeSlugs.size,
+    gradeCapViolations: {
+      cap:            GRADE_CAP,
+      violationCount: violations.length,
+      samples:        violations.slice(0, 10),
+    },
+    topActiveCards,
+    freshness,
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Affiliate monitoring — informational panel only.
+// ─────────────────────────────────────────────────────────────────────
+
+const AFFILIATE_PLACEMENTS = [
+  'recent_sales_all',
+  'recent_sales_raw',
+  'recent_sales_psa10',
+  'recent_sales_psa9',
+  'recent_sales_psa8',
+  'recent_sales_psa_7',
+  'recent_sales_cgc_10',
+  'recent_sales_bgs_9_5',
+  'recent_sales_graded',
+]
+
+export function getAffiliateMonitoringPanel(): AffiliateMonitoringPanel {
+  return {
+    available:  false,
+    source:    'Google Analytics 4 (gtag) — no server-side persistence',
+    note:      'affiliate_link_view and affiliate_click events are sent client-side to GA4 only (see src/lib/analytics.ts). No Supabase table stores them, so click-through rates can only be inspected in GA4. Filter by event "affiliate_click" with placement starting "recent_sales_".',
+    placements: AFFILIATE_PLACEMENTS,
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Combined snapshot — the only function the route handler needs.
 // ─────────────────────────────────────────────────────────────────────
 
 export async function readAdminInspectionSnapshot(
   supa: SupabaseClient,
 ): Promise<AdminInspectionSnapshot> {
-  const [importRuns, recentSales, perCard, quarantine, duplicateCheck, latestSamples] = await Promise.all([
+  const [importRuns, recentSales, recentSalesHealth, perCard, quarantine, duplicateCheck, latestSamples] = await Promise.all([
     getLatestImportRuns(supa, 20),
     getRecentSalesSummary(supa),
+    getRecentSalesHealth(supa),
     getPerCardSummary(supa),
     getQuarantineSummary(supa),
     getDuplicateSaleKeyCheck(supa),
@@ -342,9 +619,11 @@ export async function readAdminInspectionSnapshot(
     generatedAt: new Date().toISOString(),
     importRuns,
     recentSales,
+    recentSalesHealth,
     perCard,
     quarantine,
     duplicateCheck,
     latestSamples,
+    affiliateMonitoring: getAffiliateMonitoringPanel(),
   }
 }

@@ -114,10 +114,32 @@ describe('GET /api/admin/recent-sales/inspect — success path', () => {
     expect(j).toHaveProperty('generatedAt')
     expect(j).toHaveProperty('importRuns')
     expect(j).toHaveProperty('recentSales')
+    expect(j).toHaveProperty('recentSalesHealth')
     expect(j).toHaveProperty('perCard')
     expect(j).toHaveProperty('quarantine')
     expect(j).toHaveProperty('duplicateCheck')
     expect(j).toHaveProperty('latestSamples')
+    expect(j).toHaveProperty('affiliateMonitoring')
+
+    // recentSalesHealth shape — values derived from the seeded rows.
+    expect(j.recentSalesHealth.totalRows).toBe(3)
+    expect(j.recentSalesHealth.okActiveRows).toBe(2)
+    expect(j.recentSalesHealth.okSupersededRows).toBe(0)
+    expect(j.recentSalesHealth.distinctActiveCards).toBe(1)
+    expect(j.recentSalesHealth.gradeCapViolations.cap).toBe(5)
+    expect(j.recentSalesHealth.gradeCapViolations.violationCount).toBe(0)
+    expect(j.recentSalesHealth.freshness.anchorDate).toBe('2026-06-21')
+    expect(j.recentSalesHealth.topActiveCards.length).toBeGreaterThanOrEqual(1)
+
+    // affiliateMonitoring panel is informational and disclosed as
+    // GA4-only (no server-side storage exists today).
+    expect(j.affiliateMonitoring.available).toBe(false)
+    expect(j.affiliateMonitoring.placements).toEqual(
+      expect.arrayContaining(['recent_sales_raw', 'recent_sales_psa10']),
+    )
+
+    // notesParsed defaults to null when the seeded notes is null.
+    expect(j.importRuns[0].notesParsed).toBeNull()
 
     expect(j.recentSales.totalRows).toBe(3)
     expect(j.recentSales.okRows).toBe(2)
@@ -147,6 +169,38 @@ describe('GET /api/admin/recent-sales/inspect — success path', () => {
 
     expect(j.duplicateCheck.duplicateCount).toBe(0)
     expect(j.latestSamples.length).toBe(3)
+  })
+
+  it('parses JSON notes into notesParsed when present', async () => {
+    fakeDB.seed('market_import_runs', [
+      { id: 'r-notes', provider: 'pricecharting', source: 'pilot', status: 'success',
+        started_at: '2026-06-22T00:00:00Z', completed_at: '2026-06-22T00:01:00Z',
+        duration_ms: 60000, pages_processed: 1, rows_ok: 5, rows_quarantined: 0,
+        rows_rejected: 0, rows_duplicate: 0, parser_version: 'v1', layout_signature: null,
+        notes: '{"offset": 50, "batch_size": 100, "max_sales_per_grade": 5, "errors_count": 0}' },
+    ])
+    const r = await GET(req())
+    const j = await r.json()
+    const run = j.importRuns.find((x: { id: string }) => x.id === 'r-notes')
+    expect(run.notesParsed).toEqual({
+      offset: 50, batch_size: 100, max_sales_per_grade: 5, errors_count: 0,
+    })
+  })
+
+  it('returns notesParsed=null for non-JSON / malformed notes (no crash)', async () => {
+    fakeDB.seed('market_import_runs', [
+      { id: 'r-bad', provider: 'pricecharting', source: 'pilot', status: 'success',
+        started_at: '2026-06-21T00:00:00Z', completed_at: '2026-06-21T00:01:00Z',
+        duration_ms: 60000, pages_processed: 1, rows_ok: 5, rows_quarantined: 0,
+        rows_rejected: 0, rows_duplicate: 0, parser_version: 'v1', layout_signature: null,
+        notes: 'plain text from an older run' },
+    ])
+    const r = await GET(req())
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    const run = j.importRuns.find((x: { id: string }) => x.id === 'r-bad')
+    expect(run.notes).toBe('plain text from an older run')
+    expect(run.notesParsed).toBeNull()
   })
 
   it('detects duplicate provider_sale_key when (somehow) present', async () => {

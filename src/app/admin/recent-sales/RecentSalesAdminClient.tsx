@@ -4,7 +4,7 @@
 // Calls /api/admin/recent-sales/inspect with the signed-in user's
 // Supabase Auth bearer token. No mutation actions.
 
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
 type ImportRunRow = {
@@ -12,7 +12,9 @@ type ImportRunRow = {
   startedAt: string; completedAt: string | null
   durationMs: number | null
   pagesProcessed: number; rowsOk: number; rowsQuarantined: number; rowsRejected: number; rowsDuplicate: number
-  parserVersion: string | null; layoutSignature: string | null; notes: string | null
+  parserVersion: string | null; layoutSignature: string | null
+  notes: string | null
+  notesParsed: Record<string, unknown> | null
 }
 type RecentSalesSummary = {
   totalRows: number; okRows: number; activeRows: number
@@ -45,15 +47,79 @@ type LatestSampleRow = {
   salePriceCents: number; parseStatus: string; reviewStatus: string
   parseConfidence: number; firstSeenAt: string
 }
-type Snapshot = {
-  generatedAt:    string
-  importRuns:     ImportRunRow[]
-  recentSales:    RecentSalesSummary
-  perCard:        PerCardSummaryRow[]
-  quarantine:     QuarantineSummary
-  duplicateCheck: DuplicateSaleKeyCheck
-  latestSamples:  LatestSampleRow[]
+type GradeCapViolation = {
+  internalCardSlug: string
+  gradeKey:         string
+  gradeLabel:       string
+  activeRowCount:   number
 }
+type FreshnessDistribution = {
+  anchorDate: string | null
+  last7d:     number
+  last30d:    number
+  last90d:    number
+  older:      number
+}
+type RecentSalesHealth = {
+  totalRows:           number
+  okActiveRows:        number
+  okSupersededRows:    number
+  distinctActiveCards: number
+  gradeCapViolations: {
+    cap:           number
+    violationCount: number
+    samples:       GradeCapViolation[]
+  }
+  topActiveCards: Array<{
+    providerCardId:   string
+    internalCardSlug: string
+    rowCount:         number
+    latestSaleDate:   string | null
+  }>
+  freshness: FreshnessDistribution
+}
+type AffiliateMonitoringPanel = {
+  available:  boolean
+  source:     string
+  note:       string
+  placements: string[]
+}
+type Snapshot = {
+  generatedAt:        string
+  importRuns:         ImportRunRow[]
+  recentSales:        RecentSalesSummary
+  recentSalesHealth:  RecentSalesHealth
+  perCard:            PerCardSummaryRow[]
+  quarantine:         QuarantineSummary
+  duplicateCheck:     DuplicateSaleKeyCheck
+  latestSamples:      LatestSampleRow[]
+  affiliateMonitoring: AffiliateMonitoringPanel
+}
+
+// Recognised import-run notes fields shown in priority order. Anything
+// not in this list still renders under "Other notes" so an operator
+// can spot a new scraper field without a code change.
+const NOTES_FIELDS_ORDERED = [
+  'allow_list_total',
+  'offset',
+  'effective_offset',
+  'batch_size',
+  'selected_start',
+  'selected_end',
+  'max_sales_per_grade',
+  'rows_after_grade_cap',
+  'rows_dropped_by_grade_cap',
+  'rows_pruned_old_active',
+  'fetched',
+  'cards_allowlisted',
+  'cards_parsed',
+  'rows_upserted',
+  'skipped_429',
+  'skipped_http_error',
+  'skipped_no_html',
+  'errors_count',
+  'import_type',
+] as const
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -109,6 +175,57 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       }}>{title}</h2>
       {children}
     </section>
+  )
+}
+
+function StatTile({ label, value, tone }: { label: string; value: React.ReactNode; tone?: 'good' | 'bad' | 'neutral' }) {
+  const color = tone === 'bad' ? 'var(--red, #c00)' : tone === 'good' ? 'var(--green, #2a7)' : 'var(--text)'
+  return (
+    <div style={{
+      background: 'var(--bg-light)', padding: '8px 12px',
+      borderRadius: 8, border: '1px solid var(--border)',
+    }}>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</div>
+      <div style={{ fontSize: 18, fontVariantNumeric: 'tabular-nums', color }}>{value}</div>
+    </div>
+  )
+}
+
+function NotesRow({ notes }: { notes: Record<string, unknown> }) {
+  const known = NOTES_FIELDS_ORDERED.filter(k => Object.prototype.hasOwnProperty.call(notes, k))
+  const knownSet = new Set<string>(known)
+  const others = Object.keys(notes).filter(k => !knownSet.has(k)).sort()
+  if (known.length === 0 && others.length === 0) return null
+  function val(k: string): string {
+    const v = notes[k]
+    if (v == null) return '—'
+    if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string') return String(v)
+    try { return JSON.stringify(v) } catch { return String(v) }
+  }
+  return (
+    <tr style={{ borderBottom: '1px solid var(--border)' }}>
+      <td colSpan={11} style={{ padding: '0 6px 8px 6px' }}>
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', gap: 6,
+          fontSize: 11, color: 'var(--text-muted)',
+          padding: '6px 8px', background: 'var(--bg-light)',
+          borderRadius: 8, border: '1px solid var(--border)',
+        }}>
+          {known.map(k => (
+            <span key={k} style={{ display: 'inline-flex', gap: 4, alignItems: 'baseline' }}>
+              <span style={{ opacity: 0.7 }}>{k}:</span>
+              <span style={{ color: 'var(--text)', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{val(k)}</span>
+            </span>
+          ))}
+          {others.map(k => (
+            <span key={k} style={{ display: 'inline-flex', gap: 4, alignItems: 'baseline', opacity: 0.7 }}>
+              <span>{k}:</span>
+              <span style={{ color: 'var(--text)' }}>{val(k)}</span>
+            </span>
+          ))}
+        </div>
+      </td>
+    </tr>
   )
 }
 
@@ -211,19 +328,22 @@ export default function RecentSalesAdminClient() {
                   {snap.importRuns.length === 0
                     ? <tr><td colSpan={11} style={{ padding: 8, color: 'var(--text-muted)' }}>No runs yet.</td></tr>
                     : snap.importRuns.map(r => (
-                      <tr key={r.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td style={{ padding: 6 }}>{fmtDateTime(r.startedAt)}</td>
-                        <td style={{ padding: 6 }}>{r.source}</td>
-                        <td style={{ padding: 6 }}>{r.status}</td>
-                        <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.pagesProcessed}</td>
-                        <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.rowsOk}</td>
-                        <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.rowsQuarantined}</td>
-                        <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.rowsRejected}</td>
-                        <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.rowsDuplicate}</td>
-                        <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.durationMs ?? '—'}</td>
-                        <td style={{ padding: 6, color: 'var(--text-muted)' }}>{r.parserVersion ?? '—'}</td>
-                        <td style={{ padding: 6, color: 'var(--text-muted)' }}>{r.layoutSignature ?? '—'}</td>
-                      </tr>
+                      <Fragment key={r.id}>
+                        <tr style={{ borderBottom: r.notesParsed ? 'none' : '1px solid var(--border)' }}>
+                          <td style={{ padding: 6 }}>{fmtDateTime(r.startedAt)}</td>
+                          <td style={{ padding: 6 }}>{r.source}</td>
+                          <td style={{ padding: 6 }}>{r.status}</td>
+                          <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.pagesProcessed}</td>
+                          <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.rowsOk}</td>
+                          <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.rowsQuarantined}</td>
+                          <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.rowsRejected}</td>
+                          <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.rowsDuplicate}</td>
+                          <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.durationMs ?? '—'}</td>
+                          <td style={{ padding: 6, color: 'var(--text-muted)' }}>{r.parserVersion ?? '—'}</td>
+                          <td style={{ padding: 6, color: 'var(--text-muted)' }}>{r.layoutSignature ?? '—'}</td>
+                        </tr>
+                        {r.notesParsed && <NotesRow notes={r.notesParsed} />}
+                      </Fragment>
                     ))}
                 </tbody>
               </table>
@@ -254,6 +374,82 @@ export default function RecentSalesAdminClient() {
               <Breakdown label="raw_or_graded"     data={snap.recentSales.rawOrGradedBreakdown} />
               <Breakdown label="parse_status"      data={snap.recentSales.parseStatusBreakdown} />
               <Breakdown label="review_status"     data={snap.recentSales.reviewStatusBreakdown} />
+            </div>
+          </Section>
+
+          <Section title="Recent sales data health">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 16 }}>
+              <StatTile label="total rows"           value={snap.recentSalesHealth.totalRows} />
+              <StatTile label="ok + active"          value={snap.recentSalesHealth.okActiveRows} tone="good" />
+              <StatTile label="ok + superseded"      value={snap.recentSalesHealth.okSupersededRows} />
+              <StatTile label="distinct active cards" value={snap.recentSalesHealth.distinctActiveCards} />
+              <StatTile
+                label={`> ${snap.recentSalesHealth.gradeCapViolations.cap}/grade violations`}
+                value={snap.recentSalesHealth.gradeCapViolations.violationCount}
+                tone={snap.recentSalesHealth.gradeCapViolations.violationCount === 0 ? 'good' : 'bad'}
+              />
+            </div>
+
+            {snap.recentSalesHealth.gradeCapViolations.samples.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, color: 'var(--red, #c00)', fontWeight: 600, marginBottom: 6 }}>
+                  Buckets exceeding {snap.recentSalesHealth.gradeCapViolations.cap}-per-grade cap
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead><tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
+                    <th style={{ padding: 6 }}>internal_card_slug</th>
+                    <th style={{ padding: 6 }}>grade</th>
+                    <th style={{ padding: 6, textAlign: 'right' }}>active rows</th>
+                  </tr></thead>
+                  <tbody>
+                    {snap.recentSalesHealth.gradeCapViolations.samples.map((v, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: 6 }}>{v.internalCardSlug}</td>
+                        <td style={{ padding: 6 }}>{v.gradeLabel} <span style={{ color: 'var(--text-muted)' }}>({v.gradeKey})</span></td>
+                        <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{v.activeRowCount}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+                Sale-date freshness (active rows){snap.recentSalesHealth.freshness.anchorDate ? `, anchored on ${snap.recentSalesHealth.freshness.anchorDate}` : ''}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8 }}>
+                <StatTile label="last 7 days"  value={snap.recentSalesHealth.freshness.last7d} />
+                <StatTile label="last 30 days" value={snap.recentSalesHealth.freshness.last30d} />
+                <StatTile label="last 90 days" value={snap.recentSalesHealth.freshness.last90d} />
+                <StatTile label="older"        value={snap.recentSalesHealth.freshness.older} />
+              </div>
+            </div>
+
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Top 20 active cards</div>
+              {snap.recentSalesHealth.topActiveCards.length === 0
+                ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No active rows yet.</div>
+                : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead><tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
+                      <th style={{ padding: 6 }}>provider_card_id</th>
+                      <th style={{ padding: 6 }}>internal_card_slug</th>
+                      <th style={{ padding: 6, textAlign: 'right' }}>active rows</th>
+                      <th style={{ padding: 6 }}>latest sale_date</th>
+                    </tr></thead>
+                    <tbody>
+                      {snap.recentSalesHealth.topActiveCards.map((c, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ padding: 6 }}>{c.providerCardId}</td>
+                          <td style={{ padding: 6 }}>{c.internalCardSlug}</td>
+                          <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{c.rowCount}</td>
+                          <td style={{ padding: 6 }}>{fmtDate(c.latestSaleDate)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
             </div>
           </Section>
 
@@ -382,6 +578,41 @@ export default function RecentSalesAdminClient() {
                 </tbody>
               </table>
             </div>
+          </Section>
+
+          <Section title="Affiliate monitoring">
+            <div style={{
+              padding: '10px 12px', borderRadius: 8,
+              border: '1px solid var(--border)', background: 'var(--bg-light)',
+              fontSize: 13, color: 'var(--text)', marginBottom: 12,
+            }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                {snap.affiliateMonitoring.available
+                  ? 'Server-side affiliate metrics'
+                  : 'Server-side storage unavailable — GA4 only'}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                <div><strong style={{ color: 'var(--text)' }}>Source:</strong> {snap.affiliateMonitoring.source}</div>
+                <div style={{ marginTop: 4 }}>{snap.affiliateMonitoring.note}</div>
+              </div>
+            </div>
+            {snap.affiliateMonitoring.placements.length > 0 && (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+                  GA4 placement filters (event: affiliate_click / affiliate_link_view)
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {snap.affiliateMonitoring.placements.map(p => (
+                    <span key={p} style={{
+                      fontSize: 11, fontFamily: 'monospace',
+                      padding: '3px 8px', borderRadius: 6,
+                      background: 'var(--card)', border: '1px solid var(--border)',
+                      color: 'var(--text)',
+                    }}>{p}</span>
+                  ))}
+                </div>
+              </div>
+            )}
           </Section>
         </>
       )}
