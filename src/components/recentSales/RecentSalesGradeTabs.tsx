@@ -63,10 +63,10 @@ export default function RecentSalesGradeTabs({
         role="tablist"
         aria-label="Filter recent sales by grade"
         style={{
-          display:    'flex',
-          flexWrap:   'wrap',
-          gap:         6,
-          marginBottom: 12,
+          display:      'flex',
+          flexWrap:     'wrap',
+          gap:           8,
+          marginBottom: 16,
         }}
       >
         {groups.map(g => {
@@ -79,80 +79,140 @@ export default function RecentSalesGradeTabs({
               type="button"
               onClick={() => setSelected(g.key)}
               style={{
-                padding:    '4px 10px',
-                fontSize:    12,
-                fontWeight:  active ? 700 : 500,
-                background:  active ? 'var(--accent)' : 'var(--bg-light)',
-                color:       active ? '#fff'          : 'var(--text)',
-                border:     '1px solid ' + (active ? 'var(--accent)' : 'var(--border)'),
-                borderRadius: 999,
-                cursor:      'pointer',
-                fontFamily: "'Figtree', sans-serif",
+                display:       'inline-flex',
+                alignItems:    'center',
+                gap:            6,
+                padding:       '6px 12px',
+                fontSize:       12,
+                fontWeight:     active ? 700 : 600,
+                background:     active ? 'var(--accent)' : 'var(--bg-light)',
+                color:          active ? '#fff'          : 'var(--text)',
+                border:        '1px solid ' + (active ? 'var(--accent)' : 'var(--border)'),
+                borderRadius:   999,
+                cursor:        'pointer',
+                fontFamily:    "'Figtree', sans-serif",
+                lineHeight:     1,
+                transition:    'background-color 0.12s, border-color 0.12s, color 0.12s',
               }}
             >
-              {g.label}
+              <span>{g.label}</span>
               <span style={{
-                marginLeft: 6,
-                opacity:    0.75,
-                fontWeight: 500,
+                display:        'inline-flex',
+                alignItems:     'center',
+                justifyContent: 'center',
+                minWidth:        18,
+                height:          18,
+                padding:        '0 5px',
+                borderRadius:    9,
+                background:      active ? 'rgba(255,255,255,0.22)' : 'var(--card)',
+                color:           active ? '#fff'                    : 'var(--text-muted)',
+                fontSize:        11,
+                fontWeight:      700,
+                fontVariantNumeric: 'tabular-nums',
               }}>{g.rows.length}</span>
             </button>
           )
         })}
       </div>
 
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{
-          width:              '100%',
-          borderCollapse:     'collapse',
-          fontSize:            13,
-          fontVariantNumeric: 'tabular-nums',
-        }}>
-          <thead>
-            <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-              <th style={{ padding: '6px 8px', fontWeight: 600 }}>Date</th>
-              <th style={{ padding: '6px 8px', fontWeight: 600 }}>Marketplace</th>
-              <th style={{ padding: '6px 8px', fontWeight: 600 }}>Grade</th>
-              <th style={{ padding: '6px 8px', fontWeight: 600 }}>Condition</th>
-              <th style={{ padding: '6px 8px', fontWeight: 600, textAlign: 'right' }}>Price</th>
-            </tr>
-          </thead>
-          <tbody>
-            {current.rows.map((row, i) => {
-              const bestOfferAccepted = row.bestOfferStatus === 'accepted'
-              return (
-                <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: '8px', color: 'var(--text)' }}>{fmtDate(row.saleDate)}</td>
-                  <td style={{ padding: '8px', color: 'var(--text)' }}>
-                    {marketplaceLabel(row)}
-                    {row.observedSection && (
-                      <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)' }}>
-                        {row.observedSection}
-                      </span>
-                    )}
-                  </td>
-                  <td style={{ padding: '8px', color: 'var(--text)' }}>{gradeLabel(row)}</td>
-                  <td style={{ padding: '8px', color: 'var(--text)' }}>{conditionLabel(row)}</td>
-                  <td style={{ padding: '8px', textAlign: 'right', color: 'var(--text)' }}>
-                    {fmtCents(row.salePriceCents)}
-                    {bestOfferAccepted && (
-                      <span
-                        title="Best offer accepted"
-                        style={{
-                          display:    'block',
-                          fontSize:    10,
-                          color:      'var(--text-muted)',
-                          marginTop:   2,
-                        }}
-                      >best offer accepted</span>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+      <ul style={{
+        listStyle: 'none',
+        margin:    0,
+        padding:   0,
+        display:   'flex',
+        flexDirection: 'column',
+        gap:        8,
+      }}>
+        {current.rows.map((row, i) => {
+          const bestOfferAccepted = row.bestOfferStatus === 'accepted'
+          return (
+            <li
+              key={i}
+              style={{
+                display:        'grid',
+                gridTemplateColumns: 'minmax(0, 1fr) auto',
+                gap:             '4px 16px',
+                alignItems:      'center',
+                padding:        '12px 14px',
+                border:         '1px solid var(--border)',
+                borderRadius:    10,
+                background:     'var(--bg-light)',
+              }}
+            >
+              {/* Left: meta block (date · marketplace · section · grade · condition) */}
+              <div style={{ minWidth: 0 }}>
+                <div style={{
+                  display:    'flex',
+                  flexWrap:   'wrap',
+                  gap:         8,
+                  alignItems: 'baseline',
+                  marginBottom: 4,
+                }}>
+                  <span style={{
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: 'var(--text)',
+                    fontFamily: "'Figtree', sans-serif",
+                  }}>{fmtDate(row.saleDate)}</span>
+                  <span style={{
+                    display:      'inline-flex',
+                    alignItems:   'center',
+                    padding:     '2px 8px',
+                    fontSize:     11,
+                    fontWeight:   700,
+                    color:       'var(--text)',
+                    background:  'var(--card)',
+                    border:      '1px solid var(--border)',
+                    borderRadius: 999,
+                    lineHeight:   1.4,
+                  }}>{gradeLabel(row)}</span>
+                </div>
+                <div style={{
+                  fontSize: 12,
+                  color:    'var(--text-muted)',
+                  display:  'flex',
+                  flexWrap: 'wrap',
+                  gap:       6,
+                  alignItems: 'center',
+                }}>
+                  <span>{marketplaceLabel(row)}</span>
+                  {row.observedSection && (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <span>{row.observedSection}</span>
+                    </>
+                  )}
+                  <span aria-hidden="true">·</span>
+                  <span>{conditionLabel(row)}</span>
+                </div>
+              </div>
+
+              {/* Right: price (visually dominant) */}
+              <div style={{ textAlign: 'right' }}>
+                <div style={{
+                  fontSize: 18,
+                  fontWeight: 800,
+                  color: 'var(--text)',
+                  fontFamily: "'Outfit', sans-serif",
+                  fontVariantNumeric: 'tabular-nums',
+                  lineHeight: 1.2,
+                }}>{fmtCents(row.salePriceCents)}</div>
+                {bestOfferAccepted && (
+                  <div
+                    title="Best offer accepted"
+                    style={{
+                      fontSize:   10,
+                      color:     'var(--text-muted)',
+                      marginTop:  2,
+                      letterSpacing: 0.2,
+                    }}
+                  >best offer accepted</div>
+                )}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }

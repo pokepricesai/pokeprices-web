@@ -641,6 +641,7 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
             data={priceHistory}
             series={CARD_CHART_SERIES}
             height={280}
+            ranges
             note="New graded tiers (BGS, CGC, SGC, ACE, TAG) just started tracking — limited history will fill in over the coming weeks."
           />
         </Panel>
