@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js'
 import { notFound } from 'next/navigation'
 import CardPageClient from './CardPageClient'
 import RecentSalesSection from '@/components/recentSales/RecentSalesSection'
-import { loadRecentSalesForCardIfEnabled } from '@/lib/recentSales/cardQueries'
+import { loadRecentSalesGroupedForCardIfEnabled } from '@/lib/recentSales/cardQueries'
 
 // ISR: regenerate every 24h. Prices refresh nightly, so this aligns with data cadence.
 // Dramatically reduces crawl-budget consumption across 40k+ card pages.
@@ -112,16 +112,16 @@ export default async function CardPage({ params }: { params: Promise<{ slug: str
   const card = await getCard(setName, cardSlug)
   if (!card) notFound()
 
-  // Block 4B-W-4A — fetch recent verified sales for this card.
-  // The loader returns [] when RECENT_SALES_FREE_PREVIEW_ENABLED is
-  // not the literal "true", so the DB is not consulted while the flag
-  // is off. The section renders nothing when the array is empty.
-  const recentSales = await loadRecentSalesForCardIfEnabled(card.card_slug)
+  // Recent verified sales — grouped by grade. Fail-closed: the loader
+  // returns an empty group set when RECENT_SALES_FREE_PREVIEW_ENABLED
+  // is not the literal "true", so the DB is not consulted while the
+  // flag is off. The section renders nothing when total is zero.
+  const recentSalesData = await loadRecentSalesGroupedForCardIfEnabled(card.card_slug)
 
   return (
     <>
       <CardPageClient setName={setName} cardUrlSlug={cardSlug} />
-      <RecentSalesSection rows={recentSales} />
+      <RecentSalesSection data={recentSalesData} />
     </>
   )
 }

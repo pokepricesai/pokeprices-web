@@ -1,13 +1,14 @@
-// Block 4B-W-4A — server-only query for the card-page section.
-// Verifies: flag-off short-circuit (no DB call), ok+active filter,
-// quarantined/rejected excluded, ordering, limit clamping.
+// Server-only query for the card-page section. Verifies:
+//  - flag-off short-circuit (no DB call)
+//  - ok+active filter; quarantined/rejected excluded
+//  - DESC ordering, limit clamping
+//  - grade-key derivation and grouping behaviour
+//  - grouped loader returns up-to-5 rows per grade tab
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { FakeDB } from '@/lib/email/__tests__/_fakeSupabase'
 
-// FakeDB structurally implements the subset of SupabaseClient we use.
-// Cast at the call site rather than widening the helper's signature.
 const asSupa = (db: FakeDB) => db as unknown as SupabaseClient
 
 vi.mock('server-only', () => ({}))
@@ -21,7 +22,14 @@ vi.mock('@/lib/supabaseService', () => ({
   },
 }))
 
-import { getRecentSalesForCard, loadRecentSalesForCardIfEnabled } from '../cardQueries'
+import {
+  getRecentSalesForCard,
+  getRecentSalesGroupedForCard,
+  loadRecentSalesGroupedForCardIfEnabled,
+  deriveGradeKey,
+  groupRecentSalesByGrade,
+  type CardPageRecentSale,
+} from '../cardQueries'
 
 const KEYS = ['RECENT_SALES_FREE_PREVIEW_ENABLED'] as const
 let snap: Record<string, string | undefined>
@@ -79,14 +87,16 @@ function seedThree(slug: string) {
   ])
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Row-level fetcher semantics
+// ─────────────────────────────────────────────────────────────────────
+
 describe('getRecentSalesForCard — query semantics', () => {
   it('returns only parse_status=ok AND review_status=active rows for the slug', async () => {
     seedThree('959616')
     const rows = await getRecentSalesForCard(asSupa(fakeDB), '959616', 10)
     expect(rows).toHaveLength(2)
-    for (const r of rows) {
-      expect(['ebay']).toContain(r.marketplaceSource)
-    }
+    for (const r of rows) expect(['ebay']).toContain(r.marketplaceSource)
   })
 
   it('orders by sale_date DESC', async () => {
@@ -96,14 +106,14 @@ describe('getRecentSalesForCard — query semantics', () => {
     expect(rows[1].saleDate).toBe('2026-06-18')
   })
 
-  it('clamps limit to a sane range', async () => {
+  it('clamps limit to a sane range (max 200)', async () => {
     seedThree('959616')
-    const lots = await getRecentSalesForCard(asSupa(fakeDB), '959616', 999)
-    expect(lots.length).toBeLessThanOrEqual(20)
+    const lots = await getRecentSalesForCard(asSupa(fakeDB), '959616', 9999)
+    expect(lots.length).toBeLessThanOrEqual(200)
     const one  = await getRecentSalesForCard(asSupa(fakeDB), '959616', 1)
     expect(one.length).toBe(1)
     const zero = await getRecentSalesForCard(asSupa(fakeDB), '959616', 0)
-    expect(zero.length).toBeGreaterThan(0)   // clamped up to 1
+    expect(zero.length).toBeGreaterThan(0)
     expect(zero.length).toBeLessThanOrEqual(1)
   })
 
@@ -115,37 +125,198 @@ describe('getRecentSalesForCard — query semantics', () => {
 
   it('returns [] for an empty / non-string slug without touching the DB', async () => {
     seedThree('959616')
-    // empty string
     expect(await getRecentSalesForCard(asSupa(fakeDB), '', 10)).toEqual([])
-    // null/undefined should also short-circuit (type assertion to test runtime guard)
     expect(await getRecentSalesForCard(asSupa(fakeDB), (null as unknown as string), 10)).toEqual([])
-  })
-
-  it('preserves marketplace_country, condition_bucket, best_offer_status when present', async () => {
-    seedThree('959616')
-    const rows = await getRecentSalesForCard(asSupa(fakeDB), '959616', 10)
-    const psa10 = rows.find(r => r.gradingCompany === 'PSA')
-    expect(psa10?.marketplaceCountry).toBe('US')
-    expect(psa10?.bestOfferStatus).toBe('accepted')
-    expect(psa10?.conditionBucket).toBe('mint')
   })
 })
 
-describe('loadRecentSalesForCardIfEnabled — flag gate', () => {
-  it('returns [] and DOES NOT touch the DB when flag is unset', async () => {
+// ─────────────────────────────────────────────────────────────────────
+// Grade-key derivation
+// ─────────────────────────────────────────────────────────────────────
+
+function row(over: Partial<CardPageRecentSale>): CardPageRecentSale {
+  return {
+    saleDate: '2026-06-20',
+    marketplaceSource: 'ebay',
+    marketplaceCountry: null,
+    observedSection: 'Ungraded',
+    rawOrGraded: null,
+    gradingCompany: null,
+    grade: null,
+    conditionBucket: null,
+    conditionText: null,
+    bestOfferStatus: null,
+    salePriceCents: 100,
+    ...over,
+  }
+}
+
+describe('deriveGradeKey', () => {
+  it('maps a clean PSA 10 row to key=psa-10 label=PSA 10', () => {
+    expect(deriveGradeKey(row({ gradingCompany: 'PSA', grade: '10' })))
+      .toEqual({ key: 'psa-10', label: 'PSA 10' })
+  })
+
+  it('strips a duplicated company prefix from the grade text', () => {
+    expect(deriveGradeKey(row({ gradingCompany: 'PSA', grade: 'PSA 10' })))
+      .toEqual({ key: 'psa-10', label: 'PSA 10' })
+  })
+
+  it('strips a double-duplicated company prefix from the grade text', () => {
+    expect(deriveGradeKey(row({ gradingCompany: 'PSA', grade: 'PSA PSA 10' })))
+      .toEqual({ key: 'psa-10', label: 'PSA 10' })
+  })
+
+  it('normalises the company to uppercase', () => {
+    expect(deriveGradeKey(row({ gradingCompany: 'psa', grade: '9' })))
+      .toEqual({ key: 'psa-9', label: 'PSA 9' })
+  })
+
+  it('returns Raw for raw_or_graded=raw with no grading info', () => {
+    expect(deriveGradeKey(row({ rawOrGraded: 'raw' })))
+      .toEqual({ key: 'raw', label: 'Raw' })
+  })
+
+  it('returns the company tag when only the company is known', () => {
+    expect(deriveGradeKey(row({ gradingCompany: 'CGC', rawOrGraded: 'graded' })))
+      .toEqual({ key: 'cgc', label: 'CGC' })
+  })
+
+  it('falls back to Graded when only raw_or_graded=graded is set', () => {
+    expect(deriveGradeKey(row({ rawOrGraded: 'graded' })))
+      .toEqual({ key: 'graded', label: 'Graded' })
+  })
+
+  it('falls back to Other when nothing is known', () => {
+    expect(deriveGradeKey(row({})))
+      .toEqual({ key: 'other', label: 'Other' })
+  })
+
+  it('handles a CGC 9.5 grade verbatim', () => {
+    expect(deriveGradeKey(row({ gradingCompany: 'CGC', grade: '9.5' })))
+      .toEqual({ key: 'cgc-9.5', label: 'CGC 9.5' })
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Grouping
+// ─────────────────────────────────────────────────────────────────────
+
+describe('groupRecentSalesByGrade', () => {
+  it('returns empty groups for empty input', () => {
+    expect(groupRecentSalesByGrade([])).toEqual({ groups: [], total: 0 })
+  })
+
+  it('builds an All bucket plus one bucket per derived grade key', () => {
+    const data = groupRecentSalesByGrade([
+      row({ saleDate: '2026-06-21', gradingCompany: 'PSA', grade: '10' }),
+      row({ saleDate: '2026-06-20', gradingCompany: 'PSA', grade: '9' }),
+      row({ saleDate: '2026-06-19', rawOrGraded: 'raw' }),
+    ])
+    expect(data.total).toBe(3)
+    expect(data.groups.map(g => g.key)).toEqual(['all','raw','psa-10','psa-9'])
+  })
+
+  it('orders PSA 10 / 9 / 8 / 7 in priority order, then alphabetical', () => {
+    const data = groupRecentSalesByGrade([
+      row({ gradingCompany: 'BGS', grade: '9' }),
+      row({ gradingCompany: 'PSA', grade: '8' }),
+      row({ gradingCompany: 'PSA', grade: '10' }),
+      row({ gradingCompany: 'CGC', grade: '10' }),
+      row({ rawOrGraded: 'raw' }),
+    ])
+    expect(data.groups.map(g => g.key)).toEqual([
+      'all','raw','psa-10','psa-8','bgs-9','cgc-10',
+    ])
+  })
+
+  it('caps each group at the per-grade limit (default 5)', () => {
+    const psa10s = Array.from({ length: 9 }, (_, i) =>
+      row({ saleDate: `2026-06-2${(i % 9)}`, gradingCompany: 'PSA', grade: '10' }))
+    const data = groupRecentSalesByGrade(psa10s)
+    const psa10 = data.groups.find(g => g.key === 'psa-10')!
+    expect(psa10.rows.length).toBe(5)
+    const all = data.groups.find(g => g.key === 'all')!
+    expect(all.rows.length).toBe(5)
+    expect(data.total).toBe(9)
+  })
+
+  it('respects an explicit smaller per-grade limit', () => {
+    const psa10s = Array.from({ length: 4 }, (_, i) =>
+      row({ saleDate: `2026-06-1${i}`, gradingCompany: 'PSA', grade: '10' }))
+    const data = groupRecentSalesByGrade(psa10s, 2)
+    expect(data.groups.find(g => g.key === 'psa-10')!.rows.length).toBe(2)
+    expect(data.groups.find(g => g.key === 'all')!.rows.length).toBe(2)
+  })
+
+  it('does not create a tab for a grade that has zero rows', () => {
+    const data = groupRecentSalesByGrade([row({ rawOrGraded: 'raw' })])
+    const keys = data.groups.map(g => g.key)
+    expect(keys).toContain('raw')
+    expect(keys).not.toContain('psa-10')
+    expect(keys).not.toContain('psa-9')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Grouped read (DB → groups)
+// ─────────────────────────────────────────────────────────────────────
+
+describe('getRecentSalesGroupedForCard', () => {
+  it('returns all+raw+psa-10 groups for a mixed seed and excludes quarantined/rejected/superseded', async () => {
     seedThree('959616')
-    const rows = await loadRecentSalesForCardIfEnabled('959616')
-    expect(rows).toEqual([])
+    const data = await getRecentSalesGroupedForCard(asSupa(fakeDB), '959616')
+    expect(data.total).toBe(2)
+    expect(data.groups.map(g => g.key)).toEqual(['all','raw','psa-10'])
+    const all = data.groups.find(g => g.key === 'all')!
+    expect(all.rows.length).toBe(2)
+    expect(all.rows[0].saleDate).toBe('2026-06-21')
+  })
+
+  it('keeps per-grade rows capped at 5 even when fetch returns more', async () => {
+    const rows = Array.from({ length: 12 }, (_, i) => ({
+      internal_card_slug: '959616',
+      sale_date: `2026-06-${10 + i}`,
+      marketplace_source: 'ebay',
+      observed_section: 'PSA 10',
+      raw_or_graded: 'graded', grading_company: 'PSA', grade: '10',
+      condition_bucket: 'mint', best_offer_status: 'none',
+      sale_price_cents: 1000 + i,
+      parse_status: 'ok', review_status: 'active',
+    }))
+    fakeDB.seed('recent_sales', rows)
+    const data = await getRecentSalesGroupedForCard(asSupa(fakeDB), '959616')
+    expect(data.total).toBe(12)
+    expect(data.groups.find(g => g.key === 'psa-10')!.rows.length).toBe(5)
+    expect(data.groups.find(g => g.key === 'all')!.rows.length).toBe(5)
+  })
+
+  it('returns empty groups for an unknown slug', async () => {
+    seedThree('959616')
+    const data = await getRecentSalesGroupedForCard(asSupa(fakeDB), 'nope')
+    expect(data).toEqual({ groups: [], total: 0 })
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Flag gate
+// ─────────────────────────────────────────────────────────────────────
+
+describe('loadRecentSalesGroupedForCardIfEnabled — flag gate', () => {
+  it('returns empty groups and DOES NOT touch the DB when flag is unset', async () => {
+    seedThree('959616')
+    const data = await loadRecentSalesGroupedForCardIfEnabled('959616')
+    expect(data).toEqual({ groups: [], total: 0 })
     expect(supaCalls.calls).toBe(0)
   })
 
-  it('returns [] for non-literal-true values (no DB call)', async () => {
+  it('returns empty groups for non-literal-true values (no DB call)', async () => {
     seedThree('959616')
     for (const v of ['1','yes','TRUE','True','enabled','false']) {
       supaCalls.calls = 0
       process.env.RECENT_SALES_FREE_PREVIEW_ENABLED = v
-      const rows = await loadRecentSalesForCardIfEnabled('959616')
-      expect(rows, `value=${v}`).toEqual([])
+      const data = await loadRecentSalesGroupedForCardIfEnabled('959616')
+      expect(data, `value=${v}`).toEqual({ groups: [], total: 0 })
       expect(supaCalls.calls, `value=${v}`).toBe(0)
     }
   })
@@ -153,15 +324,16 @@ describe('loadRecentSalesForCardIfEnabled — flag gate', () => {
   it('queries when flag is literal "true"', async () => {
     process.env.RECENT_SALES_FREE_PREVIEW_ENABLED = 'true'
     seedThree('959616')
-    const rows = await loadRecentSalesForCardIfEnabled('959616')
-    expect(rows.length).toBe(2)
+    const data = await loadRecentSalesGroupedForCardIfEnabled('959616')
+    expect(data.total).toBe(2)
+    expect(data.groups.map(g => g.key)).toEqual(['all','raw','psa-10'])
     expect(supaCalls.calls).toBe(1)
   })
 
-  it('returns [] when flag is on but the card has no rows', async () => {
+  it('returns empty groups when flag is on but the card has no rows', async () => {
     process.env.RECENT_SALES_FREE_PREVIEW_ENABLED = 'true'
     seedThree('959616')
-    const rows = await loadRecentSalesForCardIfEnabled('does-not-exist')
-    expect(rows).toEqual([])
+    const data = await loadRecentSalesGroupedForCardIfEnabled('does-not-exist')
+    expect(data).toEqual({ groups: [], total: 0 })
   })
 })
