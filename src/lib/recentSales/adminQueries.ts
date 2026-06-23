@@ -10,6 +10,7 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { deriveGradeKey, type CardPageRecentSale } from './cardQueries'
+import { getEngagementSnapshot, type EngagementSnapshot } from '@/lib/admin/engagementQueries'
 
 // ─────────────────────────────────────────────────────────────────────
 // Shapes
@@ -213,6 +214,7 @@ export type AdminInspectionSnapshot = {
   duplicateCheck:     DuplicateSaleKeyCheck
   latestSamples:      LatestSampleRow[]
   affiliateMonitoring: AffiliateMonitoringPanel
+  engagement:         EngagementSnapshot
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -702,7 +704,7 @@ export async function getAffiliateMonitoring(supa: SupabaseClient): Promise<Affi
 export async function readAdminInspectionSnapshot(
   supa: SupabaseClient,
 ): Promise<AdminInspectionSnapshot> {
-  const [importRuns, recentSales, recentSalesHealth, perCard, quarantine, duplicateCheck, latestSamples, affiliateMonitoring] = await Promise.all([
+  const [importRuns, recentSales, recentSalesHealth, perCard, quarantine, duplicateCheck, latestSamples, affiliateMonitoring, engagement] = await Promise.all([
     getLatestImportRuns(supa, 20),
     getRecentSalesSummary(supa),
     getRecentSalesHealth(supa),
@@ -711,6 +713,7 @@ export async function readAdminInspectionSnapshot(
     getDuplicateSaleKeyCheck(supa),
     getLatestSampleRows(supa, 25),
     getAffiliateMonitoring(supa),
+    getEngagementSnapshot(supa),
   ])
   return {
     generatedAt: new Date().toISOString(),
@@ -722,5 +725,6 @@ export async function readAdminInspectionSnapshot(
     duplicateCheck,
     latestSamples,
     affiliateMonitoring,
+    engagement,
   }
 }

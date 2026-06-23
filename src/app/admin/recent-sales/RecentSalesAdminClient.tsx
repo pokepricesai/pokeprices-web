@@ -101,6 +101,28 @@ type AffiliateMonitoringPanel = {
   placements: string[]
   metrics?:   AffiliateMonitoringMetrics
 }
+type EngagementSnapshot = {
+  watchlist: {
+    rows:           number
+    distinctUsers:  number
+    topCards: Array<{
+      cardSlug:  string
+      cardName:  string | null
+      setName:   string | null
+      watchers:  number
+    }>
+  }
+  portfolio: {
+    distinctUsers:  number
+    items:          number
+  }
+  alerts: {
+    legacyUserAlertsActive: number
+    alertPreferenceRows:    number
+    alertEventsAllTime:     number
+    alertEvents7d:          number
+  }
+}
 type Snapshot = {
   generatedAt:        string
   importRuns:         ImportRunRow[]
@@ -111,6 +133,7 @@ type Snapshot = {
   duplicateCheck:     DuplicateSaleKeyCheck
   latestSamples:      LatestSampleRow[]
   affiliateMonitoring: AffiliateMonitoringPanel
+  engagement:         EngagementSnapshot
 }
 
 // Recognised import-run notes fields shown in priority order. Anything
@@ -595,6 +618,42 @@ export default function RecentSalesAdminClient() {
                 </tbody>
               </table>
             </div>
+          </Section>
+
+          <Section title="User engagement">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 16 }}>
+              <StatTile label="watchlist users"        value={snap.engagement.watchlist.distinctUsers} />
+              <StatTile label="watchlist rows"         value={snap.engagement.watchlist.rows} />
+              <StatTile label="portfolio users"        value={snap.engagement.portfolio.distinctUsers} />
+              <StatTile label="portfolio items"        value={snap.engagement.portfolio.items} />
+              <StatTile label="alert prefs rows"       value={snap.engagement.alerts.alertPreferenceRows} />
+              <StatTile label="alert events — all"     value={snap.engagement.alerts.alertEventsAllTime} />
+              <StatTile label="alert events — 7d"      value={snap.engagement.alerts.alertEvents7d} />
+              <StatTile label="legacy threshold alerts" value={snap.engagement.alerts.legacyUserAlertsActive} />
+            </div>
+            {snap.engagement.watchlist.topCards.length > 0 && (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Top 20 watched cards</div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead><tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
+                    <th style={{ padding: 6 }}>card</th>
+                    <th style={{ padding: 6 }}>set</th>
+                    <th style={{ padding: 6 }}>card_slug</th>
+                    <th style={{ padding: 6, textAlign: 'right' }}>watchers</th>
+                  </tr></thead>
+                  <tbody>
+                    {snap.engagement.watchlist.topCards.map(c => (
+                      <tr key={c.cardSlug} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: 6 }}>{c.cardName ?? '—'}</td>
+                        <td style={{ padding: 6, color: 'var(--text-muted)' }}>{c.setName ?? '—'}</td>
+                        <td style={{ padding: 6, fontFamily: 'monospace', fontSize: 11 }}>{c.cardSlug}</td>
+                        <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{c.watchers}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </Section>
 
           <Section title="Affiliate monitoring">

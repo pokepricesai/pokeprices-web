@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import DashboardNav from '../DashboardNav'
 import Avatar from '@/components/Avatar'
 import AvatarPicker from '@/components/AvatarPicker'
+import AlertPreferencesCard from './AlertPreferencesCard'
 import {
   cleanDisplayName,
   cleanCountryCode,
@@ -426,6 +427,9 @@ export default function SettingsClient() {
               {saving ? 'Saving…' : savedAt && Date.now() - savedAt < 2000 ? 'Saved.' : ''}
             </div>
           </div>
+
+          {/* Smart alerts (Block 5A-W-1) */}
+          {user?.id && <AlertPreferencesCard userId={user.id} />}
 
           {/* Account card */}
           <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: 22 }}>
