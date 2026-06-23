@@ -72,8 +72,11 @@ describe('NEXT_PUBLIC leakage', () => {
 // ─────────────────────────────────────────────────────────────────────
 
 describe('public surface isolation', () => {
-  const publicSurfaces = [
-    'src/app/set/[slug]/card/[cardSlug]/page.tsx',
+  // CLIENT components and other surfaces that must NEVER import the
+  // recent-sales code path. The card-page server component
+  // (page.tsx) is excluded — Block 4B-W-4A intentionally imports the
+  // server-only loader there.
+  const publicClientSurfaces = [
     'src/app/set/[slug]/card/[cardSlug]/CardPageClient.tsx',
     'src/app/set/[slug]/page.tsx',
     'src/app/set/[slug]/SetPageClient.tsx',
@@ -87,7 +90,7 @@ describe('public surface isolation', () => {
     'src/lib/faqs.ts',
   ]
 
-  for (const rel of publicSurfaces) {
+  for (const rel of publicClientSurfaces) {
     it(`${rel} does NOT import recent-sales code`, () => {
       const text = readSafe(rel)
       // file may not exist (e.g. on a future rename) — empty string
@@ -100,8 +103,52 @@ describe('public surface isolation', () => {
   }
 
   it('at least one of the listed public surfaces actually exists (smoke check)', () => {
-    const any = publicSurfaces.some(rel => readSafe(rel).length > 0)
+    const any = publicClientSurfaces.some(rel => readSafe(rel).length > 0)
     expect(any).toBe(true)
+  })
+
+  // Block 4B-W-4A — the card-page server component is allowed to
+  // import the server-only loader and the section, but must NOT
+  // import the admin query layer or any client-side flag value.
+  it('card-page server component imports the recent-sales loader but NOT the admin layer', () => {
+    const text = readSafe('src/app/set/[slug]/card/[cardSlug]/page.tsx')
+    expect(text.length).toBeGreaterThan(0)
+    expect(text).toMatch(/from\s+['"]@\/lib\/recentSales\/cardQueries['"]/)
+    expect(text).toMatch(/RecentSalesSection/)
+    // Admin queries must never reach the public card page.
+    expect(text).not.toMatch(/from\s+['"]@\/lib\/recentSales\/adminQueries['"]/)
+  })
+
+  // Block 4B-W-4A — no public surface imports the admin query layer.
+  it('admin query layer is not imported by any non-admin file', () => {
+    const files = walk(SRC, { skipTests: true })
+    for (const f of files) {
+      const rel = f.replace(REPO_ROOT + path.sep, '').replace(/\\/g, '/')
+      // The admin route + admin page are the only allowed importers.
+      if (rel.includes('app/api/admin/recent-sales/')) continue
+      if (rel.includes('app/admin/recent-sales/'))      continue
+      if (rel === 'src/lib/recentSales/adminQueries.ts') continue
+      const text = readFileSync(f, 'utf8')
+      expect(text, `${rel} should not import adminQueries`).not.toMatch(
+        /from\s+['"]@\/lib\/recentSales\/adminQueries['"]/,
+      )
+    }
+  })
+
+  // The free-preview section component is a SERVER component (no
+  // 'use client'); confirm so a future refactor cannot silently make
+  // it client-side and pull recentSales code into the browser bundle.
+  it('RecentSalesSection is a server component (no "use client")', () => {
+    const text = readSafe('src/components/recentSales/RecentSalesSection.tsx')
+    expect(text.length).toBeGreaterThan(0)
+    // The first 200 chars are headers/comments; check the first non-comment
+    // line is NOT a 'use client' directive.
+    const stripped = text
+      .split('\n')
+      .filter(l => !l.trim().startsWith('//') && l.trim() !== '')
+      .slice(0, 3)
+      .join('\n')
+    expect(stripped).not.toMatch(/^['"]use client['"]/m)
   })
 })
 
