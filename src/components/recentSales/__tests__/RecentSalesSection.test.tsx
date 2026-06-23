@@ -8,9 +8,25 @@
 //  - hidden grades do not get a tab
 //  - no eBay affiliate links rendered
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { renderToString } from 'react-dom/server'
 import { createElement } from 'react'
+
+// The shared supabase module eagerly constructs a browser client at
+// import time (pulled in transitively via the affiliate link helpers
+// used by RecentSalesGradeTabs). The test env has no Supabase env
+// vars, so stub it.
+vi.mock('@/lib/supabase', () => ({
+  supabase: { auth: { getSession: async () => ({ data: { session: null } }), onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }) } },
+  CHAT_ENDPOINT: '',
+  formatPrice:       (c: number | null | undefined) => c == null ? '—' : `$${(c/100).toFixed(2)}`,
+  formatPriceGBP:    (c: number | null | undefined) => c == null ? '—' : `£${(c/100).toFixed(2)}`,
+  formatPriceShort:  (c: number | null | undefined) => c == null ? '—' : `$${(c/100).toFixed(0)}`,
+  formatPct:         () => ({ text: '—', color: '' }),
+  formatDate:        (d: string | null) => d ?? '—',
+  formatChartPrice:  (c: number) => `$${c}`,
+}))
+
 import RecentSalesSection from '../RecentSalesSection'
 import type { CardPageRecentSale, CardPageRecentSalesData } from '@/lib/recentSales/cardQueries'
 

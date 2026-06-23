@@ -118,10 +118,22 @@ export default async function CardPage({ params }: { params: Promise<{ slug: str
   // flag is off. The section renders nothing when total is zero.
   const recentSalesData = await loadRecentSalesGroupedForCardIfEnabled(card.card_slug)
 
+  // Grade-aware affiliate link in the recent-sales section needs the
+  // card's display metadata. Mirrors the shape EbayCardPriceActions
+  // uses higher up the page; strips the pc- prefix from card_slug to
+  // match the existing convention.
+  const recentSalesCard = {
+    cardName:   String(card.card_name ?? ''),
+    setName:    String(card.set_name ?? ''),
+    cardNumber: (card.card_number_display ?? card.card_number ?? null) as string | null,
+    cardSlug:   String(card.card_slug ?? '').replace(/^pc-/, '') || null,
+    isSealed:   !!card.is_sealed,
+  }
+
   return (
     <>
       <CardPageClient setName={setName} cardUrlSlug={cardSlug} />
-      <RecentSalesSection data={recentSalesData} />
+      <RecentSalesSection data={recentSalesData} card={recentSalesCard} />
     </>
   )
 }

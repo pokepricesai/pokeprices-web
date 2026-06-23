@@ -2,14 +2,21 @@
 // Server component that renders the "Recent verified sales" panel
 // below the card-page data. Receives pre-fetched, pre-grouped data
 // from the card-page server component. The interactive grade-tab
-// switch lives in a child client component (RecentSalesGradeTabs).
+// switch (and the grade-aware affiliate link) live in a child client
+// component (RecentSalesGradeTabs).
 
 import type { CardPageRecentSalesData } from '@/lib/recentSales/cardQueries'
-import RecentSalesGradeTabs from './RecentSalesGradeTabs'
+import RecentSalesGradeTabs, { type RecentSalesCardContext } from './RecentSalesGradeTabs'
 
 const TITLE = 'Recent verified sales'
 
-export default function RecentSalesSection({ data }: { data: CardPageRecentSalesData }) {
+export default function RecentSalesSection({
+  data,
+  card,
+}: {
+  data:  CardPageRecentSalesData
+  card?: RecentSalesCardContext
+}) {
   if (!data || data.total === 0 || data.groups.length === 0) return null
 
   return (
@@ -37,7 +44,7 @@ export default function RecentSalesSection({ data }: { data: CardPageRecentSales
             fontFamily: "'Outfit', sans-serif",
           }}>{TITLE}</h2>
         </header>
-        <RecentSalesGradeTabs groups={data.groups} />
+        <RecentSalesGradeTabs groups={data.groups} card={card} />
       </div>
     </section>
   )
