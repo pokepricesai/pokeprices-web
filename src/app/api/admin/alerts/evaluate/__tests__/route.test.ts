@@ -114,9 +114,20 @@ describe('POST /api/admin/alerts/evaluate — dryRun default', () => {
     expect(typeof j.diagnostics.usersWithDisabledPrefs).toBe('number')
     expect(typeof j.diagnostics.usersWithNoCards).toBe('number')
     expect(typeof j.diagnostics.cardsWithNoSlugResolution).toBe('number')
+    expect(typeof j.diagnostics.cardsWithMissingDisplayFields).toBe('number')
     expect(typeof j.diagnostics.cardsWithInsufficientPriceHistory).toBe('number')
     expect(typeof j.diagnostics.cardsWithNoRecentSales).toBe('number')
     expect(j.diagnostics.triggersByRule).toBeDefined()
+
+    // Block 5A-W-10 — admin response must NOT echo raw user_id; the
+    // public scrub replaces it with an opaque per-batch userIndex.
+    for (const e of j.proposedEvents) {
+      expect(Object.prototype.hasOwnProperty.call(e, 'userId')).toBe(false)
+      expect(typeof e.userIndex).toBe('number')
+    }
+    const blob = JSON.stringify(j.proposedEvents)
+    expect(blob).not.toMatch(/"userId"/i)
+    expect(blob).not.toMatch(/u1\b/)        // the seeded user_id must not appear
   })
 
   it('defaults dryRun=true when body explicitly passes { dryRun: true }', async () => {

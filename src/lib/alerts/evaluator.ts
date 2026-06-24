@@ -81,6 +81,13 @@ export type EvaluationDiagnostics = {
    *  scraper-owned `cards` table does not know about (renamed slug,
    *  removed card, etc.). */
   cardsWithNoSlugResolution:         number
+  /** Of the unique cards that DID resolve (have a bare-numeric
+   *  cardSlug), how many ended up without a usable cardName OR
+   *  setName even after the cards-table fallback. Block 5A-W-10 —
+   *  surface so the operator notices stale watchlist denorms or
+   *  cards rows missing display columns. Does not overlap with
+   *  cardsWithNoSlugResolution. */
+  cardsWithMissingDisplayFields:     number
   /** Of the unique cards across all users in this batch, how many
    *  had fewer than two price points covering the ~7d lookback —
    *  i.e. `findPriceComparisonPair` returned null. These cards can
@@ -106,6 +113,45 @@ export type EvaluationResult = {
   triggersInserted:             number         // 0 in dryRun
   proposedEvents:               ProposedAlertEvent[]   // capped sample
   diagnostics:                  EvaluationDiagnostics
+}
+
+/**
+ * Operator-safe shape of a proposed event for the admin response.
+ * Omits userId; adds an opaque per-batch userIndex so the operator
+ * can SEE which events belong to the same user without seeing the
+ * actual user_id. Block 5A-W-10.
+ */
+export type PublicProposedAlertEvent = Omit<ProposedAlertEvent, 'userId'> & {
+  userIndex: number
+}
+
+export type PublicEvaluationResult = Omit<EvaluationResult, 'proposedEvents'> & {
+  proposedEvents: PublicProposedAlertEvent[]
+}
+
+/**
+ * Strip user identifiers from the evaluator result before returning
+ * it to the admin browser. Internal callers (the insert path inside
+ * evaluateAlerts) run BEFORE this — alert_events still receives the
+ * real user_id. This is a presentation-layer scrub.
+ */
+export function toPublicEvaluationResult(r: EvaluationResult): PublicEvaluationResult {
+  const userIndexById = new Map<string, number>()
+  let nextIdx = 1
+  for (const e of r.proposedEvents) {
+    if (!userIndexById.has(e.userId)) {
+      userIndexById.set(e.userId, nextIdx++)
+    }
+  }
+  return {
+    ...r,
+    proposedEvents: r.proposedEvents.map(e => {
+      // Strip userId; assign a stable per-batch index.
+      const { userId, ...rest } = e
+      void userId   // explicit: we intentionally drop it
+      return { ...rest, userIndex: userIndexById.get(e.userId)! }
+    }),
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -239,31 +285,54 @@ export async function evaluateAlerts(
   for (const r of wlRows) add(r.user_id, r.card_slug, 'watchlist', r.card_name, r.set_name)
   for (const r of piRows) add(r.user_id, r.card_slug, 'portfolio', null, null)
 
-  // Resolve URL → bare numeric in one batch. Cards without a row
-  // here get cardSlug=null and are skipped from market evaluation.
+  // Resolve URL → bare numeric + backfill display fields in one batch.
+  // Cards without a row here get cardSlug=null and are skipped from
+  // market evaluation. portfolio_items rows store no card_name /
+  // set_name; the cards-table fallback fills them. Watchlist rows
+  // already carry denormalised display fields captured at add-time,
+  // and those WIN over the cards fallback so the user sees the same
+  // wording in the email as in their watchlist UI.
   const urlSlugSet = new Set<string>()
   for (const perUser of Array.from(userCards.values())) {
     for (const url of Array.from(perUser.keys())) urlSlugSet.add(url)
   }
-  const urlSlugList = Array.from(urlSlugSet)
-  const urlToBare   = await loadUrlSlugToBareMap(supa, urlSlugList)
+  const urlSlugList   = Array.from(urlSlugSet)
+  const urlToDetails  = await loadCardDetailsByUrlSlug(supa, urlSlugList)
   let cardsConsidered = 0
   let cardsWithNoSlugResolution = 0
   const allMarketIds = new Set<string>()
   for (const perUser of Array.from(userCards.values())) {
     for (const card of Array.from(perUser.values())) {
       cardsConsidered++
-      const bare = urlToBare.get(card.urlSlug)
-      if (bare) {
-        card.cardSlug = bare
-        allMarketIds.add(bare)
+      const details = urlToDetails.get(card.urlSlug)
+      if (details) {
+        card.cardSlug = details.cardSlug
+        // Fill missing display fields from cards as fallback. Do not
+        // overwrite values the watchlist already provided.
+        if (!card.cardName && details.cardName) card.cardName = details.cardName
+        if (!card.setName  && details.setName)  card.setName  = details.setName
+        allMarketIds.add(details.cardSlug)
       }
     }
   }
   // Count UNIQUE url slugs that failed to resolve (card-level, not tuple).
   for (const url of urlSlugList) {
-    if (!urlToBare.has(url)) cardsWithNoSlugResolution++
+    if (!urlToDetails.has(url)) cardsWithNoSlugResolution++
   }
+
+  // Diagnostic: cards that resolved (have a cardSlug) but still
+  // ended up without a usable card_name OR set_name even after the
+  // cards-table fallback. Rare in practice — usually a sign of a
+  // missing cards row column rather than a logic bug. Unique by
+  // bare-numeric cardSlug so a card on N users counts once.
+  const missingDisplaySet = new Set<string>()
+  for (const perUser of Array.from(userCards.values())) {
+    for (const card of Array.from(perUser.values())) {
+      if (!card.cardSlug) continue
+      if (!card.cardName || !card.setName) missingDisplaySet.add(card.cardSlug)
+    }
+  }
+  const cardsWithMissingDisplayFields = missingDisplaySet.size
 
   // Diagnostic: users in usersConsidered who ended up with zero cards.
   const usersWithNoCards = Array.from(prefsByUser.keys()).filter(uid => !userCards.has(uid)).length
@@ -317,7 +386,9 @@ export async function evaluateAlerts(
         // alert_events.card_slug aligns with cards.card_slug — the
         // existing digest URL builder in delivery.ts / preview-email
         // does `.in('card_slug', bareSlugs)` and keys its result map
-        // by bare numeric.
+        // by bare numeric. cardName + setName now come from
+        // watchlist if present, else the cards-table fallback
+        // populated in the resolution loop above.
         card: { cardSlug: marketId, cardName: card.cardName, setName: card.setName, source: card.source },
         prefs,
         priceRows,
@@ -354,6 +425,7 @@ export async function evaluateAlerts(
       usersWithDisabledPrefs,
       usersWithNoCards,
       cardsWithNoSlugResolution,
+      cardsWithMissingDisplayFields,
       cardsWithInsufficientPriceHistory,
       cardsWithNoRecentSales,
       triggersByRule,
@@ -510,24 +582,39 @@ async function loadEnabledPrefs(supa: SupabaseClient, limit: number): Promise<Ar
   return (data ?? []) as Array<Record<string, unknown>>
 }
 
-async function loadUrlSlugToBareMap(supa: SupabaseClient, urlSlugs: string[]): Promise<Map<string, string>> {
-  // Resolve cards.card_url_slug → cards.card_slug for the supplied
-  // URL slugs. The market-data tables (daily_prices / recent_sales)
-  // are keyed off the bare-numeric card_slug, not the URL slug; this
-  // map is the bridge. Missing rows mean the user added a card whose
-  // URL slug the scraper-owned `cards` table no longer recognises —
-  // we skip those from market evaluation rather than guessing.
-  const out = new Map<string, string>()
+type CardDetails = {
+  cardSlug: string       // bare numeric (cards.card_slug)
+  cardName: string | null
+  setName:  string | null
+}
+
+async function loadCardDetailsByUrlSlug(supa: SupabaseClient, urlSlugs: string[]): Promise<Map<string, CardDetails>> {
+  // Resolve cards.card_url_slug → cards.card_slug + display fields
+  // for the supplied URL slugs in ONE batched query. Replaces the
+  // narrower loadUrlSlugToBareMap so portfolio_items rows (which
+  // store no card_name / set_name themselves) can have their display
+  // fields backfilled from the cards table — Block 5A-W-10.
+  //
+  // The market-data tables (daily_prices / recent_sales) are keyed
+  // off the bare-numeric card_slug, not the URL slug; this map is
+  // the bridge.
+  const out = new Map<string, CardDetails>()
   if (urlSlugs.length === 0) return out
   const { data, error } = await supa
     .from('cards')
-    .select('card_url_slug, card_slug')
+    .select('card_url_slug, card_slug, card_name, set_name')
     .in('card_url_slug', urlSlugs)
   if (error || !Array.isArray(data)) return out
   for (const r of data as Array<Record<string, unknown>>) {
     const url  = r.card_url_slug == null ? '' : String(r.card_url_slug)
     const bare = r.card_slug     == null ? '' : String(r.card_slug)
-    if (url && bare) out.set(url, bare)
+    if (url && bare) {
+      out.set(url, {
+        cardSlug: bare,
+        cardName: r.card_name == null ? null : String(r.card_name),
+        setName:  r.set_name  == null ? null : String(r.set_name),
+      })
+    }
   }
   return out
 }
@@ -689,6 +776,7 @@ function emptyResult(dryRun: boolean, asOfIso: string, usersWithDisabledPrefs = 
       usersWithDisabledPrefs,
       usersWithNoCards:                  0,
       cardsWithNoSlugResolution:         0,
+      cardsWithMissingDisplayFields:     0,
       cardsWithInsufficientPriceHistory: 0,
       cardsWithNoRecentSales:            0,
       triggersByRule: {

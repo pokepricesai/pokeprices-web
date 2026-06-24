@@ -13,7 +13,7 @@ import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/adminAuth'
 import { isAlertsEvaluatorEnabled } from '@/lib/alerts/flags'
 import { getSupabaseServiceClient } from '@/lib/supabaseService'
-import { evaluateAlerts } from '@/lib/alerts/evaluator'
+import { evaluateAlerts, toPublicEvaluationResult } from '@/lib/alerts/evaluator'
 
 export const runtime  = 'nodejs'
 export const dynamic  = 'force-dynamic'
@@ -44,8 +44,12 @@ export async function POST(req: Request) {
 
   try {
     const supa   = getSupabaseServiceClient()
+    // evaluateAlerts uses the real user_id internally (cooldown
+    // lookups, alert_events INSERT). Only the response is scrubbed:
+    // toPublicEvaluationResult strips userId and substitutes an
+    // opaque per-batch userIndex on each proposedEvent.
     const result = await evaluateAlerts(supa, { dryRun, limitUsers })
-    return NextResponse.json(result)
+    return NextResponse.json(toPublicEvaluationResult(result))
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'unknown'
     return NextResponse.json({ error: 'evaluator failed', detail: msg }, { status: 500 })

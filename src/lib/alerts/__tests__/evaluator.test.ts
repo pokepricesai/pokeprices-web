@@ -491,6 +491,162 @@ describe('evaluateAlerts — orchestrator', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────
+// Display field resolution + admin response scrub (Block 5A-W-10)
+// portfolio_items rows carry no card_name / set_name; the evaluator
+// must backfill them from the cards table. The admin API response
+// must NOT include the real user_id but should expose an opaque
+// per-batch userIndex so the operator can see grouping.
+// ─────────────────────────────────────────────────────────────────────
+
+import { toPublicEvaluationResult } from '../evaluator'
+
+describe('evaluateAlerts — display field resolution', () => {
+  it('backfills cardName + setName from the cards table for a portfolio event', async () => {
+    seedPrefs('u1')
+    // cards row provides the display fields; portfolio_items row has none.
+    fakeDB.seed('cards', [{
+      card_url_slug: 'mystery-card-99',
+      card_slug:     '889291',
+      card_name:     'Mystery Card #99',
+      set_name:      'Some Set',
+    }])
+    fakeDB.seed('portfolios',      [{ id: 'p-u1', user_id: 'u1' }])
+    fakeDB.seed('portfolio_items', [{ portfolio_id: 'p-u1', card_slug: 'mystery-card-99' }])
+    // Recent sales so a trigger fires
+    fakeDB.seed('recent_sales', [
+      { internal_card_slug: '889291', sale_date: '2026-06-22', parse_status: 'ok', review_status: 'active' },
+    ])
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf, dryRun: true })
+    expect(r.proposedEvents).toHaveLength(1)
+    expect(r.proposedEvents[0]).toMatchObject({
+      cardSlug: '889291',
+      cardName: 'Mystery Card #99',
+      setName:  'Some Set',
+      rule:     'recent_sales',
+    })
+  })
+
+  it('keeps watchlist-provided display fields when the cards row also has them (watchlist wins)', async () => {
+    seedPrefs('u1')
+    fakeDB.seed('cards', [{
+      card_url_slug: 'charizard-4',
+      card_slug:     '630417',
+      card_name:     'Charizard #4 (cards table)',
+      set_name:      'Base (cards table)',
+    }])
+    fakeDB.seed('watchlist', [{
+      user_id:   'u1',
+      card_slug: 'charizard-4',
+      card_name: 'My Charizard (watchlist)',
+      set_name:  'My Base Set (watchlist)',
+    }])
+    seedPriceTwoPoints('630417', 1000, 1200)
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf, dryRun: true })
+    expect(r.proposedEvents[0]).toMatchObject({
+      cardName: 'My Charizard (watchlist)',
+      setName:  'My Base Set (watchlist)',
+    })
+  })
+
+  it('fills only the missing field when watchlist has one but not the other', async () => {
+    seedPrefs('u1')
+    fakeDB.seed('cards', [{
+      card_url_slug: 'partial-1',
+      card_slug:     '1111',
+      card_name:     'CardsCardName',
+      set_name:      'CardsSetName',
+    }])
+    fakeDB.seed('watchlist', [{
+      user_id:   'u1',
+      card_slug: 'partial-1',
+      card_name: 'WatchlistName',
+      set_name:  null,   // missing — should fall back to cards
+    }])
+    seedPriceTwoPoints('1111', 1000, 1200)
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf, dryRun: true })
+    expect(r.proposedEvents[0]).toMatchObject({
+      cardName: 'WatchlistName',       // watchlist value preserved
+      setName:  'CardsSetName',        // backfilled from cards
+    })
+  })
+
+  it('increments cardsWithMissingDisplayFields when no source provides cardName / setName', async () => {
+    seedPrefs('u1')
+    // cards row exists (so slug resolves) but display fields are null.
+    fakeDB.seed('cards', [{
+      card_url_slug: 'unnamed-card',
+      card_slug:     '7777',
+      card_name:     null,
+      set_name:      null,
+    }])
+    fakeDB.seed('portfolios',      [{ id: 'p-u1', user_id: 'u1' }])
+    fakeDB.seed('portfolio_items', [{ portfolio_id: 'p-u1', card_slug: 'unnamed-card' }])
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    expect(r.diagnostics.cardsWithMissingDisplayFields).toBe(1)
+    expect(r.diagnostics.cardsWithNoSlugResolution).toBe(0)  // resolved but unnamed
+  })
+
+  it('cardsWithMissingDisplayFields does not double-count cards already in cardsWithNoSlugResolution', async () => {
+    seedPrefs('u1')
+    // No cards row → unresolved.
+    fakeDB.seed('watchlist', [{ user_id: 'u1', card_slug: 'totally-unknown', card_name: null, set_name: null }])
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    expect(r.diagnostics.cardsWithNoSlugResolution).toBe(1)
+    expect(r.diagnostics.cardsWithMissingDisplayFields).toBe(0)
+  })
+})
+
+describe('toPublicEvaluationResult', () => {
+  const internal: import('../evaluator').EvaluationResult = {
+    dryRun: true,
+    asOf:   '2026-06-24T12:00:00Z',
+    usersConsidered: 2, cardsConsidered: 3,
+    triggersFound: 3, triggersSuppressedByCooldown: 0, triggersInserted: 0,
+    proposedEvents: [
+      { userId: 'user-A-uuid', cardSlug: '1', cardName: 'A', setName: 'X', rule: 'raw_change',   severity: 'normal', source: 'watchlist', payload: {} },
+      { userId: 'user-A-uuid', cardSlug: '2', cardName: 'B', setName: 'X', rule: 'recent_sales', severity: 'normal', source: 'watchlist', payload: {} },
+      { userId: 'user-B-uuid', cardSlug: '3', cardName: 'C', setName: 'Y', rule: 'raw_change',   severity: 'high',   source: 'portfolio', payload: {} },
+    ],
+    diagnostics: {
+      usersWithDisabledPrefs: 0, usersWithNoCards: 0, cardsWithNoSlugResolution: 0,
+      cardsWithMissingDisplayFields: 0, cardsWithInsufficientPriceHistory: 0,
+      cardsWithNoRecentSales: 0,
+      triggersByRule: { price_move: 0, recent_sales: 1, psa10_change: 0, raw_change: 2, spread_change: 0, market_activity: 0 },
+    },
+  }
+
+  it('strips userId from every proposedEvent', () => {
+    const pub = toPublicEvaluationResult(internal)
+    for (const e of pub.proposedEvents) {
+      expect(Object.prototype.hasOwnProperty.call(e, 'userId')).toBe(false)
+    }
+    const blob = JSON.stringify(pub)
+    expect(blob).not.toMatch(/user-[AB]-uuid/)
+    expect(blob).not.toMatch(/"userId"/i)
+  })
+
+  it('assigns a stable per-batch userIndex (events from the same user share an index)', () => {
+    const pub = toPublicEvaluationResult(internal)
+    expect(pub.proposedEvents[0].userIndex).toBe(1)
+    expect(pub.proposedEvents[1].userIndex).toBe(1)   // same user as #0
+    expect(pub.proposedEvents[2].userIndex).toBe(2)   // different user
+  })
+
+  it('passes the rest of the result through unchanged', () => {
+    const pub = toPublicEvaluationResult(internal)
+    expect(pub.dryRun).toBe(internal.dryRun)
+    expect(pub.usersConsidered).toBe(internal.usersConsidered)
+    expect(pub.triggersFound).toBe(internal.triggersFound)
+    expect(pub.diagnostics).toEqual(internal.diagnostics)
+  })
+
+  it('returns an empty proposedEvents array unchanged (no userIndex churn)', () => {
+    const pub = toPublicEvaluationResult({ ...internal, proposedEvents: [] })
+    expect(pub.proposedEvents).toEqual([])
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
 // Slug-format resolution (Block 5A-W-9)
 // watchlist + portfolio_items store URL slugs; market-data tables
 // are keyed by bare numeric cards.card_slug. The evaluator must
@@ -647,6 +803,7 @@ describe('evaluateAlerts — diagnostics', () => {
     expect(r.diagnostics.usersWithDisabledPrefs).toBe(0)
     expect(r.diagnostics.usersWithNoCards).toBe(0)
     expect(r.diagnostics.cardsWithNoSlugResolution).toBe(0)
+    expect(r.diagnostics.cardsWithMissingDisplayFields).toBe(0)
     expect(r.diagnostics.cardsWithInsufficientPriceHistory).toBe(0)
     expect(r.diagnostics.cardsWithNoRecentSales).toBe(0)
     expect(r.diagnostics.triggersByRule).toEqual({
