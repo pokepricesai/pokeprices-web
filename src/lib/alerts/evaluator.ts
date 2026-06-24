@@ -73,6 +73,14 @@ export type EvaluationDiagnostics = {
   /** Of the users in `usersConsidered`, how many ended up with zero
    *  cards on either watchlist OR portfolio (so nothing to evaluate). */
   usersWithNoCards:                  number
+  /** Of the unique URL slugs pulled from watchlist + portfolio_items,
+   *  how many could NOT be resolved to a bare-numeric cards.card_slug
+   *  via cards.card_url_slug. These cards are skipped from every
+   *  market-data lookup. Usually zero on a healthy cards table — a
+   *  non-zero count means a watch/portfolio row references a slug the
+   *  scraper-owned `cards` table does not know about (renamed slug,
+   *  removed card, etc.). */
+  cardsWithNoSlugResolution:         number
   /** Of the unique cards across all users in this batch, how many
    *  had fewer than two price points covering the ~7d lookback —
    *  i.e. `findPriceComparisonPair` returned null. These cards can
@@ -196,54 +204,91 @@ export async function evaluateAlerts(
   ])
 
   // 3. Build user → card map with source attribution.
+  //
+  // SLUG-FORMAT NOTE (Block 5A-W-9): watchlist.card_slug and
+  // portfolio_items.card_slug both store URL slugs (e.g. "charizard-4"
+  // — the same string as cards.card_url_slug). The market-data tables
+  // are keyed by the BARE NUMERIC cards.card_slug (e.g. "630417"),
+  // with daily_prices using a "pc-" prefix on top of that. We keep
+  // the URL slug as the per-user key and later resolve it to the bare
+  // numeric for market lookups. The resolved bare numeric ends up on
+  // ProposedAlertEvent.cardSlug so alert_events.card_slug stays
+  // consistent with cards.card_slug and the existing digest URL
+  // builder in delivery.ts / preview-email keeps working unchanged.
   type CardOnUserList = {
-    cardSlug: string
+    urlSlug:  string         // raw watchlist/portfolio_items.card_slug (= cards.card_url_slug)
+    cardSlug: string | null  // resolved bare numeric (cards.card_slug); null = unresolved
     cardName: string | null
     setName:  string | null
     source:   EvalSource
   }
   const userCards = new Map<string, Map<string, CardOnUserList>>()
-  function add(userId: string, cardSlug: string, src: 'watchlist'|'portfolio', cardName: string | null, setName: string | null) {
-    if (!cardSlug) return
+  function add(userId: string, urlSlug: string, src: 'watchlist'|'portfolio', cardName: string | null, setName: string | null) {
+    if (!urlSlug) return
     let perUser = userCards.get(userId)
     if (!perUser) { perUser = new Map(); userCards.set(userId, perUser) }
-    const existing = perUser.get(cardSlug)
+    const existing = perUser.get(urlSlug)
     if (existing) {
       if (existing.source !== src) existing.source = 'both'
       if (!existing.cardName && cardName) existing.cardName = cardName
       if (!existing.setName  && setName)  existing.setName  = setName
     } else {
-      perUser.set(cardSlug, { cardSlug, cardName, setName, source: src })
+      perUser.set(urlSlug, { urlSlug, cardSlug: null, cardName, setName, source: src })
     }
   }
   for (const r of wlRows) add(r.user_id, r.card_slug, 'watchlist', r.card_name, r.set_name)
   for (const r of piRows) add(r.user_id, r.card_slug, 'portfolio', null, null)
 
-  const allCardSlugs = new Set<string>()
-  let cardsConsidered = 0
+  // Resolve URL → bare numeric in one batch. Cards without a row
+  // here get cardSlug=null and are skipped from market evaluation.
+  const urlSlugSet = new Set<string>()
   for (const perUser of Array.from(userCards.values())) {
-    cardsConsidered += perUser.size
-    for (const s of Array.from(perUser.keys())) allCardSlugs.add(s)
+    for (const url of Array.from(perUser.keys())) urlSlugSet.add(url)
+  }
+  const urlSlugList = Array.from(urlSlugSet)
+  const urlToBare   = await loadUrlSlugToBareMap(supa, urlSlugList)
+  let cardsConsidered = 0
+  let cardsWithNoSlugResolution = 0
+  const allMarketIds = new Set<string>()
+  for (const perUser of Array.from(userCards.values())) {
+    for (const card of Array.from(perUser.values())) {
+      cardsConsidered++
+      const bare = urlToBare.get(card.urlSlug)
+      if (bare) {
+        card.cardSlug = bare
+        allMarketIds.add(bare)
+      }
+    }
+  }
+  // Count UNIQUE url slugs that failed to resolve (card-level, not tuple).
+  for (const url of urlSlugList) {
+    if (!urlToBare.has(url)) cardsWithNoSlugResolution++
   }
 
   // Diagnostic: users in usersConsidered who ended up with zero cards.
   const usersWithNoCards = Array.from(prefsByUser.keys()).filter(uid => !userCards.has(uid)).length
 
-  // 4. Load price history + recent-sales activity for the union of cards.
-  const slugList = Array.from(allCardSlugs)
+  // 4. Load price history + recent-sales activity for the resolved
+  //    market IDs ONLY. Cards without a resolved bare numeric are
+  //    impossible to look up in either table (the keys would not
+  //    match), so we exclude them here and skip them inside the
+  //    per-card loop below.
+  const marketIdList = Array.from(allMarketIds)
   const [priceIndex, recentSales7d, recentSales14d] = await Promise.all([
-    loadPriceIndex(supa, slugList, asOfDate),
-    loadRecentSalesCounts(supa, slugList, asOfDate, RECENT_SALES_WINDOW_DAYS),
-    loadRecentSalesCounts(supa, slugList, asOfDate, MARKET_ACTIVITY_WINDOW_DAYS),
+    loadPriceIndex(supa, marketIdList, asOfDate),
+    loadRecentSalesCounts(supa, marketIdList, asOfDate, RECENT_SALES_WINDOW_DAYS),
+    loadRecentSalesCounts(supa, marketIdList, asOfDate, MARKET_ACTIVITY_WINDOW_DAYS),
   ])
 
-  // Diagnostic: per-card counts at the unique-card level. A card is
-  // counted once regardless of how many users list it.
+  // Diagnostic: per-card counts at the unique-card level (unique by
+  // resolved bare numeric). Cards without a resolution are reported
+  // via cardsWithNoSlugResolution instead — counting them here would
+  // double-attribute the same problem.
   let cardsWithInsufficientPriceHistory = 0
   let cardsWithNoRecentSales            = 0
-  for (const slug of slugList) {
-    if (!findPriceComparisonPair(priceIndex.get(slug) ?? [])) cardsWithInsufficientPriceHistory++
-    if ((recentSales14d.get(slug) ?? 0) === 0)                cardsWithNoRecentSales++
+  for (const id of marketIdList) {
+    if (!findPriceComparisonPair(priceIndex.get(id) ?? [])) cardsWithInsufficientPriceHistory++
+    if ((recentSales14d.get(id) ?? 0) === 0)                cardsWithNoRecentSales++
   }
 
   // 5. Load recent alert_events for cooldown.
@@ -259,15 +304,29 @@ export async function evaluateAlerts(
   for (const [userId, perUser] of Array.from(userCards.entries())) {
     const prefs = prefsByUser.get(userId)!
     for (const card of Array.from(perUser.values())) {
-      const priceRows = priceIndex.get(card.cardSlug) ?? []
+      // Skip cards with no resolved bare numeric — they cannot fire
+      // any market-based rule. They are already counted in
+      // cardsWithNoSlugResolution above.
+      if (!card.cardSlug) continue
+
+      const marketId  = card.cardSlug
+      const priceRows = priceIndex.get(marketId) ?? []
       const events    = evaluateCardForUser({
-        userId, card, prefs, priceRows,
-        recentCount7d:  recentSales7d.get(card.cardSlug)  ?? 0,
-        recentCount14d: recentSales14d.get(card.cardSlug) ?? 0,
+        userId,
+        // ProposedAlertEvent.cardSlug carries the BARE NUMERIC so
+        // alert_events.card_slug aligns with cards.card_slug — the
+        // existing digest URL builder in delivery.ts / preview-email
+        // does `.in('card_slug', bareSlugs)` and keys its result map
+        // by bare numeric.
+        card: { cardSlug: marketId, cardName: card.cardName, setName: card.setName, source: card.source },
+        prefs,
+        priceRows,
+        recentCount7d:  recentSales7d.get(marketId)  ?? 0,
+        recentCount14d: recentSales14d.get(marketId) ?? 0,
       })
       for (const ev of events) {
         triggersByRule[ev.rule]++   // count every generated trigger, pre-cooldown
-        if (isOnCooldown(cooldownIndex, userId, card.cardSlug, ev.rule, prefs.minHoursBetweenAlerts, asOfDate)) {
+        if (isOnCooldown(cooldownIndex, userId, marketId, ev.rule, prefs.minHoursBetweenAlerts, asOfDate)) {
           suppressed++
           continue
         }
@@ -294,6 +353,7 @@ export async function evaluateAlerts(
     diagnostics: {
       usersWithDisabledPrefs,
       usersWithNoCards,
+      cardsWithNoSlugResolution,
       cardsWithInsufficientPriceHistory,
       cardsWithNoRecentSales,
       triggersByRule,
@@ -448,6 +508,28 @@ async function loadEnabledPrefs(supa: SupabaseClient, limit: number): Promise<Ar
     .limit(limit)
   if (error) return []
   return (data ?? []) as Array<Record<string, unknown>>
+}
+
+async function loadUrlSlugToBareMap(supa: SupabaseClient, urlSlugs: string[]): Promise<Map<string, string>> {
+  // Resolve cards.card_url_slug → cards.card_slug for the supplied
+  // URL slugs. The market-data tables (daily_prices / recent_sales)
+  // are keyed off the bare-numeric card_slug, not the URL slug; this
+  // map is the bridge. Missing rows mean the user added a card whose
+  // URL slug the scraper-owned `cards` table no longer recognises —
+  // we skip those from market evaluation rather than guessing.
+  const out = new Map<string, string>()
+  if (urlSlugs.length === 0) return out
+  const { data, error } = await supa
+    .from('cards')
+    .select('card_url_slug, card_slug')
+    .in('card_url_slug', urlSlugs)
+  if (error || !Array.isArray(data)) return out
+  for (const r of data as Array<Record<string, unknown>>) {
+    const url  = r.card_url_slug == null ? '' : String(r.card_url_slug)
+    const bare = r.card_slug     == null ? '' : String(r.card_slug)
+    if (url && bare) out.set(url, bare)
+  }
+  return out
 }
 
 async function countDisabledPrefs(supa: SupabaseClient): Promise<number> {
@@ -606,6 +688,7 @@ function emptyResult(dryRun: boolean, asOfIso: string, usersWithDisabledPrefs = 
     diagnostics: {
       usersWithDisabledPrefs,
       usersWithNoCards:                  0,
+      cardsWithNoSlugResolution:         0,
       cardsWithInsufficientPriceHistory: 0,
       cardsWithNoRecentSales:            0,
       triggersByRule: {

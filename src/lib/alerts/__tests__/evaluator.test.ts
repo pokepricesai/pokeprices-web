@@ -282,20 +282,37 @@ function seedPrefs(userId: string, patch: Partial<typeof ALERT_PREFERENCE_DEFAUL
   ])
 }
 
-function seedWatch(userId: string, cardSlug: string, name = 'Charizard', set = 'Base') {
-  fakeDB.seed('watchlist', [
-    ...fakeDB.rows('watchlist'),
-    { user_id: userId, card_slug: cardSlug, card_name: name, set_name: set },
+// Block 5A-W-9 — the evaluator resolves watchlist/portfolio URL slugs
+// to the bare-numeric cards.card_slug via the `cards` table before
+// any market-data lookup. The existing tests pass the same string
+// for both (e.g. '1450205' as URL slug AND bare numeric), so the
+// helpers auto-seed a self-mapping cards row to keep them passing.
+// Tests that exercise a DIFFERENT URL / bare pair seed the cards row
+// explicitly via seedCardLink().
+function seedCardLink(urlSlug: string, bareSlug: string = urlSlug) {
+  const existing = fakeDB.rows('cards').filter(c => c.card_url_slug !== urlSlug)
+  fakeDB.seed('cards', [
+    ...existing,
+    { card_url_slug: urlSlug, card_slug: bareSlug },
   ])
 }
 
-function seedPortfolio(userId: string, cardSlug: string, portfolioId = 'p-' + userId) {
+function seedWatch(userId: string, urlSlug: string, name = 'Charizard', set = 'Base') {
+  seedCardLink(urlSlug)
+  fakeDB.seed('watchlist', [
+    ...fakeDB.rows('watchlist'),
+    { user_id: userId, card_slug: urlSlug, card_name: name, set_name: set },
+  ])
+}
+
+function seedPortfolio(userId: string, urlSlug: string, portfolioId = 'p-' + userId) {
+  seedCardLink(urlSlug)
   if (!fakeDB.rows('portfolios').some(p => p.id === portfolioId)) {
     fakeDB.seed('portfolios', [...fakeDB.rows('portfolios'), { id: portfolioId, user_id: userId }])
   }
   fakeDB.seed('portfolio_items', [
     ...fakeDB.rows('portfolio_items'),
-    { portfolio_id: portfolioId, card_slug: cardSlug },
+    { portfolio_id: portfolioId, card_slug: urlSlug },
   ])
 }
 
@@ -474,6 +491,152 @@ describe('evaluateAlerts — orchestrator', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────
+// Slug-format resolution (Block 5A-W-9)
+// watchlist + portfolio_items store URL slugs; market-data tables
+// are keyed by bare numeric cards.card_slug. The evaluator must
+// resolve URL → bare via the `cards` table before any lookup.
+// ─────────────────────────────────────────────────────────────────────
+
+describe('evaluateAlerts — URL slug → bare numeric resolution', () => {
+  it('resolves a watchlist URL slug to the bare numeric and finds daily_prices', async () => {
+    seedPrefs('u1')
+    // Different strings on purpose: URL slug 'charizard-4', bare numeric '630417'.
+    seedCardLink('charizard-4', '630417')
+    fakeDB.seed('watchlist', [
+      { user_id: 'u1', card_slug: 'charizard-4', card_name: 'Charizard', set_name: 'Base' },
+    ])
+    seedPriceTwoPoints('630417', 1000, 1200)   // pc-630417 in daily_prices
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf, dryRun: true })
+    expect(r.cardsConsidered).toBe(1)
+    expect(r.diagnostics.cardsWithNoSlugResolution).toBe(0)
+    expect(r.diagnostics.cardsWithInsufficientPriceHistory).toBe(0)
+    expect(r.triggersFound).toBeGreaterThan(0)
+    // ProposedAlertEvent.cardSlug should be the BARE NUMERIC so
+    // alert_events.card_slug aligns with cards.card_slug (the digest
+    // URL builder downstream queries by bare numeric).
+    expect(r.proposedEvents[0].cardSlug).toBe('630417')
+  })
+
+  it('resolves a portfolio URL slug to the bare numeric and finds recent_sales', async () => {
+    seedPrefs('u1')
+    seedCardLink('haunter-incomplete-holo-error-6', '9536051')
+    if (!fakeDB.rows('portfolios').some(p => p.id === 'p-u1')) {
+      fakeDB.seed('portfolios', [{ id: 'p-u1', user_id: 'u1' }])
+    }
+    fakeDB.seed('portfolio_items', [
+      { portfolio_id: 'p-u1', card_slug: 'haunter-incomplete-holo-error-6' },
+    ])
+    fakeDB.seed('recent_sales', [
+      { internal_card_slug: '9536051', sale_date: '2026-06-22', parse_status: 'ok', review_status: 'active' },
+      { internal_card_slug: '9536051', sale_date: '2026-06-23', parse_status: 'ok', review_status: 'active' },
+    ])
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf, dryRun: true })
+    const ev = r.proposedEvents.find(e => e.rule === 'recent_sales')
+    expect(ev).toBeDefined()
+    expect(ev!.cardSlug).toBe('9536051')
+    expect(ev!.payload).toMatchObject({ recent_active_count: 2 })
+  })
+
+  it('does NOT query daily_prices with `pc-{urlSlug}` (no spurious match against a URL-slug-keyed row)', async () => {
+    seedPrefs('u1')
+    seedCardLink('charizard-4', '630417')
+    fakeDB.seed('watchlist', [
+      { user_id: 'u1', card_slug: 'charizard-4', card_name: 'Charizard', set_name: 'Base' },
+    ])
+    // Decoy: a daily_prices row keyed with `pc-charizard-4` MUST NOT
+    // be picked up. The fix should query `pc-630417` only.
+    fakeDB.seed('daily_prices', [
+      { card_slug: 'pc-charizard-4', date: '2026-06-15', raw_usd: 9999, psa10_usd: null },
+      { card_slug: 'pc-charizard-4', date: '2026-06-22', raw_usd: 9999, psa10_usd: null },
+      { card_slug: 'pc-630417',      date: '2026-06-15', raw_usd: 1000, psa10_usd: null },
+      { card_slug: 'pc-630417',      date: '2026-06-22', raw_usd: 1200, psa10_usd: null },
+    ])
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf, dryRun: true })
+    expect(r.proposedEvents).toHaveLength(1)
+    // The real (1000 → 1200, +20%) — not the decoy stays-at-9999.
+    expect(r.proposedEvents[0].payload).toMatchObject({ old: 1000, new: 1200 })
+  })
+
+  it('does NOT query recent_sales using the URL slug (decoy rows under the URL key are ignored)', async () => {
+    seedPrefs('u1')
+    seedCardLink('charizard-4', '630417')
+    fakeDB.seed('watchlist', [
+      { user_id: 'u1', card_slug: 'charizard-4', card_name: 'Charizard', set_name: 'Base' },
+    ])
+    // Decoy under the URL slug; only the bare-numeric row should be counted.
+    fakeDB.seed('recent_sales', [
+      { internal_card_slug: 'charizard-4', sale_date: '2026-06-23', parse_status: 'ok', review_status: 'active' },
+      { internal_card_slug: '630417',      sale_date: '2026-06-23', parse_status: 'ok', review_status: 'active' },
+    ])
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf, dryRun: true })
+    const ev = r.proposedEvents.find(e => e.rule === 'recent_sales')
+    expect(ev).toBeDefined()
+    // Count is 1 (the bare-numeric row), not 2 (would include the decoy).
+    expect(ev!.payload).toMatchObject({ recent_active_count: 1 })
+  })
+
+  it('increments cardsWithNoSlugResolution and skips market eval for unresolved URL slugs', async () => {
+    seedPrefs('u1')
+    // No cards row → no URL→bare mapping.
+    fakeDB.seed('watchlist', [
+      { user_id: 'u1', card_slug: 'no-such-card-99', card_name: 'Mystery', set_name: 'Unknown' },
+    ])
+    // Even if daily_prices rows exist under any guess of the bare id,
+    // the absence of a cards mapping should mean the evaluator never
+    // looks them up.
+    fakeDB.seed('daily_prices', [
+      { card_slug: 'pc-no-such-card-99', date: '2026-06-15', raw_usd: 1000, psa10_usd: null },
+      { card_slug: 'pc-no-such-card-99', date: '2026-06-22', raw_usd: 2000, psa10_usd: null },
+    ])
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf, dryRun: true })
+    expect(r.cardsConsidered).toBe(1)
+    expect(r.diagnostics.cardsWithNoSlugResolution).toBe(1)
+    expect(r.proposedEvents).toHaveLength(0)
+  })
+
+  it('counts unique URL slugs in cardsWithNoSlugResolution (card-level, not per-user-tuple)', async () => {
+    seedPrefs('u1')
+    seedPrefs('u2')
+    // Three users would watch the same unresolved card; expect 1.
+    seedPrefs('u3')
+    for (const uid of ['u1','u2','u3']) {
+      fakeDB.seed('watchlist', [
+        ...fakeDB.rows('watchlist'),
+        { user_id: uid, card_slug: 'unresolvable-card', card_name: null, set_name: null },
+      ])
+    }
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    expect(r.diagnostics.cardsWithNoSlugResolution).toBe(1)
+  })
+
+  it('an unresolved card does not count toward cardsWithInsufficientPriceHistory or cardsWithNoRecentSales (avoids double-attribution)', async () => {
+    seedPrefs('u1')
+    fakeDB.seed('watchlist', [
+      { user_id: 'u1', card_slug: 'unresolvable', card_name: null, set_name: null },
+    ])
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    expect(r.diagnostics.cardsWithNoSlugResolution).toBe(1)
+    expect(r.diagnostics.cardsWithInsufficientPriceHistory).toBe(0)
+    expect(r.diagnostics.cardsWithNoRecentSales).toBe(0)
+  })
+
+  it('a card on both watchlist + portfolio with different URL/bare values still produces ONE evaluated card per user', async () => {
+    seedPrefs('u1')
+    seedCardLink('charizard-4', '630417')
+    fakeDB.seed('watchlist', [
+      { user_id: 'u1', card_slug: 'charizard-4', card_name: 'Charizard', set_name: 'Base' },
+    ])
+    fakeDB.seed('portfolios',       [{ id: 'p-u1', user_id: 'u1' }])
+    fakeDB.seed('portfolio_items',  [{ portfolio_id: 'p-u1', card_slug: 'charizard-4' }])
+    seedPriceTwoPoints('630417', 1000, 1200)
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf, dryRun: true })
+    expect(r.cardsConsidered).toBe(1)
+    expect(r.proposedEvents[0].cardSlug).toBe('630417')
+    expect(r.proposedEvents[0].payload).toMatchObject({ source: 'both' })
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
 // Diagnostics (Block 5A-W-7)
 // ─────────────────────────────────────────────────────────────────────
 
@@ -483,6 +646,7 @@ describe('evaluateAlerts — diagnostics', () => {
     expect(r.diagnostics).toBeDefined()
     expect(r.diagnostics.usersWithDisabledPrefs).toBe(0)
     expect(r.diagnostics.usersWithNoCards).toBe(0)
+    expect(r.diagnostics.cardsWithNoSlugResolution).toBe(0)
     expect(r.diagnostics.cardsWithInsufficientPriceHistory).toBe(0)
     expect(r.diagnostics.cardsWithNoRecentSales).toBe(0)
     expect(r.diagnostics.triggersByRule).toEqual({

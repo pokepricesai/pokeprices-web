@@ -48,6 +48,11 @@ function req(body?: Record<string, unknown>): Request {
 function seedReadyToFire() {
   fakeDB.seed('user_alert_preferences', [{ user_id: 'u1', ...preferencesToRow(ALERT_PREFERENCE_DEFAULTS) }])
   fakeDB.seed('watchlist',     [{ user_id: 'u1', card_slug: '1450205', card_name: 'Charizard', set_name: 'Base' }])
+  // Block 5A-W-9: the evaluator resolves watchlist.card_slug (a URL
+  // slug) to cards.card_slug (bare numeric) via cards.card_url_slug
+  // before touching daily_prices / recent_sales. Self-mapping row
+  // keeps this fixture's "URL = bare" simplification working.
+  fakeDB.seed('cards',         [{ card_url_slug: '1450205', card_slug: '1450205' }])
   fakeDB.seed('daily_prices',  [
     { card_slug: 'pc-1450205', date: '2026-06-15', raw_usd: 1000, psa10_usd: null },
     { card_slug: 'pc-1450205', date: '2026-06-22', raw_usd: 1200, psa10_usd: null },
@@ -108,6 +113,7 @@ describe('POST /api/admin/alerts/evaluate — dryRun default', () => {
     expect(j.diagnostics).toBeDefined()
     expect(typeof j.diagnostics.usersWithDisabledPrefs).toBe('number')
     expect(typeof j.diagnostics.usersWithNoCards).toBe('number')
+    expect(typeof j.diagnostics.cardsWithNoSlugResolution).toBe('number')
     expect(typeof j.diagnostics.cardsWithInsufficientPriceHistory).toBe('number')
     expect(typeof j.diagnostics.cardsWithNoRecentSales).toBe('number')
     expect(j.diagnostics.triggersByRule).toBeDefined()
