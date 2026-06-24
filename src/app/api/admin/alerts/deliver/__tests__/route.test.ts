@@ -162,6 +162,23 @@ describe('POST /api/admin/alerts/deliver — limit forwarding', () => {
     expect(deliveryCalls[0].maxEventsPerUser).toBeUndefined()
     expect(deliveryCalls[0].maxCardsPerEmail).toBeUndefined()
   })
+
+  it('forwards cooldownHours when supplied as a positive number (Block 5A-W-12)', async () => {
+    await POST(req({ cooldownHours: 12 }))
+    expect(deliveryCalls[0].cooldownHours).toBe(12)
+  })
+
+  it('accepts fractional cooldownHours (e.g. 0.5h for short stress runs)', async () => {
+    await POST(req({ cooldownHours: 0.5 }))
+    expect(deliveryCalls[0].cooldownHours).toBe(0.5)
+  })
+
+  it('drops non-positive or non-numeric cooldownHours (orchestrator falls back to env default)', async () => {
+    await POST(req({ cooldownHours: -1 }))
+    expect(deliveryCalls[0].cooldownHours).toBeUndefined()
+    await POST(req({ cooldownHours: 'soon' as unknown as number }))
+    expect(deliveryCalls[1].cooldownHours).toBeUndefined()
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────

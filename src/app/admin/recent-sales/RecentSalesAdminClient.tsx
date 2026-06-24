@@ -912,6 +912,8 @@ function AlertDeliveryBatchControls() {
     eventsDelivered?:       number
     cardsDelivered?:        number
     eventsLeftUndelivered?: number
+    usersInCooldown?:       number
+    cooldownHours?:         number
     suppressedOrSkipped?:   number
     failed?:                number
     perUser?: Array<{
@@ -997,7 +999,7 @@ function AlertDeliveryBatchControls() {
     <div style={{ marginTop: 16 }}>
       <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Deliver alert emails</div>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
-        Sends real digest emails to users with undelivered <code>alert_events</code>. <strong style={{ color: 'var(--text)' }}>Admin-triggered only — no cron.</strong> Defaults: 5 users, 20 events loaded, up to 10 distinct cards per email (multiple reasons on one card collapse into one card block). Recipients shown masked. Marks <code>alert_events.delivered_at</code> only for events actually included in a sent digest — events trimmed by the card cap roll into the next batch.
+        Sends real digest emails to users with undelivered <code>alert_events</code>. <strong style={{ color: 'var(--text)' }}>Admin-triggered only — no cron.</strong> Defaults: 5 users, 20 events loaded, up to 10 distinct cards per email (multiple reasons on one card collapse into one card block). Recipients shown masked. Marks <code>alert_events.delivered_at</code> only for events actually included in a sent digest — events trimmed by the card cap or the per-user cooldown roll into the next batch. <strong style={{ color: 'var(--text)' }}>Per-recipient cooldown</strong> defaults to 24h (override via <code>ALERT_DELIVERY_USER_COOLDOWN_HOURS</code>); users inside the window show as <code>recent_delivery_cooldown</code> in both preview and send.
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <button
@@ -1051,7 +1053,8 @@ function AlertDeliveryBatchControls() {
                 <SmallStat label={body.dryRun === false ? 'users emailed' : 'would email'} value={body.usersEmailed} />
                 <SmallStat label={body.dryRun === false ? 'cards delivered' : 'cards in digest'} value={body.cardsDelivered} />
                 <SmallStat label={body.dryRun === false ? 'events delivered' : 'would deliver'} value={body.eventsDelivered} />
-                <SmallStat label="left for next batch" value={body.eventsLeftUndelivered} />
+                <SmallStat label={`in cooldown (${typeof body.cooldownHours === 'number' ? body.cooldownHours : '?'}h)`} value={body.usersInCooldown} />
+                <SmallStat label="total backlog left" value={body.eventsLeftUndelivered} />
                 <SmallStat label="suppressed / skipped" value={body.suppressedOrSkipped} />
                 <SmallStat label="failed"              value={body.failed} />
               </div>

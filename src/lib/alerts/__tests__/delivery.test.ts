@@ -91,12 +91,12 @@ describe('summarise', () => {
     return { recipientMasked: '***', eventCount: count, cardCount: cards, eventsLeftUndelivered: leftover, outcome }
   }
   it('counts sent + would_send as emailed; sums their event counts', () => {
-    const s = summarise([r('sent', 3, 2), r('would_send', 5, 4)], false, 'now', 2)
+    const s = summarise([r('sent', 3, 2), r('would_send', 5, 4)], false, 'now', 2, 24)
     expect(s.usersEmailed).toBe(2)
     expect(s.eventsDelivered).toBe(8)
   })
   it('sums cardCount and eventsLeftUndelivered across emailed users (Block 5A-W-11)', () => {
-    const s = summarise([r('sent', 3, 2, 4), r('would_send', 5, 4, 1)], false, 'now', 2)
+    const s = summarise([r('sent', 3, 2, 4), r('would_send', 5, 4, 1)], false, 'now', 2, 24)
     expect(s.cardsDelivered).toBe(6)
     expect(s.eventsLeftUndelivered).toBe(5)
   })
@@ -104,7 +104,7 @@ describe('summarise', () => {
     const s = summarise(
       ['suppressed','unsubscribed','preference_disabled','prefs_disabled','no_email','no_events','duplicate']
         .map(o => r(o as UserDeliveryResult['outcome'], 1)),
-      false, 'now', 7,
+      false, 'now', 7, 24,
     )
     expect(s.suppressedOrSkipped).toBe(7)
     expect(s.usersEmailed).toBe(0)
@@ -112,9 +112,23 @@ describe('summarise', () => {
   it('buckets provider_error / invalid_recipient / configuration_error as failed', () => {
     const s = summarise(
       ['provider_error','invalid_recipient','configuration_error'].map(o => r(o as UserDeliveryResult['outcome'])),
-      false, 'now', 3,
+      false, 'now', 3, 24,
     )
     expect(s.failed).toBe(3)
+  })
+  it('echoes cooldownHours back on the result (Block 5A-W-12)', () => {
+    const s = summarise([], true, 'now', 0, 12)
+    expect(s.cooldownHours).toBe(12)
+  })
+  it('counts cooldown-skipped users separately and rolls their backlog into the aggregate', () => {
+    const s = summarise(
+      [r('sent', 5, 2, 3), r('recent_delivery_cooldown', 0, 0, 69), r('recent_delivery_cooldown', 0, 0, 4)],
+      false, 'now', 3, 24,
+    )
+    expect(s.usersEmailed).toBe(1)
+    expect(s.usersInCooldown).toBe(2)
+    expect(s.suppressedOrSkipped).toBe(2)             // cooldown counts under the skipped bucket too
+    expect(s.eventsLeftUndelivered).toBe(3 + 69 + 4)  // emailed user's leftover + both cooldown backlogs
   })
 })
 
@@ -624,5 +638,235 @@ describe('deliverAlerts — Block 5A-W-11 card-first grouping', () => {
     const rows = fakeDB.rows('alert_events') as Array<{ delivered_at: string | null }>
     expect(rows.filter(r => r.delivered_at != null)).toHaveLength(4)
     expect(rows.filter(r => r.delivered_at == null)).toHaveLength(6)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-12 — per-recipient cooldown + accurate backlog
+// ─────────────────────────────────────────────────────────────────────
+
+/** Seed N undelivered events plus optionally a prior delivered event.
+ *  All events share a card so the digest groups them into one block. */
+function seedBackloggedUser(opts: {
+  userId:          string
+  undeliveredN:    number
+  lastDeliveredAt?: string   // when present, that user has a prior delivery
+}) {
+  seedPrefs(opts.userId)
+  if (opts.lastDeliveredAt) {
+    fakeDB.seed('alert_events', [
+      ...fakeDB.rows('alert_events'),
+      {
+        id: `e-${opts.userId}-prior`,
+        user_id: opts.userId, card_slug: '1450205',
+        card_name: 'Charizard', set_name: 'Base',
+        rule: 'raw_change', severity: 'normal',
+        payload_json: { pct: 5 },
+        detected_at:  '2026-06-23T10:00:00Z',
+        delivered_at: opts.lastDeliveredAt,
+        delivery_channel: 'email',
+      },
+    ])
+  }
+  for (let i = 0; i < opts.undeliveredN; i++) {
+    fakeDB.seed('alert_events', [
+      ...fakeDB.rows('alert_events'),
+      {
+        id: `e-${opts.userId}-u${i}`,
+        user_id: opts.userId, card_slug: '1450205',
+        card_name: 'Charizard', set_name: 'Base',
+        rule: 'raw_change', severity: 'normal',
+        payload_json: { pct: 10 },
+        detected_at:  `2026-06-24T10:0${i % 10}:00Z`,
+        delivered_at: null,
+      },
+    ])
+  }
+}
+
+describe('deliverAlerts — Block 5A-W-12 cooldown gate (send mode)', () => {
+  it('skips a user whose last delivered_at is within the 24h cooldown window', async () => {
+    // asOf is 2026-06-24T12:00:00Z; previous delivery 2026-06-24T01:00:00Z = 11h ago.
+    seedBackloggedUser({ userId: 'u1', undeliveredN: 5, lastDeliveredAt: '2026-06-24T01:00:00Z' })
+    const send = stubSend('sent')
+    const result = await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      getUserEmail: emailMap([['u1','user@example.com']]),
+      sendFn: send.fn,
+    })
+    expect(send.calls).toHaveLength(0)
+    expect(result.perUser[0].outcome).toBe('recent_delivery_cooldown')
+    expect(result.usersInCooldown).toBe(1)
+    expect(result.cooldownHours).toBe(24)
+    // All undelivered events still have delivered_at = null
+    const rows = fakeDB.rows('alert_events') as Array<{ delivered_at: string | null; id: string }>
+    const stillNull = rows.filter(r => r.delivered_at == null)
+    expect(stillNull).toHaveLength(5)
+  })
+
+  it('allows a user whose last delivered_at is OUTSIDE the cooldown window', async () => {
+    // Previous delivery 36h before asOf → past the 24h cooldown.
+    seedBackloggedUser({ userId: 'u1', undeliveredN: 3, lastDeliveredAt: '2026-06-23T00:00:00Z' })
+    const send = stubSend('sent', { emailId: 'r-1' })
+    const result = await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      getUserEmail: emailMap([['u1','user@example.com']]),
+      sendFn: send.fn,
+    })
+    expect(send.calls).toHaveLength(1)
+    expect(result.perUser[0].outcome).toBe('sent')
+    expect(result.usersInCooldown).toBe(0)
+  })
+
+  it('allows a brand-new user (no prior delivered_at) regardless of cooldown', async () => {
+    seedBackloggedUser({ userId: 'u1', undeliveredN: 2 })   // no prior delivery
+    const send = stubSend('sent')
+    const result = await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      getUserEmail: emailMap([['u1','user@example.com']]),
+      sendFn: send.fn,
+    })
+    expect(send.calls).toHaveLength(1)
+    expect(result.perUser[0].outcome).toBe('sent')
+  })
+
+  it('honours the caller-supplied cooldownHours override', async () => {
+    // Last delivery 2h ago. Override cooldown to 1h → user OUTSIDE cooldown.
+    seedBackloggedUser({ userId: 'u1', undeliveredN: 2, lastDeliveredAt: '2026-06-24T10:00:00Z' })
+    const send = stubSend('sent')
+    const result = await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      cooldownHours: 1,
+      getUserEmail: emailMap([['u1','user@example.com']]),
+      sendFn: send.fn,
+    })
+    expect(send.calls).toHaveLength(1)
+    expect(result.perUser[0].outcome).toBe('sent')
+    expect(result.cooldownHours).toBe(1)
+  })
+
+  it('honours ALERT_DELIVERY_USER_COOLDOWN_HOURS env var when no caller value is supplied', async () => {
+    // Last delivery 6h ago. With env cooldown=4h, the user is OUTSIDE the window.
+    process.env.ALERT_DELIVERY_USER_COOLDOWN_HOURS = '4'
+    try {
+      seedBackloggedUser({ userId: 'u1', undeliveredN: 2, lastDeliveredAt: '2026-06-24T06:00:00Z' })
+      const send = stubSend('sent')
+      const result = await deliverAlerts(asSupa(fakeDB), {
+        asOf, dryRun: false,
+        getUserEmail: emailMap([['u1','user@example.com']]),
+        sendFn: send.fn,
+      })
+      expect(result.cooldownHours).toBe(4)
+      expect(result.perUser[0].outcome).toBe('sent')
+    } finally {
+      delete process.env.ALERT_DELIVERY_USER_COOLDOWN_HOURS
+    }
+  })
+})
+
+describe('deliverAlerts — Block 5A-W-12 cooldown gate (preview mode)', () => {
+  it('surfaces recent_delivery_cooldown in dry-run AND does not change delivered_at', async () => {
+    seedBackloggedUser({ userId: 'u1', undeliveredN: 7, lastDeliveredAt: '2026-06-24T08:00:00Z' })  // 4h ago
+    const send = stubSend('sent')
+    const result = await deliverAlerts(asSupa(fakeDB), {
+      asOf,            // dryRun default = true
+      getUserEmail: emailMap([['u1','user@example.com']]),
+      sendFn: send.fn,
+    })
+    expect(result.dryRun).toBe(true)
+    expect(send.calls).toHaveLength(0)
+    expect(result.perUser[0].outcome).toBe('recent_delivery_cooldown')
+    expect(result.perUser[0].reason).toMatch(/last digest .* ago/)
+    expect(result.perUser[0].eventsLeftUndelivered).toBe(7)       // total backlog visible
+    expect(result.usersInCooldown).toBe(1)
+    // delivered_at on the prior event stays exactly as seeded; no new updates.
+    const rows = fakeDB.rows('alert_events') as Array<{ id: string; delivered_at: string | null }>
+    const prior = rows.find(r => r.id === 'e-u1-prior')!
+    expect(prior.delivered_at).toBe('2026-06-24T08:00:00Z')
+    const undelivered = rows.filter(r => r.delivered_at == null)
+    expect(undelivered).toHaveLength(7)
+  })
+
+  it('does NOT skip a user whose only prior delivery is outside the cooldown', async () => {
+    seedBackloggedUser({ userId: 'u1', undeliveredN: 2, lastDeliveredAt: '2026-06-22T00:00:00Z' })  // 60h ago
+    const send = stubSend('sent')
+    const result = await deliverAlerts(asSupa(fakeDB), {
+      asOf,
+      getUserEmail: emailMap([['u1','user@example.com']]),
+      sendFn: send.fn,
+    })
+    expect(result.perUser[0].outcome).toBe('would_send')
+    expect(result.usersInCooldown).toBe(0)
+  })
+})
+
+describe('deliverAlerts — Block 5A-W-12 accurate backlog counts', () => {
+  it('reports the FULL backlog in eventsLeftUndelivered, not just the loaded slice', async () => {
+    // Mirror the production case: 69 undelivered, 40 delivered (more
+    // than a day ago so cooldown does not skip), maxEventsPerUser caps
+    // at 20 so the loaded slice under-reports the queue depth.
+    seedBackloggedUser({ userId: 'u1', undeliveredN: 69, lastDeliveredAt: '2026-06-22T00:00:00Z' })
+    // Add 39 extra delivered events to bring delivered count to 40 (1
+    // is the lastDelivered seeded by the helper).
+    for (let i = 0; i < 39; i++) {
+      fakeDB.seed('alert_events', [
+        ...fakeDB.rows('alert_events'),
+        {
+          id: `e-u1-d${i}`, user_id: 'u1', card_slug: '1450205',
+          rule: 'raw_change', severity: 'normal', payload_json: {},
+          detected_at: '2026-06-22T00:00:00Z',
+          delivered_at: '2026-06-22T01:00:00Z', delivery_channel: 'email',
+        },
+      ])
+    }
+    const send = stubSend('sent', { emailId: 'r-1' })
+    const result = await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      maxEventsPerUser: 20,            // matches the misleading slice size
+      maxCardsPerEmail: 10,
+      getUserEmail: emailMap([['u1','user@example.com']]),
+      sendFn: send.fn,
+    })
+    // All 69 undelivered events sit on one card → MAX_EVENTS_PER_CARD trims to 10 included.
+    // eventsLeftUndelivered must be 69 - 10 = 59 (not 0 from the trimmed slice).
+    expect(result.perUser[0].eventCount).toBe(10)
+    expect(result.perUser[0].eventsLeftUndelivered).toBe(59)
+    expect(result.eventsLeftUndelivered).toBe(59)
+  })
+
+  it('reports the full backlog even when the cooldown skips the user', async () => {
+    seedBackloggedUser({ userId: 'u1', undeliveredN: 89, lastDeliveredAt: '2026-06-24T11:00:00Z' })  // 1h ago
+    const send = stubSend('sent')
+    const result = await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      getUserEmail: emailMap([['u1','user@example.com']]),
+      sendFn: send.fn,
+    })
+    expect(result.perUser[0].outcome).toBe('recent_delivery_cooldown')
+    expect(result.perUser[0].eventsLeftUndelivered).toBe(89)
+    expect(send.calls).toHaveLength(0)
+  })
+})
+
+describe('deliverAlerts — Block 5A-W-12 candidate-selection mix', () => {
+  it('within one batch: cooldown user is skipped, non-cooldown user is emailed', async () => {
+    seedBackloggedUser({ userId: 'cool', undeliveredN: 4, lastDeliveredAt: '2026-06-24T09:00:00Z' })   // in cooldown
+    seedBackloggedUser({ userId: 'fresh', undeliveredN: 4, lastDeliveredAt: '2026-06-22T00:00:00Z' })  // outside
+    const send = stubSend('sent', { emailId: 'r-1' })
+    const lookup = emailMap([['cool','c@x.io'], ['fresh','f@x.io']])
+    const result = await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      getUserEmail: lookup,
+      sendFn: send.fn,
+    })
+    expect(send.calls).toHaveLength(1)
+    const sentTo = send.calls[0].toEmail
+    expect(sentTo).toBe('f@x.io')
+    const cooldownRow = result.perUser.find(r => r.outcome === 'recent_delivery_cooldown')
+    const sentRow     = result.perUser.find(r => r.outcome === 'sent')
+    expect(cooldownRow).toBeDefined()
+    expect(sentRow).toBeDefined()
+    expect(result.usersInCooldown).toBe(1)
+    expect(result.usersEmailed).toBe(1)
   })
 })

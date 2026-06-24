@@ -14,7 +14,8 @@
 //     "dryRun":           true | false,    // default TRUE
 //     "maxUsers":         number,          // clamped server-side
 //     "maxEventsPerUser": number,          // clamped server-side
-//     "maxCardsPerEmail": number           // Block 5A-W-11; clamped server-side
+//     "maxCardsPerEmail": number,          // Block 5A-W-11; clamped server-side
+//     "cooldownHours":    number           // Block 5A-W-12; overrides env
 //   }
 //
 // SAFETY: see src/lib/alerts/delivery.ts header for the full invariants
@@ -36,12 +37,22 @@ type Body = {
   maxUsers?:         unknown
   maxEventsPerUser?: unknown
   maxCardsPerEmail?: unknown
+  cooldownHours?:    unknown
 }
 
 function asPositiveInt(v: unknown): number | undefined {
   if (typeof v !== 'number' || !Number.isFinite(v)) return undefined
   const i = Math.floor(v)
   return i > 0 ? i : undefined
+}
+
+/** Block 5A-W-12 — cooldownHours accepts fractional values (e.g. 0.5h
+ *  for stress-testing) so we don't floor it. Still rejects ≤ 0 / non-
+ *  finite. The orchestrator falls back to the env default when
+ *  undefined. */
+function asPositiveNumber(v: unknown): number | undefined {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return undefined
+  return v > 0 ? v : undefined
 }
 
 export async function POST(req: Request) {
@@ -61,6 +72,7 @@ export async function POST(req: Request) {
   const maxUsers         = asPositiveInt(body.maxUsers)
   const maxEventsPerUser = asPositiveInt(body.maxEventsPerUser)
   const maxCardsPerEmail = asPositiveInt(body.maxCardsPerEmail)
+  const cooldownHours    = asPositiveNumber(body.cooldownHours)
 
   try {
     const supa  = getSupabaseServiceClient()
@@ -69,6 +81,7 @@ export async function POST(req: Request) {
       maxUsers,
       maxEventsPerUser,
       maxCardsPerEmail,
+      cooldownHours,
       getUserEmail: makeAuthEmailLookup(supa),
     })
     return NextResponse.json(result)

@@ -18,6 +18,12 @@
 //   * delivered_at is only updated for the events that were carried
 //     in a send whose outcome === 'sent'. Suppressed / preference-
 //     disabled / provider_error sends never mark events delivered.
+//   * Block 5A-W-12 — per-recipient cooldown: if the user's most
+//     recent alert_event delivered_at is within the cooldown window
+//     (default 24h, env-overridable), the orchestrator SKIPS them
+//     with outcome=recent_delivery_cooldown — both in preview AND
+//     send mode. Prevents repeat digest emails to the same person
+//     when the operator runs back-to-back batches.
 //   * Recipient emails are masked in the returned summary so the
 //     admin UI never has to render full addresses.
 
@@ -36,6 +42,7 @@ import {
   type AlertRule,
   type UserAlertPreferences,
 } from './preferences'
+import { getAlertDeliveryUserCooldownHours } from './flags'
 
 // ─────────────────────────────────────────────────────────────────────
 // Hard caps. Caller-supplied limits are clamped to these values.
@@ -59,18 +66,20 @@ const MAX_EVENTS_PER_CARD           = 10
 // ─────────────────────────────────────────────────────────────────────
 
 export type DeliveryOutcome =
-  | 'sent'                  // send mode, outcome=sent — delivered_at written
-  | 'would_send'            // dry-run mode, ready to be sent in send mode
-  | 'suppressed'            // sendEmail: suppressed (terminal or non-terminal)
-  | 'unsubscribed'          // sendEmail: unsubscribed
-  | 'preference_disabled'   // sendEmail: per-category preference off
-  | 'provider_error'        // sendEmail: Resend SDK error
-  | 'invalid_recipient'     // sendEmail: email failed normalisation
-  | 'configuration_error'   // sendEmail: missing key, etc.
-  | 'duplicate'             // sendEmail: idempotency conflict
-  | 'prefs_disabled'        // user_alert_preferences.enabled = false (or no row)
-  | 'no_email'              // could not resolve a recipient address
-  | 'no_events'             // no undelivered events at delivery time (rare race)
+  | 'sent'                       // send mode, outcome=sent — delivered_at written
+  | 'would_send'                 // dry-run mode, ready to be sent in send mode
+  | 'suppressed'                 // sendEmail: suppressed (terminal or non-terminal)
+  | 'unsubscribed'               // sendEmail: unsubscribed
+  | 'preference_disabled'        // sendEmail: per-category preference off
+  | 'provider_error'             // sendEmail: Resend SDK error
+  | 'invalid_recipient'          // sendEmail: email failed normalisation
+  | 'configuration_error'        // sendEmail: missing key, etc.
+  | 'duplicate'                  // sendEmail: idempotency conflict
+  | 'prefs_disabled'             // user_alert_preferences.enabled = false (or no row)
+  | 'no_email'                   // could not resolve a recipient address
+  | 'no_events'                  // no undelivered events at delivery time (rare race)
+  | 'recent_delivery_cooldown'   // Block 5A-W-12 — skipped because the user
+                                 // got a digest within the cooldown window
 
 export type UserDeliveryResult = {
   recipientMasked: string
@@ -80,10 +89,10 @@ export type UserDeliveryResult = {
   /** Number of distinct cards included in the digest. Always ≤ the
    *  configured maxCardsPerEmail. */
   cardCount:       number
-  /** Events that were loaded for this user but excluded from the
-   *  digest because of the card cap or per-card safety cap. These
-   *  remain undelivered and roll into the next batch. Always 0 in the
-   *  happy path where everything fits. */
+  /** Block 5A-W-12 — TOTAL undelivered alert_events for this user
+   *  AFTER subtracting events included in this digest. Counts the full
+   *  backlog, not just what fit in the loaded slice. If a user has 89
+   *  undelivered and the email carries 20, this is 69. */
   eventsLeftUndelivered: number
   outcome:         DeliveryOutcome
   emailId?:        string | null
@@ -100,12 +109,21 @@ export type DeliveryResult = {
   /** Block 5A-W-11 — sum of cardCount across users that were emailed
    *  (or would have been in dry-run). */
   cardsDelivered:         number
-  /** Block 5A-W-11 — aggregate of events loaded but not included
-   *  because of the card cap. Operators watch this to decide whether
-   *  to raise the cap or run more frequent batches. */
+  /** Block 5A-W-12 — aggregate of remaining undelivered alert_events
+   *  across ALL considered users (emailed users' post-digest backlog
+   *  PLUS cooldown-skipped users' full backlog). Lets the operator see
+   *  the total queue depth at a glance. */
   eventsLeftUndelivered:  number
+  /** Block 5A-W-12 — count of users skipped specifically because of
+   *  the per-recipient cooldown. Surfaced separately so the admin can
+   *  tell "we have 30 candidates but 25 are in cooldown" from "30
+   *  candidates, 5 had no events to send". */
+  usersInCooldown:        number
   suppressedOrSkipped:    number
   failed:                 number
+  /** Block 5A-W-12 — effective cooldown window the batch ran with,
+   *  in hours. Echoed back so the admin UI can label things. */
+  cooldownHours:          number
   perUser:                UserDeliveryResult[]
 }
 
@@ -120,6 +138,13 @@ export type DeliveryOptions = {
    *  single user's digest. Defaults to DEFAULT_MAX_CARDS_PER_EMAIL,
    *  clamped to HARD_MAX_CARDS_PER_EMAIL. */
   maxCardsPerEmail?: number
+  /** Block 5A-W-12 — per-recipient cooldown in hours. When omitted,
+   *  reads ALERT_DELIVERY_USER_COOLDOWN_HOURS (default 24). Users
+   *  whose most-recent alert_events.delivered_at falls inside this
+   *  window are SKIPPED with outcome=recent_delivery_cooldown in both
+   *  preview and send modes. Out-of-range values fall back to the env
+   *  default rather than disabling the cooldown. */
+  cooldownHours?:    number
   /** Override "now" for deterministic tests. */
   asOf?:             Date
   /** Email-resolution dependency. The route handler passes a function
@@ -182,16 +207,38 @@ export async function deliverAlerts(
   const asOfIso          = asOfDate.toISOString()
   const getEmail         = opts.getUserEmail ?? (async () => null)
   const send             = opts.sendFn       ?? sendEmail
+  const cooldownHours    = resolveCooldownHours(opts.cooldownHours)
+  const cooldownMs       = Math.round(cooldownHours * 60 * 60 * 1000)
+  const cooldownCutoff   = new Date(asOfDate.getTime() - cooldownMs)
 
-  // 1. Discover candidate user_ids with undelivered events. Pull a bit
-  //    more than maxUsers in case some are skipped by prefs / no_email,
-  //    but DO cap to maxUsers after the prefs filter so the batch
-  //    cannot grow past the operator's request.
-  const candidateUserIds = await loadCandidateUserIds(supa, maxUsers)
+  // 1. Discover a wider pool of candidate user_ids so we can prefer
+  //    non-cooldown users when filling the batch. Without this, a
+  //    single user with hundreds of undelivered events can dominate
+  //    the first maxUsers slots even when other users are waiting.
+  const pool = await loadCandidateUserIds(supa, maxUsers * 4)
 
-  // 2. Load prefs for the candidates so we can re-check enabled at
+  // 2. Load prefs for the WHOLE pool so we can re-check enabled at
   //    delivery time (consent can change after the evaluator ran).
-  const prefsByUser = await loadPrefsForUsers(supa, candidateUserIds)
+  const prefsByUser = await loadPrefsForUsers(supa, pool)
+
+  // 3. Block 5A-W-12 — load each candidate's most-recent delivered_at
+  //    so we can apply the per-recipient cooldown BEFORE doing any
+  //    other work (no email lookup, no digest build, no send) for
+  //    users we know we are going to skip.
+  const lastDeliveredByUser = await loadLastDeliveredAt(supa, pool, cooldownCutoff)
+
+  // 4. Partition the pool — eligible users get first call on the
+  //    maxUsers budget; cooldown users are still surfaced in the
+  //    result so the admin can see "u1 has 89 waiting, eligible in
+  //    13h" rather than guessing why nothing was sent.
+  const eligible:    string[] = []
+  const inCooldown:  string[] = []
+  for (const uid of pool) {
+    const t = lastDeliveredByUser.get(uid)
+    if (t && t.getTime() > cooldownCutoff.getTime()) inCooldown.push(uid)
+    else eligible.push(uid)
+  }
+  const candidateUserIds = [...eligible.slice(0, maxUsers), ...inCooldown]
 
   const perUser: UserDeliveryResult[] = []
 
@@ -199,6 +246,25 @@ export async function deliverAlerts(
     const prefs = prefsByUser.get(userId)
     if (!prefs || !prefs.enabled) {
       perUser.push({ recipientMasked: '***', eventCount: 0, cardCount: 0, eventsLeftUndelivered: 0, outcome: 'prefs_disabled' })
+      continue
+    }
+
+    // ── Cooldown gate (preview + send) ─────────────────────────────
+    const lastDelivered = lastDeliveredByUser.get(userId)
+    if (lastDelivered && lastDelivered.getTime() > cooldownCutoff.getTime()) {
+      // We still want the backlog count to be informative so an
+      // operator can see "this user has N waiting, will be eligible
+      // again at T".
+      const totalUndelivered = await countUndeliveredEventsForUser(supa, userId)
+      const hoursAgo = (asOfDate.getTime() - lastDelivered.getTime()) / (60 * 60 * 1000)
+      perUser.push({
+        recipientMasked:       '***',
+        eventCount:            0,
+        cardCount:             0,
+        eventsLeftUndelivered: totalUndelivered,
+        outcome:               'recent_delivery_cooldown',
+        reason:                `last digest ${hoursAgo.toFixed(1)}h ago, cooldown ${cooldownHours}h`,
+      })
       continue
     }
 
@@ -219,12 +285,18 @@ export async function deliverAlerts(
     const allDigestEvents = await toDigestEvents(supa, events)
     const plan            = selectDigestPlan(allDigestEvents, maxCardsPerEmail)
 
+    // Block 5A-W-12 — count the FULL backlog (not just the loaded
+    // slice). leftAfterDigest = (total undelivered for the user) -
+    // (events going into this digest). Never negative.
+    const totalUndelivered  = await countUndeliveredEventsForUser(supa, userId)
+    const leftAfterDigest   = Math.max(0, totalUndelivered - plan.includedEvents.length)
+
     if (dryRun) {
       perUser.push({
         recipientMasked:       masked,
         eventCount:            plan.includedEvents.length,
         cardCount:             plan.cardCount,
-        eventsLeftUndelivered: plan.leftover,
+        eventsLeftUndelivered: leftAfterDigest,
         outcome:               'would_send',
       })
       continue
@@ -258,7 +330,7 @@ export async function deliverAlerts(
         recipientMasked:       masked,
         eventCount:            plan.includedEvents.length,
         cardCount:             plan.cardCount,
-        eventsLeftUndelivered: plan.leftover,
+        eventsLeftUndelivered: leftAfterDigest,
         outcome:               'provider_error',
         reason,
       })
@@ -269,7 +341,7 @@ export async function deliverAlerts(
       recipientMasked:       masked,
       eventCount:            plan.includedEvents.length,
       cardCount:             plan.cardCount,
-      eventsLeftUndelivered: plan.leftover,
+      eventsLeftUndelivered: leftAfterDigest,
       outcome:               result.outcome as DeliveryOutcome,
       emailId:               result.emailId ?? null,
       deliveryLogId:         result.deliveryLogId ?? null,
@@ -290,7 +362,18 @@ export async function deliverAlerts(
     }
   }
 
-  return summarise(perUser, dryRun, asOfIso, candidateUserIds.length)
+  return summarise(perUser, dryRun, asOfIso, candidateUserIds.length, cooldownHours)
+}
+
+/** Resolve the effective cooldown window. Caller-supplied option wins,
+ *  falling back to ALERT_DELIVERY_USER_COOLDOWN_HOURS (default 24).
+ *  Invalid caller values (non-finite / ≤ 0) fall back to the env
+ *  default rather than silently disabling the cooldown. */
+function resolveCooldownHours(callerSupplied: number | undefined): number {
+  if (typeof callerSupplied === 'number' && Number.isFinite(callerSupplied) && callerSupplied > 0) {
+    return callerSupplied
+  }
+  return getAlertDeliveryUserCooldownHours()
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -332,14 +415,21 @@ export function selectDigestPlan(events: DigestEvent[], maxCards: number): Diges
 // ─────────────────────────────────────────────────────────────────────
 
 const COUNTS_AS_EMAILED = new Set<DeliveryOutcome>(['sent', 'would_send'])
-const COUNTS_AS_SKIPPED = new Set<DeliveryOutcome>(['suppressed','unsubscribed','preference_disabled','prefs_disabled','no_email','no_events','duplicate'])
+const COUNTS_AS_SKIPPED = new Set<DeliveryOutcome>(['suppressed','unsubscribed','preference_disabled','prefs_disabled','no_email','no_events','duplicate','recent_delivery_cooldown'])
 const COUNTS_AS_FAILED  = new Set<DeliveryOutcome>(['provider_error','invalid_recipient','configuration_error'])
 
-export function summarise(perUser: UserDeliveryResult[], dryRun: boolean, asOf: string, usersConsidered: number): DeliveryResult {
+export function summarise(
+  perUser:         UserDeliveryResult[],
+  dryRun:          boolean,
+  asOf:            string,
+  usersConsidered: number,
+  cooldownHours:   number,
+): DeliveryResult {
   let usersEmailed          = 0
   let eventsDelivered       = 0
   let cardsDelivered        = 0
   let eventsLeftUndelivered = 0
+  let usersInCooldown       = 0
   let suppressedSkip        = 0
   let failed                = 0
   for (const r of perUser) {
@@ -350,6 +440,12 @@ export function summarise(perUser: UserDeliveryResult[], dryRun: boolean, asOf: 
       eventsLeftUndelivered += r.eventsLeftUndelivered ?? 0
     } else if (COUNTS_AS_SKIPPED.has(r.outcome)) {
       suppressedSkip++
+      // Cooldown-skipped users carry the full backlog count; roll it
+      // into the aggregate so the admin sees real queue depth.
+      if (r.outcome === 'recent_delivery_cooldown') {
+        usersInCooldown++
+        eventsLeftUndelivered += r.eventsLeftUndelivered ?? 0
+      }
     } else if (COUNTS_AS_FAILED.has(r.outcome)) {
       failed++
       // Failed sends still represent real events that didn't get out;
@@ -365,8 +461,10 @@ export function summarise(perUser: UserDeliveryResult[], dryRun: boolean, asOf: 
     eventsDelivered,
     cardsDelivered,
     eventsLeftUndelivered,
+    usersInCooldown,
     suppressedOrSkipped: suppressedSkip,
     failed,
+    cooldownHours,
     perUser,
   }
 }
@@ -410,6 +508,52 @@ async function loadPrefsForUsers(supa: SupabaseClient, userIds: string[]): Promi
     out.set(String(r.user_id), rowToPreferences(r))
   }
   return out
+}
+
+/** Block 5A-W-12 — most-recent delivered_at per candidate user, scoped
+ *  to events inside the cooldown window. Returns one Date per user
+ *  who has ≥1 delivery within the window; users with no recent
+ *  delivery (or no delivery at all) are absent from the map. The
+ *  cutoff filter keeps the result small even when a user has hundreds
+ *  of historical delivered_at rows. */
+async function loadLastDeliveredAt(
+  supa:           SupabaseClient,
+  userIds:        string[],
+  cooldownCutoff: Date,
+): Promise<Map<string, Date>> {
+  const out = new Map<string, Date>()
+  if (userIds.length === 0) return out
+  const { data, error } = await supa
+    .from('alert_events')
+    .select('user_id, delivered_at')
+    .in('user_id', userIds)
+    .gte('delivered_at', cooldownCutoff.toISOString())
+    .order('delivered_at', { ascending: false })
+  if (error || !Array.isArray(data)) return out
+  for (const r of data as Array<Record<string, unknown>>) {
+    const uid = String(r.user_id ?? '')
+    if (!uid) continue
+    if (out.has(uid)) continue   // first row per user wins (we ordered DESC)
+    const raw = r.delivered_at
+    if (raw == null) continue
+    const d = new Date(String(raw))
+    if (!Number.isNaN(d.getTime())) out.set(uid, d)
+  }
+  return out
+}
+
+/** Block 5A-W-12 — exact backlog count per user. Used for the
+ *  accurate eventsLeftUndelivered figure that the previous block was
+ *  computing from the loaded slice (which capped at maxEventsPerUser
+ *  and so under-reported the queue depth). */
+async function countUndeliveredEventsForUser(supa: SupabaseClient, userId: string): Promise<number> {
+  const { count, error } = await supa
+    .from('alert_events')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .is('delivered_at', null)
+  if (error || typeof count !== 'number' || !Number.isFinite(count)) return 0
+  return count
 }
 
 async function loadUndeliveredEvents(supa: SupabaseClient, userId: string, limit: number): Promise<AlertEventRow[]> {

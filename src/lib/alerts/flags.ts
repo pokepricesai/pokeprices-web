@@ -59,9 +59,28 @@ export function isAlertDeliveryEnabled(): boolean {
   return readLiteralTrue('ALERT_DELIVERY_ENABLED')
 }
 
+/**
+ * Block 5A-W-12 — per-user delivery cooldown (hours). If a user had
+ * any alert_event marked delivered_at within this window, the next
+ * batch SKIPS them with outcome=recent_delivery_cooldown — both in
+ * preview and send mode. Default 24h; override via env. Out-of-range
+ * values (negative / NaN / zero) fall back to the default rather than
+ * silently disabling the cooldown.
+ */
+export const DEFAULT_ALERT_DELIVERY_USER_COOLDOWN_HOURS = 24
+
+export function getAlertDeliveryUserCooldownHours(): number {
+  const raw = (process.env.ALERT_DELIVERY_USER_COOLDOWN_HOURS ?? '').trim()
+  if (raw.length === 0) return DEFAULT_ALERT_DELIVERY_USER_COOLDOWN_HOURS
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_ALERT_DELIVERY_USER_COOLDOWN_HOURS
+  return n
+}
+
 export const ALERTS_EVALUATOR_FLAG_NAMES: ReadonlyArray<string> = [
   'ALERTS_EVALUATOR_ENABLED',
   'ALERT_EMAIL_PREVIEW_ENABLED',
   'ALERT_TEST_EMAIL_ENABLED',
   'ALERT_DELIVERY_ENABLED',
+  'ALERT_DELIVERY_USER_COOLDOWN_HOURS',
 ]
