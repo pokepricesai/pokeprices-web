@@ -49,8 +49,19 @@ export function isAlertTestEmailEnabled(): boolean {
   return readLiteralTrue('ALERT_TEST_EMAIL_ENABLED')
 }
 
+/**
+ * Gates the admin batch-delivery route (Block 5A-W-6). Strictly its
+ * own flag — the preview / test-send flags do NOT unlock real user
+ * delivery. The route additionally enforces requireAdmin and
+ * dryRun=true as the default.
+ */
+export function isAlertDeliveryEnabled(): boolean {
+  return readLiteralTrue('ALERT_DELIVERY_ENABLED')
+}
+
 export const ALERTS_EVALUATOR_FLAG_NAMES: ReadonlyArray<string> = [
   'ALERTS_EVALUATOR_ENABLED',
   'ALERT_EMAIL_PREVIEW_ENABLED',
   'ALERT_TEST_EMAIL_ENABLED',
+  'ALERT_DELIVERY_ENABLED',
 ]
