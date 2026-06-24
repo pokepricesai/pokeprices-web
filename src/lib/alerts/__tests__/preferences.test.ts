@@ -19,7 +19,12 @@ import {
   ALERT_PREFERENCE_DEFAULTS,
   ALERT_PREFERENCE_BOUNDS,
   ALERT_RULES,
+  SENSITIVITY_PRESETS,
+  SENSITIVITY_PRESET_LABELS,
+  SENSITIVITY_PRESET_THRESHOLDS,
   applyPatch,
+  applySensitivityPreset,
+  detectSensitivityPreset,
   loadUserAlertPreferences,
   preferencesToRow,
   rowToPreferences,
@@ -484,5 +489,168 @@ describe('migrations/2026-06-24-alert-preferences-v2.sql', () => {
 
   it('does not touch other existing tables', () => {
     expect(sql).not.toMatch(/ALTER\s+TABLE\s+public\.(watchlist|portfolios|portfolio_items|alert_events|user_email_preferences|cards|provider_card_links)/i)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-13B — sensitivity preset helpers
+// ─────────────────────────────────────────────────────────────────────
+
+describe('SENSITIVITY_PRESETS', () => {
+  it('exposes the three documented preset names in the documented order', () => {
+    expect(SENSITIVITY_PRESETS).toEqual(['conservative', 'balanced', 'active'])
+  })
+
+  it('provides a human label for every preset', () => {
+    for (const p of SENSITIVITY_PRESETS) {
+      expect(typeof SENSITIVITY_PRESET_LABELS[p]).toBe('string')
+      expect(SENSITIVITY_PRESET_LABELS[p].length).toBeGreaterThan(0)
+    }
+  })
+
+  it('balanced preset thresholds match ALERT_PREFERENCE_DEFAULTS so the system default IS balanced', () => {
+    const t = SENSITIVITY_PRESET_THRESHOLDS.balanced
+    expect(t.rulePriceMovePortfolioPct).toBe(ALERT_PREFERENCE_DEFAULTS.rulePriceMovePortfolioPct)
+    expect(t.rulePriceMoveWatchlistPct).toBe(ALERT_PREFERENCE_DEFAULTS.rulePriceMoveWatchlistPct)
+    expect(t.ruleRawChangePct).toBe(ALERT_PREFERENCE_DEFAULTS.ruleRawChangePct)
+    expect(t.ruleMyPSA10ChangePct).toBe(ALERT_PREFERENCE_DEFAULTS.ruleMyPSA10ChangePct)
+    expect(t.ruleSpreadChangePct).toBe(ALERT_PREFERENCE_DEFAULTS.ruleSpreadChangePct)
+    expect(t.ruleRecentSalesMinCount).toBe(ALERT_PREFERENCE_DEFAULTS.ruleRecentSalesMinCount)
+    expect(t.ruleMarketActivityMinCount).toBe(ALERT_PREFERENCE_DEFAULTS.ruleMarketActivityMinCount)
+  })
+
+  it('conservative preset widens every pct threshold and raises every count', () => {
+    const b = SENSITIVITY_PRESET_THRESHOLDS.balanced
+    const c = SENSITIVITY_PRESET_THRESHOLDS.conservative
+    expect(c.rulePriceMovePortfolioPct).toBeGreaterThan(b.rulePriceMovePortfolioPct)
+    expect(c.rulePriceMoveWatchlistPct).toBeGreaterThan(b.rulePriceMoveWatchlistPct)
+    expect(c.ruleRawChangePct).toBeGreaterThan(b.ruleRawChangePct)
+    expect(c.ruleMyPSA10ChangePct).toBeGreaterThan(b.ruleMyPSA10ChangePct)
+    expect(c.ruleSpreadChangePct).toBeGreaterThan(b.ruleSpreadChangePct)
+    expect(c.ruleRecentSalesMinCount).toBeGreaterThan(b.ruleRecentSalesMinCount)
+    expect(c.ruleMarketActivityMinCount).toBeGreaterThan(b.ruleMarketActivityMinCount)
+  })
+
+  it('active preset tightens every pct threshold and lowers every count', () => {
+    const b = SENSITIVITY_PRESET_THRESHOLDS.balanced
+    const a = SENSITIVITY_PRESET_THRESHOLDS.active
+    expect(a.rulePriceMovePortfolioPct).toBeLessThan(b.rulePriceMovePortfolioPct)
+    expect(a.rulePriceMoveWatchlistPct).toBeLessThan(b.rulePriceMoveWatchlistPct)
+    expect(a.ruleRawChangePct).toBeLessThan(b.ruleRawChangePct)
+    expect(a.ruleMyPSA10ChangePct).toBeLessThan(b.ruleMyPSA10ChangePct)
+    expect(a.ruleSpreadChangePct).toBeLessThan(b.ruleSpreadChangePct)
+    expect(a.ruleRecentSalesMinCount).toBeLessThan(b.ruleRecentSalesMinCount)
+    expect(a.ruleMarketActivityMinCount).toBeLessThan(b.ruleMarketActivityMinCount)
+  })
+
+  it('every preset value sits inside its bounds (no clamp loss when applied)', () => {
+    for (const name of SENSITIVITY_PRESETS) {
+      const t = SENSITIVITY_PRESET_THRESHOLDS[name]
+      expect(t.rulePriceMovePortfolioPct).toBeGreaterThanOrEqual(ALERT_PREFERENCE_BOUNDS.rulePriceMovePortfolioPct.min)
+      expect(t.rulePriceMovePortfolioPct).toBeLessThanOrEqual(ALERT_PREFERENCE_BOUNDS.rulePriceMovePortfolioPct.max)
+      expect(t.ruleRecentSalesMinCount).toBeGreaterThanOrEqual(ALERT_PREFERENCE_BOUNDS.ruleRecentSalesMinCount.min)
+      expect(t.ruleMarketActivityMinCount).toBeLessThanOrEqual(ALERT_PREFERENCE_BOUNDS.ruleMarketActivityMinCount.max)
+    }
+  })
+})
+
+describe('detectSensitivityPreset', () => {
+  it('returns "balanced" for the system defaults', () => {
+    expect(detectSensitivityPreset(ALERT_PREFERENCE_DEFAULTS)).toBe('balanced')
+  })
+
+  it('returns "conservative" when every threshold matches the conservative preset', () => {
+    const p = { ...ALERT_PREFERENCE_DEFAULTS, ...SENSITIVITY_PRESET_THRESHOLDS.conservative }
+    expect(detectSensitivityPreset(p)).toBe('conservative')
+  })
+
+  it('returns "active" when every threshold matches the active preset', () => {
+    const p = { ...ALERT_PREFERENCE_DEFAULTS, ...SENSITIVITY_PRESET_THRESHOLDS.active }
+    expect(detectSensitivityPreset(p)).toBe('active')
+  })
+
+  it('returns "custom" when ANY one threshold diverges from the preset', () => {
+    const p: UserAlertPreferences = {
+      ...ALERT_PREFERENCE_DEFAULTS,
+      // Balanced everywhere except one field tweaked manually.
+      rulePriceMovePortfolioPct: 13,
+    }
+    expect(detectSensitivityPreset(p)).toBe('custom')
+  })
+
+  it('ignores non-threshold fields when determining preset', () => {
+    // Balanced thresholds but instant alerts off, scope reduced.
+    const p: UserAlertPreferences = {
+      ...ALERT_PREFERENCE_DEFAULTS,
+      ...SENSITIVITY_PRESET_THRESHOLDS.balanced,
+      enabled:              true,
+      instantAlertsEnabled: false,
+      scopePortfolio:       false,
+      weeklyDigestEnabled:  false,
+    }
+    expect(detectSensitivityPreset(p)).toBe('balanced')
+  })
+})
+
+describe('applySensitivityPreset', () => {
+  it('returns a new object — never mutates input', () => {
+    const base = { ...ALERT_PREFERENCE_DEFAULTS }
+    const out  = applySensitivityPreset(base, 'conservative')
+    expect(out).not.toBe(base)
+    expect(base.rulePriceMovePortfolioPct).toBe(ALERT_PREFERENCE_DEFAULTS.rulePriceMovePortfolioPct)
+  })
+
+  it('overwrites the seven threshold fields and leaves everything else alone', () => {
+    const tweaked: UserAlertPreferences = {
+      ...ALERT_PREFERENCE_DEFAULTS,
+      enabled:              false,                 // master off (preserved)
+      scopePortfolio:       false,                 // scope off  (preserved)
+      weeklyDigestEnabled:  false,                 // weekly off (preserved)
+      instantAlertsEnabled: false,                 // instant off (preserved)
+      minHoursBetweenAlerts: 72,                   // cooldown   (preserved)
+      digestCooldownHours:   48,                   //            (preserved)
+      weeklyDigestDayOfWeek: 5,                    //            (preserved)
+    }
+    const out = applySensitivityPreset(tweaked, 'active')
+    // Threshold fields now match active.
+    const a = SENSITIVITY_PRESET_THRESHOLDS.active
+    expect(out.rulePriceMovePortfolioPct).toBe(a.rulePriceMovePortfolioPct)
+    expect(out.ruleMarketActivityMinCount).toBe(a.ruleMarketActivityMinCount)
+    // Non-threshold fields untouched.
+    expect(out.enabled).toBe(false)
+    expect(out.scopePortfolio).toBe(false)
+    expect(out.weeklyDigestEnabled).toBe(false)
+    expect(out.instantAlertsEnabled).toBe(false)
+    expect(out.minHoursBetweenAlerts).toBe(72)
+    expect(out.digestCooldownHours).toBe(48)
+    expect(out.weeklyDigestDayOfWeek).toBe(5)
+  })
+
+  it('detectSensitivityPreset returns the same preset just applied (round-trip)', () => {
+    for (const name of SENSITIVITY_PRESETS) {
+      const out = applySensitivityPreset(ALERT_PREFERENCE_DEFAULTS, name)
+      expect(detectSensitivityPreset(out)).toBe(name)
+    }
+  })
+
+  it('saved row reflects the preset on persistence (no clamp loss)', async () => {
+    // First save the user with the active preset applied.
+    const next = applySensitivityPreset(ALERT_PREFERENCE_DEFAULTS, 'active')
+    await saveUserAlertPreferences(asSupa(fakeDB), 'user-active', next)
+    const row = fakeDB.rows('user_alert_preferences')[0]
+    const a   = SENSITIVITY_PRESET_THRESHOLDS.active
+    expect(row).toMatchObject({
+      user_id:                          'user-active',
+      rule_price_move_portfolio_pct:    a.rulePriceMovePortfolioPct,
+      rule_price_move_watchlist_pct:    a.rulePriceMoveWatchlistPct,
+      rule_raw_change_pct:              a.ruleRawChangePct,
+      rule_psa10_change_pct:            a.ruleMyPSA10ChangePct,
+      rule_spread_change_pct:           a.ruleSpreadChangePct,
+      rule_recent_sales_min_count:      a.ruleRecentSalesMinCount,
+      rule_market_activity_min_count:   a.ruleMarketActivityMinCount,
+    })
+    // Re-reading the row yields preferences that detect as 'active'.
+    const reloaded = rowToPreferences(row)
+    expect(detectSensitivityPreset(reloaded)).toBe('active')
   })
 })

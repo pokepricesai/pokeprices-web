@@ -143,6 +143,108 @@ export const ALERT_PREFERENCE_DEFAULTS: UserAlertPreferences = {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-13B — sensitivity presets.
+//
+// The Smart Alerts settings UI exposes a single 3-way "sensitivity"
+// chooser (Conservative / Balanced / Active) that maps to the seven
+// underlying threshold fields. Power users can still fine-tune each
+// field via the Advanced settings disclosure; presets are a shortcut
+// for the common case.
+//
+// Detection rule: a saved-pref row is reported as matching a preset
+// only when ALL seven threshold fields match that preset exactly.
+// One off-by-one and we fall back to 'custom' so the UI doesn't lie
+// about what's stored.
+// ─────────────────────────────────────────────────────────────────────
+
+export const SENSITIVITY_PRESETS = ['conservative', 'balanced', 'active'] as const
+export type SensitivityPreset = (typeof SENSITIVITY_PRESETS)[number]
+
+/** Subset of UserAlertPreferences touched by a preset. The preset
+ *  never flips enabled / scope / weekly / instant toggles — those
+ *  stay where the user left them. */
+type SensitivityThresholds = Pick<
+  UserAlertPreferences,
+  | 'rulePriceMovePortfolioPct'
+  | 'rulePriceMoveWatchlistPct'
+  | 'ruleRawChangePct'
+  | 'ruleMyPSA10ChangePct'
+  | 'ruleSpreadChangePct'
+  | 'ruleRecentSalesMinCount'
+  | 'ruleMarketActivityMinCount'
+>
+
+/** The threshold values each preset writes when chosen. Balanced is
+ *  the system default — exposed as a separate constant so the test
+ *  that pins these numbers also pins them against the migration
+ *  defaults. Conservative widens the bands (fewer alerts). Active
+ *  tightens them (more alerts). */
+export const SENSITIVITY_PRESET_THRESHOLDS: Record<SensitivityPreset, SensitivityThresholds> = {
+  conservative: {
+    rulePriceMovePortfolioPct:  20,
+    rulePriceMoveWatchlistPct:  25,
+    ruleRawChangePct:           20,
+    ruleMyPSA10ChangePct:       20,
+    ruleSpreadChangePct:        25,
+    ruleRecentSalesMinCount:    5,
+    ruleMarketActivityMinCount: 10,
+  },
+  balanced: {
+    rulePriceMovePortfolioPct:  10,
+    rulePriceMoveWatchlistPct:  15,
+    ruleRawChangePct:           10,
+    ruleMyPSA10ChangePct:       10,
+    ruleSpreadChangePct:        15,
+    ruleRecentSalesMinCount:    3,
+    ruleMarketActivityMinCount: 5,
+  },
+  active: {
+    rulePriceMovePortfolioPct:  5,
+    rulePriceMoveWatchlistPct:  7,
+    ruleRawChangePct:           5,
+    ruleMyPSA10ChangePct:       5,
+    ruleSpreadChangePct:        10,
+    ruleRecentSalesMinCount:    2,
+    ruleMarketActivityMinCount: 3,
+  },
+}
+
+export const SENSITIVITY_PRESET_LABELS: Record<SensitivityPreset, string> = {
+  conservative: 'Conservative',
+  balanced:     'Balanced',
+  active:       'Active',
+}
+
+/** Returns the matching preset name, or 'custom' if any one threshold
+ *  diverges. Useful for highlighting the current selection in the UI
+ *  and for detecting when the user has fine-tuned in Advanced. */
+export function detectSensitivityPreset(p: UserAlertPreferences): SensitivityPreset | 'custom' {
+  for (const name of SENSITIVITY_PRESETS) {
+    const t = SENSITIVITY_PRESET_THRESHOLDS[name]
+    if (
+      p.rulePriceMovePortfolioPct  === t.rulePriceMovePortfolioPct  &&
+      p.rulePriceMoveWatchlistPct  === t.rulePriceMoveWatchlistPct  &&
+      p.ruleRawChangePct           === t.ruleRawChangePct           &&
+      p.ruleMyPSA10ChangePct       === t.ruleMyPSA10ChangePct       &&
+      p.ruleSpreadChangePct        === t.ruleSpreadChangePct        &&
+      p.ruleRecentSalesMinCount    === t.ruleRecentSalesMinCount    &&
+      p.ruleMarketActivityMinCount === t.ruleMarketActivityMinCount
+    ) return name
+  }
+  return 'custom'
+}
+
+/** Returns a NEW preferences object with the seven threshold fields
+ *  overwritten by the given preset. Non-threshold fields (enabled,
+ *  scope, weekly, instant, cooldowns) are preserved. */
+export function applySensitivityPreset(
+  base:   UserAlertPreferences,
+  preset: SensitivityPreset,
+): UserAlertPreferences {
+  return applyPatch(base, SENSITIVITY_PRESET_THRESHOLDS[preset])
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Bounds — used for validation in the UI and on the wire. Anything
 // outside these bounds is clamped at save time so the DB CHECK
 // constraint cannot reject the row.
