@@ -64,6 +64,41 @@ export type UserAlertPreferences = {
   ruleMarketActivityEnabled:     boolean
 
   minHoursBetweenAlerts:         number
+
+  // ─── Block 5A-W-13 additions ──────────────────────────────────────
+
+  /** Weekly overview email — master switch for the digest. */
+  weeklyDigestEnabled:           boolean
+  /** Include the portfolio half of the weekly overview. */
+  weeklyOverviewPortfolioEnabled: boolean
+  /** Include the watchlist half of the weekly overview. */
+  weeklyOverviewWatchlistEnabled: boolean
+  /** ISO weekday for the weekly send (1=Mon … 7=Sun). */
+  weeklyDigestDayOfWeek:         number
+
+  /** Per-event ("instant") alert cadence. Separate from `enabled`
+   *  (the master switch) so a user can keep the weekly overview
+   *  while silencing per-event alerts. */
+  instantAlertsEnabled:          boolean
+
+  /** Threshold for price moves on cards the user OWNS. Tighter than
+   *  the watchlist threshold by default — collectors care more about
+   *  meaningful moves on owned cards. */
+  rulePriceMovePortfolioPct:     number
+  /** Threshold for price moves on cards the user merely watches. */
+  rulePriceMoveWatchlistPct:     number
+
+  /** Minimum count of fresh verified sales for the recent_sales
+   *  rule to fire (within the rule's window). */
+  ruleRecentSalesMinCount:       number
+  /** Minimum count for the market_activity rule to fire. */
+  ruleMarketActivityMinCount:    number
+
+  /** Per-user override of the system-wide per-recipient digest
+   *  cooldown (ALERT_DELIVERY_USER_COOLDOWN_HOURS). The orchestrator
+   *  will eventually pick `max(env, user)` so the env value remains
+   *  the operator-side floor. */
+  digestCooldownHours:           number
 }
 
 export const ALERT_PREFERENCE_DEFAULTS: UserAlertPreferences = {
@@ -88,6 +123,23 @@ export const ALERT_PREFERENCE_DEFAULTS: UserAlertPreferences = {
   ruleMarketActivityEnabled: true,
 
   minHoursBetweenAlerts:     24,
+
+  // Block 5A-W-13 — must mirror the column DEFAULTs in
+  // migrations/2026-06-24-alert-preferences-v2.sql.
+  weeklyDigestEnabled:             true,
+  weeklyOverviewPortfolioEnabled:  true,
+  weeklyOverviewWatchlistEnabled:  true,
+  weeklyDigestDayOfWeek:           1,   // Monday
+
+  instantAlertsEnabled:            true,
+
+  rulePriceMovePortfolioPct:       10,
+  rulePriceMoveWatchlistPct:       15,
+
+  ruleRecentSalesMinCount:         3,
+  ruleMarketActivityMinCount:      5,
+
+  digestCooldownHours:             24,
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -96,11 +148,19 @@ export const ALERT_PREFERENCE_DEFAULTS: UserAlertPreferences = {
 // constraint cannot reject the row.
 // ─────────────────────────────────────────────────────────────────────
 export const ALERT_PREFERENCE_BOUNDS = {
-  rulePriceMovePct:       { min: 1, max: 100 },
-  ruleMyPSA10ChangePct:   { min: 1, max: 100 },
-  ruleRawChangePct:       { min: 1, max: 100 },
-  ruleSpreadChangePct:    { min: 1, max: 100 },
-  minHoursBetweenAlerts:  { min: 0, max: 168 },
+  rulePriceMovePct:           { min: 1, max: 100 },
+  ruleMyPSA10ChangePct:       { min: 1, max: 100 },
+  ruleRawChangePct:           { min: 1, max: 100 },
+  ruleSpreadChangePct:        { min: 1, max: 100 },
+  minHoursBetweenAlerts:      { min: 0, max: 168 },
+
+  // Block 5A-W-13 — mirror the SQL CHECK constraints exactly.
+  weeklyDigestDayOfWeek:      { min: 1, max: 7   },
+  rulePriceMovePortfolioPct:  { min: 1, max: 100 },
+  rulePriceMoveWatchlistPct:  { min: 1, max: 100 },
+  ruleRecentSalesMinCount:    { min: 1, max: 50  },
+  ruleMarketActivityMinCount: { min: 1, max: 100 },
+  digestCooldownHours:        { min: 1, max: 168 },
 } as const
 
 function clamp(n: number, min: number, max: number): number {
@@ -142,6 +202,22 @@ export function applyPatch(
 
   if (typeof patch.minHoursBetweenAlerts    === 'number')  out.minHoursBetweenAlerts    = clamp(patch.minHoursBetweenAlerts, ALERT_PREFERENCE_BOUNDS.minHoursBetweenAlerts.min, ALERT_PREFERENCE_BOUNDS.minHoursBetweenAlerts.max)
 
+  // ─── Block 5A-W-13 fields ───────────────────────────────────────
+  if (typeof patch.weeklyDigestEnabled            === 'boolean') out.weeklyDigestEnabled            = patch.weeklyDigestEnabled
+  if (typeof patch.weeklyOverviewPortfolioEnabled === 'boolean') out.weeklyOverviewPortfolioEnabled = patch.weeklyOverviewPortfolioEnabled
+  if (typeof patch.weeklyOverviewWatchlistEnabled === 'boolean') out.weeklyOverviewWatchlistEnabled = patch.weeklyOverviewWatchlistEnabled
+  if (typeof patch.weeklyDigestDayOfWeek          === 'number')  out.weeklyDigestDayOfWeek          = clamp(patch.weeklyDigestDayOfWeek,        ALERT_PREFERENCE_BOUNDS.weeklyDigestDayOfWeek.min,      ALERT_PREFERENCE_BOUNDS.weeklyDigestDayOfWeek.max)
+
+  if (typeof patch.instantAlertsEnabled           === 'boolean') out.instantAlertsEnabled           = patch.instantAlertsEnabled
+
+  if (typeof patch.rulePriceMovePortfolioPct      === 'number')  out.rulePriceMovePortfolioPct      = clamp(patch.rulePriceMovePortfolioPct,    ALERT_PREFERENCE_BOUNDS.rulePriceMovePortfolioPct.min,  ALERT_PREFERENCE_BOUNDS.rulePriceMovePortfolioPct.max)
+  if (typeof patch.rulePriceMoveWatchlistPct      === 'number')  out.rulePriceMoveWatchlistPct      = clamp(patch.rulePriceMoveWatchlistPct,    ALERT_PREFERENCE_BOUNDS.rulePriceMoveWatchlistPct.min,  ALERT_PREFERENCE_BOUNDS.rulePriceMoveWatchlistPct.max)
+
+  if (typeof patch.ruleRecentSalesMinCount        === 'number')  out.ruleRecentSalesMinCount        = clamp(patch.ruleRecentSalesMinCount,      ALERT_PREFERENCE_BOUNDS.ruleRecentSalesMinCount.min,    ALERT_PREFERENCE_BOUNDS.ruleRecentSalesMinCount.max)
+  if (typeof patch.ruleMarketActivityMinCount     === 'number')  out.ruleMarketActivityMinCount     = clamp(patch.ruleMarketActivityMinCount,   ALERT_PREFERENCE_BOUNDS.ruleMarketActivityMinCount.min, ALERT_PREFERENCE_BOUNDS.ruleMarketActivityMinCount.max)
+
+  if (typeof patch.digestCooldownHours            === 'number')  out.digestCooldownHours            = clamp(patch.digestCooldownHours,          ALERT_PREFERENCE_BOUNDS.digestCooldownHours.min,        ALERT_PREFERENCE_BOUNDS.digestCooldownHours.max)
+
   return out
 }
 
@@ -161,20 +237,34 @@ export function rowToPreferences(row: Row | null | undefined): UserAlertPreferen
   }
   const d = ALERT_PREFERENCE_DEFAULTS
   return {
-    enabled:                   b('enabled',                       d.enabled),
-    scopeWatchlist:            b('scope_watchlist',               d.scopeWatchlist),
-    scopePortfolio:            b('scope_portfolio',               d.scopePortfolio),
-    rulePriceMoveEnabled:      b('rule_price_move_enabled',       d.rulePriceMoveEnabled),
-    rulePriceMovePct:          n('rule_price_move_pct',           d.rulePriceMovePct),
-    ruleRecentSalesEnabled:    b('rule_recent_sales_enabled',     d.ruleRecentSalesEnabled),
-    ruleMyPSA10ChangeEnabled:  b('rule_psa10_change_enabled',     d.ruleMyPSA10ChangeEnabled),
-    ruleMyPSA10ChangePct:      n('rule_psa10_change_pct',         d.ruleMyPSA10ChangePct),
-    ruleRawChangeEnabled:      b('rule_raw_change_enabled',       d.ruleRawChangeEnabled),
-    ruleRawChangePct:          n('rule_raw_change_pct',           d.ruleRawChangePct),
-    ruleSpreadChangeEnabled:   b('rule_spread_change_enabled',    d.ruleSpreadChangeEnabled),
-    ruleSpreadChangePct:       n('rule_spread_change_pct',        d.ruleSpreadChangePct),
-    ruleMarketActivityEnabled: b('rule_market_activity_enabled',  d.ruleMarketActivityEnabled),
-    minHoursBetweenAlerts:     n('min_hours_between_alerts',      d.minHoursBetweenAlerts),
+    enabled:                   b('enabled',                          d.enabled),
+    scopeWatchlist:            b('scope_watchlist',                  d.scopeWatchlist),
+    scopePortfolio:            b('scope_portfolio',                  d.scopePortfolio),
+    rulePriceMoveEnabled:      b('rule_price_move_enabled',          d.rulePriceMoveEnabled),
+    rulePriceMovePct:          n('rule_price_move_pct',              d.rulePriceMovePct),
+    ruleRecentSalesEnabled:    b('rule_recent_sales_enabled',        d.ruleRecentSalesEnabled),
+    ruleMyPSA10ChangeEnabled:  b('rule_psa10_change_enabled',        d.ruleMyPSA10ChangeEnabled),
+    ruleMyPSA10ChangePct:      n('rule_psa10_change_pct',            d.ruleMyPSA10ChangePct),
+    ruleRawChangeEnabled:      b('rule_raw_change_enabled',          d.ruleRawChangeEnabled),
+    ruleRawChangePct:          n('rule_raw_change_pct',              d.ruleRawChangePct),
+    ruleSpreadChangeEnabled:   b('rule_spread_change_enabled',       d.ruleSpreadChangeEnabled),
+    ruleSpreadChangePct:       n('rule_spread_change_pct',           d.ruleSpreadChangePct),
+    ruleMarketActivityEnabled: b('rule_market_activity_enabled',     d.ruleMarketActivityEnabled),
+    minHoursBetweenAlerts:     n('min_hours_between_alerts',         d.minHoursBetweenAlerts),
+
+    // Block 5A-W-13 additions. Defaults make this safe to read on
+    // a pre-migration row (existing tests that seed only the v1
+    // columns continue to work).
+    weeklyDigestEnabled:             b('weekly_digest_enabled',             d.weeklyDigestEnabled),
+    weeklyOverviewPortfolioEnabled:  b('weekly_overview_portfolio_enabled', d.weeklyOverviewPortfolioEnabled),
+    weeklyOverviewWatchlistEnabled:  b('weekly_overview_watchlist_enabled', d.weeklyOverviewWatchlistEnabled),
+    weeklyDigestDayOfWeek:           n('weekly_digest_day_of_week',         d.weeklyDigestDayOfWeek),
+    instantAlertsEnabled:            b('instant_alerts_enabled',            d.instantAlertsEnabled),
+    rulePriceMovePortfolioPct:       n('rule_price_move_portfolio_pct',     d.rulePriceMovePortfolioPct),
+    rulePriceMoveWatchlistPct:       n('rule_price_move_watchlist_pct',     d.rulePriceMoveWatchlistPct),
+    ruleRecentSalesMinCount:         n('rule_recent_sales_min_count',       d.ruleRecentSalesMinCount),
+    ruleMarketActivityMinCount:      n('rule_market_activity_min_count',    d.ruleMarketActivityMinCount),
+    digestCooldownHours:             n('digest_cooldown_hours',             d.digestCooldownHours),
   }
 }
 
@@ -194,6 +284,18 @@ export function preferencesToRow(p: UserAlertPreferences): Record<string, unknow
     rule_spread_change_pct:        p.ruleSpreadChangePct,
     rule_market_activity_enabled:  p.ruleMarketActivityEnabled,
     min_hours_between_alerts:      p.minHoursBetweenAlerts,
+
+    // Block 5A-W-13
+    weekly_digest_enabled:             p.weeklyDigestEnabled,
+    weekly_overview_portfolio_enabled: p.weeklyOverviewPortfolioEnabled,
+    weekly_overview_watchlist_enabled: p.weeklyOverviewWatchlistEnabled,
+    weekly_digest_day_of_week:         p.weeklyDigestDayOfWeek,
+    instant_alerts_enabled:            p.instantAlertsEnabled,
+    rule_price_move_portfolio_pct:     p.rulePriceMovePortfolioPct,
+    rule_price_move_watchlist_pct:     p.rulePriceMoveWatchlistPct,
+    rule_recent_sales_min_count:       p.ruleRecentSalesMinCount,
+    rule_market_activity_min_count:    p.ruleMarketActivityMinCount,
+    digest_cooldown_hours:             p.digestCooldownHours,
   }
 }
 

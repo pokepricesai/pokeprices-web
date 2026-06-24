@@ -1,10 +1,15 @@
 'use client'
 
-// Block 5A-W-1 — settings card for the rule-based alert preferences.
-// Renders the new user_alert_preferences row with sensible defaults
-// when no row exists yet. Saving upserts via the user's own RLS-bound
-// supabase client; no emails are sent from this block, no public API
-// route is added.
+// Block 5A-W-13 — Smart Alerts settings card with four logical sections:
+//   A) Weekly overview     — opt in/out, portfolio half, watchlist half, day of week
+//   B) Instant alerts      — opt in/out, which lists to evaluate
+//   C) Alert thresholds    — per-rule toggles + percentages + min counts
+//   D) Email frequency     — per-rule cooldown + per-user digest cooldown
+//
+// The card writes the new user_alert_preferences columns added in
+// migrations/2026-06-24-alert-preferences-v2.sql. The evaluator + the
+// delivery orchestrator do NOT read the new fields yet — the next
+// block will wire them. This card persists the user's intent now.
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
@@ -17,6 +22,16 @@ import {
   preferencesToRow,
   type UserAlertPreferences,
 } from '@/lib/alerts/preferences'
+
+const DOW_LABELS: Array<{ value: number; label: string }> = [
+  { value: 1, label: 'Mon' },
+  { value: 2, label: 'Tue' },
+  { value: 3, label: 'Wed' },
+  { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' },
+  { value: 6, label: 'Sat' },
+  { value: 7, label: 'Sun' },
+]
 
 export default function AlertPreferencesCard({ userId }: { userId: string }) {
   const [prefs,   setPrefs]   = useState<UserAlertPreferences | null>(null)
@@ -55,53 +70,122 @@ export default function AlertPreferencesCard({ userId }: { userId: string }) {
     )
   }
 
-  const masterOff = !prefs.enabled
+  const masterOff       = !prefs.enabled
+  const weeklyOff       = !prefs.weeklyDigestEnabled
+  const instantOff      = !prefs.instantAlertsEnabled
 
   return (
     <div style={cardStyle}>
       <h2 style={h2Style}>Smart alerts</h2>
       <p style={subStyle}>
-        Decide when we should let you know a card on your watchlist or in your portfolio has moved.
-        These preferences are saved now; emails are not sent yet — that arrives in a later release.
+        Pick how PokePrices keeps you informed about cards you watch and own.
+        Changes save as you go.
       </p>
 
       <Toggle
         label="Smart alerts"
-        sub="Master switch. When off, no rule fires regardless of what you set below."
+        sub="Master switch. When off, no weekly digest and no instant alerts — regardless of what you set below."
         value={prefs.enabled}
         onChange={v => update({ enabled: v })}
       />
 
       <div style={{ opacity: masterOff ? 0.5 : 1, pointerEvents: masterOff ? 'none' : 'auto' }}>
-        <SectionLabel>Which cards count</SectionLabel>
-        <Toggle
-          label="My watchlist"
-          sub="Cards you have added to your watchlist."
-          value={prefs.scopeWatchlist}
-          onChange={v => update({ scopeWatchlist: v })}
-        />
-        <Toggle
-          label="My portfolio"
-          sub="Cards you own and track in your portfolio."
-          value={prefs.scopePortfolio}
-          onChange={v => update({ scopePortfolio: v })}
-        />
 
-        <SectionLabel>What counts as a meaningful change</SectionLabel>
+        {/* ─── A) Weekly overview ─────────────────────────────────────── */}
+        <SectionLabel>A) Weekly overview</SectionLabel>
+        <Toggle
+          label="Weekly overview email"
+          sub="A short summary every week — biggest movers across your cards and portfolio total change."
+          value={prefs.weeklyDigestEnabled}
+          onChange={v => update({ weeklyDigestEnabled: v })}
+        />
+        <div style={{ opacity: weeklyOff ? 0.5 : 1, pointerEvents: weeklyOff ? 'none' : 'auto', paddingLeft: 14, borderLeft: '2px solid var(--border-light)' }}>
+          <Toggle
+            label="Include portfolio summary"
+            sub="Total portfolio value change for the week."
+            value={prefs.weeklyOverviewPortfolioEnabled}
+            onChange={v => update({ weeklyOverviewPortfolioEnabled: v })}
+          />
+          <Toggle
+            label="Include watchlist summary"
+            sub="Biggest movers among the cards you're watching."
+            value={prefs.weeklyOverviewWatchlistEnabled}
+            onChange={v => update({ weeklyOverviewWatchlistEnabled: v })}
+          />
+          <div style={rowStyle}>
+            <div style={{ flex: 1 }}>
+              <div style={labelStyle}>Send on</div>
+              <div style={subTextStyle}>Which day of the week to receive the overview.</div>
+            </div>
+            <div style={{ display: 'flex', gap: 4, flexShrink: 0, flexWrap: 'wrap', maxWidth: 240, justifyContent: 'flex-end' }}>
+              {DOW_LABELS.map(d => (
+                <button
+                  key={d.value}
+                  onClick={() => update({ weeklyDigestDayOfWeek: d.value })}
+                  aria-pressed={prefs.weeklyDigestDayOfWeek === d.value}
+                  style={{
+                    padding: '5px 9px', borderRadius: 8, fontSize: 11.5, fontWeight: 700,
+                    fontFamily: "'Figtree', sans-serif",
+                    border: prefs.weeklyDigestDayOfWeek === d.value ? '1px solid var(--primary)' : '1px solid var(--border)',
+                    background: prefs.weeklyDigestDayOfWeek === d.value ? 'rgba(26,95,173,0.08)' : 'transparent',
+                    color: prefs.weeklyDigestDayOfWeek === d.value ? 'var(--primary)' : 'var(--text)',
+                    cursor: 'pointer',
+                  }}
+                >{d.label}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* ─── B) Instant alerts ──────────────────────────────────────── */}
+        <SectionLabel>B) Instant alerts</SectionLabel>
+        <Toggle
+          label="Instant alert emails"
+          sub="Send me a short alert whenever a tracked card crosses one of the thresholds below. Independent from the weekly overview."
+          value={prefs.instantAlertsEnabled}
+          onChange={v => update({ instantAlertsEnabled: v })}
+        />
+        <div style={{ opacity: instantOff ? 0.5 : 1, pointerEvents: instantOff ? 'none' : 'auto', paddingLeft: 14, borderLeft: '2px solid var(--border-light)' }}>
+          <Toggle
+            label="Cards in my portfolio"
+            sub="Cards you own and track."
+            value={prefs.scopePortfolio}
+            onChange={v => update({ scopePortfolio: v })}
+          />
+          <Toggle
+            label="Cards on my watchlist"
+            sub="Cards you have added to your watchlist."
+            value={prefs.scopeWatchlist}
+            onChange={v => update({ scopeWatchlist: v })}
+          />
+        </div>
+
+        {/* ─── C) Alert thresholds ────────────────────────────────────── */}
+        <SectionLabel>C) Alert thresholds</SectionLabel>
 
         <RuleRow
-          label="Price moved up or down"
-          sub="Trigger when any tracked price moves by at least this much."
+          label="Portfolio price move"
+          sub="Trigger when a card you OWN moves by at least this much."
           enabled={prefs.rulePriceMoveEnabled}
           onToggle={v => update({ rulePriceMoveEnabled: v })}
-          pct={prefs.rulePriceMovePct}
-          onPct={n => update({ rulePriceMovePct: n })}
-          pctBounds={ALERT_PREFERENCE_BOUNDS.rulePriceMovePct}
+          pct={prefs.rulePriceMovePortfolioPct}
+          onPct={n => update({ rulePriceMovePortfolioPct: n })}
+          pctBounds={ALERT_PREFERENCE_BOUNDS.rulePriceMovePortfolioPct}
+        />
+
+        <RuleRow
+          label="Watchlist price move"
+          sub="Trigger when a card you WATCH moves by at least this much. Default is looser than portfolio."
+          enabled={prefs.rulePriceMoveEnabled}
+          onToggle={v => update({ rulePriceMoveEnabled: v })}
+          pct={prefs.rulePriceMoveWatchlistPct}
+          onPct={n => update({ rulePriceMoveWatchlistPct: n })}
+          pctBounds={ALERT_PREFERENCE_BOUNDS.rulePriceMoveWatchlistPct}
         />
 
         <RuleRow
           label="Raw price changed"
-          sub="Same as above but tied specifically to the raw price."
+          sub="Same as price move but tied specifically to the raw price."
           enabled={prefs.ruleRawChangeEnabled}
           onToggle={v => update({ ruleRawChangeEnabled: v })}
           pct={prefs.ruleRawChangePct}
@@ -111,7 +195,7 @@ export default function AlertPreferencesCard({ userId }: { userId: string }) {
 
         <RuleRow
           label="PSA 10 price changed"
-          sub="Same as above but tied specifically to the PSA 10 price."
+          sub="Same as price move but tied specifically to the PSA 10 price."
           enabled={prefs.ruleMyPSA10ChangeEnabled}
           onToggle={v => update({ ruleMyPSA10ChangeEnabled: v })}
           pct={prefs.ruleMyPSA10ChangePct}
@@ -120,7 +204,7 @@ export default function AlertPreferencesCard({ userId }: { userId: string }) {
         />
 
         <RuleRow
-          label="Raw → PSA 10 spread widened or narrowed"
+          label="Raw → PSA 10 spread shifted"
           sub="Useful when the grading premium changes meaningfully."
           enabled={prefs.ruleSpreadChangeEnabled}
           onToggle={v => update({ ruleSpreadChangeEnabled: v })}
@@ -129,24 +213,33 @@ export default function AlertPreferencesCard({ userId }: { userId: string }) {
           pctBounds={ALERT_PREFERENCE_BOUNDS.ruleSpreadChangePct}
         />
 
-        <Toggle
-          label="New recent sales available"
-          sub="Trigger when fresh marketplace sales land for a card you watch."
-          value={prefs.ruleRecentSalesEnabled}
-          onChange={v => update({ ruleRecentSalesEnabled: v })}
+        <CountRow
+          label="New recent sales"
+          sub="Trigger when this many fresh verified sales land for a card you follow."
+          enabled={prefs.ruleRecentSalesEnabled}
+          onToggle={v => update({ ruleRecentSalesEnabled: v })}
+          count={prefs.ruleRecentSalesMinCount}
+          onCount={n => update({ ruleRecentSalesMinCount: n })}
+          countBounds={ALERT_PREFERENCE_BOUNDS.ruleRecentSalesMinCount}
+          suffix="sales"
         />
 
-        <Toggle
-          label="Card has meaningful market activity"
-          sub="A heuristic flag for unusual recent activity on a card."
-          value={prefs.ruleMarketActivityEnabled}
-          onChange={v => update({ ruleMarketActivityEnabled: v })}
+        <CountRow
+          label="Unusual market activity"
+          sub="Trigger when a card has at least this many verified sales in the recent activity window."
+          enabled={prefs.ruleMarketActivityEnabled}
+          onToggle={v => update({ ruleMarketActivityEnabled: v })}
+          count={prefs.ruleMarketActivityMinCount}
+          onCount={n => update({ ruleMarketActivityMinCount: n })}
+          countBounds={ALERT_PREFERENCE_BOUNDS.ruleMarketActivityMinCount}
+          suffix="sales"
         />
 
-        <SectionLabel>Cooldown</SectionLabel>
+        {/* ─── D) Email frequency / cooldown ──────────────────────────── */}
+        <SectionLabel>D) Email frequency &amp; cooldown</SectionLabel>
         <div style={rowStyle}>
           <div style={{ flex: 1 }}>
-            <div style={labelStyle}>Minimum hours between alerts</div>
+            <div style={labelStyle}>Per-rule cooldown</div>
             <div style={subTextStyle}>
               The same (card, rule) pair will not fire more than once in this window. 0 means no cooldown.
             </div>
@@ -155,6 +248,21 @@ export default function AlertPreferencesCard({ userId }: { userId: string }) {
             value={prefs.minHoursBetweenAlerts}
             onChange={n => update({ minHoursBetweenAlerts: n })}
             bounds={ALERT_PREFERENCE_BOUNDS.minHoursBetweenAlerts}
+            suffix="hrs"
+          />
+        </div>
+        <div style={rowStyle}>
+          <div style={{ flex: 1 }}>
+            <div style={labelStyle}>Minimum hours between alert emails</div>
+            <div style={subTextStyle}>
+              Even if multiple alerts trigger, you'll receive no more than one email per this many hours.
+              The system minimum may apply on top of this value.
+            </div>
+          </div>
+          <PctInput
+            value={prefs.digestCooldownHours}
+            onChange={n => update({ digestCooldownHours: n })}
+            bounds={ALERT_PREFERENCE_BOUNDS.digestCooldownHours}
             suffix="hrs"
           />
         </div>
@@ -228,6 +336,46 @@ function RuleRow({ label, sub, enabled, onToggle, pct, onPct, pctBounds }: {
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
         <PctInput value={pct} onChange={onPct} bounds={pctBounds} suffix="%" disabled={!enabled} />
+        <button
+          onClick={() => onToggle(!enabled)}
+          aria-pressed={enabled}
+          style={{
+            width: 42, height: 24, borderRadius: 12,
+            background: enabled ? 'var(--primary)' : 'var(--bg-light)',
+            border: '1px solid ' + (enabled ? 'var(--primary)' : 'var(--border)'),
+            position: 'relative', cursor: 'pointer', padding: 0,
+          }}
+        >
+          <span style={{
+            position: 'absolute', top: 2, left: enabled ? 20 : 2,
+            width: 18, height: 18, borderRadius: '50%',
+            background: '#fff',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+          }} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function CountRow({ label, sub, enabled, onToggle, count, onCount, countBounds, suffix }: {
+  label:       string
+  sub?:        string
+  enabled:     boolean
+  onToggle:    (v: boolean) => void
+  count:       number
+  onCount:     (n: number) => void
+  countBounds: { min: number; max: number }
+  suffix:      string
+}) {
+  return (
+    <div style={rowStyle}>
+      <div style={{ flex: 1 }}>
+        <div style={labelStyle}>{label}</div>
+        {sub && <div style={subTextStyle}>{sub}</div>}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+        <PctInput value={count} onChange={onCount} bounds={countBounds} suffix={suffix} disabled={!enabled} />
         <button
           onClick={() => onToggle(!enabled)}
           aria-pressed={enabled}
