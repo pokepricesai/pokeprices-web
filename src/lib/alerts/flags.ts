@@ -28,6 +28,17 @@ export function isAlertsEvaluatorEnabled(): boolean {
   return readLiteralTrue('ALERTS_EVALUATOR_ENABLED')
 }
 
+/**
+ * Gates the admin email-preview route. Separate from the evaluator
+ * flag so an operator can review the email design before turning the
+ * evaluator on (or vice versa). The preview route accepts EITHER
+ * flag — see src/app/api/admin/alerts/preview-email/route.ts.
+ */
+export function isAlertEmailPreviewEnabled(): boolean {
+  return readLiteralTrue('ALERT_EMAIL_PREVIEW_ENABLED')
+}
+
 export const ALERTS_EVALUATOR_FLAG_NAMES: ReadonlyArray<string> = [
   'ALERTS_EVALUATOR_ENABLED',
+  'ALERT_EMAIL_PREVIEW_ENABLED',
 ]

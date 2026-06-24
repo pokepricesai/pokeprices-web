@@ -248,6 +248,55 @@ function StatTile({ label, value, tone }: { label: string; value: React.ReactNod
   )
 }
 
+// The three sample sizes admins can pick. Bounded enum so the browser
+// cannot post an arbitrary number; the route also clamps server-side.
+type LimitChoice = 5 | 25 | 100
+const LIMIT_CHOICES: ReadonlyArray<LimitChoice> = [5, 25, 100]
+
+// Owns the shared limitUsers state and renders both evaluator
+// buttons. Default 5 is conservative; admin can step up to 25 or 100
+// when the smaller sample finds nothing.
+function EvaluatorControls() {
+  const [limitUsers, setLimitUsers] = useState<LimitChoice>(5)
+  return (
+    <>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+        marginTop: 8,
+      }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.6 }}>
+          Users to evaluate
+        </span>
+        <div role="radiogroup" aria-label="Users to evaluate" style={{ display: 'inline-flex', gap: 4 }}>
+          {LIMIT_CHOICES.map(n => {
+            const active = n === limitUsers
+            return (
+              <button
+                key={n}
+                role="radio"
+                aria-checked={active}
+                type="button"
+                onClick={() => setLimitUsers(n)}
+                style={{
+                  padding: '4px 10px', borderRadius: 6,
+                  border: '1px solid ' + (active ? 'var(--primary)' : 'var(--border)'),
+                  background:   active ? 'var(--primary)' : 'transparent',
+                  color:        active ? '#fff'           : 'var(--text)',
+                  fontSize: 12, fontWeight: 700,
+                  fontFamily: "'Figtree', sans-serif",
+                  cursor: 'pointer',
+                }}
+              >{n}</button>
+            )
+          })}
+        </div>
+      </div>
+      <EvaluatorDryRunButton limitUsers={limitUsers} />
+      <EvaluatorWriteModeButton limitUsers={limitUsers} />
+    </>
+  )
+}
+
 // Admin-only button: POST /api/admin/alerts/evaluate with the same
 // Supabase session token used elsewhere on this page. Renders only
 // inside this admin-gated client component, so visiting it requires
@@ -255,7 +304,7 @@ function StatTile({ label, value, tone }: { label: string; value: React.ReactNod
 // (which is what blocks the page from rendering at all when off).
 // The evaluator route itself is independently gated by
 // ALERTS_EVALUATOR_ENABLED.
-function EvaluatorDryRunButton() {
+function EvaluatorDryRunButton({ limitUsers }: { limitUsers: LimitChoice }) {
   const [busy,    setBusy]    = useState(false)
   const [status,  setStatus]  = useState<number | null>(null)
   const [body,    setBody]    = useState<unknown>(null)
@@ -275,7 +324,7 @@ function EvaluatorDryRunButton() {
           authorization:  `Bearer ${session.access_token}`,
           'content-type': 'application/json',
         },
-        body:    JSON.stringify({ dryRun: true, limitUsers: 5 }),
+        body:    JSON.stringify({ dryRun: true, limitUsers }),
         cache:   'no-store',
       })
       setStatus(res.status)
@@ -304,7 +353,7 @@ function EvaluatorDryRunButton() {
           fontSize: 12, fontWeight: 700,
           fontFamily: "'Figtree', sans-serif",
         }}
-      >{busy ? 'Running…' : 'Run dry-run (limit 5 users)'}</button>
+      >{busy ? 'Running…' : `Run dry-run (limit ${limitUsers} users)`}</button>
 
       {(status != null || error) && (
         <div style={{ marginTop: 8 }}>
@@ -344,7 +393,7 @@ function EvaluatorDryRunButton() {
 // IMPORTANT: this button does NOT send any email. The evaluator
 // inserts rows into alert_events; the email/digest layer that
 // eventually consumes them is a separate, not-yet-built block.
-function EvaluatorWriteModeButton() {
+function EvaluatorWriteModeButton({ limitUsers }: { limitUsers: LimitChoice }) {
   const [arm,    setArm]    = useState<ArmedState>(initialArmedState())
   const [busy,   setBusy]   = useState(false)
   const [status, setStatus] = useState<number | null>(null)
@@ -372,9 +421,10 @@ function EvaluatorWriteModeButton() {
           authorization:  `Bearer ${session.access_token}`,
           'content-type': 'application/json',
         },
-        // Hard-coded literals — the browser cannot supply a different
-        // limit or dryRun. The route enforces the same on its side.
-        body:    JSON.stringify({ dryRun: false, limitUsers: 5 }),
+        // dryRun is hard-coded; limitUsers is one of the bounded
+        // LimitChoice values picked by the admin (5/25/100). The route
+        // enforces the same numeric bound on its side.
+        body:    JSON.stringify({ dryRun: false, limitUsers }),
         cache:   'no-store',
       })
       setStatus(res.status)
@@ -412,7 +462,7 @@ function EvaluatorWriteModeButton() {
     ? 'Running…'
     : armed
       ? 'Click again to confirm — auto-cancels in 5s'
-      : 'Run evaluator and create alert events'
+      : `Run evaluator and create alert events (${limitUsers} users)`
 
   const summary = (body && typeof body === 'object' && !Array.isArray(body))
     ? (body as Record<string, unknown>)
@@ -472,6 +522,159 @@ function EvaluatorWriteModeButton() {
             }}>
 {typeof body === 'string' ? body : JSON.stringify(body, null, 2)}
             </pre>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Admin-only button: POST /api/admin/alerts/preview-email. Renders
+// the subject / preview text / HTML body / plain text the digest
+// would carry, WITHOUT sending or writing anything. The route picks
+// real-vs-sample mode based on whether the admin has undelivered
+// alert_events.
+function AlertEmailPreviewButton() {
+  const [busy,   setBusy]   = useState(false)
+  const [status, setStatus] = useState<number | null>(null)
+  const [body,   setBody]   = useState<{
+    mode?:        string
+    sample?:      boolean
+    eventCount?:  number
+    subject?:     string
+    previewText?: string
+    html?:        string
+    text?:        string
+    error?:       string
+  } | null>(null)
+  const [error,  setError]  = useState<string | null>(null)
+
+  async function run(mode: 'auto' | 'sample') {
+    setBusy(true); setError(null); setStatus(null); setBody(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        setError('Not signed in. Sign in with an authorised admin account.')
+        return
+      }
+      const res = await fetch('/api/admin/alerts/preview-email', {
+        method:  'POST',
+        headers: {
+          authorization:  `Bearer ${session.access_token}`,
+          'content-type': 'application/json',
+        },
+        body:    JSON.stringify({ mode }),
+        cache:   'no-store',
+      })
+      setStatus(res.status)
+      const text = await res.text()
+      try { setBody(JSON.parse(text)) } catch { setError(text || 'Empty response') }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'unknown error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Preview alert email</div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+        Renders the digest the user would receive — <strong style={{ color: 'var(--text)' }}>preview only, no email sent</strong>. Auto-mode uses your own undelivered events when present and falls back to sample data when not.
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <button
+          onClick={() => void run('auto')}
+          disabled={busy}
+          style={{
+            padding: '6px 12px', borderRadius: 6,
+            border: '1px solid var(--border)',
+            background: busy ? 'var(--bg-light)' : 'var(--primary)',
+            color: busy ? 'var(--text)' : '#fff',
+            cursor: busy ? 'wait' : 'pointer',
+            fontSize: 12, fontWeight: 700,
+            fontFamily: "'Figtree', sans-serif",
+          }}
+        >{busy ? 'Loading…' : 'Preview alert email (auto)'}</button>
+        <button
+          onClick={() => void run('sample')}
+          disabled={busy}
+          style={{
+            padding: '6px 12px', borderRadius: 6,
+            border: '1px solid var(--border)',
+            background: 'transparent',
+            color: 'var(--text)',
+            cursor: busy ? 'wait' : 'pointer',
+            fontSize: 12, fontWeight: 700,
+            fontFamily: "'Figtree', sans-serif",
+          }}
+        >Force sample</button>
+      </div>
+
+      {(status != null || error) && (
+        <div style={{ marginTop: 12 }}>
+          {error && (
+            <div style={{ fontSize: 12, color: 'var(--red, #c00)', marginBottom: 4 }}>
+              {error}
+            </div>
+          )}
+          {status != null && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
+              HTTP <strong style={{ color: 'var(--text)' }}>{status}</strong>
+              {body?.mode && (
+                <>
+                  {' '}· mode <strong style={{ color: 'var(--text)' }}>{body.mode}</strong>
+                  {' '}· events <strong style={{ color: 'var(--text)' }}>{body.eventCount ?? '—'}</strong>
+                </>
+              )}
+            </div>
+          )}
+          {body?.subject != null && (
+            <div style={{
+              padding: '8px 10px', borderRadius: 6,
+              background: 'var(--bg-light)', border: '1px solid var(--border)',
+              marginBottom: 6,
+            }}>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700 }}>Subject</div>
+              <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 600 }}>{body.subject}</div>
+            </div>
+          )}
+          {body?.previewText != null && (
+            <div style={{
+              padding: '8px 10px', borderRadius: 6,
+              background: 'var(--bg-light)', border: '1px solid var(--border)',
+              marginBottom: 6,
+            }}>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700 }}>Preview text</div>
+              <div style={{ fontSize: 13, color: 'var(--text)' }}>{body.previewText}</div>
+            </div>
+          )}
+          {body?.html != null && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700, marginBottom: 4 }}>Rendered HTML</div>
+              <iframe
+                title="alert digest preview"
+                srcDoc={body.html}
+                sandbox=""
+                style={{
+                  width: '100%', height: 540,
+                  border: '1px solid var(--border)', borderRadius: 6,
+                  background: '#fff',
+                }}
+              />
+            </div>
+          )}
+          {body?.text != null && (
+            <details style={{ marginBottom: 8 }}>
+              <summary style={{ fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>Plain text body</summary>
+              <pre style={{
+                margin: '6px 0 0', padding: 8, borderRadius: 6,
+                background: 'var(--card)', border: '1px solid var(--border)',
+                fontFamily: 'monospace', fontSize: 11,
+                overflowX: 'auto', whiteSpace: 'pre',
+                maxHeight: 320,
+              }}>{body.text}</pre>
+            </details>
           )}
         </div>
       )}
@@ -935,9 +1138,10 @@ export default function RecentSalesAdminClient() {
               marginBottom: 16,
             }}>
               <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Run the alert evaluator</div>
-              <div>Requires <code>ALERTS_EVALUATOR_ENABLED=true</code> in the runtime env. The dry-run button is read-only — no writes, no emails. The write-mode button inserts into <code>alert_events</code> but still sends no emails; it is gated by a two-click confirmation.</div>
-              <EvaluatorDryRunButton />
-              <EvaluatorWriteModeButton />
+              <div>Requires <code>ALERTS_EVALUATOR_ENABLED=true</code> in the runtime env. The dry-run button is read-only — no writes, no emails. The write-mode button inserts into <code>alert_events</code> but still sends no emails; it is gated by a two-click confirmation. Pick a sample size, then run.</div>
+              <EvaluatorControls />
+              <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '14px 0 0' }} />
+              <AlertEmailPreviewButton />
               <pre style={{
                 margin: '6px 0 0', padding: 8, borderRadius: 6,
                 background: 'var(--card)', border: '1px solid var(--border)',
