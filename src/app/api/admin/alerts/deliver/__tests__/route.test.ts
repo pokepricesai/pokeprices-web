@@ -149,16 +149,18 @@ describe('POST /api/admin/alerts/deliver — dryRun', () => {
 describe('POST /api/admin/alerts/deliver — limit forwarding', () => {
   beforeEach(() => { process.env.ALERT_DELIVERY_ENABLED = 'true' })
 
-  it('forwards maxUsers and maxEventsPerUser when supplied as positive integers', async () => {
-    await POST(req({ maxUsers: 3, maxEventsPerUser: 10 }))
+  it('forwards maxUsers, maxEventsPerUser and maxCardsPerEmail when supplied as positive integers', async () => {
+    await POST(req({ maxUsers: 3, maxEventsPerUser: 10, maxCardsPerEmail: 6 }))
     expect(deliveryCalls[0].maxUsers).toBe(3)
     expect(deliveryCalls[0].maxEventsPerUser).toBe(10)
+    expect(deliveryCalls[0].maxCardsPerEmail).toBe(6)
   })
 
   it('drops non-numeric or non-positive limits (orchestrator applies its defaults)', async () => {
-    await POST(req({ maxUsers: 'lots' as unknown as number, maxEventsPerUser: -5 }))
+    await POST(req({ maxUsers: 'lots' as unknown as number, maxEventsPerUser: -5, maxCardsPerEmail: 0 }))
     expect(deliveryCalls[0].maxUsers).toBeUndefined()
     expect(deliveryCalls[0].maxEventsPerUser).toBeUndefined()
+    expect(deliveryCalls[0].maxCardsPerEmail).toBeUndefined()
   })
 })
 

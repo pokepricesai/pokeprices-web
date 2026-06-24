@@ -13,7 +13,8 @@
 //   {
 //     "dryRun":           true | false,    // default TRUE
 //     "maxUsers":         number,          // clamped server-side
-//     "maxEventsPerUser": number           // clamped server-side
+//     "maxEventsPerUser": number,          // clamped server-side
+//     "maxCardsPerEmail": number           // Block 5A-W-11; clamped server-side
 //   }
 //
 // SAFETY: see src/lib/alerts/delivery.ts header for the full invariants
@@ -34,6 +35,7 @@ type Body = {
   dryRun?:           unknown
   maxUsers?:         unknown
   maxEventsPerUser?: unknown
+  maxCardsPerEmail?: unknown
 }
 
 function asPositiveInt(v: unknown): number | undefined {
@@ -58,6 +60,7 @@ export async function POST(req: Request) {
   const dryRun           = body.dryRun !== false
   const maxUsers         = asPositiveInt(body.maxUsers)
   const maxEventsPerUser = asPositiveInt(body.maxEventsPerUser)
+  const maxCardsPerEmail = asPositiveInt(body.maxCardsPerEmail)
 
   try {
     const supa  = getSupabaseServiceClient()
@@ -65,6 +68,7 @@ export async function POST(req: Request) {
       dryRun,
       maxUsers,
       maxEventsPerUser,
+      maxCardsPerEmail,
       getUserEmail: makeAuthEmailLookup(supa),
     })
     return NextResponse.json(result)

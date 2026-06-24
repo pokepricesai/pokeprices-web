@@ -22,6 +22,10 @@ export type DigestEvent = {
   cardName: string
   /** Display set name (e.g. "Gym Challenge"). */
   setName:  string
+  /** Bare-numeric `cards.card_slug`. Used by groupEventsByCard to
+   *  collapse multiple events on the same card. When absent, the
+   *  grouper falls back to a `cardName|setName` composite key. */
+  cardSlug?: string
   /** Optional resolved card-page URL; when missing the item still
    *  renders, just without a link. */
   cardUrl?: string
@@ -30,6 +34,27 @@ export type DigestEvent = {
   /** Free-form payload — same shape the evaluator inserts. The
    *  builder only reads known keys; unknown ones are ignored. */
   payload:  Record<string, unknown>
+  /** Internal plumbing — the `alert_events.id` value. Plumbed through
+   *  groupEventsByCard so the delivery orchestrator can mark only the
+   *  events that actually fit in the digest (after the card cap). The
+   *  renderer never reads this. */
+  id?:      string
+}
+
+/** A card-grouped block — one entry per (user, card) with all of that
+ *  card's reasons collected under a single heading in the email. */
+export type DigestCardBlock = {
+  /** Group key — `cardSlug` when present, else `cardName|setName`. */
+  key:       string
+  cardSlug?: string
+  cardName:  string
+  setName:   string
+  cardUrl?:  string
+  /** Max severity across this card's events. */
+  severity:  DigestSeverity
+  /** Events on this card, ordered by intra-card priority (price
+   *  changes first, spread next, activity last). */
+  events:    DigestEvent[]
 }
 
 export type DigestOutput = {
@@ -113,17 +138,101 @@ const SEVERITY_LABEL: Record<DigestSeverity, string> = {
   normal: 'Notable changes',
   low:    'For your awareness',
 }
+const SEVERITY_WEIGHT: Record<DigestSeverity, number> = { high: 3, normal: 2, low: 1 }
 
-function groupBySeverity(events: DigestEvent[]): Array<{ severity: DigestSeverity; events: DigestEvent[] }> {
-  const groups = new Map<DigestSeverity, DigestEvent[]>()
+// Per-rule weight used inside a card (most important reason first)
+// AND as part of the card priority score for sorting cards in the
+// digest. Brief 5A-W-11 ordering: price changes > spread > activity.
+const RULE_WEIGHT: Record<AlertRule, number> = {
+  raw_change:      300,
+  psa10_change:    290,
+  price_move:      280,
+  spread_change:   200,
+  recent_sales:    100,
+  market_activity:  90,
+}
+
+/** Group raw events into per-card blocks. Multiple events on the same
+ *  (user, card) collapse into one block. Events within a block are
+ *  ordered by intra-card priority so the most important reason renders
+ *  first under the card heading. Exported for tests. */
+export function groupEventsByCard(events: DigestEvent[]): DigestCardBlock[] {
+  const byKey = new Map<string, DigestCardBlock>()
   for (const e of events) {
-    let bucket = groups.get(e.severity)
-    if (!bucket) { bucket = []; groups.set(e.severity, bucket) }
-    bucket.push(e)
+    const key = e.cardSlug ? `slug:${e.cardSlug}` : `name:${e.cardName}|${e.setName}`
+    let block = byKey.get(key)
+    if (!block) {
+      block = {
+        key,
+        cardSlug: e.cardSlug,
+        cardName: e.cardName,
+        setName:  e.setName,
+        cardUrl:  e.cardUrl,
+        severity: e.severity,
+        events:   [],
+      }
+      byKey.set(key, block)
+    } else {
+      // Preserve the first non-empty URL we see (more likely populated).
+      if (!block.cardUrl && e.cardUrl) block.cardUrl = e.cardUrl
+      // Lift severity to the max of any event on the card.
+      if (SEVERITY_WEIGHT[e.severity] > SEVERITY_WEIGHT[block.severity]) {
+        block.severity = e.severity
+      }
+    }
+    block.events.push(e)
+  }
+  // Stable ordering inside each card: rule priority DESC; ties broken
+  // by event severity DESC.
+  for (const block of Array.from(byKey.values())) {
+    block.events.sort((a, b) => {
+      const dr = (RULE_WEIGHT[b.rule] ?? 0) - (RULE_WEIGHT[a.rule] ?? 0)
+      if (dr !== 0) return dr
+      return SEVERITY_WEIGHT[b.severity] - SEVERITY_WEIGHT[a.severity]
+    })
+  }
+  return Array.from(byKey.values())
+}
+
+function payloadMagnitude(payload: Record<string, unknown>): number {
+  const pct = Number(payload.pct ?? 0)
+  const cnt = Number(payload.recent_active_count ?? payload.active_count ?? 0)
+  return Math.max(Number.isFinite(pct) ? Math.abs(pct) : 0, Number.isFinite(cnt) ? cnt : 0)
+}
+
+/** Composite priority used to order CARDS in the digest. Higher = first.
+ *  Composed so the brief's tie-break order falls out: severity first,
+ *  then the rule category, then the largest payload magnitude. */
+export function cardPriorityScore(block: DigestCardBlock): number {
+  const sev = SEVERITY_WEIGHT[block.severity] * 1_000_000
+  let bestRule = 0
+  let bestMag  = 0
+  for (const e of block.events) {
+    const w = RULE_WEIGHT[e.rule] ?? 0
+    if (w > bestRule) bestRule = w
+    const mag = payloadMagnitude(e.payload)
+    if (mag > bestMag) bestMag = mag
+  }
+  // bestRule is at most 300; scale to dominate magnitude.
+  return sev + bestRule * 1000 + Math.round(bestMag)
+}
+
+/** Sort blocks by cardPriorityScore DESC. Pure; safe to call on the
+ *  result of groupEventsByCard. */
+export function sortCardBlocksByPriority(blocks: DigestCardBlock[]): DigestCardBlock[] {
+  return [...blocks].sort((a, b) => cardPriorityScore(b) - cardPriorityScore(a))
+}
+
+function groupBlocksBySeverity(blocks: DigestCardBlock[]): Array<{ severity: DigestSeverity; blocks: DigestCardBlock[] }> {
+  const groups = new Map<DigestSeverity, DigestCardBlock[]>()
+  for (const b of blocks) {
+    let bucket = groups.get(b.severity)
+    if (!bucket) { bucket = []; groups.set(b.severity, bucket) }
+    bucket.push(b)
   }
   return SEVERITY_ORDER
     .filter(s => groups.has(s))
-    .map(severity => ({ severity, events: groups.get(severity)! }))
+    .map(severity => ({ severity, blocks: groups.get(severity)! }))
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -217,7 +326,8 @@ const TAGLINE = 'Track your Pokémon card market moves'
 const MANAGE_URL = 'https://www.pokeprices.io/dashboard/settings'
 
 function renderHtml(events: DigestEvent[], sample: boolean): string {
-  const groups = groupBySeverity(events)
+  const blocks = sortCardBlocksByPriority(groupEventsByCard(events))
+  const groups = groupBlocksBySeverity(blocks)
 
   // ── Header — wordmark + tagline, thin primary underline ──
   const header = `
@@ -240,22 +350,27 @@ function renderHtml(events: DigestEvent[], sample: boolean): string {
       <strong>Sample data</strong> — this email was generated from hand-crafted events for design review. It would NOT be sent to a recipient.
     </div>` : ''
 
+  const renderReason = (ev: DigestEvent): string => `
+    <li style="font-family:'Figtree',sans-serif;font-size:13px;color:${BRAND.text};margin:0 0 6px;line-height:1.5;">
+      <span style="display:inline-block;padding:2px 8px;border-radius:999px;background:${BRAND.primarySoft};color:${BRAND.primary};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.7px;margin-right:8px;vertical-align:middle;">${esc(RULE_TITLE[ev.rule])}</span>
+      ${esc(reasonText(ev))}
+    </li>`
+
   const sections = groups.map(g => `
     <h2 style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:800;color:${BRAND.navy};margin:24px 0 10px;text-transform:uppercase;letter-spacing:0.8px;">${esc(SEVERITY_LABEL[g.severity])}</h2>
     <table role="presentation" style="width:100%;border-collapse:collapse;">
       <tbody>
-        ${g.events.map(ev => `
+        ${g.blocks.map(block => `
         <tr>
           <td style="padding:14px 16px;background:${BRAND.cardBg};border:1px solid ${BRAND.border};border-radius:10px;">
-            <div style="font-family:'Outfit',sans-serif;font-size:15px;font-weight:700;color:${BRAND.text};line-height:1.3;">${esc(ev.cardName)}</div>
-            <div style="font-family:'Figtree',sans-serif;font-size:12px;color:${BRAND.muted};margin-top:3px;">${esc(ev.setName)}</div>
-            <div style="font-family:'Figtree',sans-serif;font-size:13px;color:${BRAND.text};margin-top:10px;line-height:1.5;">
-              <span style="display:inline-block;padding:3px 8px;border-radius:999px;background:${BRAND.primarySoft};color:${BRAND.primary};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.7px;margin-right:8px;vertical-align:middle;">${esc(RULE_TITLE[ev.rule])}</span>
-              ${esc(reasonText(ev))}
-            </div>
-            ${ev.cardUrl ? `
+            <div style="font-family:'Outfit',sans-serif;font-size:15px;font-weight:700;color:${BRAND.text};line-height:1.3;">${esc(block.cardName)}</div>
+            <div style="font-family:'Figtree',sans-serif;font-size:12px;color:${BRAND.muted};margin-top:3px;">${esc(block.setName)}</div>
+            <ul style="margin:10px 0 0;padding:0 0 0 16px;">
+              ${block.events.map(renderReason).join('')}
+            </ul>
+            ${block.cardUrl ? `
             <div style="margin-top:12px;">
-              <a href="${esc(ev.cardUrl)}" style="display:inline-block;padding:8px 14px;border-radius:8px;background:${BRAND.primary};color:#ffffff;font-family:'Figtree',sans-serif;font-size:12px;font-weight:700;text-decoration:none;letter-spacing:0.2px;">View card →</a>
+              <a href="${esc(block.cardUrl)}" style="display:inline-block;padding:8px 14px;border-radius:8px;background:${BRAND.primary};color:#ffffff;font-family:'Figtree',sans-serif;font-size:12px;font-weight:700;text-decoration:none;letter-spacing:0.2px;">View card →</a>
             </div>` : ''}
           </td>
         </tr>
@@ -319,13 +434,16 @@ function renderText(events: DigestEvent[], sample: boolean): string {
   if (events.length === 0) {
     lines.push('No new alerts since your last digest.')
   } else {
-    for (const g of groupBySeverity(events)) {
+    const blocks = sortCardBlocksByPriority(groupEventsByCard(events))
+    for (const g of groupBlocksBySeverity(blocks)) {
       lines.push(SEVERITY_LABEL[g.severity].toUpperCase())
       lines.push('-'.repeat(SEVERITY_LABEL[g.severity].length))
-      for (const ev of g.events) {
-        lines.push(`* ${ev.cardName} (${ev.setName})`)
-        lines.push(`    ${RULE_TITLE[ev.rule]}: ${reasonText(ev)}`)
-        if (ev.cardUrl) lines.push(`    ${ev.cardUrl}`)
+      for (const block of g.blocks) {
+        lines.push(`* ${block.cardName} (${block.setName})`)
+        for (const ev of block.events) {
+          lines.push(`    - ${RULE_TITLE[ev.rule]}: ${reasonText(ev)}`)
+        }
+        if (block.cardUrl) lines.push(`    ${block.cardUrl}`)
       }
       lines.push('')
     }

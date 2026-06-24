@@ -906,19 +906,23 @@ function AlertDeliveryBatchControls() {
   const [status, setStatus] = useState<number | null>(null)
   const [busy,   setBusy]   = useState<'idle' | 'preview' | 'send'>('idle')
   const [body,   setBody]   = useState<{
-    dryRun?:              boolean
-    usersConsidered?:     number
-    usersEmailed?:        number
-    eventsDelivered?:     number
-    suppressedOrSkipped?: number
-    failed?:              number
+    dryRun?:                boolean
+    usersConsidered?:       number
+    usersEmailed?:          number
+    eventsDelivered?:       number
+    cardsDelivered?:        number
+    eventsLeftUndelivered?: number
+    suppressedOrSkipped?:   number
+    failed?:                number
     perUser?: Array<{
-      recipientMasked: string
-      eventCount:      number
-      outcome:         string
-      reason?:         string | null
+      recipientMasked:       string
+      eventCount:            number
+      cardCount?:            number
+      eventsLeftUndelivered?: number
+      outcome:               string
+      reason?:               string | null
     }>
-    error?:               string
+    error?:                 string
   } | null>(null)
   const [error,  setError]  = useState<string | null>(null)
 
@@ -993,7 +997,7 @@ function AlertDeliveryBatchControls() {
     <div style={{ marginTop: 16 }}>
       <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Deliver alert emails</div>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
-        Sends real digest emails to users with undelivered <code>alert_events</code>. <strong style={{ color: 'var(--text)' }}>Admin-triggered only — no cron.</strong> Defaults: 5 users, 20 events each. Recipients shown masked. Marks <code>alert_events.delivered_at</code> only when a send actually succeeds.
+        Sends real digest emails to users with undelivered <code>alert_events</code>. <strong style={{ color: 'var(--text)' }}>Admin-triggered only — no cron.</strong> Defaults: 5 users, 20 events loaded, up to 10 distinct cards per email (multiple reasons on one card collapse into one card block). Recipients shown masked. Marks <code>alert_events.delivered_at</code> only for events actually included in a sent digest — events trimmed by the card cap roll into the next batch.
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <button
@@ -1045,7 +1049,9 @@ function AlertDeliveryBatchControls() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginBottom: 8 }}>
                 <SmallStat label="users considered"   value={body.usersConsidered} />
                 <SmallStat label={body.dryRun === false ? 'users emailed' : 'would email'} value={body.usersEmailed} />
+                <SmallStat label={body.dryRun === false ? 'cards delivered' : 'cards in digest'} value={body.cardsDelivered} />
                 <SmallStat label={body.dryRun === false ? 'events delivered' : 'would deliver'} value={body.eventsDelivered} />
+                <SmallStat label="left for next batch" value={body.eventsLeftUndelivered} />
                 <SmallStat label="suppressed / skipped" value={body.suppressedOrSkipped} />
                 <SmallStat label="failed"              value={body.failed} />
               </div>
@@ -1057,7 +1063,9 @@ function AlertDeliveryBatchControls() {
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                     <thead><tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
                       <th style={{ padding: 6 }}>recipient</th>
+                      <th style={{ padding: 6, textAlign: 'right' }}>cards</th>
                       <th style={{ padding: 6, textAlign: 'right' }}>events</th>
+                      <th style={{ padding: 6, textAlign: 'right' }}>left</th>
                       <th style={{ padding: 6 }}>outcome</th>
                       <th style={{ padding: 6 }}>reason</th>
                     </tr></thead>
@@ -1065,7 +1073,9 @@ function AlertDeliveryBatchControls() {
                       {body.perUser.map((u, i) => (
                         <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
                           <td style={{ padding: 6, fontFamily: 'monospace', fontSize: 11 }}>{u.recipientMasked}</td>
+                          <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{u.cardCount ?? '—'}</td>
                           <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{u.eventCount}</td>
+                          <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: (u.eventsLeftUndelivered ?? 0) > 0 ? 'var(--accent)' : 'var(--text-muted)' }}>{u.eventsLeftUndelivered ?? 0}</td>
                           <td style={{ padding: 6 }}>{u.outcome}</td>
                           <td style={{ padding: 6, color: 'var(--text-muted)' }}>{u.reason ?? '—'}</td>
                         </tr>

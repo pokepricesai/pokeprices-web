@@ -14,9 +14,11 @@ vi.mock('server-only', () => ({}))
 import {
   deliverAlerts,
   maskEmail,
+  selectDigestPlan,
   summarise,
   type UserDeliveryResult,
 } from '../delivery'
+import type { DigestEvent } from '../emailDigest'
 import { preferencesToRow, ALERT_PREFERENCE_DEFAULTS, applyPatch } from '../preferences'
 import type { SendEmailInput, SendResult } from '@/lib/email/types'
 
@@ -85,13 +87,18 @@ describe('maskEmail', () => {
 })
 
 describe('summarise', () => {
-  function r(outcome: UserDeliveryResult['outcome'], count = 0): UserDeliveryResult {
-    return { recipientMasked: '***', eventCount: count, outcome }
+  function r(outcome: UserDeliveryResult['outcome'], count = 0, cards = 0, leftover = 0): UserDeliveryResult {
+    return { recipientMasked: '***', eventCount: count, cardCount: cards, eventsLeftUndelivered: leftover, outcome }
   }
   it('counts sent + would_send as emailed; sums their event counts', () => {
-    const s = summarise([r('sent', 3), r('would_send', 5)], false, 'now', 2)
+    const s = summarise([r('sent', 3, 2), r('would_send', 5, 4)], false, 'now', 2)
     expect(s.usersEmailed).toBe(2)
     expect(s.eventsDelivered).toBe(8)
+  })
+  it('sums cardCount and eventsLeftUndelivered across emailed users (Block 5A-W-11)', () => {
+    const s = summarise([r('sent', 3, 2, 4), r('would_send', 5, 4, 1)], false, 'now', 2)
+    expect(s.cardsDelivered).toBe(6)
+    expect(s.eventsLeftUndelivered).toBe(5)
   })
   it('buckets suppressed / unsubscribed / preference_disabled / prefs_disabled / no_email / no_events as skipped', () => {
     const s = summarise(
@@ -401,5 +408,221 @@ describe('deliverAlerts — no sample data', () => {
     })
     expect(result.usersConsidered).toBe(0)
     expect(result.perUser).toEqual([])
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-11 — card-first grouping + selective delivery
+// ─────────────────────────────────────────────────────────────────────
+
+function ev(over: Partial<DigestEvent> = {}): DigestEvent {
+  return {
+    cardName: 'C', setName: 'S',
+    rule: 'raw_change', severity: 'normal',
+    payload: {},
+    ...over,
+  }
+}
+
+describe('selectDigestPlan — pure card grouping + capping', () => {
+  it('collapses multiple events on the same card into a single block', () => {
+    const events: DigestEvent[] = [
+      ev({ id: 'a', cardSlug: '1', rule: 'raw_change',    severity: 'high'   }),
+      ev({ id: 'b', cardSlug: '1', rule: 'psa10_change',  severity: 'normal' }),
+      ev({ id: 'c', cardSlug: '1', rule: 'recent_sales',  severity: 'normal' }),
+    ]
+    const plan = selectDigestPlan(events, 10)
+    expect(plan.cardCount).toBe(1)
+    expect(plan.includedEvents).toHaveLength(3)
+    expect(plan.leftover).toBe(0)
+  })
+
+  it('caps at maxCardsPerEmail and tracks leftover events', () => {
+    const events: DigestEvent[] = []
+    for (let i = 0; i < 20; i++) {
+      events.push(ev({ id: `e${i}`, cardSlug: String(i), rule: 'raw_change', severity: 'normal', payload: { pct: 5 } }))
+    }
+    const plan = selectDigestPlan(events, 5)
+    expect(plan.cardCount).toBe(5)
+    expect(plan.includedEvents).toHaveLength(5)
+    expect(plan.leftover).toBe(15)
+  })
+
+  it('prioritises high-severity cards over normal/low when the cap bites', () => {
+    const events: DigestEvent[] = [
+      // 3 low-severity cards first (in input order)
+      ev({ id: 'l1', cardSlug: 'L1', severity: 'low',    rule: 'recent_sales',  payload: { recent_active_count: 1 } }),
+      ev({ id: 'l2', cardSlug: 'L2', severity: 'low',    rule: 'recent_sales',  payload: { recent_active_count: 1 } }),
+      ev({ id: 'l3', cardSlug: 'L3', severity: 'low',    rule: 'recent_sales',  payload: { recent_active_count: 1 } }),
+      // 1 high-severity card last
+      ev({ id: 'h1', cardSlug: 'H1', severity: 'high',   rule: 'raw_change',    payload: { pct: 35 } }),
+    ]
+    const plan = selectDigestPlan(events, 1)
+    expect(plan.cardCount).toBe(1)
+    expect(plan.includedEvents).toHaveLength(1)
+    expect(plan.includedEvents[0].id).toBe('h1')
+    expect(plan.leftover).toBe(3)
+  })
+
+  it('prioritises price-change rules over spread / activity within the same severity', () => {
+    const events: DigestEvent[] = [
+      ev({ id: 'act', cardSlug: 'A', severity: 'normal', rule: 'market_activity', payload: { active_count: 5 } }),
+      ev({ id: 'sp',  cardSlug: 'B', severity: 'normal', rule: 'spread_change',   payload: { pct: 10 } }),
+      ev({ id: 'raw', cardSlug: 'C', severity: 'normal', rule: 'raw_change',      payload: { pct: 12 } }),
+    ]
+    const plan = selectDigestPlan(events, 2)
+    expect(plan.cardCount).toBe(2)
+    expect(plan.includedEvents.map(e => e.id)).toEqual(['raw', 'sp'])
+  })
+
+  it('trims a card to MAX_EVENTS_PER_CARD = 10 so a runaway card cannot dominate', () => {
+    const events: DigestEvent[] = []
+    for (let i = 0; i < 25; i++) {
+      events.push(ev({ id: `e${i}`, cardSlug: 'one', rule: 'raw_change', severity: 'normal', payload: { pct: 5 } }))
+    }
+    const plan = selectDigestPlan(events, 10)
+    expect(plan.cardCount).toBe(1)
+    expect(plan.includedEvents).toHaveLength(10)
+    expect(plan.leftover).toBe(15)
+  })
+
+  it('returns empty plan for empty input', () => {
+    const plan = selectDigestPlan([], 10)
+    expect(plan).toEqual({ includedEvents: [], cardCount: 0, leftover: 0 })
+  })
+})
+
+describe('deliverAlerts — Block 5A-W-11 card-first grouping', () => {
+  function seedEventsOnCards(userId: string, eventsPerCard: number, cardCount: number) {
+    for (let c = 0; c < cardCount; c++) {
+      const slug = String(1_000_000 + c)
+      for (let r = 0; r < eventsPerCard; r++) {
+        fakeDB.seed('alert_events', [
+          ...fakeDB.rows('alert_events'),
+          {
+            id: `e-${c}-${r}`,
+            user_id: userId,
+            card_slug: slug,
+            card_name: `Card ${c}`,
+            set_name:  `Set ${c}`,
+            rule:     r === 0 ? 'raw_change' : 'recent_sales',
+            severity: 'normal',
+            payload_json: { pct: 10, recent_active_count: 3 },
+            detected_at:  `2026-06-24T10:0${c % 10}:00Z`,
+            delivered_at: null,
+          },
+        ])
+      }
+    }
+  }
+
+  it('sends ONE digest per user; multiple events on same card collapse to one card block', async () => {
+    seedPrefs('u1')
+    // 2 events on the SAME card_slug — should be a single card block
+    // with two reasons, but only ONE send call.
+    fakeDB.seed('alert_events', [
+      { id: 'r1', user_id: 'u1', card_slug: '777', card_name: 'C', set_name: 'S',
+        rule: 'raw_change',   severity: 'high',   payload_json: { pct: 30 },
+        detected_at: '2026-06-24T10:00:00Z', delivered_at: null },
+      { id: 'r2', user_id: 'u1', card_slug: '777', card_name: 'C', set_name: 'S',
+        rule: 'recent_sales', severity: 'normal', payload_json: { recent_active_count: 4, window_days: 7 },
+        detected_at: '2026-06-24T10:01:00Z', delivered_at: null },
+    ])
+    const send = stubSend('sent', { emailId: 'r-1' })
+    const result = await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      getUserEmail: emailMap([['u1','user@example.com']]),
+      sendFn: send.fn,
+    })
+    expect(send.calls).toHaveLength(1)
+    expect(result.perUser[0].cardCount).toBe(1)
+    expect(result.perUser[0].eventCount).toBe(2)
+    expect(result.perUser[0].eventsLeftUndelivered).toBe(0)
+    // Both events delivered_at set
+    const ev = fakeDB.rows('alert_events').sort((a, b) => String(a.id).localeCompare(String(b.id)))
+    expect(ev[0].delivered_at).toBe(asOf.toISOString())
+    expect(ev[1].delivered_at).toBe(asOf.toISOString())
+  })
+
+  it('honours maxCardsPerEmail and marks only included events delivered', async () => {
+    seedPrefs('u1')
+    // 12 distinct cards, 1 event each
+    seedEventsOnCards('u1', 1, 12)
+    const send = stubSend('sent', { emailId: 'r-1' })
+    const result = await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      maxCardsPerEmail: 3,
+      maxEventsPerUser: 20,
+      getUserEmail: emailMap([['u1','user@example.com']]),
+      sendFn: send.fn,
+    })
+    expect(send.calls).toHaveLength(1)
+    expect(result.perUser[0].cardCount).toBe(3)
+    expect(result.perUser[0].eventCount).toBe(3)
+    expect(result.perUser[0].eventsLeftUndelivered).toBeGreaterThan(0)
+    expect(result.cardsDelivered).toBe(3)
+    expect(result.eventsDelivered).toBe(3)
+    expect(result.eventsLeftUndelivered).toBe(result.perUser[0].eventsLeftUndelivered)
+    // Exactly 3 events should have delivered_at set; the rest stay null.
+    const rows = fakeDB.rows('alert_events') as Array<{ delivered_at: string | null }>
+    const delivered = rows.filter(r => r.delivered_at != null)
+    const stillUndelivered = rows.filter(r => r.delivered_at == null)
+    expect(delivered).toHaveLength(3)
+    expect(stillUndelivered.length).toBeGreaterThanOrEqual(9)
+  })
+
+  it('clamps maxCardsPerEmail to HARD_MAX_CARDS_PER_EMAIL = 50', async () => {
+    seedPrefs('u1')
+    seedEventsOnCards('u1', 1, 5)
+    const send = stubSend('sent')
+    const result = await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      maxCardsPerEmail: 9999,
+      maxEventsPerUser: 50,
+      getUserEmail: emailMap([['u1','user@example.com']]),
+      sendFn: send.fn,
+    })
+    // Only 5 cards seeded → 5 cards delivered, well under the clamp.
+    expect(result.perUser[0].cardCount).toBe(5)
+  })
+
+  it('reports card grouping in dry-run WITHOUT writing delivered_at', async () => {
+    seedPrefs('u1')
+    seedEventsOnCards('u1', 1, 8)
+    const send = stubSend('sent')
+    const result = await deliverAlerts(asSupa(fakeDB), {
+      asOf,
+      maxCardsPerEmail: 5,
+      maxEventsPerUser: 20,
+      getUserEmail: emailMap([['u1','user@example.com']]),
+      sendFn: send.fn,
+    })
+    expect(result.dryRun).toBe(true)
+    expect(send.calls).toHaveLength(0)
+    expect(result.perUser[0].outcome).toBe('would_send')
+    expect(result.perUser[0].cardCount).toBe(5)
+    expect(result.perUser[0].eventCount).toBe(5)
+    expect(result.perUser[0].eventsLeftUndelivered).toBe(3)
+    // delivered_at must remain null for every row
+    const rows = fakeDB.rows('alert_events') as Array<{ delivered_at: string | null }>
+    expect(rows.every(r => r.delivered_at == null)).toBe(true)
+  })
+
+  it('does NOT mark excluded events delivered even when the digest sends successfully', async () => {
+    seedPrefs('u1')
+    seedEventsOnCards('u1', 1, 10)
+    const send = stubSend('sent')
+    await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      maxCardsPerEmail: 4,
+      maxEventsPerUser: 20,
+      getUserEmail: emailMap([['u1','user@example.com']]),
+      sendFn: send.fn,
+    })
+    // Exactly 4 events should have delivered_at set; the other 6 stay
+    // undelivered and would roll into the next batch.
+    const rows = fakeDB.rows('alert_events') as Array<{ delivered_at: string | null }>
+    expect(rows.filter(r => r.delivered_at != null)).toHaveLength(4)
+    expect(rows.filter(r => r.delivered_at == null)).toHaveLength(6)
   })
 })

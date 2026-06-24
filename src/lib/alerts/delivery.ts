@@ -25,6 +25,8 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   buildEmailDigest,
+  groupEventsByCard,
+  sortCardBlocksByPriority,
   type DigestEvent,
 } from './emailDigest'
 import { sendEmail } from '@/lib/email/send'
@@ -38,10 +40,19 @@ import {
 // ─────────────────────────────────────────────────────────────────────
 // Hard caps. Caller-supplied limits are clamped to these values.
 // ─────────────────────────────────────────────────────────────────────
-const HARD_MAX_USERS            = 50
-const HARD_MAX_EVENTS_PER_USER  = 50
-const DEFAULT_MAX_USERS         = 5
-const DEFAULT_MAX_EVENTS_PER_U  = 20
+const HARD_MAX_USERS                = 50
+const HARD_MAX_EVENTS_PER_USER      = 50
+const DEFAULT_MAX_USERS             = 5
+const DEFAULT_MAX_EVENTS_PER_U      = 20
+// Block 5A-W-11 — cap is now CARD-based, not event-based. A card with
+// five reasons (raw + psa10 + spread + sales + activity) is one card
+// in the digest, not five rows.
+const DEFAULT_MAX_CARDS_PER_EMAIL   = 10
+const HARD_MAX_CARDS_PER_EMAIL      = 50
+// Per-card safety: if a single card somehow accumulated dozens of
+// reasons we still trim the digest to a readable size. Surplus events
+// stay undelivered and roll into the next batch.
+const MAX_EVENTS_PER_CARD           = 10
 
 // ─────────────────────────────────────────────────────────────────────
 // Public types
@@ -63,7 +74,17 @@ export type DeliveryOutcome =
 
 export type UserDeliveryResult = {
   recipientMasked: string
+  /** Number of events INCLUDED in the digest (after card grouping +
+   *  cap). When outcome=sent this is also the number marked delivered. */
   eventCount:      number
+  /** Number of distinct cards included in the digest. Always ≤ the
+   *  configured maxCardsPerEmail. */
+  cardCount:       number
+  /** Events that were loaded for this user but excluded from the
+   *  digest because of the card cap or per-card safety cap. These
+   *  remain undelivered and roll into the next batch. Always 0 in the
+   *  happy path where everything fits. */
+  eventsLeftUndelivered: number
   outcome:         DeliveryOutcome
   emailId?:        string | null
   deliveryLogId?:  string | null
@@ -71,14 +92,21 @@ export type UserDeliveryResult = {
 }
 
 export type DeliveryResult = {
-  dryRun:               boolean
-  asOf:                 string
-  usersConsidered:      number
-  usersEmailed:         number    // sent (or would_send in dry run)
-  eventsDelivered:      number    // sum of eventCount for outcomes counted in usersEmailed
-  suppressedOrSkipped:  number
-  failed:               number
-  perUser:              UserDeliveryResult[]
+  dryRun:                 boolean
+  asOf:                   string
+  usersConsidered:        number
+  usersEmailed:           number    // sent (or would_send in dry run)
+  eventsDelivered:        number    // sum of eventCount for outcomes counted in usersEmailed
+  /** Block 5A-W-11 — sum of cardCount across users that were emailed
+   *  (or would have been in dry-run). */
+  cardsDelivered:         number
+  /** Block 5A-W-11 — aggregate of events loaded but not included
+   *  because of the card cap. Operators watch this to decide whether
+   *  to raise the cap or run more frequent batches. */
+  eventsLeftUndelivered:  number
+  suppressedOrSkipped:    number
+  failed:                 number
+  perUser:                UserDeliveryResult[]
 }
 
 export type DeliveryOptions = {
@@ -88,6 +116,10 @@ export type DeliveryOptions = {
   maxUsers?:         number
   /** Clamped to HARD_MAX_EVENTS_PER_USER. */
   maxEventsPerUser?: number
+  /** Block 5A-W-11 — max distinct cards (not events) included in a
+   *  single user's digest. Defaults to DEFAULT_MAX_CARDS_PER_EMAIL,
+   *  clamped to HARD_MAX_CARDS_PER_EMAIL. */
+  maxCardsPerEmail?: number
   /** Override "now" for deterministic tests. */
   asOf?:             Date
   /** Email-resolution dependency. The route handler passes a function
@@ -145,6 +177,7 @@ export async function deliverAlerts(
   const dryRun           = opts.dryRun !== false   // default TRUE
   const maxUsers         = clampLimit(opts.maxUsers,         DEFAULT_MAX_USERS,        HARD_MAX_USERS)
   const maxEventsPerUser = clampLimit(opts.maxEventsPerUser, DEFAULT_MAX_EVENTS_PER_U, HARD_MAX_EVENTS_PER_USER)
+  const maxCardsPerEmail = clampLimit(opts.maxCardsPerEmail, DEFAULT_MAX_CARDS_PER_EMAIL, HARD_MAX_CARDS_PER_EMAIL)
   const asOfDate         = opts.asOf ?? new Date()
   const asOfIso          = asOfDate.toISOString()
   const getEmail         = opts.getUserEmail ?? (async () => null)
@@ -165,32 +198,41 @@ export async function deliverAlerts(
   for (const userId of candidateUserIds) {
     const prefs = prefsByUser.get(userId)
     if (!prefs || !prefs.enabled) {
-      perUser.push({ recipientMasked: '***', eventCount: 0, outcome: 'prefs_disabled' })
+      perUser.push({ recipientMasked: '***', eventCount: 0, cardCount: 0, eventsLeftUndelivered: 0, outcome: 'prefs_disabled' })
       continue
     }
 
     const events = await loadUndeliveredEvents(supa, userId, maxEventsPerUser)
     if (events.length === 0) {
-      perUser.push({ recipientMasked: '***', eventCount: 0, outcome: 'no_events' })
+      perUser.push({ recipientMasked: '***', eventCount: 0, cardCount: 0, eventsLeftUndelivered: 0, outcome: 'no_events' })
       continue
     }
 
     const email = await getEmail(userId)
     if (!email) {
-      perUser.push({ recipientMasked: '***', eventCount: events.length, outcome: 'no_email' })
+      perUser.push({ recipientMasked: '***', eventCount: events.length, cardCount: 0, eventsLeftUndelivered: 0, outcome: 'no_email' })
       continue
     }
     const masked = maskEmail(email)
 
+    // ── Group + cap (shared by dry-run and send paths) ────────────
+    const allDigestEvents = await toDigestEvents(supa, events)
+    const plan            = selectDigestPlan(allDigestEvents, maxCardsPerEmail)
+
     if (dryRun) {
-      perUser.push({ recipientMasked: masked, eventCount: events.length, outcome: 'would_send' })
+      perUser.push({
+        recipientMasked:       masked,
+        eventCount:            plan.includedEvents.length,
+        cardCount:             plan.cardCount,
+        eventsLeftUndelivered: plan.leftover,
+        outcome:               'would_send',
+      })
       continue
     }
 
     // ── Real send path ────────────────────────────────────────────
-    const digestEvents = await toDigestEvents(supa, events)
     // sample=false and test=false — REAL digest going to a real user.
-    const digest = buildEmailDigest(digestEvents, { sample: false, test: false })
+    const digest = buildEmailDigest(plan.includedEvents, { sample: false, test: false })
 
     let result: SendResult
     try {
@@ -206,31 +248,83 @@ export async function deliverAlerts(
         idempotencyKey: `alert-digest-${userId}-${asOfDate.getTime()}`,
         metadata: {
           source:      'alert_delivery_batch',
-          event_count: events.length,
+          event_count: plan.includedEvents.length,
+          card_count:  plan.cardCount,
         },
       })
     } catch (e) {
       const reason = e instanceof Error ? e.message : 'unknown'
-      perUser.push({ recipientMasked: masked, eventCount: events.length, outcome: 'provider_error', reason })
+      perUser.push({
+        recipientMasked:       masked,
+        eventCount:            plan.includedEvents.length,
+        cardCount:             plan.cardCount,
+        eventsLeftUndelivered: plan.leftover,
+        outcome:               'provider_error',
+        reason,
+      })
       continue
     }
 
     perUser.push({
-      recipientMasked: masked,
-      eventCount:      events.length,
-      outcome:         result.outcome as DeliveryOutcome,
-      emailId:         result.emailId ?? null,
-      deliveryLogId:   result.deliveryLogId ?? null,
-      reason:          result.reason ?? null,
+      recipientMasked:       masked,
+      eventCount:            plan.includedEvents.length,
+      cardCount:             plan.cardCount,
+      eventsLeftUndelivered: plan.leftover,
+      outcome:               result.outcome as DeliveryOutcome,
+      emailId:               result.emailId ?? null,
+      deliveryLogId:         result.deliveryLogId ?? null,
+      reason:                result.reason ?? null,
     })
 
     // ── Mark delivered ONLY when the send actually went through ──
+    // SELECTIVE: only the events that fit in the digest are marked.
+    // Events trimmed by the card cap stay undelivered and roll into
+    // the next batch.
     if (result.outcome === 'sent') {
-      await markEventsDelivered(supa, events.map(e => e.id), asOfIso)
+      const includedIds = plan.includedEvents
+        .map(e => e.id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      if (includedIds.length > 0) {
+        await markEventsDelivered(supa, includedIds, asOfIso)
+      }
     }
   }
 
   return summarise(perUser, dryRun, asOfIso, candidateUserIds.length)
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Card-first digest plan (pure, exported for tests)
+// ─────────────────────────────────────────────────────────────────────
+
+export type DigestPlan = {
+  /** Events kept after grouping + capping. Pass directly to
+   *  buildEmailDigest — it will re-group internally. */
+  includedEvents: DigestEvent[]
+  /** Distinct cards represented in includedEvents. */
+  cardCount:      number
+  /** Events that were loaded but excluded because of the card cap or
+   *  per-card safety cap. Surface this in the admin response so the
+   *  operator can spot a leftover trend. */
+  leftover:       number
+}
+
+/** Group raw digest events into card blocks, sort blocks by priority,
+ *  trim to the card cap, and trim each card to MAX_EVENTS_PER_CARD.
+ *  Returns the flat list of surviving events plus counters. Pure. */
+export function selectDigestPlan(events: DigestEvent[], maxCards: number): DigestPlan {
+  if (events.length === 0) return { includedEvents: [], cardCount: 0, leftover: 0 }
+  const blocks = sortCardBlocksByPriority(groupEventsByCard(events))
+  const capped = blocks.slice(0, maxCards).map(b => ({
+    ...b,
+    events: b.events.slice(0, MAX_EVENTS_PER_CARD),
+  }))
+  const includedEvents = capped.flatMap(b => b.events)
+  return {
+    includedEvents,
+    cardCount: capped.length,
+    leftover:  Math.max(0, events.length - includedEvents.length),
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -242,18 +336,25 @@ const COUNTS_AS_SKIPPED = new Set<DeliveryOutcome>(['suppressed','unsubscribed',
 const COUNTS_AS_FAILED  = new Set<DeliveryOutcome>(['provider_error','invalid_recipient','configuration_error'])
 
 export function summarise(perUser: UserDeliveryResult[], dryRun: boolean, asOf: string, usersConsidered: number): DeliveryResult {
-  let usersEmailed     = 0
-  let eventsDelivered  = 0
-  let suppressedSkip   = 0
-  let failed           = 0
+  let usersEmailed          = 0
+  let eventsDelivered       = 0
+  let cardsDelivered        = 0
+  let eventsLeftUndelivered = 0
+  let suppressedSkip        = 0
+  let failed                = 0
   for (const r of perUser) {
     if (COUNTS_AS_EMAILED.has(r.outcome)) {
       usersEmailed++
-      eventsDelivered += r.eventCount
+      eventsDelivered       += r.eventCount
+      cardsDelivered        += r.cardCount ?? 0
+      eventsLeftUndelivered += r.eventsLeftUndelivered ?? 0
     } else if (COUNTS_AS_SKIPPED.has(r.outcome)) {
       suppressedSkip++
     } else if (COUNTS_AS_FAILED.has(r.outcome)) {
       failed++
+      // Failed sends still represent real events that didn't get out;
+      // surface their backlog under leftover so the admin notices.
+      eventsLeftUndelivered += r.eventsLeftUndelivered ?? 0
     }
   }
   return {
@@ -262,6 +363,8 @@ export function summarise(perUser: UserDeliveryResult[], dryRun: boolean, asOf: 
     usersConsidered,
     usersEmailed,
     eventsDelivered,
+    cardsDelivered,
+    eventsLeftUndelivered,
     suppressedOrSkipped: suppressedSkip,
     failed,
     perUser,
@@ -334,13 +437,18 @@ async function loadUndeliveredEvents(supa: SupabaseClient, userId: string, limit
 async function toDigestEvents(supa: SupabaseClient, events: AlertEventRow[]): Promise<DigestEvent[]> {
   const slugs = Array.from(new Set(events.map(e => e.card_slug).filter(Boolean)))
   const urlMap = await loadCardUrlMap(supa, slugs)
+  // Block 5A-W-11 — plumb `id` and `cardSlug` so the digest builder
+  // groups by card AND the delivery orchestrator can map blocks back
+  // to alert_events ids for selective delivered_at marking.
   return events.map(e => ({
     cardName: e.card_name ?? e.card_slug,
     setName:  e.set_name ?? '',
+    cardSlug: e.card_slug,
     cardUrl:  urlMap.get(e.card_slug),
     rule:     e.rule,
     severity: e.severity,
     payload:  e.payload_json ?? {},
+    id:       e.id,
   }))
 }
 

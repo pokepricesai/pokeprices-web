@@ -7,6 +7,10 @@ import { describe, it, expect } from 'vitest'
 import {
   buildEmailDigest,
   buildSampleEvents,
+  cardPriorityScore,
+  groupEventsByCard,
+  sortCardBlocksByPriority,
+  type DigestCardBlock,
   type DigestEvent,
 } from '../emailDigest'
 
@@ -266,6 +270,131 @@ describe('buildEmailDigest — branding', () => {
 // ─────────────────────────────────────────────────────────────────────
 // PII / leakage
 // ─────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-11 — card-first grouping helpers + renderer behaviour
+// ─────────────────────────────────────────────────────────────────────
+
+describe('groupEventsByCard', () => {
+  it('collapses multiple events on the same cardSlug into one block', () => {
+    const blocks = groupEventsByCard([
+      ev({ cardSlug: '1', cardName: 'A', setName: 'S', rule: 'raw_change',   severity: 'high'   }),
+      ev({ cardSlug: '1', cardName: 'A', setName: 'S', rule: 'psa10_change', severity: 'normal' }),
+      ev({ cardSlug: '1', cardName: 'A', setName: 'S', rule: 'recent_sales', severity: 'normal' }),
+    ])
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].cardSlug).toBe('1')
+    expect(blocks[0].events).toHaveLength(3)
+  })
+
+  it('falls back to cardName|setName when cardSlug is missing', () => {
+    const blocks = groupEventsByCard([
+      ev({ cardName: 'X', setName: 'S', rule: 'raw_change' }),
+      ev({ cardName: 'X', setName: 'S', rule: 'recent_sales' }),
+      ev({ cardName: 'Y', setName: 'S', rule: 'raw_change' }),
+    ])
+    expect(blocks).toHaveLength(2)
+    const xBlock = blocks.find(b => b.cardName === 'X') as DigestCardBlock
+    expect(xBlock.events).toHaveLength(2)
+  })
+
+  it('lifts the block severity to the max of any event on the card', () => {
+    const blocks = groupEventsByCard([
+      ev({ cardSlug: '1', severity: 'low'    }),
+      ev({ cardSlug: '1', severity: 'high'   }),
+      ev({ cardSlug: '1', severity: 'normal' }),
+    ])
+    expect(blocks[0].severity).toBe('high')
+  })
+
+  it('orders events within a card by rule priority (price changes first)', () => {
+    const blocks = groupEventsByCard([
+      ev({ cardSlug: '1', rule: 'recent_sales' }),
+      ev({ cardSlug: '1', rule: 'spread_change' }),
+      ev({ cardSlug: '1', rule: 'raw_change' }),
+    ])
+    expect(blocks[0].events.map(e => e.rule)).toEqual(['raw_change', 'spread_change', 'recent_sales'])
+  })
+
+  it('preserves the first non-empty cardUrl seen for the block', () => {
+    const blocks = groupEventsByCard([
+      ev({ cardSlug: '1' }),
+      ev({ cardSlug: '1', cardUrl: 'https://example.com/x' }),
+    ])
+    expect(blocks[0].cardUrl).toBe('https://example.com/x')
+  })
+})
+
+describe('cardPriorityScore / sortCardBlocksByPriority', () => {
+  function block(over: Partial<DigestCardBlock>): DigestCardBlock {
+    return {
+      key: 'k', cardName: 'C', setName: 'S',
+      severity: 'normal', events: [],
+      ...over,
+    }
+  }
+  it('ranks high-severity blocks above normal-severity blocks', () => {
+    const a = block({ key: 'a', severity: 'high',   events: [ev({ rule: 'raw_change', severity: 'high',   payload: { pct: 5 } })] })
+    const b = block({ key: 'b', severity: 'normal', events: [ev({ rule: 'raw_change', severity: 'normal', payload: { pct: 50 } })] })
+    expect(cardPriorityScore(a)).toBeGreaterThan(cardPriorityScore(b))
+    expect(sortCardBlocksByPriority([b, a]).map(x => x.key)).toEqual(['a', 'b'])
+  })
+
+  it('ranks price-change rules over spread / activity within the same severity', () => {
+    const a = block({ key: 'a', events: [ev({ rule: 'raw_change',    severity: 'normal', payload: { pct: 10 } })] })
+    const b = block({ key: 'b', events: [ev({ rule: 'spread_change', severity: 'normal', payload: { pct: 10 } })] })
+    const c = block({ key: 'c', events: [ev({ rule: 'recent_sales',  severity: 'normal', payload: { recent_active_count: 5 } })] })
+    expect(sortCardBlocksByPriority([c, b, a]).map(x => x.key)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('breaks ties by largest payload magnitude', () => {
+    const small = block({ key: 'small', events: [ev({ rule: 'raw_change', severity: 'normal', payload: { pct: 5 } })] })
+    const big   = block({ key: 'big',   events: [ev({ rule: 'raw_change', severity: 'normal', payload: { pct: 40 } })] })
+    expect(sortCardBlocksByPriority([small, big]).map(x => x.key)).toEqual(['big', 'small'])
+  })
+})
+
+describe('buildEmailDigest — card-first rendering', () => {
+  it('renders one card block with bulleted reasons when a card has multiple events', () => {
+    const d = buildEmailDigest([
+      ev({ cardSlug: '1', cardName: 'Raichu', setName: 'Gym', rule: 'raw_change',   severity: 'high',
+           payload: { old: 12500, new: 16875, pct: 35 } }),
+      ev({ cardSlug: '1', cardName: 'Raichu', setName: 'Gym', rule: 'recent_sales', severity: 'normal',
+           payload: { recent_active_count: 4, window_days: 7 } }),
+    ])
+    // Card name appears once in the HTML body; both reason labels show up.
+    const heading = d.html.match(/Raichu/g) ?? []
+    // It may appear in subject too, but the body should have ONE card heading
+    // and TWO list items.
+    expect(heading.length).toBeGreaterThanOrEqual(1)
+    expect(d.html).toMatch(/Raw price changed/)
+    expect(d.html).toMatch(/Fresh sales landed/)
+    // The HTML wraps reasons in <ul>…<li>; assert at least two list items.
+    const listItems = d.html.match(/<li\b/g) ?? []
+    expect(listItems.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('mirrors the card-first structure in plain text — one card line, multiple reason lines indented', () => {
+    const d = buildEmailDigest([
+      ev({ cardSlug: '1', cardName: 'Raichu', setName: 'Gym', rule: 'raw_change',   severity: 'high',
+           payload: { old: 12500, new: 16875, pct: 35 } }),
+      ev({ cardSlug: '1', cardName: 'Raichu', setName: 'Gym', rule: 'recent_sales', severity: 'normal',
+           payload: { recent_active_count: 4, window_days: 7 } }),
+    ])
+    // One "* Raichu" card line, two "    - " indented reason lines.
+    expect(d.text).toMatch(/\* Raichu \(Gym\)/)
+    const reasonLines = d.text.split('\n').filter(l => l.startsWith('    - '))
+    expect(reasonLines.length).toBe(2)
+    expect(reasonLines[0]).toMatch(/Raw price changed/)
+    expect(reasonLines[1]).toMatch(/Fresh sales landed/)
+  })
+
+  it('keeps single-event-per-card cards rendering normally with one bullet', () => {
+    const d = buildEmailDigest([ev({ cardSlug: '1', cardName: 'Pikachu' })])
+    const listItems = d.html.match(/<li\b/g) ?? []
+    expect(listItems.length).toBe(1)
+  })
+})
 
 describe('buildEmailDigest — PII guard', () => {
   it('never includes email addresses, user_id keys, or auth tokens in any output', () => {
