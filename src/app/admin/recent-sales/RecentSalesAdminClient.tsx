@@ -253,6 +253,86 @@ function StatTile({ label, value, tone }: { label: string; value: React.ReactNod
 type LimitChoice = 5 | 25 | 100
 const LIMIT_CHOICES: ReadonlyArray<LimitChoice> = [5, 25, 100]
 
+// Shape of the evaluator response the panel knows how to render. Extra
+// keys on the response are ignored — only the named fields are tile'd
+// out; the full body still renders as raw JSON underneath.
+type EvaluatorResultBody = {
+  dryRun?:                       boolean
+  usersConsidered?:              number
+  cardsConsidered?:              number
+  triggersFound?:                number
+  triggersSuppressedByCooldown?: number
+  triggersInserted?:             number
+  diagnostics?: {
+    usersWithDisabledPrefs?:            number
+    usersWithNoCards?:                  number
+    cardsWithInsufficientPriceHistory?: number
+    cardsWithNoRecentSales?:            number
+    triggersByRule?:                    Record<string, number>
+  }
+}
+
+// Shared renderer used by BOTH the dry-run and write-mode buttons so
+// the diagnostics show up identically regardless of mode. Block 5A-W-7.
+function EvaluatorResultPanel({ body }: { body: EvaluatorResultBody }) {
+  const d = body.diagnostics
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginBottom: 8 }}>
+        <SmallStat label="users considered"      value={body.usersConsidered} />
+        <SmallStat label="cards considered"      value={body.cardsConsidered} />
+        <SmallStat label="triggers found"        value={body.triggersFound} />
+        <SmallStat label="suppressed by cooldown" value={body.triggersSuppressedByCooldown} />
+        <SmallStat label="triggers inserted"     value={body.triggersInserted} />
+      </div>
+
+      {d && (
+        <>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700, marginBottom: 6 }}>
+            Diagnostics
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8, marginBottom: 8 }}>
+            <SmallStat label="users w/ disabled prefs (global)" value={d.usersWithDisabledPrefs} />
+            <SmallStat label="users w/ no cards"                value={d.usersWithNoCards} />
+            <SmallStat label="cards w/ insufficient history"    value={d.cardsWithInsufficientPriceHistory} />
+            <SmallStat label="cards w/ no recent_sales"         value={d.cardsWithNoRecentSales} />
+          </div>
+
+          {d.triggersByRule && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Triggers by rule</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {Object.entries(d.triggersByRule).map(([rule, n]) => (
+                  <span key={rule} style={{
+                    display: 'inline-flex', alignItems: 'baseline', gap: 4,
+                    padding: '3px 8px', borderRadius: 6,
+                    background: 'var(--bg-light)', border: '1px solid var(--border)',
+                    fontSize: 11, fontFamily: 'monospace',
+                  }}>
+                    <span style={{ color: 'var(--text-muted)' }}>{rule}</span>
+                    <span style={{ fontWeight: 700, color: n > 0 ? 'var(--text)' : 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>{n}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      <details>
+        <summary style={{ fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>Raw response JSON</summary>
+        <pre style={{
+          margin: '6px 0 0', padding: 8, borderRadius: 6,
+          background: 'var(--card)', border: '1px solid var(--border)',
+          fontFamily: 'monospace', fontSize: 11,
+          overflowX: 'auto', whiteSpace: 'pre',
+          maxHeight: 320,
+        }}>{JSON.stringify(body, null, 2)}</pre>
+      </details>
+    </div>
+  )
+}
+
 // Owns the shared limitUsers state and renders both evaluator
 // buttons. Default 5 is conservative; admin can step up to 25 or 100
 // when the smaller sample finds nothing.
@@ -307,7 +387,7 @@ function EvaluatorControls() {
 function EvaluatorDryRunButton({ limitUsers }: { limitUsers: LimitChoice }) {
   const [busy,    setBusy]    = useState(false)
   const [status,  setStatus]  = useState<number | null>(null)
-  const [body,    setBody]    = useState<unknown>(null)
+  const [body,    setBody]    = useState<EvaluatorResultBody | string | null>(null)
   const [error,   setError]   = useState<string | null>(null)
 
   async function run() {
@@ -368,15 +448,15 @@ function EvaluatorDryRunButton({ limitUsers }: { limitUsers: LimitChoice }) {
             </div>
           )}
           {body != null && (
-            <pre style={{
-              margin: 0, padding: 8, borderRadius: 6,
-              background: 'var(--card)', border: '1px solid var(--border)',
-              fontFamily: 'monospace', fontSize: 11,
-              overflowX: 'auto', whiteSpace: 'pre',
-              maxHeight: 320,
-            }}>
-{typeof body === 'string' ? body : JSON.stringify(body, null, 2)}
-            </pre>
+            typeof body === 'string'
+              ? <pre style={{
+                  margin: 0, padding: 8, borderRadius: 6,
+                  background: 'var(--card)', border: '1px solid var(--border)',
+                  fontFamily: 'monospace', fontSize: 11,
+                  overflowX: 'auto', whiteSpace: 'pre',
+                  maxHeight: 320,
+                }}>{body}</pre>
+              : <EvaluatorResultPanel body={body} />
           )}
         </div>
       )}
@@ -397,7 +477,7 @@ function EvaluatorWriteModeButton({ limitUsers }: { limitUsers: LimitChoice }) {
   const [arm,    setArm]    = useState<ArmedState>(initialArmedState())
   const [busy,   setBusy]   = useState(false)
   const [status, setStatus] = useState<number | null>(null)
-  const [body,   setBody]   = useState<unknown>(null)
+  const [body,   setBody]   = useState<EvaluatorResultBody | string | null>(null)
   const [error,  setError]  = useState<string | null>(null)
   // setTimeout handle so we can cancel a pending auto-disarm when a
   // second click lands first.
@@ -464,10 +544,6 @@ function EvaluatorWriteModeButton({ limitUsers }: { limitUsers: LimitChoice }) {
       ? 'Click again to confirm — auto-cancels in 5s'
       : `Run evaluator and create alert events (${limitUsers} users)`
 
-  const summary = (body && typeof body === 'object' && !Array.isArray(body))
-    ? (body as Record<string, unknown>)
-    : null
-
   return (
     <div style={{ marginTop: 12 }}>
       <button
@@ -500,28 +576,16 @@ function EvaluatorWriteModeButton({ limitUsers }: { limitUsers: LimitChoice }) {
               HTTP <strong style={{ color: 'var(--text)' }}>{status}</strong>
             </div>
           )}
-          {summary && (
-            <div style={{
-              display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8,
-              marginTop: 6, marginBottom: 8,
-            }}>
-              <SmallStat label="users considered"      value={summary.usersConsidered} />
-              <SmallStat label="cards considered"      value={summary.cardsConsidered} />
-              <SmallStat label="triggers found"        value={summary.triggersFound} />
-              <SmallStat label="suppressed by cooldown" value={summary.triggersSuppressedByCooldown} />
-              <SmallStat label="triggers inserted"     value={summary.triggersInserted} />
-            </div>
-          )}
           {body != null && (
-            <pre style={{
-              margin: 0, padding: 8, borderRadius: 6,
-              background: 'var(--card)', border: '1px solid var(--border)',
-              fontFamily: 'monospace', fontSize: 11,
-              overflowX: 'auto', whiteSpace: 'pre',
-              maxHeight: 320,
-            }}>
-{typeof body === 'string' ? body : JSON.stringify(body, null, 2)}
-            </pre>
+            typeof body === 'string'
+              ? <pre style={{
+                  margin: 0, padding: 8, borderRadius: 6,
+                  background: 'var(--card)', border: '1px solid var(--border)',
+                  fontFamily: 'monospace', fontSize: 11,
+                  overflowX: 'auto', whiteSpace: 'pre',
+                  maxHeight: 320,
+                }}>{body}</pre>
+              : <EvaluatorResultPanel body={body} />
           )}
         </div>
       )}

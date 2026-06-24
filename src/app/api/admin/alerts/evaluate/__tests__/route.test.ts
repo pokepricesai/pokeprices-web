@@ -104,6 +104,13 @@ describe('POST /api/admin/alerts/evaluate — dryRun default', () => {
     expect(j.triggersInserted).toBe(0)
     expect(j.proposedEvents.length).toBeGreaterThan(0)
     expect(fakeDB.rows('alert_events')).toEqual([])
+    // Block 5A-W-7 — diagnostics object passes through to the response.
+    expect(j.diagnostics).toBeDefined()
+    expect(typeof j.diagnostics.usersWithDisabledPrefs).toBe('number')
+    expect(typeof j.diagnostics.usersWithNoCards).toBe('number')
+    expect(typeof j.diagnostics.cardsWithInsufficientPriceHistory).toBe('number')
+    expect(typeof j.diagnostics.cardsWithNoRecentSales).toBe('number')
+    expect(j.diagnostics.triggersByRule).toBeDefined()
   })
 
   it('defaults dryRun=true when body explicitly passes { dryRun: true }', async () => {

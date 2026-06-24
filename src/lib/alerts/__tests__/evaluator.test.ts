@@ -474,6 +474,92 @@ describe('evaluateAlerts — orchestrator', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────
+// Diagnostics (Block 5A-W-7)
+// ─────────────────────────────────────────────────────────────────────
+
+describe('evaluateAlerts — diagnostics', () => {
+  it('includes a diagnostics object on every result', async () => {
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    expect(r.diagnostics).toBeDefined()
+    expect(r.diagnostics.usersWithDisabledPrefs).toBe(0)
+    expect(r.diagnostics.usersWithNoCards).toBe(0)
+    expect(r.diagnostics.cardsWithInsufficientPriceHistory).toBe(0)
+    expect(r.diagnostics.cardsWithNoRecentSales).toBe(0)
+    expect(r.diagnostics.triggersByRule).toEqual({
+      price_move: 0, recent_sales: 0, psa10_change: 0,
+      raw_change: 0, spread_change: 0, market_activity: 0,
+    })
+  })
+
+  it('counts users with disabled prefs as a global signal (does NOT inflate usersConsidered)', async () => {
+    seedPrefs('u1', { enabled: true  })
+    seedPrefs('u2', { enabled: false })
+    seedPrefs('u3', { enabled: false })
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    expect(r.usersConsidered).toBe(1)                  // only enabled
+    expect(r.diagnostics.usersWithDisabledPrefs).toBe(2)
+  })
+
+  it('counts enabled users who happen to have zero cards on either list', async () => {
+    seedPrefs('u1')                       // no watchlist + no portfolio
+    seedPrefs('u2'); seedWatch('u2', '1450205')
+    seedPriceTwoPoints('1450205', 1000, 1200)
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    expect(r.usersConsidered).toBe(2)
+    expect(r.diagnostics.usersWithNoCards).toBe(1)
+  })
+
+  it('counts unique cards with insufficient price history (cards-not-rows)', async () => {
+    seedPrefs('u1')
+    seedPrefs('u2')
+    seedWatch('u1', '1450205')                          // 2 price points, 7d apart → enough
+    seedWatch('u2', '9536051')                          // only 1 price point → not enough
+    seedPriceTwoPoints('1450205', 1000, 1200)
+    fakeDB.seed('daily_prices', [
+      ...fakeDB.rows('daily_prices'),
+      { card_slug: 'pc-9536051', date: '2026-06-22', raw_usd: 500, psa10_usd: 2000 },
+    ])
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    expect(r.diagnostics.cardsWithInsufficientPriceHistory).toBe(1)
+  })
+
+  it('counts unique cards with zero active recent_sales in the 14d window', async () => {
+    seedPrefs('u1')
+    seedWatch('u1', '1450205')
+    seedWatch('u1', '9536051')
+    seedPriceTwoPoints('1450205', 1000, 1200)
+    seedPriceTwoPoints('9536051', 500,  600)
+    fakeDB.seed('recent_sales', [
+      { internal_card_slug: '1450205', sale_date: '2026-06-23', parse_status: 'ok', review_status: 'active' },
+      // 9536051 has nothing
+    ])
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    expect(r.diagnostics.cardsWithNoRecentSales).toBe(1)   // only 9536051
+  })
+
+  it('buckets triggersByRule with the same total as triggersFound', async () => {
+    seedPrefs('u1')
+    seedWatch('u1', '1450205')
+    // Big move triggers both raw_change and psa10_change.
+    seedPriceTwoPoints('1450205', 1000, 1500, 8000, 9500)
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    const total = Object.values(r.diagnostics.triggersByRule).reduce((a, b) => a + b, 0)
+    expect(total).toBe(r.triggersFound)
+    expect(r.diagnostics.triggersByRule.raw_change).toBeGreaterThanOrEqual(1)
+    expect(r.diagnostics.triggersByRule.psa10_change).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not expose user_id / email in the diagnostics object', async () => {
+    seedPrefs('should-not-leak', { enabled: false })
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    const blob = JSON.stringify(r.diagnostics)
+    expect(blob).not.toMatch(/should-not-leak/)
+    expect(blob).not.toMatch(/"user_id"/i)
+    expect(blob).not.toMatch(/"email"/i)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
 // Type-system smoke — surfaces the exported shape so a future block
 // can't silently drop a field without breaking this file.
 // ─────────────────────────────────────────────────────────────────────

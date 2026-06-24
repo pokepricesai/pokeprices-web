@@ -64,6 +64,30 @@ export type EvaluationOptions = {
   asOf?:        Date
 }
 
+export type EvaluationDiagnostics = {
+  /** Global count of user_alert_preferences rows with enabled=FALSE.
+   *  Useful awareness signal — independent of the current batch.
+   *  Disabled users are already filtered out at the SQL layer, so
+   *  they never contribute to `usersConsidered`. */
+  usersWithDisabledPrefs:            number
+  /** Of the users in `usersConsidered`, how many ended up with zero
+   *  cards on either watchlist OR portfolio (so nothing to evaluate). */
+  usersWithNoCards:                  number
+  /** Of the unique cards across all users in this batch, how many
+   *  had fewer than two price points covering the ~7d lookback —
+   *  i.e. `findPriceComparisonPair` returned null. These cards can
+   *  never fire raw/psa10/spread rules. */
+  cardsWithInsufficientPriceHistory: number
+  /** Of the unique cards across all users in this batch, how many
+   *  had zero active recent_sales rows in the last 14 days — i.e.
+   *  the market_activity / recent_sales rules will never fire. */
+  cardsWithNoRecentSales:            number
+  /** Breakdown of every trigger generated this pass (matches
+   *  triggersFound — counted BEFORE the cooldown filter so an operator
+   *  can see which rules are firing at all). */
+  triggersByRule:                    Record<AlertRule, number>
+}
+
 export type EvaluationResult = {
   dryRun:                       boolean
   asOf:                         string         // ISO timestamp used for cooldown / windowing
@@ -73,6 +97,7 @@ export type EvaluationResult = {
   triggersSuppressedByCooldown: number
   triggersInserted:             number         // 0 in dryRun
   proposedEvents:               ProposedAlertEvent[]   // capped sample
+  diagnostics:                  EvaluationDiagnostics
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -148,10 +173,15 @@ export async function evaluateAlerts(
   const asOfDate   = opts.asOf ?? new Date()
   const asOfIso    = asOfDate.toISOString()
 
+  // 0. Diagnostic: global count of disabled prefs rows. Cheap one-off
+  //    count for ops awareness — disabled users are filtered out by
+  //    the SQL in loadEnabledPrefs, so they never enter usersConsidered.
+  const usersWithDisabledPrefs = await countDisabledPrefs(supa)
+
   // 1. Load enabled user prefs.
   const prefsRows = await loadEnabledPrefs(supa, limitUsers)
   if (prefsRows.length === 0) {
-    return emptyResult(dryRun, asOfIso)
+    return emptyResult(dryRun, asOfIso, usersWithDisabledPrefs)
   }
   const prefsByUser = new Map<string, UserAlertPreferences>()
   for (const r of prefsRows) prefsByUser.set(String(r.user_id), rowToPreferences(r))
@@ -196,6 +226,9 @@ export async function evaluateAlerts(
     for (const s of Array.from(perUser.keys())) allCardSlugs.add(s)
   }
 
+  // Diagnostic: users in usersConsidered who ended up with zero cards.
+  const usersWithNoCards = Array.from(prefsByUser.keys()).filter(uid => !userCards.has(uid)).length
+
   // 4. Load price history + recent-sales activity for the union of cards.
   const slugList = Array.from(allCardSlugs)
   const [priceIndex, recentSales7d, recentSales14d] = await Promise.all([
@@ -204,12 +237,25 @@ export async function evaluateAlerts(
     loadRecentSalesCounts(supa, slugList, asOfDate, MARKET_ACTIVITY_WINDOW_DAYS),
   ])
 
+  // Diagnostic: per-card counts at the unique-card level. A card is
+  // counted once regardless of how many users list it.
+  let cardsWithInsufficientPriceHistory = 0
+  let cardsWithNoRecentSales            = 0
+  for (const slug of slugList) {
+    if (!findPriceComparisonPair(priceIndex.get(slug) ?? [])) cardsWithInsufficientPriceHistory++
+    if ((recentSales14d.get(slug) ?? 0) === 0)                cardsWithNoRecentSales++
+  }
+
   // 5. Load recent alert_events for cooldown.
   const cooldownIndex = await loadCooldownIndex(supa, Array.from(userCards.keys()), asOfDate)
 
   // 6. Evaluate.
   const proposed: ProposedAlertEvent[] = []
   let suppressed = 0
+  const triggersByRule: Record<AlertRule, number> = {
+    price_move: 0, recent_sales: 0, psa10_change: 0,
+    raw_change: 0, spread_change: 0, market_activity: 0,
+  }
   for (const [userId, perUser] of Array.from(userCards.entries())) {
     const prefs = prefsByUser.get(userId)!
     for (const card of Array.from(perUser.values())) {
@@ -220,6 +266,7 @@ export async function evaluateAlerts(
         recentCount14d: recentSales14d.get(card.cardSlug) ?? 0,
       })
       for (const ev of events) {
+        triggersByRule[ev.rule]++   // count every generated trigger, pre-cooldown
         if (isOnCooldown(cooldownIndex, userId, card.cardSlug, ev.rule, prefs.minHoursBetweenAlerts, asOfDate)) {
           suppressed++
           continue
@@ -244,6 +291,13 @@ export async function evaluateAlerts(
     triggersSuppressedByCooldown: suppressed,
     triggersInserted:             inserted,
     proposedEvents:               proposed.slice(0, DRYRUN_SAMPLE_CAP),
+    diagnostics: {
+      usersWithDisabledPrefs,
+      usersWithNoCards,
+      cardsWithInsufficientPriceHistory,
+      cardsWithNoRecentSales,
+      triggersByRule,
+    },
   }
 }
 
@@ -396,6 +450,19 @@ async function loadEnabledPrefs(supa: SupabaseClient, limit: number): Promise<Ar
   return (data ?? []) as Array<Record<string, unknown>>
 }
 
+async function countDisabledPrefs(supa: SupabaseClient): Promise<number> {
+  try {
+    const { count, error } = await supa
+      .from('user_alert_preferences')
+      .select('*', { count: 'exact', head: true })
+      .eq('enabled', false)
+    if (error) return 0
+    return count ?? 0
+  } catch {
+    return 0
+  }
+}
+
 async function loadWatchlist(supa: SupabaseClient, userIds: string[]): Promise<WLRow[]> {
   if (userIds.length === 0) return []
   const { data, error } = await supa
@@ -526,7 +593,7 @@ async function insertEvents(supa: SupabaseClient, events: ProposedAlertEvent[], 
   return rows.length
 }
 
-function emptyResult(dryRun: boolean, asOfIso: string): EvaluationResult {
+function emptyResult(dryRun: boolean, asOfIso: string, usersWithDisabledPrefs = 0): EvaluationResult {
   return {
     dryRun,
     asOf:                         asOfIso,
@@ -536,5 +603,15 @@ function emptyResult(dryRun: boolean, asOfIso: string): EvaluationResult {
     triggersSuppressedByCooldown: 0,
     triggersInserted:             0,
     proposedEvents:               [],
+    diagnostics: {
+      usersWithDisabledPrefs,
+      usersWithNoCards:                  0,
+      cardsWithInsufficientPriceHistory: 0,
+      cardsWithNoRecentSales:            0,
+      triggersByRule: {
+        price_move: 0, recent_sales: 0, psa10_change: 0,
+        raw_change: 0, spread_change: 0, market_activity: 0,
+      },
+    },
   }
 }
