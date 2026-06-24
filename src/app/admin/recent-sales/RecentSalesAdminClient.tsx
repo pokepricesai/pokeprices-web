@@ -242,6 +242,93 @@ function StatTile({ label, value, tone }: { label: string; value: React.ReactNod
   )
 }
 
+// Admin-only button: POST /api/admin/alerts/evaluate with the same
+// Supabase session token used elsewhere on this page. Renders only
+// inside this admin-gated client component, so visiting it requires
+// RECENT_SALES_ADMIN_VIEW_ENABLED + requireAdmin on the inspect route
+// (which is what blocks the page from rendering at all when off).
+// The evaluator route itself is independently gated by
+// ALERTS_EVALUATOR_ENABLED.
+function EvaluatorDryRunButton() {
+  const [busy,    setBusy]    = useState(false)
+  const [status,  setStatus]  = useState<number | null>(null)
+  const [body,    setBody]    = useState<unknown>(null)
+  const [error,   setError]   = useState<string | null>(null)
+
+  async function run() {
+    setBusy(true); setError(null); setStatus(null); setBody(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        setError('Not signed in. Sign in with an authorised admin account.')
+        return
+      }
+      const res = await fetch('/api/admin/alerts/evaluate', {
+        method:  'POST',
+        headers: {
+          authorization:  `Bearer ${session.access_token}`,
+          'content-type': 'application/json',
+        },
+        body:    JSON.stringify({ dryRun: true, limitUsers: 5 }),
+        cache:   'no-store',
+      })
+      setStatus(res.status)
+      // Read body even when !res.ok so the operator can see why.
+      const text = await res.text()
+      try { setBody(JSON.parse(text)) }
+      catch { setBody(text) }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'unknown error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button
+        onClick={() => void run()}
+        disabled={busy}
+        style={{
+          padding: '6px 12px', borderRadius: 6,
+          border: '1px solid var(--border)',
+          background: busy ? 'var(--bg-light)' : 'var(--primary)',
+          color: busy ? 'var(--text)' : '#fff',
+          cursor: busy ? 'wait' : 'pointer',
+          fontSize: 12, fontWeight: 700,
+          fontFamily: "'Figtree', sans-serif",
+        }}
+      >{busy ? 'Running…' : 'Run dry-run (limit 5 users)'}</button>
+
+      {(status != null || error) && (
+        <div style={{ marginTop: 8 }}>
+          {error && (
+            <div style={{ fontSize: 12, color: 'var(--red, #c00)', marginBottom: 4 }}>
+              {error}
+            </div>
+          )}
+          {status != null && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+              HTTP <strong style={{ color: 'var(--text)' }}>{status}</strong>
+            </div>
+          )}
+          {body != null && (
+            <pre style={{
+              margin: 0, padding: 8, borderRadius: 6,
+              background: 'var(--card)', border: '1px solid var(--border)',
+              fontFamily: 'monospace', fontSize: 11,
+              overflowX: 'auto', whiteSpace: 'pre',
+              maxHeight: 320,
+            }}>
+{typeof body === 'string' ? body : JSON.stringify(body, null, 2)}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function NotesRow({ notes }: { notes: Record<string, unknown> }) {
   const known = NOTES_FIELDS_ORDERED.filter(k => Object.prototype.hasOwnProperty.call(notes, k))
   const knownSet = new Set<string>(known)
@@ -681,7 +768,8 @@ export default function RecentSalesAdminClient() {
               marginBottom: 16,
             }}>
               <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Run the alert evaluator</div>
-              <div>Set <code>ALERTS_EVALUATOR_ENABLED=true</code> in the runtime env, then POST your admin bearer token:</div>
+              <div>Requires <code>ALERTS_EVALUATOR_ENABLED=true</code> in the runtime env. The button below runs a dry-run capped at 5 users — no writes, no emails. There is no write-mode button by design; use cURL when you want to insert.</div>
+              <EvaluatorDryRunButton />
               <pre style={{
                 margin: '6px 0 0', padding: 8, borderRadius: 6,
                 background: 'var(--card)', border: '1px solid var(--border)',
