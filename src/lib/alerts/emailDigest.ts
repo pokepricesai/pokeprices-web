@@ -44,6 +44,11 @@ export type BuildDigestOptions = {
    *  bodies carry a banner so an admin previewing the email cannot
    *  mistake fake data for real activity. */
   sample?: boolean
+  /** When true, the subject is prefixed `[TEST]` so a test-send from
+   *  the admin button cannot be confused with a production digest
+   *  even at a glance in the inbox. Stacks with `sample` — the
+   *  resulting prefix is `[TEST] [SAMPLE] …` when both are set. */
+  test?: boolean
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -171,8 +176,11 @@ function pluralize(n: number, singular: string, plural: string): string {
   return n === 1 ? singular : plural
 }
 
-function buildSubject(events: DigestEvent[], sample: boolean): string {
-  const prefix = sample ? '[SAMPLE] ' : ''
+function buildSubject(events: DigestEvent[], sample: boolean, test: boolean): string {
+  const tags: string[] = []
+  if (test)   tags.push('[TEST]')
+  if (sample) tags.push('[SAMPLE]')
+  const prefix = tags.length > 0 ? tags.join(' ') + ' ' : ''
   if (events.length === 0) return `${prefix}Your PokePrices alert digest`
   const distinctCards = new Set(events.map(e => `${e.cardName}|${e.setName}`)).size
   return `${prefix}Your PokePrices alert digest — ${distinctCards} ${pluralize(distinctCards, 'card moved', 'cards moved')}`
@@ -335,8 +343,9 @@ function renderText(events: DigestEvent[], sample: boolean): string {
 
 export function buildEmailDigest(events: DigestEvent[], opts: BuildDigestOptions = {}): DigestOutput {
   const sample = opts.sample === true
+  const test   = opts.test   === true
   return {
-    subject:     buildSubject(events, sample),
+    subject:     buildSubject(events, sample, test),
     previewText: buildPreviewText(events, sample),
     html:        renderHtml(events, sample),
     text:        renderText(events, sample),

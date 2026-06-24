@@ -38,7 +38,19 @@ export function isAlertEmailPreviewEnabled(): boolean {
   return readLiteralTrue('ALERT_EMAIL_PREVIEW_ENABLED')
 }
 
+/**
+ * Gates the admin send-test-email route. Accepts EITHER this flag or
+ * ALERT_EMAIL_PREVIEW_ENABLED so an operator who already enabled
+ * previewing can flip the test-send on without juggling two flags.
+ * The route also enforces requireAdmin + a hard recipient allow-list
+ * (admin email or ALERT_TEST_EMAIL_TO).
+ */
+export function isAlertTestEmailEnabled(): boolean {
+  return readLiteralTrue('ALERT_TEST_EMAIL_ENABLED')
+}
+
 export const ALERTS_EVALUATOR_FLAG_NAMES: ReadonlyArray<string> = [
   'ALERTS_EVALUATOR_ENABLED',
   'ALERT_EMAIL_PREVIEW_ENABLED',
+  'ALERT_TEST_EMAIL_ENABLED',
 ]

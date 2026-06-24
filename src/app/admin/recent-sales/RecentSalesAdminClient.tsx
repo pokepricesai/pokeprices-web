@@ -682,6 +682,155 @@ function AlertEmailPreviewButton() {
   )
 }
 
+// Admin-only WRITE-mode button for the test-email send. POSTs to
+// /api/admin/alerts/send-test-email. Two-click confirmation reuses
+// the _armedClick state machine for parity with the evaluator's
+// write-mode button.
+function AlertTestEmailSendButton() {
+  const [arm,    setArm]    = useState<ArmedState>(initialArmedState())
+  const [busy,   setBusy]   = useState(false)
+  const [status, setStatus] = useState<number | null>(null)
+  const [body,   setBody]   = useState<{
+    ok?:              boolean
+    outcome?:         string
+    deliveryLogId?:   string | null
+    emailId?:         string | null
+    reason?:          string | null
+    recipient?:       string
+    recipientSource?: string
+    mode?:            string
+    eventCount?:      number
+    subject?:         string
+    error?:           string
+  } | null>(null)
+  const [error,  setError]  = useState<string | null>(null)
+  const disarmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => () => {
+    if (disarmTimerRef.current) clearTimeout(disarmTimerRef.current)
+  }, [])
+
+  async function run() {
+    setBusy(true); setError(null); setStatus(null); setBody(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        setError('Not signed in. Sign in with an authorised admin account.')
+        return
+      }
+      const res = await fetch('/api/admin/alerts/send-test-email', {
+        method:  'POST',
+        headers: {
+          authorization:  `Bearer ${session.access_token}`,
+          'content-type': 'application/json',
+        },
+        // No body — the route resolves recipient + mode internally.
+        body:    '{}',
+        cache:   'no-store',
+      })
+      setStatus(res.status)
+      const text = await res.text()
+      try { setBody(JSON.parse(text)) } catch { setError(text || 'Empty response') }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'unknown error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function click() {
+    if (busy) return
+    const decision = nextArmedState(arm, Date.now())
+    if (decision.shouldRun) {
+      if (disarmTimerRef.current) {
+        clearTimeout(disarmTimerRef.current)
+        disarmTimerRef.current = null
+      }
+      setArm(initialArmedState())
+      void run()
+      return
+    }
+    setArm({ armed: decision.armed, armedAt: decision.armedAt })
+    if (disarmTimerRef.current) clearTimeout(disarmTimerRef.current)
+    disarmTimerRef.current = setTimeout(() => {
+      setArm(initialArmedState())
+      disarmTimerRef.current = null
+    }, DEFAULT_ARM_THRESHOLD_MS)
+  }
+
+  const armed = arm.armed
+  const label = busy
+    ? 'Sending…'
+    : armed
+      ? 'Click again to confirm — auto-cancels in 5s'
+      : 'Send test alert email to admin'
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <button
+        onClick={click}
+        disabled={busy}
+        aria-pressed={armed}
+        style={{
+          padding: '6px 12px', borderRadius: 6,
+          border: '1px solid ' + (armed ? 'var(--red, #c00)' : 'var(--border)'),
+          background: armed ? 'var(--red, #c00)' : 'transparent',
+          color:      armed ? '#fff'             : 'var(--red, #c00)',
+          cursor: busy ? 'wait' : 'pointer',
+          fontSize: 12, fontWeight: 700,
+          fontFamily: "'Figtree', sans-serif",
+        }}
+      >{label}</button>
+      <span style={{ marginLeft: 10, fontSize: 11, color: 'var(--text-muted)' }}>
+        Sends <strong style={{ color: 'var(--text)' }}>one test email only</strong>. Does not mark alerts delivered. Subject is prefixed <code>[TEST]</code>.
+      </span>
+
+      {(status != null || error) && (
+        <div style={{ marginTop: 8 }}>
+          {error && (
+            <div style={{ fontSize: 12, color: 'var(--red, #c00)', marginBottom: 4 }}>
+              {error}
+            </div>
+          )}
+          {status != null && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+              HTTP <strong style={{ color: 'var(--text)' }}>{status}</strong>
+              {body?.outcome && (
+                <>{' '}· outcome <strong style={{ color: body.ok ? 'var(--green, #2a7)' : 'var(--text)' }}>{body.outcome}</strong></>
+              )}
+              {body?.recipient && (
+                <>{' '}· recipient <strong style={{ color: 'var(--text)' }}>{body.recipient}</strong>{body.recipientSource ? ` (${body.recipientSource})` : ''}</>
+              )}
+              {body?.mode && (
+                <>{' '}· mode <strong style={{ color: 'var(--text)' }}>{body.mode}</strong></>
+              )}
+            </div>
+          )}
+          {body?.subject && (
+            <div style={{
+              padding: '8px 10px', borderRadius: 6,
+              background: 'var(--bg-light)', border: '1px solid var(--border)',
+              marginBottom: 6,
+            }}>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700 }}>Subject sent</div>
+              <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 600 }}>{body.subject}</div>
+            </div>
+          )}
+          {body != null && (
+            <pre style={{
+              margin: 0, padding: 8, borderRadius: 6,
+              background: 'var(--card)', border: '1px solid var(--border)',
+              fontFamily: 'monospace', fontSize: 11,
+              overflowX: 'auto', whiteSpace: 'pre',
+              maxHeight: 320,
+            }}>{JSON.stringify(body, null, 2)}</pre>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SmallStat({ label, value }: { label: string; value: unknown }) {
   const display = typeof value === 'number' ? value : '—'
   return (
@@ -1142,6 +1291,7 @@ export default function RecentSalesAdminClient() {
               <EvaluatorControls />
               <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '14px 0 0' }} />
               <AlertEmailPreviewButton />
+              <AlertTestEmailSendButton />
               <pre style={{
                 margin: '6px 0 0', padding: 8, borderRadius: 6,
                 background: 'var(--card)', border: '1px solid var(--border)',

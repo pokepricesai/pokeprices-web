@@ -49,6 +49,22 @@ describe('buildEmailDigest — subject', () => {
     const d = buildEmailDigest(buildSampleEvents(), { sample: true })
     expect(d.subject.startsWith('[SAMPLE] ')).toBe(true)
   })
+
+  it('prefixes [TEST] when test=true', () => {
+    const d = buildEmailDigest([ev({})], { test: true })
+    expect(d.subject.startsWith('[TEST] ')).toBe(true)
+    expect(d.subject).not.toContain('[SAMPLE]')
+  })
+
+  it('stacks [TEST] [SAMPLE] in that order when both flags are set', () => {
+    const d = buildEmailDigest(buildSampleEvents(), { test: true, sample: true })
+    expect(d.subject.startsWith('[TEST] [SAMPLE] ')).toBe(true)
+  })
+
+  it('uses the empty-state subject when test=true and there are no events', () => {
+    const d = buildEmailDigest([], { test: true })
+    expect(d.subject).toBe('[TEST] Your PokePrices alert digest')
+  })
 })
 
 describe('buildEmailDigest — preview text', () => {
