@@ -4,8 +4,14 @@
 // Calls /api/admin/recent-sales/inspect with the signed-in user's
 // Supabase Auth bearer token. No mutation actions.
 
-import { Fragment, useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import {
+  DEFAULT_ARM_THRESHOLD_MS,
+  initialArmedState,
+  nextArmedState,
+  type ArmedState,
+} from './_armedClick'
 
 type ImportRunRow = {
   id: string; provider: string; source: string; status: string
@@ -325,6 +331,163 @@ function EvaluatorDryRunButton() {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// Admin-only WRITE-mode button. Posts { dryRun: false, limitUsers: 5 }
+// to the same /api/admin/alerts/evaluate route the dry-run button
+// uses. Gated by a two-click confirmation (see _armedClick.ts) so a
+// stray click cannot insert alert_events. The route itself remains
+// gated by ALERTS_EVALUATOR_ENABLED + requireAdmin.
+//
+// IMPORTANT: this button does NOT send any email. The evaluator
+// inserts rows into alert_events; the email/digest layer that
+// eventually consumes them is a separate, not-yet-built block.
+function EvaluatorWriteModeButton() {
+  const [arm,    setArm]    = useState<ArmedState>(initialArmedState())
+  const [busy,   setBusy]   = useState(false)
+  const [status, setStatus] = useState<number | null>(null)
+  const [body,   setBody]   = useState<unknown>(null)
+  const [error,  setError]  = useState<string | null>(null)
+  // setTimeout handle so we can cancel a pending auto-disarm when a
+  // second click lands first.
+  const disarmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => () => {
+    if (disarmTimerRef.current) clearTimeout(disarmTimerRef.current)
+  }, [])
+
+  async function run() {
+    setBusy(true); setError(null); setStatus(null); setBody(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        setError('Not signed in. Sign in with an authorised admin account.')
+        return
+      }
+      const res = await fetch('/api/admin/alerts/evaluate', {
+        method:  'POST',
+        headers: {
+          authorization:  `Bearer ${session.access_token}`,
+          'content-type': 'application/json',
+        },
+        // Hard-coded literals — the browser cannot supply a different
+        // limit or dryRun. The route enforces the same on its side.
+        body:    JSON.stringify({ dryRun: false, limitUsers: 5 }),
+        cache:   'no-store',
+      })
+      setStatus(res.status)
+      const text = await res.text()
+      try { setBody(JSON.parse(text)) } catch { setBody(text) }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'unknown error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function click() {
+    if (busy) return
+    const decision = nextArmedState(arm, Date.now())
+    if (decision.shouldRun) {
+      if (disarmTimerRef.current) {
+        clearTimeout(disarmTimerRef.current)
+        disarmTimerRef.current = null
+      }
+      setArm(initialArmedState())
+      void run()
+      return
+    }
+    setArm({ armed: decision.armed, armedAt: decision.armedAt })
+    if (disarmTimerRef.current) clearTimeout(disarmTimerRef.current)
+    disarmTimerRef.current = setTimeout(() => {
+      setArm(initialArmedState())
+      disarmTimerRef.current = null
+    }, DEFAULT_ARM_THRESHOLD_MS)
+  }
+
+  const armed = arm.armed
+  const label = busy
+    ? 'Running…'
+    : armed
+      ? 'Click again to confirm — auto-cancels in 5s'
+      : 'Run evaluator and create alert events'
+
+  const summary = (body && typeof body === 'object' && !Array.isArray(body))
+    ? (body as Record<string, unknown>)
+    : null
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <button
+        onClick={click}
+        disabled={busy}
+        aria-pressed={armed}
+        style={{
+          padding: '6px 12px', borderRadius: 6,
+          border: '1px solid ' + (armed ? 'var(--red, #c00)' : 'var(--border)'),
+          background: armed ? 'var(--red, #c00)' : 'transparent',
+          color:      armed ? '#fff'             : 'var(--red, #c00)',
+          cursor: busy ? 'wait' : 'pointer',
+          fontSize: 12, fontWeight: 700,
+          fontFamily: "'Figtree', sans-serif",
+        }}
+      >{label}</button>
+      <span style={{ marginLeft: 10, fontSize: 11, color: 'var(--text-muted)' }}>
+        This creates <strong style={{ color: 'var(--text)' }}>alert_events</strong> but does not send emails.
+      </span>
+
+      {(status != null || error) && (
+        <div style={{ marginTop: 8 }}>
+          {error && (
+            <div style={{ fontSize: 12, color: 'var(--red, #c00)', marginBottom: 4 }}>
+              {error}
+            </div>
+          )}
+          {status != null && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+              HTTP <strong style={{ color: 'var(--text)' }}>{status}</strong>
+            </div>
+          )}
+          {summary && (
+            <div style={{
+              display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8,
+              marginTop: 6, marginBottom: 8,
+            }}>
+              <SmallStat label="users considered"      value={summary.usersConsidered} />
+              <SmallStat label="cards considered"      value={summary.cardsConsidered} />
+              <SmallStat label="triggers found"        value={summary.triggersFound} />
+              <SmallStat label="suppressed by cooldown" value={summary.triggersSuppressedByCooldown} />
+              <SmallStat label="triggers inserted"     value={summary.triggersInserted} />
+            </div>
+          )}
+          {body != null && (
+            <pre style={{
+              margin: 0, padding: 8, borderRadius: 6,
+              background: 'var(--card)', border: '1px solid var(--border)',
+              fontFamily: 'monospace', fontSize: 11,
+              overflowX: 'auto', whiteSpace: 'pre',
+              maxHeight: 320,
+            }}>
+{typeof body === 'string' ? body : JSON.stringify(body, null, 2)}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SmallStat({ label, value }: { label: string; value: unknown }) {
+  const display = typeof value === 'number' ? value : '—'
+  return (
+    <div style={{
+      background: 'var(--bg-light)', padding: '6px 10px',
+      borderRadius: 6, border: '1px solid var(--border)',
+    }}>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{display}</div>
     </div>
   )
 }
@@ -734,30 +897,34 @@ export default function RecentSalesAdminClient() {
             {snap.engagement.alerts.latest.length > 0 && (
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Latest 10 alert events (newest first)</div>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                  <thead><tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
-                    <th style={{ padding: 6 }}>detected_at</th>
-                    <th style={{ padding: 6 }}>card</th>
-                    <th style={{ padding: 6 }}>set</th>
-                    <th style={{ padding: 6 }}>rule</th>
-                    <th style={{ padding: 6 }}>severity</th>
-                    <th style={{ padding: 6 }}>delivered</th>
-                  </tr></thead>
-                  <tbody>
-                    {snap.engagement.alerts.latest.map((e, i) => (
-                      <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td style={{ padding: 6 }}>{fmtDateTime(e.detectedAt)}</td>
-                        <td style={{ padding: 6 }}>{e.cardName ?? e.cardSlug}</td>
-                        <td style={{ padding: 6, color: 'var(--text-muted)' }}>{e.setName ?? '—'}</td>
-                        <td style={{ padding: 6, fontFamily: 'monospace', fontSize: 11 }}>{e.rule}</td>
-                        <td style={{ padding: 6 }}>{e.severity}</td>
-                        <td style={{ padding: 6, color: e.delivered ? 'var(--green, #2a7)' : 'var(--text-muted)' }}>
-                          {e.delivered ? 'yes' : '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead><tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
+                      <th style={{ padding: 6 }}>detected_at</th>
+                      <th style={{ padding: 6 }}>card name</th>
+                      <th style={{ padding: 6 }}>set name</th>
+                      <th style={{ padding: 6 }}>card slug</th>
+                      <th style={{ padding: 6 }}>rule</th>
+                      <th style={{ padding: 6 }}>severity</th>
+                      <th style={{ padding: 6 }}>delivered</th>
+                    </tr></thead>
+                    <tbody>
+                      {snap.engagement.alerts.latest.map((e, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ padding: 6 }}>{fmtDateTime(e.detectedAt)}</td>
+                          <td style={{ padding: 6 }}>{e.cardName ?? '—'}</td>
+                          <td style={{ padding: 6, color: 'var(--text-muted)' }}>{e.setName ?? '—'}</td>
+                          <td style={{ padding: 6, fontFamily: 'monospace', fontSize: 11 }}>{e.cardSlug}</td>
+                          <td style={{ padding: 6, fontFamily: 'monospace', fontSize: 11 }}>{e.rule}</td>
+                          <td style={{ padding: 6 }}>{e.severity}</td>
+                          <td style={{ padding: 6, color: e.delivered ? 'var(--green, #2a7)' : 'var(--text-muted)' }}>
+                            {e.delivered ? 'yes' : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
@@ -768,8 +935,9 @@ export default function RecentSalesAdminClient() {
               marginBottom: 16,
             }}>
               <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Run the alert evaluator</div>
-              <div>Requires <code>ALERTS_EVALUATOR_ENABLED=true</code> in the runtime env. The button below runs a dry-run capped at 5 users — no writes, no emails. There is no write-mode button by design; use cURL when you want to insert.</div>
+              <div>Requires <code>ALERTS_EVALUATOR_ENABLED=true</code> in the runtime env. The dry-run button is read-only — no writes, no emails. The write-mode button inserts into <code>alert_events</code> but still sends no emails; it is gated by a two-click confirmation.</div>
               <EvaluatorDryRunButton />
+              <EvaluatorWriteModeButton />
               <pre style={{
                 margin: '6px 0 0', padding: 8, borderRadius: 6,
                 background: 'var(--card)', border: '1px solid var(--border)',
