@@ -190,34 +190,92 @@ function buildPreviewText(events: DigestEvent[], sample: boolean): string {
 // Body renderers
 // ─────────────────────────────────────────────────────────────────────
 
+// Brand palette. Hex literals (not CSS variables) because most email
+// clients strip / ignore CSS custom properties. Kept tight: one navy
+// for the wordmark, one primary blue for accents + links, a single
+// soft border colour, two muted greys.
+const BRAND = {
+  navy:        '#0d2747',
+  primary:     '#1a5fad',
+  primarySoft: '#eaf1f9',
+  text:        '#1a1a1a',
+  muted:       '#5f6b7a',
+  mutedSoft:   '#8a93a0',
+  border:      '#e6e9ee',
+  cardBg:      '#fbfbfd',
+} as const
+
+const TAGLINE = 'Track your Pokémon card market moves'
+const MANAGE_URL = 'https://www.pokeprices.io/dashboard/settings'
+
 function renderHtml(events: DigestEvent[], sample: boolean): string {
   const groups = groupBySeverity(events)
+
+  // ── Header — wordmark + tagline, thin primary underline ──
+  const header = `
+    <table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 18px;">
+      <tr>
+        <td style="padding:0 0 12px;border-bottom:2px solid ${BRAND.primary};">
+          <div style="font-family:'Outfit',sans-serif;font-size:22px;font-weight:800;color:${BRAND.navy};letter-spacing:-0.2px;">PokePrices</div>
+          <div style="font-family:'Figtree',sans-serif;font-size:12px;color:${BRAND.muted};margin-top:2px;">${esc(TAGLINE)}</div>
+        </td>
+      </tr>
+    </table>`
+
+  const intro = `
+    <p style="font-family:'Figtree',sans-serif;font-size:13px;color:${BRAND.muted};margin:0 0 16px;line-height:1.5;">
+      A short summary of meaningful changes on cards you watch.
+    </p>`
+
   const sampleBanner = sample ? `
-    <div style="background:#fff3cd;border:1px solid #ffe69c;color:#664d03;padding:10px 12px;border-radius:8px;margin-bottom:16px;font-size:13px;font-family:'Figtree',sans-serif;">
+    <div style="background:#fff7e0;border:1px solid #f3d36b;color:#704a00;padding:10px 12px;border-radius:8px;margin:0 0 20px;font-size:13px;font-family:'Figtree',sans-serif;">
       <strong>Sample data</strong> — this email was generated from hand-crafted events for design review. It would NOT be sent to a recipient.
     </div>` : ''
 
   const sections = groups.map(g => `
-    <h2 style="font-family:'Outfit',sans-serif;font-size:15px;color:#1a1a1a;margin:24px 0 8px;">${esc(SEVERITY_LABEL[g.severity])}</h2>
-    <table style="width:100%;border-collapse:collapse;">
+    <h2 style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:800;color:${BRAND.navy};margin:24px 0 10px;text-transform:uppercase;letter-spacing:0.8px;">${esc(SEVERITY_LABEL[g.severity])}</h2>
+    <table role="presentation" style="width:100%;border-collapse:collapse;">
       <tbody>
         ${g.events.map(ev => `
         <tr>
-          <td style="padding:10px 12px;background:#f7f7f7;border:1px solid #e6e6e6;border-radius:8px;">
-            <div style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:700;color:#1a1a1a;">${esc(ev.cardName)}</div>
-            <div style="font-family:'Figtree',sans-serif;font-size:12px;color:#666;margin-top:2px;">${esc(ev.setName)}</div>
-            <div style="font-family:'Figtree',sans-serif;font-size:12px;color:#1a1a1a;margin-top:8px;">
-              <span style="display:inline-block;padding:2px 6px;border-radius:4px;background:#1a5fad;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;margin-right:6px;">${esc(RULE_TITLE[ev.rule])}</span>
+          <td style="padding:14px 16px;background:${BRAND.cardBg};border:1px solid ${BRAND.border};border-radius:10px;">
+            <div style="font-family:'Outfit',sans-serif;font-size:15px;font-weight:700;color:${BRAND.text};line-height:1.3;">${esc(ev.cardName)}</div>
+            <div style="font-family:'Figtree',sans-serif;font-size:12px;color:${BRAND.muted};margin-top:3px;">${esc(ev.setName)}</div>
+            <div style="font-family:'Figtree',sans-serif;font-size:13px;color:${BRAND.text};margin-top:10px;line-height:1.5;">
+              <span style="display:inline-block;padding:3px 8px;border-radius:999px;background:${BRAND.primarySoft};color:${BRAND.primary};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.7px;margin-right:8px;vertical-align:middle;">${esc(RULE_TITLE[ev.rule])}</span>
               ${esc(reasonText(ev))}
             </div>
-            ${ev.cardUrl ? `<div style="margin-top:8px;"><a href="${esc(ev.cardUrl)}" style="font-family:'Figtree',sans-serif;font-size:12px;color:#1a5fad;font-weight:700;text-decoration:none;">View card →</a></div>` : ''}
+            ${ev.cardUrl ? `
+            <div style="margin-top:12px;">
+              <a href="${esc(ev.cardUrl)}" style="display:inline-block;padding:8px 14px;border-radius:8px;background:${BRAND.primary};color:#ffffff;font-family:'Figtree',sans-serif;font-size:12px;font-weight:700;text-decoration:none;letter-spacing:0.2px;">View card →</a>
+            </div>` : ''}
           </td>
         </tr>
-        <tr><td style="height:8px;"></td></tr>
+        <tr><td style="height:10px;line-height:10px;">&nbsp;</td></tr>
         `).join('')}
       </tbody>
     </table>
   `).join('')
+
+  // ── Footer — wordmark + reason + manage link. No unsubscribe link
+  // because the per-user opt-out flow is the in-app settings page.
+  const footer = `
+    <table role="presentation" style="width:100%;border-collapse:collapse;margin:32px 0 0;border-top:1px solid ${BRAND.border};">
+      <tr>
+        <td style="padding:18px 0 0;">
+          <div style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:800;color:${BRAND.navy};letter-spacing:-0.1px;">PokePrices</div>
+          <p style="font-family:'Figtree',sans-serif;font-size:11px;color:${BRAND.mutedSoft};line-height:1.6;margin:6px 0 0;">
+            You are receiving this because you enabled card alerts.<br>
+            <a href="${MANAGE_URL}" style="color:${BRAND.primary};text-decoration:none;font-weight:700;">Manage alerts</a>
+            · We never share your address. We never sell your data.
+          </p>
+        </td>
+      </tr>
+    </table>`
+
+  const body = events.length === 0
+    ? `<p style="font-family:'Figtree',sans-serif;font-size:13px;color:${BRAND.muted};">No new alerts since your last digest.</p>`
+    : sections
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -226,18 +284,13 @@ function renderHtml(events: DigestEvent[], sample: boolean): string {
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Your PokePrices alert digest</title>
 </head>
-<body style="margin:0;padding:24px;background:#ffffff;font-family:'Figtree',sans-serif;color:#1a1a1a;">
+<body style="margin:0;padding:24px;background:#ffffff;font-family:'Figtree',sans-serif;color:${BRAND.text};">
   <div style="max-width:560px;margin:0 auto;">
-    <h1 style="font-family:'Outfit',sans-serif;font-size:22px;margin:0 0 6px;color:#1a1a1a;">PokePrices alerts</h1>
-    <p style="font-family:'Figtree',sans-serif;font-size:13px;color:#666;margin:0 0 16px;">A short summary of meaningful changes on cards you watch.</p>
+    ${header}
+    ${intro}
     ${sampleBanner}
-    ${events.length === 0
-      ? '<p style="font-family:\'Figtree\',sans-serif;font-size:13px;color:#666;">No new alerts since your last digest.</p>'
-      : sections}
-    <hr style="border:none;border-top:1px solid #e6e6e6;margin:32px 0 16px;">
-    <p style="font-family:'Figtree',sans-serif;font-size:11px;color:#888;line-height:1.6;">
-      You're receiving this because your Smart alerts are enabled at pokeprices.io/dashboard/settings. Manage alerts there. We do not share your address; we never sell data.
-    </p>
+    ${body}
+    ${footer}
   </div>
 </body>
 </html>`
@@ -245,7 +298,10 @@ function renderHtml(events: DigestEvent[], sample: boolean): string {
 
 function renderText(events: DigestEvent[], sample: boolean): string {
   const lines: string[] = []
-  lines.push('PokePrices alerts')
+  lines.push('PokePrices')
+  lines.push(TAGLINE)
+  lines.push('='.repeat(Math.max(TAGLINE.length, 'PokePrices'.length)))
+  lines.push('')
   lines.push('A short summary of meaningful changes on cards you watch.')
   lines.push('')
   if (sample) {
@@ -267,7 +323,9 @@ function renderText(events: DigestEvent[], sample: boolean): string {
     }
   }
   lines.push('---')
-  lines.push('Manage alerts at https://www.pokeprices.io/dashboard/settings')
+  lines.push('PokePrices')
+  lines.push('You are receiving this because you enabled card alerts.')
+  lines.push(`Manage alerts at ${MANAGE_URL}`)
   return lines.join('\n')
 }
 

@@ -154,12 +154,16 @@ describe('buildEmailDigest — sections', () => {
 // ─────────────────────────────────────────────────────────────────────
 
 describe('buildEmailDigest — links and escaping', () => {
-  it('renders an anchor when cardUrl is present and no anchor when absent', () => {
+  it('renders the View card button when cardUrl is present and omits it when absent', () => {
     const withUrl = buildEmailDigest([ev({ cardUrl: 'https://www.pokeprices.io/set/Base/card/x' })])
     expect(withUrl.html).toMatch(/href="https:\/\/www\.pokeprices\.io\/set\/Base\/card\/x"/)
+    expect(withUrl.html).toMatch(/View card →<\/a>/)
     expect(withUrl.text).toMatch(/https:\/\/www\.pokeprices\.io\/set\/Base\/card\/x/)
+    // No "View card" button when no URL is supplied — but the footer
+    // Manage-alerts link does still appear, so we cannot blanket-assert
+    // there is no href in the document.
     const noUrl = buildEmailDigest([ev({})])
-    expect(noUrl.html).not.toMatch(/href=/)
+    expect(noUrl.html).not.toMatch(/View card →/)
   })
 
   it('escapes HTML in card and set names', () => {
@@ -186,6 +190,60 @@ describe('buildSampleEvents', () => {
       expect(e.cardName.length).toBeGreaterThan(0)
       expect(e.setName.length).toBeGreaterThan(0)
     }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Branding
+// ─────────────────────────────────────────────────────────────────────
+
+describe('buildEmailDigest — branding', () => {
+  it('renders the PokePrices wordmark in the HTML header and the plain text header', () => {
+    const d = buildEmailDigest([ev({})])
+    expect(d.html).toMatch(/PokePrices/)
+    expect(d.text).toMatch(/^PokePrices$/m)
+  })
+
+  it('renders the tagline in both HTML and text', () => {
+    const d = buildEmailDigest([ev({})])
+    const tagline = 'Track your Pokémon card market moves'
+    expect(d.html).toContain(tagline)
+    expect(d.text).toContain(tagline)
+  })
+
+  it('renders View card as an anchor styled like a branded button', () => {
+    const d = buildEmailDigest([ev({ cardUrl: 'https://www.pokeprices.io/set/Base/card/x' })])
+    // Branded look: anchor uses the primary blue background + white text.
+    expect(d.html).toMatch(/<a\b[^>]*href="https:\/\/www\.pokeprices\.io\/set\/Base\/card\/x"[^>]*background:#1a5fad/)
+    expect(d.html).toMatch(/View card →<\/a>/)
+  })
+
+  it('renders a footer with the brand line, opt-in reason, and the manage-alerts link', () => {
+    const d = buildEmailDigest([ev({})])
+    // HTML footer must contain the reason copy + manage link + the
+    // wordmark a second time (top + bottom).
+    expect(d.html).toMatch(/You are receiving this because you enabled card alerts/)
+    expect(d.html).toMatch(/href="https:\/\/www\.pokeprices\.io\/dashboard\/settings"[^>]*>Manage alerts<\/a>/)
+    // The HTML contains the PokePrices wordmark at least twice (header + footer).
+    expect((d.html.match(/PokePrices/g) ?? []).length).toBeGreaterThanOrEqual(2)
+
+    // Plain text mirrors the structure.
+    expect(d.text).toMatch(/You are receiving this because you enabled card alerts/)
+    expect(d.text).toMatch(/Manage alerts at https:\/\/www\.pokeprices\.io\/dashboard\/settings/)
+  })
+
+  it('does NOT include an unsubscribe link (in-app settings is the opt-out flow)', () => {
+    const d = buildEmailDigest([ev({})])
+    expect(d.html.toLowerCase()).not.toMatch(/unsubscribe/)
+    expect(d.text.toLowerCase()).not.toMatch(/unsubscribe/)
+  })
+
+  it('keeps the sample banner visible alongside the new header when sample=true', () => {
+    const d = buildEmailDigest(buildSampleEvents(), { sample: true })
+    expect(d.html).toMatch(/PokePrices/)
+    expect(d.html).toMatch(/Sample data/)
+    expect(d.text).toMatch(/PokePrices/)
+    expect(d.text).toMatch(/\[SAMPLE DATA/)
   })
 })
 

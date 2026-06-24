@@ -181,9 +181,11 @@ describe('POST /api/admin/alerts/preview-email — real mode', () => {
     expect(j.html).toMatch(/href="https:\/\/www\.pokeprices\.io\/set\/Gym%20Challenge\/card\/lt-surges-raichu-1st-edition-11"/)
   })
 
-  it('renders the event without a link when the slug is missing from cards', async () => {
-    // Seed only the alert_events; do NOT seed cards. Both rows should
-    // render but neither should carry an anchor.
+  it('renders the event without a View card button when the slug is missing from cards', async () => {
+    // Seed only the alert_events; do NOT seed cards. The event row
+    // should render with no "View card" button — but the branded
+    // footer's Manage-alerts link does still appear, so we cannot
+    // blanket-assert there is no href anywhere in the document.
     fakeDB.seed('alert_events', [
       { user_id: 'admin-uid', card_slug: '9999999', card_name: 'Unresolvable', set_name: 'X',
         rule: 'raw_change', severity: 'normal', payload_json: { old: 100, new: 110, pct: 10 },
@@ -192,7 +194,7 @@ describe('POST /api/admin/alerts/preview-email — real mode', () => {
     const r = await POST(req())
     const j = await r.json()
     expect(j.html).toMatch(/Unresolvable/)
-    expect(j.html).not.toMatch(/href=/)
+    expect(j.html).not.toMatch(/View card →/)
   })
 })
 
