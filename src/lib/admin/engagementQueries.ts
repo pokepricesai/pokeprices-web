@@ -14,6 +14,16 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+export type AlertEventLatestRow = {
+  detectedAt:  string
+  cardSlug:    string
+  cardName:    string | null
+  setName:     string | null
+  rule:        string
+  severity:    string
+  delivered:   boolean
+}
+
 export type EngagementSnapshot = {
   watchlist: {
     rows:           number
@@ -34,6 +44,8 @@ export type EngagementSnapshot = {
     alertPreferenceRows:    number   // new user_alert_preferences rows
     alertEventsAllTime:     number   // new alert_events total
     alertEvents7d:          number   // new alert_events in the last 7d
+    alertEventsUndelivered: number   // delivered_at IS NULL
+    latest:                 AlertEventLatestRow[]   // newest 10, no user_id
   }
 }
 
@@ -127,6 +139,37 @@ export async function getEngagementSnapshot(supa: SupabaseClient): Promise<Engag
   const since7                 = new Date(Date.now() - 7 * 86_400_000).toISOString()
   const alertEvents7d          = await safeCountWhereGte(supa, 'alert_events', 'detected_at', since7)
 
+  // Undelivered count + a small "latest events" sample. user_id is
+  // deliberately excluded from the sample to keep this panel free of
+  // PII — the admin only needs to see which cards/rules are firing.
+  let alertEventsUndelivered = 0
+  try {
+    const { count, error } = await supa.from('alert_events').select('*', { count: 'exact', head: true }).is('delivered_at', null)
+    if (!error) alertEventsUndelivered = count ?? 0
+  } catch { /* fail closed */ }
+
+  const latest: AlertEventLatestRow[] = []
+  try {
+    const { data, error } = await supa
+      .from('alert_events')
+      .select('detected_at, card_slug, card_name, set_name, rule, severity, delivered_at')
+      .order('detected_at', { ascending: false })
+      .limit(10)
+    if (!error && Array.isArray(data)) {
+      for (const r of data as Array<Record<string, unknown>>) {
+        latest.push({
+          detectedAt: String(r.detected_at),
+          cardSlug:   String(r.card_slug),
+          cardName:   r.card_name == null ? null : String(r.card_name),
+          setName:    r.set_name  == null ? null : String(r.set_name),
+          rule:       String(r.rule),
+          severity:   String(r.severity),
+          delivered:  r.delivered_at != null,
+        })
+      }
+    }
+  } catch { /* fail closed */ }
+
   return {
     watchlist: {
       rows:          watchRows,
@@ -142,6 +185,8 @@ export async function getEngagementSnapshot(supa: SupabaseClient): Promise<Engag
       alertPreferenceRows,
       alertEventsAllTime,
       alertEvents7d,
+      alertEventsUndelivered,
+      latest,
     },
   }
 }

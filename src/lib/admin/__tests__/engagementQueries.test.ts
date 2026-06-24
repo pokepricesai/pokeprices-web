@@ -25,6 +25,8 @@ describe('getEngagementSnapshot — empty database', () => {
       alertPreferenceRows:    0,
       alertEventsAllTime:     0,
       alertEvents7d:          0,
+      alertEventsUndelivered: 0,
+      latest:                 [],
     })
   })
 })
@@ -107,6 +109,25 @@ describe('getEngagementSnapshot — alert counts', () => {
     const snap = await getEngagementSnapshot(asSupa(fakeDB))
     expect(snap.alerts.alertEventsAllTime).toBe(3)
     expect(snap.alerts.alertEvents7d).toBe(2)
+  })
+
+  it('counts undelivered events (delivered_at IS NULL) and surfaces the latest 10 without user_id', async () => {
+    const now = Date.now()
+    fakeDB.seed('alert_events', [
+      { id: 'e1', user_id: 'u1', detected_at: new Date(now - 1 * 86_400_000).toISOString(), card_slug: 'a', card_name: 'Charizard', set_name: 'Base',  rule: 'raw_change',   severity: 'normal', delivered_at: null },
+      { id: 'e2', user_id: 'u2', detected_at: new Date(now - 2 * 86_400_000).toISOString(), card_slug: 'b', card_name: 'Blastoise', set_name: 'Base',  rule: 'psa10_change', severity: 'high',   delivered_at: new Date(now - 1 * 86_400_000).toISOString() },
+    ])
+    const snap = await getEngagementSnapshot(asSupa(fakeDB))
+    expect(snap.alerts.alertEventsUndelivered).toBe(1)
+    expect(snap.alerts.latest).toHaveLength(2)
+    expect(snap.alerts.latest[0]).toMatchObject({
+      cardSlug: 'a', cardName: 'Charizard', setName: 'Base',
+      rule: 'raw_change', severity: 'normal', delivered: false,
+    })
+    expect(snap.alerts.latest[1].delivered).toBe(true)
+    const blob = JSON.stringify(snap.alerts.latest)
+    expect(blob).not.toMatch(/u1|u2/)        // user_id excluded from the sample
+    expect(blob).not.toMatch(/"user_id"/i)
   })
 })
 

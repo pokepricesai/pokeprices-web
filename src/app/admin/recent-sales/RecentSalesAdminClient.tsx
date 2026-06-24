@@ -101,6 +101,15 @@ type AffiliateMonitoringPanel = {
   placements: string[]
   metrics?:   AffiliateMonitoringMetrics
 }
+type AlertEventLatestRow = {
+  detectedAt: string
+  cardSlug:   string
+  cardName:   string | null
+  setName:    string | null
+  rule:       string
+  severity:   string
+  delivered:  boolean
+}
 type EngagementSnapshot = {
   watchlist: {
     rows:           number
@@ -121,6 +130,8 @@ type EngagementSnapshot = {
     alertPreferenceRows:    number
     alertEventsAllTime:     number
     alertEvents7d:          number
+    alertEventsUndelivered: number
+    latest:                 AlertEventLatestRow[]
   }
 }
 type Snapshot = {
@@ -629,7 +640,63 @@ export default function RecentSalesAdminClient() {
               <StatTile label="alert prefs rows"       value={snap.engagement.alerts.alertPreferenceRows} />
               <StatTile label="alert events — all"     value={snap.engagement.alerts.alertEventsAllTime} />
               <StatTile label="alert events — 7d"      value={snap.engagement.alerts.alertEvents7d} />
+              <StatTile label="undelivered events"     value={snap.engagement.alerts.alertEventsUndelivered} />
               <StatTile label="legacy threshold alerts" value={snap.engagement.alerts.legacyUserAlertsActive} />
+            </div>
+
+            {snap.engagement.alerts.latest.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Latest 10 alert events (newest first)</div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead><tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
+                    <th style={{ padding: 6 }}>detected_at</th>
+                    <th style={{ padding: 6 }}>card</th>
+                    <th style={{ padding: 6 }}>set</th>
+                    <th style={{ padding: 6 }}>rule</th>
+                    <th style={{ padding: 6 }}>severity</th>
+                    <th style={{ padding: 6 }}>delivered</th>
+                  </tr></thead>
+                  <tbody>
+                    {snap.engagement.alerts.latest.map((e, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: 6 }}>{fmtDateTime(e.detectedAt)}</td>
+                        <td style={{ padding: 6 }}>{e.cardName ?? e.cardSlug}</td>
+                        <td style={{ padding: 6, color: 'var(--text-muted)' }}>{e.setName ?? '—'}</td>
+                        <td style={{ padding: 6, fontFamily: 'monospace', fontSize: 11 }}>{e.rule}</td>
+                        <td style={{ padding: 6 }}>{e.severity}</td>
+                        <td style={{ padding: 6, color: e.delivered ? 'var(--green, #2a7)' : 'var(--text-muted)' }}>
+                          {e.delivered ? 'yes' : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div style={{
+              padding: '10px 12px', borderRadius: 8,
+              border: '1px solid var(--border)', background: 'var(--bg-light)',
+              fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6,
+              marginBottom: 16,
+            }}>
+              <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Run the alert evaluator</div>
+              <div>Set <code>ALERTS_EVALUATOR_ENABLED=true</code> in the runtime env, then POST your admin bearer token:</div>
+              <pre style={{
+                margin: '6px 0 0', padding: 8, borderRadius: 6,
+                background: 'var(--card)', border: '1px solid var(--border)',
+                fontFamily: 'monospace', fontSize: 11, overflowX: 'auto', whiteSpace: 'pre',
+              }}>
+{`# dry-run (default): returns proposals, writes nothing
+curl -X POST /api/admin/alerts/evaluate \\
+  -H "authorization: Bearer <session token>"
+
+# write mode: inserts into alert_events, still sends NO emails
+curl -X POST /api/admin/alerts/evaluate \\
+  -H "authorization: Bearer <session token>" \\
+  -H "content-type: application/json" \\
+  -d '{"dryRun": false}'`}
+              </pre>
             </div>
             {snap.engagement.watchlist.topCards.length > 0 && (
               <div>

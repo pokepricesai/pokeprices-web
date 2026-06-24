@@ -129,6 +129,8 @@ describe('GET /api/admin/recent-sales/inspect — success path', () => {
     expect(j.engagement.portfolio.items).toBe(0)
     expect(j.engagement.alerts.alertPreferenceRows).toBe(0)
     expect(j.engagement.alerts.alertEventsAllTime).toBe(0)
+    expect(j.engagement.alerts.alertEventsUndelivered).toBe(0)
+    expect(j.engagement.alerts.latest).toEqual([])
     expect(JSON.stringify(j.engagement)).not.toMatch(/"user_id"/i)
     expect(JSON.stringify(j.engagement)).not.toMatch(/"email"/i)
 
