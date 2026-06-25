@@ -72,6 +72,12 @@ export type ValuedItem = {
    *  no market value but a manual override exists. 'missing' means
    *  neither market nor manual exists for this card. */
   source:                ValuationPriceSource
+  /** Block 5A-W-16E — 30-day percent change for the card, sourced
+   *  from card_trends.raw_pct_30d (same field the portfolio dashboard
+   *  displays). Null when no card_trends row exists for this card OR
+   *  when raw_pct_30d is null. Signed percent (e.g. -15.6, +19.8) —
+   *  same scale the dashboard's fmtPct expects. */
+  pct30d:                number | null
 }
 
 export type PortfolioValuation = {
@@ -138,16 +144,21 @@ export async function valuePortfolio(
     itemCount += qty
     const ht  = (holding.holding_type ?? '').toLowerCase()
 
+    // Block 5A-W-16E — look up the 30d trend ONCE per row. Used by
+    // every source path so the digest can show dashboard-equivalent
+    // 30d movement regardless of which price source priced the card.
+    const trendKey = `${holding.card_name ?? ''}::${holding.set_name ?? ''}`
+    const trend    = trendMap.get(trendKey)
+    const pct30d   = trend?.raw_pct_30d ?? null
+
     // --- Pass 1: card_trends precedence for raw / psa9 / psa10
     if (ht === 'raw' || ht === 'psa9' || ht === 'psa10') {
-      const key   = `${holding.card_name ?? ''}::${holding.set_name ?? ''}`
-      const trend = trendMap.get(key)
       const col: 'current_raw' | 'current_psa9' | 'current_psa10' =
         ht === 'raw' ? 'current_raw' : ht === 'psa9' ? 'current_psa9' : 'current_psa10'
       const market = trend?.[col] ?? null
       if (market != null && Number.isFinite(market)) {
         sourceCounts.card_trends += 1
-        return makeItem(holding, market, qty, 'card_trends')
+        return makeItem(holding, market, qty, 'card_trends', pct30d)
       }
       // No card_trends row for this card → still try a daily_prices
       // fallback before giving up. This mirrors the dashboard's
@@ -167,7 +178,7 @@ export async function valuePortfolio(
         const v = dp[dpCol]
         if (v != null && Number.isFinite(v)) {
           sourceCounts.daily_prices += 1
-          return makeItem(holding, Number(v), qty, 'daily_prices')
+          return makeItem(holding, Number(v), qty, 'daily_prices', pct30d)
         }
       }
     }
@@ -185,6 +196,7 @@ export async function valuePortfolio(
         marketValueCents:     null,
         positionValueCents:   null,
         source:               'manual',
+        pct30d,
       }
     }
 
@@ -196,6 +208,7 @@ export async function valuePortfolio(
       marketValueCents:     null,
       positionValueCents:   null,
       source:               'missing',
+      pct30d,
     }
   })
 
@@ -216,6 +229,7 @@ function makeItem(
   marketCents: number,
   qty: number,
   source: ValuationPriceSource,
+  pct30d: number | null,
 ): ValuedItem {
   const market = Math.round(marketCents)
   const manualRaw = holding.manual_value_cents
@@ -228,6 +242,7 @@ function makeItem(
     marketValueCents:     market,
     positionValueCents:   market * qty,
     source,
+    pct30d,
   }
 }
 
@@ -241,6 +256,7 @@ type CardTrendRow = {
   current_raw:   number | null
   current_psa9:  number | null
   current_psa10: number | null
+  raw_pct_30d:   number | null
 }
 
 async function loadCardTrends(
@@ -250,9 +266,12 @@ async function loadCardTrends(
 ): Promise<Map<string, CardTrendRow>> {
   const out = new Map<string, CardTrendRow>()
   if (names.length === 0 || sets.length === 0) return out
+  // Block 5A-W-16E — also pull raw_pct_30d so the digest can show
+  // dashboard-equivalent 30d movement per card instead of inventing
+  // a 7d move by comparing card_trends-current to daily_prices-7d-ago.
   const { data, error } = await supa
     .from('card_trends')
-    .select('card_name, set_name, current_raw, current_psa9, current_psa10')
+    .select('card_name, set_name, current_raw, current_psa9, current_psa10, raw_pct_30d')
     .in('card_name', names)
     .in('set_name',  sets)
   if (error || !Array.isArray(data)) return out
@@ -264,6 +283,7 @@ async function loadCardTrends(
       current_raw:   r.current_raw   == null ? null : Number(r.current_raw),
       current_psa9:  r.current_psa9  == null ? null : Number(r.current_psa9),
       current_psa10: r.current_psa10 == null ? null : Number(r.current_psa10),
+      raw_pct_30d:   r.raw_pct_30d   == null ? null : Number(r.raw_pct_30d),
     })
   }
   return out

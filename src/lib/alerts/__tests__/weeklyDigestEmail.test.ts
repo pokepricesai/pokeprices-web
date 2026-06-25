@@ -30,13 +30,18 @@ function emptyDiagnostics(generatedAt = '2026-06-25T12:00:00Z'): WeeklyDigestDia
     cardsWithNoRecentSales:      0,
     portfolioPriceBasisCounts:   { raw_usd: 0, psa9_usd: 0, psa10_usd: 0, unknown_fallback: 0 },
     displayCurrency:             'GBP',
-    portfolioValueSource:        'shared_valuation_helper',
-    portfolioPreviousValueSource:'daily_prices_baseline',
-    portfolioValueSourceCounts:  { card_trends: 0, daily_prices: 0, manual: 0, missing: 0 },
-    portfolioPortfoliosLoaded:        0,
-    portfolioItemsLoaded:             0,
-    portfolioItemsMissingCardName:    0,
-    portfolioItemsValuedAsMissing:    0,
+    portfolioValueSource:              'shared_valuation_helper',
+    portfolioMovementSource:           'none',
+    portfolioItemMovementWindowDays:   null,
+    portfolioHeadlineChangeSuppressed: true,
+    portfolioHeadlineSuppressedReason: 'no dashboard-equivalent historical total',
+    portfolioValueSourceCounts:        { card_trends: 0, daily_prices: 0, manual: 0, missing: 0 },
+    portfolioPortfoliosLoaded:           0,
+    portfolioItemsLoaded:                0,
+    portfolioItemsMissingCardName:       0,
+    portfolioItemsValuedAsMissing:       0,
+    portfolioHoldingsPricedCount:        0,
+    portfolioHoldingsMissingPriceCount:  0,
     sectionsOmittedByPreferences: [],
     generatedAt,
   }
@@ -169,6 +174,32 @@ describe('buildWeeklyDigestEmail — portfolio section', () => {
     }))
     expect(out.html).toMatch(/No portfolio items yet/)
     expect(out.text).toMatch(/No portfolio items yet/)
+  })
+
+  it('does NOT emit a "vs N days ago" headline change line when the section pctChange is null (Block 5A-W-16E)', () => {
+    const out = buildWeeklyDigestEmail(baseData({
+      currency: 'GBP',
+      portfolio: {
+        itemCount: 3,
+        currentTotalCents: 100_000,
+        previousTotalCents: null,
+        absChangeCents:     null,
+        pctChange:          null,
+        topItems: [{
+          cardSlug: '1', cardName: 'Charizard', setName: 'Base Set',
+          cardUrl: null,
+          currentCents: 29_074, previousCents: null,
+          pctChange: 19.8, absChangeCents: null,
+          recentSalesCount: 0, reason: 'biggest_riser',
+          pctChangeWindowDays: 30,
+        }],
+      },
+    }))
+    expect(out.html).not.toMatch(/vs \d+ days? ago/i)
+    // Per-card pct is still rendered, but labelled with the 30d window
+    expect(out.html).toMatch(/\+19\.8%/)
+    expect(out.html).toMatch(/\(30d\)/)
+    expect(out.text).toMatch(/\+19\.8% \(30d\)/)
   })
 
   it('renders a distinct "items found but no value" fallback when itemCount > 0 yet nothing priced (Block 5A-W-16D)', () => {
@@ -504,10 +535,12 @@ describe('buildSampleWeeklyDigestData — carries currency', () => {
     expect(d.diagnostics.displayCurrency).toBe(d.currency)
   })
 
-  it('echoes the shared_valuation_helper value source in diagnostics (Block 5A-W-16C)', () => {
+  it('echoes the shared_valuation_helper + dashboard_30d movement diagnostics (Block 5A-W-16E)', () => {
     const d = buildSampleWeeklyDigestData()
     expect(d.diagnostics.portfolioValueSource).toBe('shared_valuation_helper')
-    expect(d.diagnostics.portfolioPreviousValueSource).toBe('daily_prices_baseline')
+    expect(d.diagnostics.portfolioMovementSource).toBe('dashboard_30d')
+    expect(d.diagnostics.portfolioItemMovementWindowDays).toBe(30)
+    expect(d.diagnostics.portfolioHeadlineChangeSuppressed).toBe(true)
     expect(d.diagnostics.portfolioValueSourceCounts).toBeDefined()
   })
 })

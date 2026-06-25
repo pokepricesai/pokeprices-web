@@ -343,16 +343,21 @@ describe('buildWeeklyDigestForUser — slug resolution', () => {
 
     // Portfolio reflects the resolved price (USD-cents, quantity 1).
     expect(out.portfolio?.currentTotalCents).toBe(1200)
-    expect(out.portfolio?.previousTotalCents).toBe(1000)
-    expect(out.portfolio?.pctChange).toBeCloseTo(20)
-    expect(out.portfolio?.absChangeCents).toBe(200)
-    // Top item carries the price + sales data
+    // Block 5A-W-16E — headline weekly change is suppressed (no
+    // dashboard-equivalent historical total available).
+    expect(out.portfolio?.previousTotalCents).toBeNull()
+    expect(out.portfolio?.pctChange).toBeNull()
+    expect(out.portfolio?.absChangeCents).toBeNull()
+    // Top item carries the price + sales data. Block 5A-W-16E:
+    // portfolio previousCents is null (no dashboard-equivalent
+    // historical per-card baseline), but the activity rule still
+    // surfaces the card via recent sales.
     expect(out.portfolio?.topItems[0]).toMatchObject({
       cardSlug:         '1450205',
       cardName:         'Charizard',
       setName:          'Base Set',
       currentCents:     1200,
-      previousCents:    1000,
+      previousCents:    null,
       recentSalesCount: 2,
     })
     // And a public URL was synthesised from cards.card_url_slug + set_name
@@ -400,7 +405,8 @@ describe('buildWeeklyDigestForUser — slug resolution', () => {
     seedPrice('111', '2026-06-25', { raw:   200, psa10: 60_000 })   // $2 raw, $600 psa10
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
     expect(out.portfolio?.currentTotalCents).toBe(60_000)
-    expect(out.portfolio?.previousTotalCents).toBe(50_000)
+    // Block 5A-W-16E — headline previous always null
+    expect(out.portfolio?.previousTotalCents).toBeNull()
   })
 
   it('multiplies the per-card price by quantity in the portfolio total', async () => {
@@ -411,8 +417,9 @@ describe('buildWeeklyDigestForUser — slug resolution', () => {
     seedPrice('111', '2026-06-25', { raw: 1500 })   // $15.00 in USD-cents
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
     expect(out.portfolio?.currentTotalCents).toBe(4500)   // 1500 cents × 3
-    expect(out.portfolio?.previousTotalCents).toBe(3000)  // 1000 cents × 3
-    expect(out.portfolio?.absChangeCents).toBe(1500)
+    // Block 5A-W-16E — headline change suppressed
+    expect(out.portfolio?.previousTotalCents).toBeNull()
+    expect(out.portfolio?.absChangeCents).toBeNull()
   })
 })
 
@@ -591,7 +598,13 @@ describe('buildWeeklyDigestForUser — diagnostics', () => {
     })
     // Block 5A-W-16C — shared valuation source diagnostics
     expect(d.portfolioValueSource).toBe('shared_valuation_helper')
-    expect(d.portfolioPreviousValueSource).toBe('daily_prices_baseline')
+    // Block 5A-W-16E — movement source + headline-suppression diagnostics
+    expect(d.portfolioMovementSource).toBe('none')           // empty user → no movement to show
+    expect(d.portfolioItemMovementWindowDays).toBeNull()
+    expect(d.portfolioHeadlineChangeSuppressed).toBe(true)
+    expect(typeof d.portfolioHeadlineSuppressedReason).toBe('string')
+    expect(typeof d.portfolioHoldingsPricedCount).toBe('number')
+    expect(typeof d.portfolioHoldingsMissingPriceCount).toBe('number')
     expect(d.portfolioValueSourceCounts).toEqual({
       card_trends: 0, daily_prices: 0, manual: 0, missing: 0,
     })
@@ -731,7 +744,8 @@ describe('buildWeeklyDigestForUser — Block 5A-W-15B basis diagnostic', () => {
     seedPrice('111', '2026-06-25', { raw: 100, psa10: 15_000 })   // $1 raw, $150 psa10
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
     expect(out.portfolio?.currentTotalCents).toBe(15_000)
-    expect(out.portfolio?.previousTotalCents).toBe(10_000)
+    // Block 5A-W-16E — headline previous always null
+    expect(out.portfolio?.previousTotalCents).toBeNull()
     expect(out.diagnostics.portfolioPriceBasisCounts.psa10_usd).toBe(1)
   })
 
@@ -857,11 +871,12 @@ describe('buildWeeklyDigestForUser — Block 5A-W-16B currency', () => {
     expect(out.diagnostics.displayCurrency).toBe('USD')
   })
 
-  it('echoes portfolioValueSource = shared_valuation_helper in diagnostics (Block 5A-W-16C)', async () => {
+  it('echoes portfolioValueSource = shared_valuation_helper + Block 5A-W-16E movement diagnostics', async () => {
     seedPrefs('u1')
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
     expect(out.diagnostics.portfolioValueSource).toBe('shared_valuation_helper')
-    expect(out.diagnostics.portfolioPreviousValueSource).toBe('daily_prices_baseline')
+    expect(out.diagnostics.portfolioMovementSource).toBe('none')
+    expect(out.diagnostics.portfolioHeadlineChangeSuppressed).toBe(true)
     expect(out.diagnostics.portfolioValueSourceCounts).toEqual({
       card_trends: 0, daily_prices: 0, manual: 0, missing: 0,
     })
@@ -951,6 +966,98 @@ describe('buildWeeklyDigestForUser — Block 5A-W-16C dashboard-aligned valuatio
     expect(out.portfolio?.currentTotalCents).toBe(116)
     // The renderer turns 116 USD-cents into £0.91 (116 / 127). The
     // valuation helper just hands the cents through.
+  })
+})
+
+describe('buildWeeklyDigestForUser — Block 5A-W-16E no fake weekly moves', () => {
+  // Real dashboard fixture, with the per-card 30d figures the
+  // dashboard ACTUALLY shows. The pre-fix code was inventing
+  // wildly different percentages by comparing card_trends current
+  // values against daily_prices baselines.
+  function seedRealishUser() {
+    seedPrefs('u1')
+    fakeDB.seed('portfolios', [
+      ...fakeDB.rows('portfolios'),
+      { id: 'pf-u1', user_id: 'u1' },
+    ])
+    const items: Array<[string, string, string, string, number, number | null]> = [
+      // [urlSlug, bareSlug, cardName, setName, current_raw, raw_pct_30d]
+      ['charizard-4',  '1', 'Charizard', 'Base Set', 29_074, +19.8],
+      ['venusaur-15',  '2', 'Venusaur',  'Base Set',  4_886, -15.6],
+      ['blastoise-2',  '3', 'Blastoise', 'Base Set',  7_874,  -5.5],
+      ['meowstic-34',  '4', 'Meowstic',  'Some Set',     24, +121.4],
+    ]
+    for (const [url, bare, name, set, raw, pct30] of items) {
+      seedCardLink(url, bare, name, set)
+      seedCardTrend(name, set, { raw })
+      // Also tack the 30d pct onto the trend row.
+      const trends = fakeDB.rows('card_trends') as Array<Record<string, unknown>>
+      const tr = trends[trends.length - 1] as { raw_pct_30d?: number | null }
+      tr.raw_pct_30d = pct30
+      fakeDB.seed('portfolio_items', [
+        ...fakeDB.rows('portfolio_items'),
+        {
+          portfolio_id:       'pf-u1',
+          card_slug:          url,
+          holding_type:       'raw',
+          quantity:           1,
+          card_name_snapshot: name,
+          set_name_snapshot:  set,
+        },
+      ])
+    }
+  }
+
+  it('per-item pctChange comes from card_trends.raw_pct_30d — never a fabricated 7d figure', async () => {
+    seedRealishUser()
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    const byName = new Map(out.portfolio!.topItems.map(i => [i.cardName, i]))
+    expect(byName.get('Venusaur')?.pctChange).toBeCloseTo(-15.6, 1)
+    expect(byName.get('Charizard')?.pctChange).toBeCloseTo(+19.8, 1)
+    expect(byName.get('Blastoise')?.pctChange).toBeCloseTo(-5.5, 1)
+    // The fake-moves the regression produced (Venusaur +486.6%,
+    // Charizard +62.3%, Blastoise +233.3%) must never reappear.
+    for (const item of out.portfolio!.topItems) {
+      if (item.pctChange != null) {
+        expect(Math.abs(item.pctChange)).toBeLessThan(150)
+      }
+    }
+  })
+
+  it('every per-portfolio-item pctChange carries pctChangeWindowDays = 30', async () => {
+    seedRealishUser()
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    for (const item of out.portfolio!.topItems) {
+      if (item.pctChange != null) {
+        expect(item.pctChangeWindowDays).toBe(30)
+      }
+    }
+  })
+
+  it('headline portfolio change is suppressed — currentTotalCents present, change fields null', async () => {
+    seedRealishUser()
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.currentTotalCents).toBe(29_074 + 4_886 + 7_874 + 24)   // sum of 4 raw values
+    expect(out.portfolio?.previousTotalCents).toBeNull()
+    expect(out.portfolio?.absChangeCents).toBeNull()
+    expect(out.portfolio?.pctChange).toBeNull()
+    expect(out.diagnostics.portfolioHeadlineChangeSuppressed).toBe(true)
+    expect(out.diagnostics.portfolioMovementSource).toBe('dashboard_30d')
+    expect(out.diagnostics.portfolioItemMovementWindowDays).toBe(30)
+  })
+
+  it('most_valuable surfaces the largest position (Charizard wins on currentCents)', async () => {
+    seedRealishUser()
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    const mostValuable = out.portfolio!.topItems.find(i => i.reason === 'most_valuable')
+    expect(mostValuable?.cardName).toBe('Charizard')
+  })
+
+  it('diagnostics report holdings priced + missing counts', async () => {
+    seedRealishUser()
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.diagnostics.portfolioHoldingsPricedCount).toBe(4)
+    expect(out.diagnostics.portfolioHoldingsMissingPriceCount).toBe(0)
   })
 })
 

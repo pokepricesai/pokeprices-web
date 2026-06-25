@@ -67,6 +67,7 @@ export type WeeklyDigestItemReason =
   | 'biggest_riser'
   | 'biggest_faller'
   | 'most_active'
+  | 'most_valuable'           // Block 5A-W-16E — surfaces the highest-position card
   | 'new_sales_activity'
 
 /** A single card line for the portfolio or watchlist section. All
@@ -82,6 +83,12 @@ export type WeeklyDigestItem = {
   absChangeCents:   number | null   // signed
   recentSalesCount: number          // 0 when no sales in the window
   reason:           WeeklyDigestItemReason
+  /** Block 5A-W-16E — window the pctChange is measured over. Lets
+   *  the renderer label "+19.8% (30d)" so a 30-day card_trends figure
+   *  is never mistaken for a 7-day comparison. Null when no pct is
+   *  shown OR when the source window doesn't need labelling (legacy
+   *  watchlist 7d comparison stays unlabelled to match prior copy). */
+  pctChangeWindowDays?: number | null
 }
 
 export type WeeklyDigestPortfolioSection = {
@@ -141,21 +148,35 @@ export type WeeklyDigestDiagnostics = {
    *  same value the email body will display. */
   displayCurrency:              DigestDisplayCurrency
   /** Block 5A-W-16C — money source for the portfolio total. Mirrors
-   *  the dashboard's pipeline now: card_trends precedence for
-   *  raw/psa9/psa10, daily_prices enrichment for extra tiers, manual
-   *  override for manual-grade holdings. The previous-value baseline
-   *  used for week-over-week pct still comes from daily_prices only —
-   *  see `portfolioPreviousValueSource` for that. */
+   *  the dashboard's pipeline: card_trends precedence for raw/psa9/
+   *  psa10, daily_prices enrichment for extra tiers, manual override
+   *  for manual-grade holdings. */
   portfolioValueSource:         'shared_valuation_helper'
-  /** Block 5A-W-16C — money source for the WEEK-AGO baseline used in
-   *  week-over-week pct. Always 'daily_prices_baseline' today because
-   *  card_trends only stores current prices, not history. Surfaced so
-   *  an admin can see the per-card pct may not exactly reconcile with
-   *  the dashboard's pct_7d (which comes from card_trends). */
-  portfolioPreviousValueSource: 'daily_prices_baseline'
+  /** Block 5A-W-16E — source of per-item movement. 'dashboard_30d'
+   *  pulls card_trends.raw_pct_30d (same field the dashboard renders).
+   *  'none' means we have no movement to show (no dashboard-equivalent
+   *  historical data). Never use a 7d-vs-current-from-mismatched-sources
+   *  pct here — that's what produced Charizard +62.3% in production. */
+  portfolioMovementSource:      'dashboard_30d' | 'none'
+  /** Block 5A-W-16E — window the per-item pctChange is measured over
+   *  for portfolio items. 30 today; null when movementSource = 'none'. */
+  portfolioItemMovementWindowDays: number | null
+  /** Block 5A-W-16E — whether the HEADLINE portfolio change line is
+   *  suppressed. True today because we don't have dashboard-equivalent
+   *  historical totals to reconcile against. Surfaced so an admin can
+   *  see this is a deliberate choice, not a calculation bug. */
+  portfolioHeadlineChangeSuppressed: boolean
+  /** Block 5A-W-16E — human-readable reason the headline change is
+   *  suppressed. Empty string when not suppressed. */
+  portfolioHeadlineSuppressedReason: string
   /** Block 5A-W-16C — per-source count of how each portfolio_items row
    *  resolved its market value. */
   portfolioValueSourceCounts:   Record<ValuationPriceSource, number>
+  /** Block 5A-W-16E — count of portfolio_items rows that resolved a
+   *  market value (card_trends + daily_prices), versus those that
+   *  fell back to manual or missing. */
+  portfolioHoldingsPricedCount:        number
+  portfolioHoldingsMissingPriceCount:  number
   /** Block 5A-W-16D — observability for the regression where the
    *  portfolio section silently showed "No portfolio items yet" because
    *  loadPortfolioItems was selecting columns that don't exist on the
@@ -289,25 +310,39 @@ export type ScoredCard = {
   absChangeCents:   number | null
   recentSalesCount: number
   quantity:         number      // 1 for watchlist; portfolio items use real quantity
+  /** Block 5A-W-16E — window over which pctChange was measured. 30
+   *  for portfolio (dashboard 30d), 7 for watchlist (daily_prices
+   *  baseline week-over-week), null when unknown. */
+  pctChangeWindowDays?: number | null
+}
+
+export type SelectTopItemsOptions = {
+  /** Block 5A-W-16E — when true, also pick the highest-value position
+   *  as a `most_valuable` row. Used for the portfolio section where
+   *  showing the user's biggest holding is genuinely useful even if
+   *  it didn't move this week. Defaults FALSE — watchlist doesn't
+   *  benefit from this since the user doesn't own the cards. */
+  includeMostValuable?: boolean
 }
 
 /** Pick the top N items for a section. Updated in Block 5A-W-15B to
  *  stop labelling weak/no-change items as "Biggest riser/faller".
+ *  Updated in Block 5A-W-16E to support a `most_valuable` pick.
  *
- *  Ranking:
- *    1. Biggest riser  — pctChange ≥ +MIN_MEANINGFUL_PCT, by max pct
- *    2. Biggest faller — pctChange ≤ -MIN_MEANINGFUL_PCT, by min pct
- *    3. Most active    — recentSalesCount > 0, by max count, |pct|
- *    4. Fill remaining slots with meaningful movers by |pct|, tagged
- *       directionally (riser/faller) — only when the card is BOTH a
- *       meaningful mover AND not yet picked. No padding with weak
- *       items: cards below the threshold that also have no sales are
- *       EXCLUDED, even if that means the section shows fewer than max.
- *    5. Final pass: sales-only / sales-with-tiny-move cards get the
- *       'new_sales_activity' label.
+ *  Ranking (in order; each takes one slot at most):
+ *    1. Biggest riser  — pctChange ≥ +MIN_MEANINGFUL_PCT
+ *    2. Biggest faller — pctChange ≤ -MIN_MEANINGFUL_PCT
+ *    3. Most active    — recentSalesCount > 0
+ *    4. Most valuable  — opt-in, by max currentCents
+ *    5. Fill remaining slots with meaningful movers by |pct|
+ *    6. Final pass: sales-only / sales-with-tiny-move → new_sales_activity
  *
  *  Pure — exported for tests. */
-export function selectTopItems(cards: ScoredCard[], max: number): WeeklyDigestItem[] {
+export function selectTopItems(
+  cards: ScoredCard[],
+  max:   number,
+  opts:  SelectTopItemsOptions = {},
+): WeeklyDigestItem[] {
   const picks: Array<{ card: ScoredCard; reason: WeeklyDigestItemReason }> = []
   const taken = new Set<string>()
   function take(card: ScoredCard | null | undefined, reason: WeeklyDigestItemReason) {
@@ -340,7 +375,15 @@ export function selectTopItems(cards: ScoredCard[], max: number): WeeklyDigestIt
     )
   take(active[0], 'most_active')
 
-  // 4. Fill — meaningful movers by |pct|. Each survivor keeps its
+  // 4. Most valuable (opt-in)
+  if (opts.includeMostValuable) {
+    const mostValuable = [...cards]
+      .filter(c => c.currentCents != null && c.currentCents > 0)
+      .sort((a, b) => (b.currentCents ?? 0) - (a.currentCents ?? 0))
+    take(mostValuable[0], 'most_valuable')
+  }
+
+  // 5. Fill — meaningful movers by |pct|. Each survivor keeps its
   //    DIRECTIONAL label; no card with |pct| < MIN_MEANINGFUL_PCT
   //    ever lands here, so "Biggest riser · +0.0%" cannot happen.
   if (picks.length < max) {
@@ -360,9 +403,7 @@ export function selectTopItems(cards: ScoredCard[], max: number): WeeklyDigestIt
     }
   }
 
-  // 5. Final pass — sales-only cards (no pct OR sub-threshold pct).
-  //    These cards have NO meaningful directional move, so they get
-  //    the activity label. Sorted by sales count desc.
+  // 6. Final pass — sales-only cards (no pct OR sub-threshold pct).
   if (picks.length < max) {
     const salesOnly = cards
       .filter(c => hasSales(c) && !isMeaningfulMover(c))
@@ -372,10 +413,6 @@ export function selectTopItems(cards: ScoredCard[], max: number): WeeklyDigestIt
       take(c, 'new_sales_activity')
     }
   }
-
-  // NOTE: deliberately no "directional fallback" pass any more.
-  // A 0.0% card with no sales is NOT a key change of the week and
-  // we'd rather show 4 items than 5 with a misleading row.
 
   return picks.map(({ card, reason }) => ({
     cardSlug:         card.cardSlug,
@@ -388,6 +425,7 @@ export function selectTopItems(cards: ScoredCard[], max: number): WeeklyDigestIt
     absChangeCents:   card.absChangeCents,
     recentSalesCount: card.recentSalesCount,
     reason,
+    pctChangeWindowDays: card.pctChangeWindowDays ?? null,
   }))
 }
 
@@ -530,63 +568,54 @@ export async function buildWeeklyDigestForUser(
           : null,
       }
 
-      // Baseline (week-ago) value — still from daily_prices because
-      // card_trends doesn't carry history. Same column the dashboard's
-      // enrichment would have used.
-      const basis  = classifyPortfolioPriceBasis(row.holding_type)
+      // Block 5A-W-16E — track which daily_prices column the user's
+      // holding maps to so the diagnostic basis-counts diagnostic
+      // stays meaningful, but DO NOT read daily_prices baseline for
+      // the portfolio pct. The previous-value baseline always came
+      // from a DIFFERENT source than card_trends, which fabricated
+      // huge fake weekly moves (Charizard +62.3% in production). The
+      // pct is now the dashboard's own raw_pct_30d.
+      const basis = classifyPortfolioPriceBasis(row.holding_type)
       portfolioPriceBasisCounts[basis.basis] += 1
-      const pair   = bare ? findPricePair(priceIndex.get(bare) ?? [], asOf, lookbackDays) : null
-      const prvCts = pair ? dailyPriceCentsFromColumn(pair.baseline[basis.column] ?? null) : null
       const qty    = Math.max(1, Math.floor(row.quantity ?? 1))
 
-      // Use the shared helper's per-card EFFECTIVE value (manual
-      // override applied) for the displayed top-item amount. Use its
-      // position value for the headline total.
-      const curCts      = valued.effectiveValueCents
-      const posCurrent  = valued.positionValueCents
-      const posPrevious = prvCts != null ? prvCts * qty : null
-      if (posPrevious != null) previousTotal = (previousTotal ?? 0) + posPrevious
+      const posCurrent = valued.positionValueCents
+      // pct30d is a signed percent (e.g. -15.6, +19.8). Same scale the
+      // dashboard's fmtPct expects. We surface it labelled "30d" in
+      // the renderer so it can't be mistaken for a 7-day move.
+      const pct30d = valued.pct30d
 
       scored.push({
-        source:           'portfolio',
-        urlSlug:          row.card_slug,
-        cardSlug:         display.cardSlug,
-        cardName:         display.cardName,
-        setName:          display.setName,
-        cardUrl:          display.cardUrl,
-        // For the displayed top-card amount we want per-card cents
-        // (NOT position), so the user sees the same per-card value as
-        // their dashboard row. Sample-data renderer treats currentCents
-        // as per-position; keep parity with renderer expectations by
-        // putting POSITION value on currentCents (since this is the
-        // sum of all the user's copies of this card).
-        currentCents:     posCurrent,
-        previousCents:    posPrevious,
-        // Per-card pct: compare per-unit current vs per-unit previous.
-        // Using EFFECTIVE per-card value (manual override applied) for
-        // current; baseline daily_prices per-unit for previous.
-        pctChange:        pctChange(prvCts, curCts),
-        absChangeCents:   (posCurrent != null && posPrevious != null) ? (posCurrent - posPrevious) : null,
-        recentSalesCount: bare ? (salesIndex.get(bare) ?? 0) : 0,
-        quantity:         qty,
+        source:               'portfolio',
+        urlSlug:              row.card_slug,
+        cardSlug:             display.cardSlug,
+        cardName:             display.cardName,
+        setName:              display.setName,
+        cardUrl:              display.cardUrl,
+        currentCents:         posCurrent,
+        previousCents:        null,
+        pctChange:            pct30d,
+        absChangeCents:       null,
+        recentSalesCount:     bare ? (salesIndex.get(bare) ?? 0) : 0,
+        quantity:             qty,
+        pctChangeWindowDays:  pct30d == null ? null : 30,
       })
     }
 
-    // Headline total comes from the helper (mirrors dashboard's
-    // recomputedTotal which uses position_value_cents — manual-only
-    // holdings contribute 0). Treat 0 as null when EVERY holding is
-    // missing market data, otherwise expose the real sum.
+    // Headline current total — from the shared helper. Suppress the
+    // headline 7-day change entirely: we don't have a dashboard-
+    // equivalent historical TOTAL, so any value here would be the
+    // same fabricated-from-mismatched-sources noise we just removed.
     const currentTotal = valuation.marketTotalCents > 0 || valuation.sourceCounts.card_trends + valuation.sourceCounts.daily_prices > 0
       ? valuation.marketTotalCents
       : null
-    const absChange = (currentTotal != null && previousTotal != null) ? (currentTotal - previousTotal) : null
     portfolioSection = {
       itemCount:          portfolioRaw.length,
       currentTotalCents:  currentTotal,
-      previousTotalCents: previousTotal,
-      absChangeCents:     absChange,
-      pctChange:          pctChange(previousTotal, currentTotal),
-      topItems:           selectTopItems(scored, maxPortfolioItems),
+      previousTotalCents: null,
+      absChangeCents:     null,
+      pctChange:          null,
+      topItems:           selectTopItems(scored, maxPortfolioItems, { includeMostValuable: true }),
     }
   }
 
@@ -655,13 +684,22 @@ export async function buildWeeklyDigestForUser(
       portfolioPriceBasisCounts,
       displayCurrency:              currency,
       portfolioValueSource:         'shared_valuation_helper',
-      portfolioPreviousValueSource: 'daily_prices_baseline',
+      // Block 5A-W-16E — pct comes from card_trends.raw_pct_30d when
+      // the user has any portfolio holdings; we deliberately suppress
+      // the headline 7-day change to avoid mismatched-source noise.
+      portfolioMovementSource:           wantPortfolio && portfolioRaw.length > 0 ? 'dashboard_30d' : 'none',
+      portfolioItemMovementWindowDays:   wantPortfolio && portfolioRaw.length > 0 ? 30 : null,
+      portfolioHeadlineChangeSuppressed: true,
+      portfolioHeadlineSuppressedReason:
+        'card_trends only stores current prices, so a dashboard-equivalent headline change is not available',
       portfolioValueSourceCounts,
       // Block 5A-W-16D observability
       portfolioPortfoliosLoaded:        portfoliosLoaded,
       portfolioItemsLoaded:             portfolioRaw.length,
       portfolioItemsMissingCardName:    portfolioRaw.filter(r => !r.card_name || !r.set_name).length,
       portfolioItemsValuedAsMissing:    portfolioValueSourceCounts.missing,
+      portfolioHoldingsPricedCount:        portfolioValueSourceCounts.card_trends + portfolioValueSourceCounts.daily_prices,
+      portfolioHoldingsMissingPriceCount:  portfolioValueSourceCounts.manual + portfolioValueSourceCounts.missing,
       sectionsOmittedByPreferences,
       generatedAt,
     },
@@ -1034,12 +1072,17 @@ function emptyDiagnostics(generatedAt: string, currency: DigestDisplayCurrency =
     portfolioPriceBasisCounts:   { raw_usd: 0, psa9_usd: 0, psa10_usd: 0, unknown_fallback: 0 },
     displayCurrency:             currency,
     portfolioValueSource:        'shared_valuation_helper',
-    portfolioPreviousValueSource:'daily_prices_baseline',
+    portfolioMovementSource:     'none',
+    portfolioItemMovementWindowDays:   null,
+    portfolioHeadlineChangeSuppressed: true,
+    portfolioHeadlineSuppressedReason: 'no dashboard-equivalent historical total',
     portfolioValueSourceCounts:  { card_trends: 0, daily_prices: 0, manual: 0, missing: 0 },
     portfolioPortfoliosLoaded:        0,
     portfolioItemsLoaded:             0,
     portfolioItemsMissingCardName:    0,
     portfolioItemsValuedAsMissing:    0,
+    portfolioHoldingsPricedCount:        0,
+    portfolioHoldingsMissingPriceCount:  0,
     sectionsOmittedByPreferences: [],
     generatedAt,
   }

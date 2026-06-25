@@ -76,6 +76,7 @@ const REASON_LABEL: Record<WeeklyDigestItemReason, string> = {
   biggest_riser:      'Biggest riser',
   biggest_faller:     'Biggest faller',
   most_active:        'Most active',
+  most_valuable:      'Most valuable',
   new_sales_activity: 'New sales activity',
 }
 
@@ -150,27 +151,35 @@ export function buildSampleWeeklyDigestData(): WeeklyDigestData {
     portfolio: {
       itemCount:          14,
       currentTotalCents:  248_750,
-      previousTotalCents: 231_200,
-      absChangeCents:     17_550,
-      pctChange:          7.6,
+      // Block 5A-W-16E — headline change suppressed (no dashboard-
+      // equivalent historical total). Sample mirrors production.
+      previousTotalCents: null,
+      absChangeCents:     null,
+      pctChange:          null,
       topItems: [
         {
           cardSlug: '1450205', cardName: "Lt. Surge's Raichu", setName: 'Gym Challenge',
           cardUrl:  'https://www.pokeprices.io/set/Gym%20Challenge/card/lt-surges-raichu-1st-edition-11',
-          currentCents: 16875, previousCents: 12500, pctChange: 35.0, absChangeCents: 4375,
-          recentSalesCount: 4, reason: 'biggest_riser',
+          currentCents: 16875, previousCents: null, pctChange: 35.0, absChangeCents: null,
+          recentSalesCount: 4, reason: 'biggest_riser', pctChangeWindowDays: 30,
         },
         {
           cardSlug: '959616', cardName: 'Charizard', setName: 'Base Set',
           cardUrl:  'https://www.pokeprices.io/set/Base%20Set/card/charizard-base-set-4-102',
-          currentCents: 38400, previousCents: 49000, pctChange: -21.6, absChangeCents: -10600,
-          recentSalesCount: 2, reason: 'biggest_faller',
+          currentCents: 38400, previousCents: null, pctChange: -21.6, absChangeCents: null,
+          recentSalesCount: 2, reason: 'biggest_faller', pctChangeWindowDays: 30,
         },
         {
           cardSlug: '12054014', cardName: 'Energy Coins [Poke Ball]', setName: 'Black Bolt',
           cardUrl:  'https://www.pokeprices.io/set/Black%20Bolt/card/energy-coins-poke-ball-81',
-          currentCents: 800, previousCents: 750, pctChange: 6.7, absChangeCents: 50,
-          recentSalesCount: 9, reason: 'most_active',
+          currentCents: 800, previousCents: null, pctChange: 6.7, absChangeCents: null,
+          recentSalesCount: 9, reason: 'most_active', pctChangeWindowDays: 30,
+        },
+        {
+          cardSlug: '1450205', cardName: 'Charizard', setName: 'Base Set',
+          cardUrl:  'https://www.pokeprices.io/set/Base%20Set/card/charizard-base-set-4-102',
+          currentCents: 29_074, previousCents: null, pctChange: null, absChangeCents: null,
+          recentSalesCount: 0, reason: 'most_valuable', pctChangeWindowDays: null,
         },
       ],
     },
@@ -216,13 +225,19 @@ export function buildSampleWeeklyDigestData(): WeeklyDigestData {
       cardsWithNoRecentSales:      12,
       portfolioPriceBasisCounts:   { raw_usd: 10, psa10_usd: 3, psa9_usd: 1, unknown_fallback: 0 },
       displayCurrency:             'GBP',
-      portfolioValueSource:        'shared_valuation_helper',
-      portfolioPreviousValueSource:'daily_prices_baseline',
-      portfolioValueSourceCounts:  { card_trends: 11, daily_prices: 3, manual: 0, missing: 0 },
-      portfolioPortfoliosLoaded:        1,
-      portfolioItemsLoaded:             14,
-      portfolioItemsMissingCardName:    0,
-      portfolioItemsValuedAsMissing:    0,
+      portfolioValueSource:              'shared_valuation_helper',
+      portfolioMovementSource:           'dashboard_30d',
+      portfolioItemMovementWindowDays:   30,
+      portfolioHeadlineChangeSuppressed: true,
+      portfolioHeadlineSuppressedReason:
+        'card_trends only stores current prices, so a dashboard-equivalent headline change is not available',
+      portfolioValueSourceCounts:        { card_trends: 11, daily_prices: 3, manual: 0, missing: 0 },
+      portfolioPortfoliosLoaded:          1,
+      portfolioItemsLoaded:               14,
+      portfolioItemsMissingCardName:      0,
+      portfolioItemsValuedAsMissing:      0,
+      portfolioHoldingsPricedCount:        14,
+      portfolioHoldingsMissingPriceCount:  0,
       sectionsOmittedByPreferences: [],
       generatedAt:                 '2026-06-25T12:00:00Z',
     },
@@ -276,8 +291,14 @@ function renderItemRow(item: WeeklyDigestItem, currency: DigestDisplayCurrency):
         : '')
     : `<span style="color:${BRAND.mutedSoft};font-size:11px;">No price data this week</span>`
 
+  // Block 5A-W-16E — append window suffix (e.g. "(30d)") whenever the
+  // item carries a known measurement window so a 30-day dashboard
+  // value is never read as a 7-day move.
+  const windowSuffix = item.pctChangeWindowDays != null
+    ? ` <span style="color:${BRAND.muted};font-size:11px;">(${item.pctChangeWindowDays}d)</span>`
+    : ''
   const pctLine = item.pctChange != null
-    ? `<span style="color:${changeColour(item.pctChange)};font-weight:700;">${esc(fmtPct(item.pctChange))}</span>`
+    ? `<span style="color:${changeColour(item.pctChange)};font-weight:700;">${esc(fmtPct(item.pctChange))}</span>${windowSuffix}`
     : ''
 
   const salesLine = item.recentSalesCount > 0
@@ -330,6 +351,11 @@ function renderPortfolioSectionHtml(data: WeeklyDigestData): string {
     ? `<div style="font-family:'Outfit',sans-serif;font-size:22px;font-weight:800;color:${BRAND.navy};">${esc(fmtCents(p.currentTotalCents, currency))}</div>`
     : `<div style="font-family:'Figtree',sans-serif;font-size:12px;color:${BRAND.muted};">Estimated total unavailable this week.</div>`
 
+  // Block 5A-W-16E — headline change is rendered ONLY when both sides
+  // exist. The orchestrator now sets pctChange = null whenever the
+  // dashboard-equivalent historical total is unavailable, so we
+  // never emit "vs N days ago" with a fabricated number. Per-card
+  // movement is still shown on individual rows, labelled by window.
   const changeLine = (p.absChangeCents != null || p.pctChange != null)
     ? `<div style="font-family:'Figtree',sans-serif;font-size:13px;margin-top:4px;">
          <span style="color:${changeColour(p.absChangeCents)};font-weight:700;">${esc(fmtCents(p.absChangeCents, currency))}</span>
@@ -572,7 +598,9 @@ function itemTextLines(item: WeeklyDigestItem, currency: DigestDisplayCurrency):
   const priceBit = item.currentCents != null
     ? `${fmtCents(item.currentCents, currency)}${item.previousCents != null ? ' (was ' + fmtCents(item.previousCents, currency) + ')' : ''}`
     : 'no price data'
-  const pctBit   = item.pctChange != null ? ` · ${fmtPct(item.pctChange)}` : ''
+  const pctBit   = item.pctChange != null
+    ? ` · ${fmtPct(item.pctChange)}${item.pctChangeWindowDays != null ? ' (' + item.pctChangeWindowDays + 'd)' : ''}`
+    : ''
   const salesBit = item.recentSalesCount > 0 ? ` · ${item.recentSalesCount} ${pluralize(item.recentSalesCount, 'sale', 'sales')}` : ''
   out.push(`    ${priceBit}${pctBit}${salesBit}`)
   if (item.cardUrl) out.push(`    ${item.cardUrl}`)
