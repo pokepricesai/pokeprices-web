@@ -30,7 +30,9 @@ function emptyDiagnostics(generatedAt = '2026-06-25T12:00:00Z'): WeeklyDigestDia
     cardsWithNoRecentSales:      0,
     portfolioPriceBasisCounts:   { raw_usd: 0, psa9_usd: 0, psa10_usd: 0, unknown_fallback: 0 },
     displayCurrency:             'GBP',
-    portfolioValueSource:        'daily_prices_pivot',
+    portfolioValueSource:        'shared_valuation_helper',
+    portfolioPreviousValueSource:'daily_prices_baseline',
+    portfolioValueSourceCounts:  { card_trends: 0, daily_prices: 0, manual: 0, missing: 0 },
     sectionsOmittedByPreferences: [],
     generatedAt,
   }
@@ -482,8 +484,10 @@ describe('buildSampleWeeklyDigestData — carries currency', () => {
     expect(d.diagnostics.displayCurrency).toBe(d.currency)
   })
 
-  it('echoes the daily_prices_pivot value source in diagnostics', () => {
+  it('echoes the shared_valuation_helper value source in diagnostics (Block 5A-W-16C)', () => {
     const d = buildSampleWeeklyDigestData()
-    expect(d.diagnostics.portfolioValueSource).toBe('daily_prices_pivot')
+    expect(d.diagnostics.portfolioValueSource).toBe('shared_valuation_helper')
+    expect(d.diagnostics.portfolioPreviousValueSource).toBe('daily_prices_baseline')
+    expect(d.diagnostics.portfolioValueSourceCounts).toBeDefined()
   })
 })

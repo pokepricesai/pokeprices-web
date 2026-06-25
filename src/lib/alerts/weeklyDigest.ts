@@ -29,6 +29,10 @@ import {
   type UserAlertPreferences,
 } from './preferences'
 import type { AlertRule } from './preferences'
+import {
+  valuePortfolio,
+  type ValuationPriceSource,
+} from '../portfolioValuation'
 
 // ─────────────────────────────────────────────────────────────────────
 // Defaults + bounds
@@ -136,13 +140,22 @@ export type WeeklyDigestDiagnostics = {
    *  diagnostics-only consumer (admin preview's JSON pane) sees the
    *  same value the email body will display. */
   displayCurrency:              DigestDisplayCurrency
-  /** Block 5A-W-16B — money source for the portfolio total. 'card_trends_rpc'
-   *  is what the dashboard uses (richer + handles non-raw tiers via
-   *  enrichment); 'daily_prices_pivot' is what THIS digest builder
-   *  uses today. The two CAN diverge — see the block 5A-W-16B report.
-   *  Surfaced so an admin can spot when the digest disagrees with the
-   *  dashboard without reading any code. */
-  portfolioValueSource:         'daily_prices_pivot'
+  /** Block 5A-W-16C — money source for the portfolio total. Mirrors
+   *  the dashboard's pipeline now: card_trends precedence for
+   *  raw/psa9/psa10, daily_prices enrichment for extra tiers, manual
+   *  override for manual-grade holdings. The previous-value baseline
+   *  used for week-over-week pct still comes from daily_prices only —
+   *  see `portfolioPreviousValueSource` for that. */
+  portfolioValueSource:         'shared_valuation_helper'
+  /** Block 5A-W-16C — money source for the WEEK-AGO baseline used in
+   *  week-over-week pct. Always 'daily_prices_baseline' today because
+   *  card_trends only stores current prices, not history. Surfaced so
+   *  an admin can see the per-card pct may not exactly reconcile with
+   *  the dashboard's pct_7d (which comes from card_trends). */
+  portfolioPreviousValueSource: 'daily_prices_baseline'
+  /** Block 5A-W-16C — per-source count of how each portfolio_items row
+   *  resolved its market value. */
+  portfolioValueSourceCounts:   Record<ValuationPriceSource, number>
   sectionsOmittedByPreferences: Array<'portfolio' | 'watchlist'>
   generatedAt:                  string
 }
@@ -456,27 +469,45 @@ export async function buildWeeklyDigestForUser(
     if (!salesIndex.has(bare)) cardsWithNoRecentSales++
   }
 
-  // 6. Score portfolio cards. portfolio_items.holding_type drives the
-  //    price-column choice; quantity scales the position value.
+  // 6. Score portfolio cards.
+  //    Block 5A-W-16C: current values + headline total now come from
+  //    the SHARED valuePortfolio() helper, which mirrors the dashboard
+  //    pipeline (card_trends → daily_prices enrichment → manual).
+  //    Previous values for the week-over-week pct still come from
+  //    daily_prices baseline reads — card_trends only stores current
+  //    prices, so we can't compute a full dashboard-style previous.
+  //    The two source-mismatches are surfaced in diagnostics
+  //    (portfolioValueSource vs portfolioPreviousValueSource).
   let portfolioSection: WeeklyDigestPortfolioSection | undefined
   const portfolioPriceBasisCounts: PortfolioPriceBasisCounts = {
     raw_usd: 0, psa9_usd: 0, psa10_usd: 0, unknown_fallback: 0,
   }
+  let portfolioValueSourceCounts = { card_trends: 0, daily_prices: 0, manual: 0, missing: 0 }
   if (wantPortfolio) {
+    // (a) shared valuation — produces dashboard-aligned per-card +
+    //     headline market value. Map keyed by row.card_slug (URL slug)
+    //     so each portfolio_items row lines up to its valued item.
+    const valuation = await valuePortfolio(supa, portfolioRaw.map(r => ({
+      id:                 r.user_id + '|' + r.card_slug + '|' + (r.holding_type ?? ''),
+      card_slug:          r.card_slug,
+      card_name:          r.card_name,
+      set_name:           r.set_name,
+      holding_type:       r.holding_type,
+      quantity:           r.quantity,
+      manual_value_cents: r.manual_value_cents,
+    })))
+    portfolioValueSourceCounts = valuation.sourceCounts
+
     const scored: ScoredCard[] = []
-    let currentTotal:  number | null = null
     let previousTotal: number | null = null
 
-    for (const row of portfolioRaw) {
+    for (let i = 0; i < portfolioRaw.length; i++) {
+      const row    = portfolioRaw[i]
+      const valued = valuation.items[i]
       const card = urlToCard.get(row.card_slug)
       const bare = card?.cardSlug ?? null
-      // Block 5A-W-16B — prefer portfolio_items.card_name / set_name
-      // when present. cards.card_url_slug can resolve to MULTIPLE rows
-      // (see the dashboard's urlToNumerics Map<url, string[]>) and we
-      // were sometimes picking the wrong set (the Charizard #4 — Crystal
-      // Guardians vs Base Set mismatch). The user's portfolio row is
-      // the source of truth for what to call the card; cards is just
-      // a fallback for the cardUrl + bare-numeric resolution.
+      // Block 5A-W-16B — portfolio_items.card_name wins over cards-row
+      // lookup so a slug-collision can't relabel the user's holding.
       const display = {
         cardSlug: bare,
         cardName: row.card_name ?? card?.cardName ?? null,
@@ -485,18 +516,22 @@ export async function buildWeeklyDigestForUser(
           ? `https://www.pokeprices.io/set/${encodeURIComponent(card.setName)}/card/${card.cardUrlSlug}`
           : null,
       }
+
+      // Baseline (week-ago) value — still from daily_prices because
+      // card_trends doesn't carry history. Same column the dashboard's
+      // enrichment would have used.
       const basis  = classifyPortfolioPriceBasis(row.holding_type)
       portfolioPriceBasisCounts[basis.basis] += 1
       const pair   = bare ? findPricePair(priceIndex.get(bare) ?? [], asOf, lookbackDays) : null
-      // Block 5A-W-16B — daily_prices.*_usd columns are already USD
-      // CENTS. Pre-fix bug: we'd multiply by 100 here and report 100×
-      // the real value. Pass the column value through as-is.
-      const curCts = pair ? dailyPriceCentsFromColumn(pair.latest[basis.column]   ?? null) : null
       const prvCts = pair ? dailyPriceCentsFromColumn(pair.baseline[basis.column] ?? null) : null
       const qty    = Math.max(1, Math.floor(row.quantity ?? 1))
-      const posCurrent  = curCts != null ? curCts * qty : null
+
+      // Use the shared helper's per-card EFFECTIVE value (manual
+      // override applied) for the displayed top-item amount. Use its
+      // position value for the headline total.
+      const curCts      = valued.effectiveValueCents
+      const posCurrent  = valued.positionValueCents
       const posPrevious = prvCts != null ? prvCts * qty : null
-      if (posCurrent  != null) currentTotal  = (currentTotal  ?? 0) + posCurrent
       if (posPrevious != null) previousTotal = (previousTotal ?? 0) + posPrevious
 
       scored.push({
@@ -506,15 +541,31 @@ export async function buildWeeklyDigestForUser(
         cardName:         display.cardName,
         setName:          display.setName,
         cardUrl:          display.cardUrl,
+        // For the displayed top-card amount we want per-card cents
+        // (NOT position), so the user sees the same per-card value as
+        // their dashboard row. Sample-data renderer treats currentCents
+        // as per-position; keep parity with renderer expectations by
+        // putting POSITION value on currentCents (since this is the
+        // sum of all the user's copies of this card).
         currentCents:     posCurrent,
         previousCents:    posPrevious,
-        pctChange:        pctChange(prvCts, curCts),    // per-card pct, not position
+        // Per-card pct: compare per-unit current vs per-unit previous.
+        // Using EFFECTIVE per-card value (manual override applied) for
+        // current; baseline daily_prices per-unit for previous.
+        pctChange:        pctChange(prvCts, curCts),
         absChangeCents:   (posCurrent != null && posPrevious != null) ? (posCurrent - posPrevious) : null,
         recentSalesCount: bare ? (salesIndex.get(bare) ?? 0) : 0,
         quantity:         qty,
       })
     }
 
+    // Headline total comes from the helper (mirrors dashboard's
+    // recomputedTotal which uses position_value_cents — manual-only
+    // holdings contribute 0). Treat 0 as null when EVERY holding is
+    // missing market data, otherwise expose the real sum.
+    const currentTotal = valuation.marketTotalCents > 0 || valuation.sourceCounts.card_trends + valuation.sourceCounts.daily_prices > 0
+      ? valuation.marketTotalCents
+      : null
     const absChange = (currentTotal != null && previousTotal != null) ? (currentTotal - previousTotal) : null
     portfolioSection = {
       itemCount:          portfolioRaw.length,
@@ -589,8 +640,10 @@ export async function buildWeeklyDigestForUser(
       cardsWithNoPriceData,
       cardsWithNoRecentSales,
       portfolioPriceBasisCounts,
-      displayCurrency:       currency,
-      portfolioValueSource:  'daily_prices_pivot',
+      displayCurrency:              currency,
+      portfolioValueSource:         'shared_valuation_helper',
+      portfolioPreviousValueSource: 'daily_prices_baseline',
+      portfolioValueSourceCounts,
       sectionsOmittedByPreferences,
       generatedAt,
     },
@@ -602,12 +655,15 @@ export async function buildWeeklyDigestForUser(
 // ─────────────────────────────────────────────────────────────────────
 
 type PortRow  = {
-  user_id:      string
-  card_slug:    string
-  holding_type: string | null
-  quantity:     number | null
-  card_name:    string | null
-  set_name:     string | null
+  user_id:            string
+  card_slug:          string
+  holding_type:       string | null
+  quantity:           number | null
+  card_name:          string | null
+  set_name:           string | null
+  /** Block 5A-W-16C — per-holding manual value override (USD-cents).
+   *  Used by the shared valuation helper for manual-grade holdings. */
+  manual_value_cents: number | null
 }
 
 type WatchRow = {
@@ -666,18 +722,37 @@ async function loadPortfolioItems(supa: SupabaseClient, userId: string): Promise
   // → cards collisions that can swap "Charizard #4 — Base Set" for a
   // same-slug card in a different set). Falls back to the cards-table
   // values when the portfolio row's columns are null.
-  const { data: items, error: iErr } = await supa
+  // Block 5A-W-16C — also pulls manual_value_cents so the shared
+  // valuation helper can treat manual-grade holdings the same way the
+  // dashboard does. Defensive: legacy schemas without that column
+  // fall back to the previous query so a missing column doesn't
+  // crash the whole digest.
+  let items: Array<Record<string, unknown>> = []
+  const { data: full, error: fullErr } = await supa
     .from('portfolio_items')
-    .select('portfolio_id, card_slug, holding_type, quantity, card_name, set_name')
+    .select('portfolio_id, card_slug, holding_type, quantity, card_name, set_name, manual_value_cents')
     .in('portfolio_id', portfolioIds)
-  if (iErr || !Array.isArray(items)) return []
-  return (items as Array<Record<string, unknown>>).map(r => ({
-    user_id:      idToUser.get(String(r.portfolio_id)) ?? userId,
-    card_slug:    String(r.card_slug ?? ''),
-    holding_type: r.holding_type == null ? null : String(r.holding_type),
-    quantity:     r.quantity     == null ? 1    : Math.max(1, Math.floor(Number(r.quantity) || 1)),
-    card_name:    r.card_name == null ? null : String(r.card_name),
-    set_name:     r.set_name  == null ? null : String(r.set_name),
+  if (fullErr || !Array.isArray(full)) {
+    const { data: legacy, error: lErr } = await supa
+      .from('portfolio_items')
+      .select('portfolio_id, card_slug, holding_type, quantity, card_name, set_name')
+      .in('portfolio_id', portfolioIds)
+    if (lErr || !Array.isArray(legacy)) return []
+    items = legacy as Array<Record<string, unknown>>
+  } else {
+    items = full as Array<Record<string, unknown>>
+  }
+
+  return items.map(r => ({
+    user_id:            idToUser.get(String(r.portfolio_id)) ?? userId,
+    card_slug:          String(r.card_slug ?? ''),
+    holding_type:       r.holding_type == null ? null : String(r.holding_type),
+    quantity:           r.quantity     == null ? 1    : Math.max(1, Math.floor(Number(r.quantity) || 1)),
+    card_name:          r.card_name == null ? null : String(r.card_name),
+    set_name:           r.set_name  == null ? null : String(r.set_name),
+    manual_value_cents: r.manual_value_cents == null || !Number.isFinite(Number(r.manual_value_cents))
+                          ? null
+                          : Math.round(Number(r.manual_value_cents)),
   })).filter(r => r.card_slug)
 }
 
@@ -915,7 +990,9 @@ function emptyDiagnostics(generatedAt: string, currency: DigestDisplayCurrency =
     cardsWithNoRecentSales:      0,
     portfolioPriceBasisCounts:   { raw_usd: 0, psa9_usd: 0, psa10_usd: 0, unknown_fallback: 0 },
     displayCurrency:             currency,
-    portfolioValueSource:        'daily_prices_pivot',
+    portfolioValueSource:        'shared_valuation_helper',
+    portfolioPreviousValueSource:'daily_prices_baseline',
+    portfolioValueSourceCounts:  { card_trends: 0, daily_prices: 0, manual: 0, missing: 0 },
     sectionsOmittedByPreferences: [],
     generatedAt,
   }

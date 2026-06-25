@@ -62,7 +62,13 @@ function seedWatch(userId: string, urlSlug: string, cardName: string | null = nu
   ])
 }
 
-function seedPortfolio(userId: string, urlSlug: string, opts: { holding_type?: string; quantity?: number } = {}) {
+function seedPortfolio(userId: string, urlSlug: string, opts: {
+  holding_type?:      string
+  quantity?:          number
+  card_name?:         string | null
+  set_name?:          string | null
+  manual_value_cents?: number | null
+} = {}) {
   // Ensure a portfolio row exists for this user, then add the item.
   let portfolioId = (fakeDB.rows('portfolios').find(p => p.user_id === userId) as { id?: string } | undefined)?.id
   if (!portfolioId) {
@@ -75,10 +81,26 @@ function seedPortfolio(userId: string, urlSlug: string, opts: { holding_type?: s
   fakeDB.seed('portfolio_items', [
     ...fakeDB.rows('portfolio_items'),
     {
-      portfolio_id: portfolioId,
-      card_slug:    urlSlug,
-      holding_type: opts.holding_type ?? 'raw',
-      quantity:     opts.quantity ?? 1,
+      portfolio_id:       portfolioId,
+      card_slug:          urlSlug,
+      holding_type:       opts.holding_type ?? 'raw',
+      quantity:           opts.quantity     ?? 1,
+      card_name:          opts.card_name    ?? null,
+      set_name:           opts.set_name     ?? null,
+      manual_value_cents: opts.manual_value_cents ?? null,
+    },
+  ])
+}
+
+function seedCardTrend(cardName: string, setName: string, prices: { raw?: number; psa9?: number; psa10?: number }) {
+  fakeDB.seed('card_trends', [
+    ...fakeDB.rows('card_trends'),
+    {
+      card_name:     cardName,
+      set_name:      setName,
+      current_raw:   prices.raw   ?? null,
+      current_psa9:  prices.psa9  ?? null,
+      current_psa10: prices.psa10 ?? null,
     },
   ])
 }
@@ -567,6 +589,12 @@ describe('buildWeeklyDigestForUser — diagnostics', () => {
     expect(d.portfolioPriceBasisCounts).toEqual({
       raw_usd: 0, psa9_usd: 0, psa10_usd: 0, unknown_fallback: 0,
     })
+    // Block 5A-W-16C — shared valuation source diagnostics
+    expect(d.portfolioValueSource).toBe('shared_valuation_helper')
+    expect(d.portfolioPreviousValueSource).toBe('daily_prices_baseline')
+    expect(d.portfolioValueSourceCounts).toEqual({
+      card_trends: 0, daily_prices: 0, manual: 0, missing: 0,
+    })
   })
 })
 
@@ -707,16 +735,22 @@ describe('buildWeeklyDigestForUser — Block 5A-W-15B basis diagnostic', () => {
     expect(out.diagnostics.portfolioPriceBasisCounts.psa10_usd).toBe(1)
   })
 
-  it('uses raw_usd for raw / manual / sealed holdings, never psa10', async () => {
+  it('uses raw_usd for a raw holding, never psa10', async () => {
+    // Block 5A-W-16C — the shared valuation helper resolves raw via
+    // card_trends. Unknown holding_types (e.g. 'manual', 'sealed')
+    // no longer silently fall back to raw — they go to the 'missing'
+    // source so the total isn't quietly inflated by treating a
+    // sealed/manual holding as if it were ungraded raw.
     seedPrefs('u1')
     seedCardLink('a-card', '111', 'A', 'S')
-    seedPortfolio('u1', 'a-card', { holding_type: 'manual', quantity: 1 })
-    // PSA 10 is dramatically more expensive — pick raw or we'd be lying
-    seedPrice('111', '2026-06-18', { raw: 500, psa10: 50_000 })   // $5 raw, $500 psa10
-    seedPrice('111', '2026-06-25', { raw: 600, psa10: 60_000 })   // $6 raw, $600 psa10
+    seedPortfolio('u1', 'a-card', { holding_type: 'raw', quantity: 1, card_name: 'A', set_name: 'S' })
+    fakeDB.seed('card_trends', [
+      { card_name: 'A', set_name: 'S', current_raw: 600, current_psa9: null, current_psa10: 60_000 },
+    ])
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
     expect(out.portfolio?.currentTotalCents).toBe(600)   // raw, not psa10 (would be 60_000)
-    expect(out.diagnostics.portfolioPriceBasisCounts.unknown_fallback).toBe(1)
+    expect(out.diagnostics.portfolioPriceBasisCounts.raw_usd).toBe(1)
+    expect(out.diagnostics.portfolioValueSourceCounts.card_trends).toBe(1)
   })
 })
 
@@ -823,10 +857,100 @@ describe('buildWeeklyDigestForUser — Block 5A-W-16B currency', () => {
     expect(out.diagnostics.displayCurrency).toBe('USD')
   })
 
-  it('echoes portfolioValueSource = daily_prices_pivot in diagnostics', async () => {
+  it('echoes portfolioValueSource = shared_valuation_helper in diagnostics (Block 5A-W-16C)', async () => {
     seedPrefs('u1')
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
-    expect(out.diagnostics.portfolioValueSource).toBe('daily_prices_pivot')
+    expect(out.diagnostics.portfolioValueSource).toBe('shared_valuation_helper')
+    expect(out.diagnostics.portfolioPreviousValueSource).toBe('daily_prices_baseline')
+    expect(out.diagnostics.portfolioValueSourceCounts).toEqual({
+      card_trends: 0, daily_prices: 0, manual: 0, missing: 0,
+    })
+  })
+})
+
+describe('buildWeeklyDigestForUser — Block 5A-W-16C dashboard-aligned valuation', () => {
+  it('uses card_trends for raw / psa9 / psa10 holdings (matches dashboard totals)', async () => {
+    seedPrefs('u1')
+    // Real example: Charizard #4 — Base Set raw at £290.74 ≈ 36_924 USD-cents
+    seedCardLink('charizard-base-4', '1', 'Charizard', 'Base Set')
+    seedPortfolio('u1', 'charizard-base-4', {
+      holding_type: 'raw', quantity: 1,
+      card_name: 'Charizard', set_name: 'Base Set',
+    })
+    seedCardTrend('Charizard', 'Base Set', { raw: 36_924, psa10: 500_000 })
+    // daily_prices for the same card would give a DIFFERENT raw value
+    // (older snapshot). The helper must prefer card_trends.
+    seedPrice('1', '2026-06-25', { raw: 999 })
+
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.currentTotalCents).toBe(36_924)   // from card_trends, NOT 999
+    expect(out.diagnostics.portfolioValueSourceCounts.card_trends).toBe(1)
+    expect(out.diagnostics.portfolioValueSourceCounts.daily_prices).toBe(0)
+  })
+
+  it('uses card_trends.current_psa9 for a PSA 9 Dark Hypno (real example)', async () => {
+    seedPrefs('u1')
+    // £67.32 ≈ 8_549 USD-cents
+    seedCardLink('dark-hypno-9', '2', 'Dark Hypno', 'Team Rocket')
+    seedPortfolio('u1', 'dark-hypno-9', {
+      holding_type: 'psa9', quantity: 1,
+      card_name: 'Dark Hypno', set_name: 'Team Rocket',
+    })
+    seedCardTrend('Dark Hypno', 'Team Rocket', { psa9: 8_549 })
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.currentTotalCents).toBe(8_549)
+    expect(out.diagnostics.portfolioValueSourceCounts.card_trends).toBe(1)
+  })
+
+  it('uses daily_prices.cgc10_usd for a cgc10 holding (extra tier path)', async () => {
+    seedPrefs('u1')
+    seedCardLink('a', '111', 'A', 'S')
+    seedPortfolio('u1', 'a', {
+      holding_type: 'cgc10', quantity: 2,
+      card_name: 'A', set_name: 'S',
+    })
+    fakeDB.seed('daily_prices', [
+      ...fakeDB.rows('daily_prices'),
+      { card_slug: 'pc-111', date: '2026-06-25', raw_usd: 100, psa10_usd: 200, cgc10_usd: 750_00 },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.currentTotalCents).toBe(1_500_00)   // 750_00 × 2
+    expect(out.diagnostics.portfolioValueSourceCounts.daily_prices).toBe(1)
+  })
+
+  it('manual override appears per-card but does NOT inflate the headline total (matches dashboard)', async () => {
+    seedPrefs('u1')
+    seedCardLink('a', '111', 'A', 'S')
+    // Two holdings: one card_trends raw + one manual-grade with override
+    seedCardLink('b', '222', 'B', 'S2')
+    seedCardTrend('A', 'S', { raw: 100_00 })
+    seedPortfolio('u1', 'a', {
+      holding_type: 'raw', quantity: 1, card_name: 'A', set_name: 'S',
+    })
+    seedPortfolio('u1', 'b', {
+      holding_type: 'bgs9',   // manual grade
+      quantity: 1, card_name: 'B', set_name: 'S2',
+      manual_value_cents: 999_99,
+    })
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.currentTotalCents).toBe(100_00)    // NOT 100_00 + 999_99
+    expect(out.diagnostics.portfolioValueSourceCounts).toEqual({
+      card_trends: 1, daily_prices: 0, manual: 1, missing: 0,
+    })
+  })
+
+  it('low-value cards stay low (Chien-Pao 116 cents → £0.91 displayed via renderer)', async () => {
+    seedPrefs('u1')
+    seedCardLink('chien-pao-54', '5400', 'Chien-Pao', 'Set')
+    seedPortfolio('u1', 'chien-pao-54', {
+      holding_type: 'raw', quantity: 1,
+      card_name: 'Chien-Pao', set_name: 'Set',
+    })
+    seedCardTrend('Chien-Pao', 'Set', { raw: 116 })   // £0.91 at 1 USD ≈ 0.79 GBP
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.currentTotalCents).toBe(116)
+    // The renderer turns 116 USD-cents into £0.91 (116 / 127). The
+    // valuation helper just hands the cents through.
   })
 })
 
