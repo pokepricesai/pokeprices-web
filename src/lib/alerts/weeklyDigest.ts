@@ -1018,12 +1018,21 @@ async function loadPortfolioItems(supa: SupabaseClient, userId: string): Promise
   return { rows, portfoliosLoaded: portfolios.length, portfolioNames, scope }
 }
 
-/** Block 5A-W-16G — most recent successful weekly_report email for
- *  the user, with the portfolio snapshot we tucked into metadata
- *  when the email was sent. Returns null on first-ever delivery,
- *  or when the previous send didn't carry the snapshot payload
- *  (legacy sends before the snapshot was introduced). Defensive:
- *  any DB error falls back to null so the digest still renders. */
+/** Block 5A-W-16G / 5A-W-16I — most recent BASELINE-ELIGIBLE
+ *  weekly_report email for the user. A row is baseline-eligible only
+ *  if it represents a real user-facing weekly batch send, which the
+ *  sender marks with `baselineEligible: true` in metadata. Admin test
+ *  sends, sample sends, and admin-bypass previews carry
+ *  `baselineEligible: false` (plus `test: true` / `sample: true`) so
+ *  they are skipped here — they otherwise polluted the comparison
+ *  with their own portfolioTotalMinorUnits snapshot, producing the
+ *  "Since last weekly: $0.00 · 0.0%" line the first time a user
+ *  inspected a Force-Real preview.
+ *
+ *  Selection strategy: fetch the most recent few rows (test sends
+ *  cluster around the operator's clicks, so we may need to skip past
+ *  several to find a real batch send). Defensive: any DB error falls
+ *  back to null so the digest still renders. */
 async function loadLastWeeklySnapshot(
   supa:   SupabaseClient,
   userId: string,
@@ -1036,30 +1045,40 @@ async function loadLastWeeklySnapshot(
       .eq('category', 'weekly_report')
       .in('status', ['sent', 'delivered'])
       .order('sent_at', { ascending: false })
-      .limit(1)
+      .limit(25)
     if (error || !Array.isArray(data) || data.length === 0) return null
-    const row = data[0] as Record<string, unknown>
-    const meta = (row.metadata_json && typeof row.metadata_json === 'object')
-      ? row.metadata_json as Record<string, unknown>
-      : {}
-    // The snapshot was written by send-weekly-digest-test using these
-    // exact field names. Legacy rows without the snapshot fields
-    // resolve to a no-baseline result.
-    const totalRaw = meta.portfolioTotalMinorUnits
-    const currencyRaw = meta.currency
-    if (currencyRaw !== 'GBP' && currencyRaw !== 'USD') return null
-    if (typeof totalRaw !== 'number' || !Number.isFinite(totalRaw)) return null
-    const sentAt = row.sent_at == null ? null : String(row.sent_at)
-    if (!sentAt) return null
-    const itemCountRaw = meta.portfolioItemCount
-    return {
-      sentAt,
-      currency:            currencyRaw,
-      portfolioTotalCents: Math.round(totalRaw),
-      portfolioItemCount:  typeof itemCountRaw === 'number' && Number.isFinite(itemCountRaw)
-                            ? Math.floor(itemCountRaw)
-                            : null,
+    for (const r of data) {
+      const row = r as Record<string, unknown>
+      const meta = (row.metadata_json && typeof row.metadata_json === 'object')
+        ? row.metadata_json as Record<string, unknown>
+        : {}
+      // Hard filter: must be explicitly baseline-eligible. We do NOT
+      // treat the absence of the flag as "probably real" — legacy
+      // rows lacking the flag are skipped intentionally. Real batch
+      // sends are the only writer of `baselineEligible: true`.
+      if (meta.baselineEligible !== true) continue
+      // Defense in depth — even if a future caller forgets to set
+      // baselineEligible:false, an explicit test/sample marker is
+      // never a baseline.
+      if (meta.test === true) continue
+      if (meta.sample === true) continue
+      const totalRaw    = meta.portfolioTotalMinorUnits
+      const currencyRaw = meta.currency
+      if (currencyRaw !== 'GBP' && currencyRaw !== 'USD') continue
+      if (typeof totalRaw !== 'number' || !Number.isFinite(totalRaw)) continue
+      const sentAt = row.sent_at == null ? null : String(row.sent_at)
+      if (!sentAt) continue
+      const itemCountRaw = meta.portfolioItemCount
+      return {
+        sentAt,
+        currency:            currencyRaw,
+        portfolioTotalCents: Math.round(totalRaw),
+        portfolioItemCount:  typeof itemCountRaw === 'number' && Number.isFinite(itemCountRaw)
+                              ? Math.floor(itemCountRaw)
+                              : null,
+      }
     }
+    return null
   } catch {
     return null
   }

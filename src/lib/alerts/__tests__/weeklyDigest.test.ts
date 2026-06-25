@@ -1476,17 +1476,18 @@ describe('buildWeeklyDigestForUser — Block 5A-W-16G since-last-digest baseline
     expect(out.portfolio?.sinceLastDigest).toBeNull()
   })
 
-  it('returns a populated sinceLastDigest when the previous delivery_log entry carries a snapshot', async () => {
+  it('returns a populated sinceLastDigest when the previous delivery_log entry carries a baselineEligible snapshot', async () => {
     seedScopedPortfolio()
     fakeDB.seed('email_delivery_log', [
       {
         id: 'log-1', user_id: 'u1',
         category: 'weekly_report', status: 'sent',
-        template_key: 'weekly-digest-test',
+        template_key: 'weekly-digest',
         sent_at: '2026-06-18T12:00:00Z',
         metadata_json: {
-          source: 'admin_send_weekly_digest_test',
+          source: 'weekly_batch_send',
           mode: 'real',
+          baselineEligible: true,
           portfolioTotalMinorUnits: 80_00,
           currency: 'GBP',
           portfolioItemCount: 1,
@@ -1509,9 +1510,9 @@ describe('buildWeeklyDigestForUser — Block 5A-W-16G since-last-digest baseline
       {
         id: 'log-1', user_id: 'u1',
         category: 'weekly_report', status: 'sent',
-        template_key: 'weekly-digest-test',
+        template_key: 'weekly-digest',
         sent_at: '2026-06-18T12:00:00Z',
-        metadata_json: { portfolioTotalMinorUnits: 80_00, currency: 'USD' },
+        metadata_json: { baselineEligible: true, portfolioTotalMinorUnits: 80_00, currency: 'USD' },
       },
     ])
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
@@ -1526,7 +1527,172 @@ describe('buildWeeklyDigestForUser — Block 5A-W-16G since-last-digest baseline
         category: 'onboarding', status: 'sent',
         template_key: 'onboarding-1',
         sent_at: '2026-06-20T12:00:00Z',
-        metadata_json: { portfolioTotalMinorUnits: 50_00, currency: 'GBP' },
+        metadata_json: { baselineEligible: true, portfolioTotalMinorUnits: 50_00, currency: 'GBP' },
+      },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.sinceLastDigest).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-16I — baseline eligibility filter for since-last-weekly
+// ─────────────────────────────────────────────────────────────────────
+
+describe('loadLastWeeklySnapshot — Block 5A-W-16I baseline eligibility', () => {
+  const asOf = new Date('2026-06-25T08:00:00Z')
+
+  function seedScopedPortfolio() {
+    seedPrefs('u1')
+    fakeDB.seed('portfolios', [
+      ...fakeDB.rows('portfolios'),
+      { id: 'pf-u1', user_id: 'u1', is_default: true, name: 'My Collection' },
+    ])
+    seedCardLink('a', '111', 'A', 'S')
+    seedCardTrend('A', 'S', { raw: 100_00 })
+    fakeDB.seed('portfolio_items', [
+      ...fakeDB.rows('portfolio_items'),
+      { portfolio_id: 'pf-u1', card_slug: 'a', holding_type: 'raw', quantity: 1, card_name_snapshot: 'A', set_name_snapshot: 'S' },
+    ])
+  }
+
+  it('ignores admin test sends (test:true, baselineEligible:false) — no $0.00 · 0.0% line', async () => {
+    seedScopedPortfolio()
+    fakeDB.seed('email_delivery_log', [
+      {
+        id: 'log-test', user_id: 'u1',
+        category: 'weekly_report', status: 'sent',
+        template_key: 'weekly-digest-test',
+        sent_at: '2026-06-24T12:00:00Z',
+        metadata_json: {
+          source: 'admin_send_weekly_digest_test',
+          test:   true,
+          sample: false,
+          baselineEligible: false,
+          mode:   'real',
+          portfolioTotalMinorUnits: 100_00,
+          currency: 'GBP',
+        },
+      },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.sinceLastDigest).toBeNull()
+  })
+
+  it('ignores admin sample sends (sample:true, baselineEligible:false)', async () => {
+    seedScopedPortfolio()
+    fakeDB.seed('email_delivery_log', [
+      {
+        id: 'log-sample', user_id: 'u1',
+        category: 'weekly_report', status: 'sent',
+        template_key: 'weekly-digest-test',
+        sent_at: '2026-06-24T12:00:00Z',
+        metadata_json: {
+          source: 'admin_send_weekly_digest_test',
+          test:   true,
+          sample: true,
+          baselineEligible: false,
+          mode:   'sample',
+          portfolioTotalMinorUnits: 9999_99,
+          currency: 'GBP',
+        },
+      },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.sinceLastDigest).toBeNull()
+  })
+
+  it('ignores legacy rows that lack baselineEligible (treats absent flag as not eligible)', async () => {
+    seedScopedPortfolio()
+    fakeDB.seed('email_delivery_log', [
+      {
+        id: 'log-legacy', user_id: 'u1',
+        category: 'weekly_report', status: 'sent',
+        template_key: 'weekly-digest-test',
+        sent_at: '2026-06-18T12:00:00Z',
+        metadata_json: {
+          source: 'admin_send_weekly_digest_test',
+          portfolioTotalMinorUnits: 80_00,
+          currency: 'GBP',
+        },
+      },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.sinceLastDigest).toBeNull()
+  })
+
+  it('uses the most recent baselineEligible row even when test sends sit on top of it', async () => {
+    seedScopedPortfolio()
+    fakeDB.seed('email_delivery_log', [
+      {
+        id: 'log-batch', user_id: 'u1',
+        category: 'weekly_report', status: 'sent',
+        template_key: 'weekly-digest',
+        sent_at: '2026-06-18T12:00:00Z',
+        metadata_json: {
+          source: 'weekly_batch_send',
+          baselineEligible: true,
+          portfolioTotalMinorUnits: 80_00,
+          currency: 'GBP',
+          portfolioItemCount: 1,
+        },
+      },
+      // Two later admin test sends — these would have hidden the
+      // real baseline under the prior "limit(1)" implementation.
+      {
+        id: 'log-test-1', user_id: 'u1',
+        category: 'weekly_report', status: 'sent',
+        template_key: 'weekly-digest-test',
+        sent_at: '2026-06-22T12:00:00Z',
+        metadata_json: { test: true, baselineEligible: false, portfolioTotalMinorUnits: 100_00, currency: 'GBP' },
+      },
+      {
+        id: 'log-test-2', user_id: 'u1',
+        category: 'weekly_report', status: 'sent',
+        template_key: 'weekly-digest-test',
+        sent_at: '2026-06-24T12:00:00Z',
+        metadata_json: { test: true, baselineEligible: false, portfolioTotalMinorUnits: 100_00, currency: 'GBP' },
+      },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    const since = out.portfolio?.sinceLastDigest
+    expect(since).not.toBeNull()
+    expect(since?.lastTotalCents).toBe(80_00)              // real batch, not the test row
+    expect(since?.absChangeCents).toBe(100_00 - 80_00)
+  })
+
+  it('first-weekly note path: returns null when only test sends exist (renderer shows the first-weekly copy)', async () => {
+    seedScopedPortfolio()
+    fakeDB.seed('email_delivery_log', [
+      {
+        id: 'log-test-1', user_id: 'u1',
+        category: 'weekly_report', status: 'sent',
+        template_key: 'weekly-digest-test',
+        sent_at: '2026-06-22T12:00:00Z',
+        metadata_json: { test: true, baselineEligible: false, portfolioTotalMinorUnits: 100_00, currency: 'GBP' },
+      },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    // Null sinceLastDigest is exactly what the renderer reads as
+    // "first weekly" — verified by the renderer-side test that asserts
+    // the "First weekly update" copy in weeklyDigestEmail.test.ts.
+    expect(out.portfolio?.sinceLastDigest).toBeNull()
+  })
+
+  it('rejects baselineEligible:true but with sample:true belt-and-braces (test=false, sample=true)', async () => {
+    seedScopedPortfolio()
+    fakeDB.seed('email_delivery_log', [
+      {
+        id: 'log-paradox', user_id: 'u1',
+        category: 'weekly_report', status: 'sent',
+        template_key: 'weekly-digest-test',
+        sent_at: '2026-06-24T12:00:00Z',
+        metadata_json: {
+          baselineEligible: true,                  // (wrongly) flagged eligible
+          sample: true,                            // but also sample
+          portfolioTotalMinorUnits: 9999_99,
+          currency: 'GBP',
+        },
       },
     ])
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })

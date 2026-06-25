@@ -163,12 +163,20 @@ export async function POST(req: Request) {
         source:      'admin_send_weekly_digest_test',
         mode:        resolvedMode,
         status:      data.status,
-        // Block 5A-W-16G — snapshot fields read back on the NEXT
-        // digest as the "since last weekly" baseline. Keeps the
-        // baseline calculation honest: the digest renderer compares
-        // a real previous total to the current total, no fabrication.
-        // Stored only on REAL sends (sample previews of the same
-        // user would otherwise pollute the baseline).
+        // Block 5A-W-16I — admin test sends are NEVER a real baseline.
+        // The since-last-weekly comparison must compare a real prior
+        // batch send to the current total; admin previews / sample
+        // sends are not user-facing weekly emails and must not pollute
+        // the baseline lookup. loadLastWeeklySnapshot requires
+        // baselineEligible === true to consider a row. Flagging
+        // test:true and sample:bool too gives a defense-in-depth
+        // filter and makes the intent obvious when inspecting the log.
+        test:             true,
+        sample:           resolvedMode === 'sample',
+        baselineEligible: false,
+        // Diagnostic snapshot fields — retained so an operator can
+        // see what the admin send observed at the time, but ignored
+        // by the baseline reader because baselineEligible=false.
         portfolioTotalMinorUnits: resolvedMode === 'real'
           ? data.portfolio?.currentTotalCents ?? null
           : null,
