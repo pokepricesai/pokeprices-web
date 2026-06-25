@@ -98,6 +98,12 @@ export type WeeklyDigestPortfolioSection = {
   absChangeCents:     number | null
   pctChange:          number | null
   topItems:           WeeklyDigestItem[]
+  /** Block 5A-W-16F — display label for the section header. When the
+   *  digest is scoped to a single named portfolio (matching the
+   *  dashboard's is_default=true scope), this carries that portfolio
+   *  name so the renderer can say "My Collection · 35 items". Null /
+   *  absent when the digest is aggregating across multiple portfolios. */
+  scopeLabel?:        string | null
 }
 
 export type WeeklyDigestWatchlistSection = {
@@ -118,6 +124,21 @@ export type WeeklyDigestAlertCardBlock = {
 export type WeeklyDigestAlertSummary = {
   totalEvents: number
   cardBlocks:  WeeklyDigestAlertCardBlock[]
+}
+
+/** Block 5A-W-16F — per-row reconciliation entry. One per
+ *  portfolio_items row processed. No user_id / no email. */
+export type PortfolioReconciliationRow = {
+  cardSlug:             string
+  cardName:             string | null
+  setName:              string | null
+  holdingType:          string | null
+  quantity:             number
+  marketValueCents:     number | null
+  positionValueCents:   number | null
+  source:               ValuationPriceSource
+  pct30d:               number | null
+  includedInTotal:      boolean
 }
 
 /** Block 5A-W-15B — how many portfolio_items rows resolved to each
@@ -186,6 +207,19 @@ export type WeeklyDigestDiagnostics = {
   portfolioItemsLoaded:             number
   portfolioItemsMissingCardName:    number
   portfolioItemsValuedAsMissing:    number
+  /** Block 5A-W-16F — scope diagnostics for the dashboard-parity fix.
+   *  `selected_dashboard_portfolio` means we used the user's
+   *  is_default=true portfolio (same scope as the dashboard's
+   *  Collection Value). `all_portfolios` is the fallback when no
+   *  portfolio is marked default (legacy users). */
+  portfolioScope:                   'selected_dashboard_portfolio' | 'all_portfolios'
+  portfolioNamesIncluded:           string[]
+  portfolioItemsIncludedInTotal:    number
+  /** Block 5A-W-16F — concise row-by-row reconciliation for admin
+   *  preview. Each row carries enough info to compare against the
+   *  dashboard but NO PII (no user_id, no email). Capped at 100
+   *  rows so the response body stays small. */
+  portfolioReconciliation:          Array<PortfolioReconciliationRow>
   sectionsOmittedByPreferences: Array<'portfolio' | 'watchlist'>
   generatedAt:                  string
 }
@@ -486,11 +520,15 @@ export async function buildWeeklyDigestForUser(
   const [portfolioResult, watchlistRaw] = await Promise.all([
     wantPortfolio
       ? loadPortfolioItems(supa, userId)
-      : Promise.resolve({ rows: [] as PortRow[], portfoliosLoaded: 0 }),
+      : Promise.resolve({
+          rows: [] as PortRow[], portfoliosLoaded: 0, portfolioNames: [], scope: 'selected_dashboard_portfolio' as const,
+        }),
     wantWatchlist ? loadWatchlist(supa, userId)      : Promise.resolve([] as WatchRow[]),
   ])
-  const portfolioRaw     = portfolioResult.rows
-  const portfoliosLoaded = portfolioResult.portfoliosLoaded
+  const portfolioRaw       = portfolioResult.rows
+  const portfoliosLoaded   = portfolioResult.portfoliosLoaded
+  const portfolioNames     = portfolioResult.portfolioNames
+  const portfolioScope     = portfolioResult.scope
 
   // 4. Resolve URL slugs → bare numeric + display fields via cards.
   const urlSlugs = uniq([
@@ -534,19 +572,29 @@ export async function buildWeeklyDigestForUser(
     raw_usd: 0, psa9_usd: 0, psa10_usd: 0, unknown_fallback: 0,
   }
   let portfolioValueSourceCounts = { card_trends: 0, daily_prices: 0, manual: 0, missing: 0 }
+  let portfolioReconciliation: PortfolioReconciliationRow[] = []
   if (wantPortfolio) {
     // (a) shared valuation — produces dashboard-aligned per-card +
     //     headline market value. Map keyed by row.card_slug (URL slug)
     //     so each portfolio_items row lines up to its valued item.
-    const valuation = await valuePortfolio(supa, portfolioRaw.map(r => ({
-      id:                 r.user_id + '|' + r.card_slug + '|' + (r.holding_type ?? ''),
-      card_slug:          r.card_slug,
-      card_name:          r.card_name,
-      set_name:           r.set_name,
-      holding_type:       r.holding_type,
-      quantity:           r.quantity,
-      manual_value_cents: r.manual_value_cents,
-    })))
+    //     Block 5A-W-16F — fill (card_name, set_name) from the cards
+    //     lookup FIRST when the portfolio row is missing them, so
+    //     valuePortfolio can match against card_trends. Without this,
+    //     pre-snapshot legacy rows (or rows with NULL snapshot
+    //     columns) would never resolve a price and contribute 0 to
+    //     the headline.
+    const valuation = await valuePortfolio(supa, portfolioRaw.map(r => {
+      const cardLookup = urlToCard.get(r.card_slug)
+      return {
+        id:                 r.user_id + '|' + r.card_slug + '|' + (r.holding_type ?? ''),
+        card_slug:          r.card_slug,
+        card_name:          r.card_name ?? cardLookup?.cardName ?? null,
+        set_name:           r.set_name  ?? cardLookup?.setName  ?? null,
+        holding_type:       r.holding_type,
+        quantity:           r.quantity,
+        manual_value_cents: r.manual_value_cents,
+      }
+    }))
     portfolioValueSourceCounts = valuation.sourceCounts
 
     const scored: ScoredCard[] = []
@@ -600,6 +648,24 @@ export async function buildWeeklyDigestForUser(
         quantity:             qty,
         pctChangeWindowDays:  pct30d == null ? null : 30,
       })
+
+      // Block 5A-W-16F — per-row reconciliation. Capped at 100 so the
+      // response stays small. Includes everything an admin needs to
+      // diff against the dashboard, NO user-identifying fields.
+      if (portfolioReconciliation.length < 100) {
+        portfolioReconciliation.push({
+          cardSlug:            row.card_slug,
+          cardName:            row.card_name,
+          setName:             row.set_name,
+          holdingType:         row.holding_type,
+          quantity:            qty,
+          marketValueCents:    valued.marketValueCents,
+          positionValueCents:  valued.positionValueCents,
+          source:              valued.source,
+          pct30d:              valued.pct30d,
+          includedInTotal:     valued.positionValueCents != null,
+        })
+      }
     }
 
     // Headline current total — from the shared helper. Suppress the
@@ -616,6 +682,9 @@ export async function buildWeeklyDigestForUser(
       absChangeCents:     null,
       pctChange:          null,
       topItems:           selectTopItems(scored, maxPortfolioItems, { includeMostValuable: true }),
+      scopeLabel:         portfolioScope === 'selected_dashboard_portfolio' && portfolioNames.length === 1
+                            ? portfolioNames[0]
+                            : null,
     }
   }
 
@@ -700,6 +769,11 @@ export async function buildWeeklyDigestForUser(
       portfolioItemsValuedAsMissing:    portfolioValueSourceCounts.missing,
       portfolioHoldingsPricedCount:        portfolioValueSourceCounts.card_trends + portfolioValueSourceCounts.daily_prices,
       portfolioHoldingsMissingPriceCount:  portfolioValueSourceCounts.manual + portfolioValueSourceCounts.missing,
+      // Block 5A-W-16F dashboard-parity diagnostics
+      portfolioScope,
+      portfolioNamesIncluded:        portfolioNames,
+      portfolioItemsIncludedInTotal: portfolioReconciliation.filter(r => r.includedInTotal).length,
+      portfolioReconciliation,
       sectionsOmittedByPreferences,
       generatedAt,
     },
@@ -764,20 +838,46 @@ async function loadPrefs(supa: SupabaseClient, userId: string): Promise<UserAler
 type PortfolioLoadResult = {
   rows:               PortRow[]
   portfoliosLoaded:   number
+  portfolioNames:     string[]
+  scope:              'selected_dashboard_portfolio' | 'all_portfolios'
 }
 
 async function loadPortfolioItems(supa: SupabaseClient, userId: string): Promise<PortfolioLoadResult> {
-  // Mirror the evaluator's two-step lookup: user → portfolios → items.
-  const { data: portfolios, error: pErr } = await supa
+  // Block 5A-W-16F — DASHBOARD PARITY: the portfolio dashboard ONLY
+  // loads is_default=true (see PortfolioDashboard.tsx::loadPortfolio).
+  // Aggregating ALL portfolios here gave the digest a higher total
+  // than the dashboard for users with multiple portfolios. Default-
+  // scope is the source of truth; fall back to all-portfolios only
+  // when no portfolio carries is_default (legacy users predating the
+  // is_default flag).
+  const { data: defaultRows, error: pErr } = await supa
     .from('portfolios')
-    .select('id, user_id')
+    .select('id, user_id, name')
     .eq('user_id', userId)
-  if (pErr || !Array.isArray(portfolios) || portfolios.length === 0) {
-    return { rows: [], portfoliosLoaded: 0 }
+    .eq('is_default', true)
+  let portfolios: Array<Record<string, unknown>> = !pErr && Array.isArray(defaultRows) ? defaultRows : []
+  let scope: 'selected_dashboard_portfolio' | 'all_portfolios' = 'selected_dashboard_portfolio'
+
+  if (portfolios.length === 0) {
+    const { data: anyRows } = await supa
+      .from('portfolios')
+      .select('id, user_id, name')
+      .eq('user_id', userId)
+    if (Array.isArray(anyRows) && anyRows.length > 0) {
+      portfolios = anyRows
+      scope = 'all_portfolios'
+    }
   }
-  const portfolioIds = portfolios.map(r => String((r as Record<string, unknown>).id))
+
+  if (portfolios.length === 0) {
+    return { rows: [], portfoliosLoaded: 0, portfolioNames: [], scope: 'selected_dashboard_portfolio' }
+  }
+  const portfolioIds = portfolios.map(r => String(r.id))
   const idToUser     = new Map<string, string>()
-  for (const r of portfolios as Array<Record<string, unknown>>) idToUser.set(String(r.id), String(r.user_id))
+  for (const r of portfolios) idToUser.set(String(r.id), String(r.user_id))
+  const portfolioNames = portfolios
+    .map(r => (r.name == null ? '' : String(r.name)).trim())
+    .filter(Boolean)
 
   // Block 5A-W-16D — the production portfolio_items schema uses the
   // `*_snapshot` suffix for denormalised card display fields (see the
@@ -834,7 +934,7 @@ async function loadPortfolioItems(supa: SupabaseClient, userId: string): Promise
                             : Math.round(Number(r.manual_value_cents)),
     }
   }).filter(r => r.card_slug)
-  return { rows, portfoliosLoaded: portfolios.length }
+  return { rows, portfoliosLoaded: portfolios.length, portfolioNames, scope }
 }
 
 /** Block 5A-W-16B — read the user's preferred display currency from
@@ -1083,6 +1183,10 @@ function emptyDiagnostics(generatedAt: string, currency: DigestDisplayCurrency =
     portfolioItemsValuedAsMissing:    0,
     portfolioHoldingsPricedCount:        0,
     portfolioHoldingsMissingPriceCount:  0,
+    portfolioScope:                'selected_dashboard_portfolio',
+    portfolioNamesIncluded:        [],
+    portfolioItemsIncludedInTotal: 0,
+    portfolioReconciliation:       [],
     sectionsOmittedByPreferences: [],
     generatedAt,
   }

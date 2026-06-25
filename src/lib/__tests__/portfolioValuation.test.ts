@@ -109,14 +109,21 @@ describe('valuePortfolio — card_trends precedence for raw/psa9/psa10', () => {
     expect(r.items[0].marketValueCents).toBe(12_500)
   })
 
-  it('falls through to daily_prices when card_trends does not have the value', async () => {
+  it('does NOT fall through to daily_prices for raw/psa9/psa10 when card_trends is missing (Block 5A-W-16F)', async () => {
+    // Dashboard parity: PortfolioDashboard.tsx wipes position_value
+    // for raw/psa9/psa10 holdings whose card_trends row is missing
+    // and pass 2's enrichment skips raw/psa9/psa10. Letting the
+    // digest fall through to daily_prices here was the source of the
+    // $1,525.98 vs $1.1k headline mismatch.
     seedCardLink('a', '111', 'A', 'S')
     seedDailyPrice('111', '2026-06-25', { raw_usd: 555 })
     const r = await valuePortfolio(asSupa(fakeDB), [
       h({ card_slug: 'a', card_name: 'A', set_name: 'S', holding_type: 'raw' }),
     ])
-    expect(r.items[0].source).toBe('daily_prices')
-    expect(r.items[0].marketValueCents).toBe(555)
+    expect(r.items[0].source).toBe('missing')
+    expect(r.items[0].marketValueCents).toBeNull()
+    expect(r.items[0].positionValueCents).toBeNull()
+    expect(r.marketTotalCents).toBe(0)
   })
 })
 

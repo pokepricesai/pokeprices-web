@@ -156,6 +156,7 @@ export function buildSampleWeeklyDigestData(): WeeklyDigestData {
       previousTotalCents: null,
       absChangeCents:     null,
       pctChange:          null,
+      scopeLabel:         'My Collection',
       topItems: [
         {
           cardSlug: '1450205', cardName: "Lt. Surge's Raichu", setName: 'Gym Challenge',
@@ -238,6 +239,10 @@ export function buildSampleWeeklyDigestData(): WeeklyDigestData {
       portfolioItemsValuedAsMissing:      0,
       portfolioHoldingsPricedCount:        14,
       portfolioHoldingsMissingPriceCount:  0,
+      portfolioScope:                'selected_dashboard_portfolio',
+      portfolioNamesIncluded:        ['My Collection'],
+      portfolioItemsIncludedInTotal: 14,
+      portfolioReconciliation:       [],
       sectionsOmittedByPreferences: [],
       generatedAt:                 '2026-06-25T12:00:00Z',
     },
@@ -365,9 +370,17 @@ function renderPortfolioSectionHtml(data: WeeklyDigestData): string {
        </div>`
     : ''
 
+  // Block 5A-W-16F — when the digest is scoped to a single named
+  // portfolio (matches the dashboard's is_default=true scope), show
+  // that portfolio name so the user can reconcile against "My
+  // Collection" on the dashboard. Falls back to the generic
+  // "across all portfolios" copy when aggregating multiple.
+  const scopeLine = p.scopeLabel
+    ? `${esc(p.scopeLabel)} · ${p.itemCount} ${pluralize(p.itemCount, 'item', 'items')}`
+    : `Estimated value across all portfolios · ${p.itemCount} ${pluralize(p.itemCount, 'item', 'items')}`
   const summary = `
     <table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 12px;"><tr><td>
-      <div style="font-family:'Figtree',sans-serif;font-size:11px;color:${BRAND.muted};text-transform:uppercase;letter-spacing:0.7px;font-weight:700;">Estimated value across all portfolios · ${p.itemCount} ${pluralize(p.itemCount, 'item', 'items')}</div>
+      <div style="font-family:'Figtree',sans-serif;font-size:11px;color:${BRAND.muted};text-transform:uppercase;letter-spacing:0.7px;font-weight:700;">${scopeLine}</div>
       ${totalLine}
       ${changeLine}
     </td></tr></table>`
@@ -536,7 +549,8 @@ function renderText(data: WeeklyDigestData, sample: boolean): string {
         // couldn't price them this week.
         lines.push(`Tracking ${data.portfolio.itemCount} ${pluralize(data.portfolio.itemCount, 'item', 'items')}, but no weekly value could be calculated.`)
       } else {
-        lines.push(`Estimated value across all portfolios: ${fmtCents(data.portfolio.currentTotalCents, data.currency)}  (was ${fmtCents(data.portfolio.previousTotalCents, data.currency)})`)
+        const scopeWord = data.portfolio.scopeLabel ?? 'all portfolios'
+        lines.push(`${data.portfolio.scopeLabel ? scopeWord : 'Estimated value across ' + scopeWord}: ${fmtCents(data.portfolio.currentTotalCents, data.currency)}  (was ${fmtCents(data.portfolio.previousTotalCents, data.currency)})`)
         lines.push(`Change: ${fmtCents(data.portfolio.absChangeCents, data.currency)}  (${fmtPct(data.portfolio.pctChange)})`)
         lines.push(`Items: ${data.portfolio.itemCount}`)
         if (data.portfolio.topItems.length === 0) {

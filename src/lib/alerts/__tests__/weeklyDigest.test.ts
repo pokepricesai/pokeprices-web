@@ -329,7 +329,14 @@ describe('buildWeeklyDigestForUser — slug resolution', () => {
     // URL slug stored on watchlist / portfolio_items
     seedCardLink('charizard-base-4', '1450205', 'Charizard', 'Base Set')
     seedWatch    ('u1', 'charizard-base-4')
-    seedPortfolio('u1', 'charizard-base-4', { holding_type: 'raw', quantity: 1 })
+    seedPortfolio('u1', 'charizard-base-4', {
+      holding_type: 'raw', quantity: 1,
+      card_name: 'Charizard', set_name: 'Base Set',
+    })
+    // Block 5A-W-16F — raw holdings price via card_trends now, NOT
+    // daily_prices. Keep daily_prices seeded so the watchlist section
+    // still gets week-over-week pct for the same card.
+    seedCardTrend('Charizard', 'Base Set', { raw: 1200 })
     // Prices indexed by pc-1450205. Values are USD CENTS (matches the
     // actual daily_prices column convention — fixed in Block 5A-W-16B).
     seedPrice('1450205', '2026-06-18', { raw: 1000 })   // baseline 7d before asOf = $10.00
@@ -398,11 +405,17 @@ describe('buildWeeklyDigestForUser — slug resolution', () => {
   it('uses the holding_type to pick the right price column (psa10 → psa10_usd)', async () => {
     seedPrefs('u1')
     seedCardLink('crz', '111', 'Charizard', 'Base')
-    seedPortfolio('u1', 'crz', { holding_type: 'psa10', quantity: 1 })
-    // USD-cents in the columns. Wildly different raw vs psa10 so a
-    // wrong-column read would be obvious.
-    seedPrice('111', '2026-06-18', { raw:   100, psa10: 50_000 })   // $1 raw, $500 psa10
-    seedPrice('111', '2026-06-25', { raw:   200, psa10: 60_000 })   // $2 raw, $600 psa10
+    seedPortfolio('u1', 'crz', {
+      holding_type: 'psa10', quantity: 1,
+      card_name: 'Charizard', set_name: 'Base',
+    })
+    // Block 5A-W-16F — psa10 prices via card_trends.current_psa10.
+    seedCardTrend('Charizard', 'Base', { raw: 200, psa10: 60_000 })
+    // daily_prices still seeded for parity with prior behaviour but
+    // must NOT influence the psa10 total — the helper no longer
+    // falls back to daily_prices for raw/psa9/psa10.
+    seedPrice('111', '2026-06-18', { raw:   100, psa10: 50_000 })
+    seedPrice('111', '2026-06-25', { raw:   200, psa10: 60_000 })
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
     expect(out.portfolio?.currentTotalCents).toBe(60_000)
     // Block 5A-W-16E — headline previous always null
@@ -412,9 +425,13 @@ describe('buildWeeklyDigestForUser — slug resolution', () => {
   it('multiplies the per-card price by quantity in the portfolio total', async () => {
     seedPrefs('u1')
     seedCardLink('crz', '111', 'Charizard', 'Base')
-    seedPortfolio('u1', 'crz', { holding_type: 'raw', quantity: 3 })
-    seedPrice('111', '2026-06-18', { raw: 1000 })   // $10.00 in USD-cents
-    seedPrice('111', '2026-06-25', { raw: 1500 })   // $15.00 in USD-cents
+    seedPortfolio('u1', 'crz', {
+      holding_type: 'raw', quantity: 3,
+      card_name: 'Charizard', set_name: 'Base',
+    })
+    seedCardTrend('Charizard', 'Base', { raw: 1500 })
+    seedPrice('111', '2026-06-18', { raw: 1000 })   // baseline for watchlist (unused here)
+    seedPrice('111', '2026-06-25', { raw: 1500 })
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
     expect(out.portfolio?.currentTotalCents).toBe(4500)   // 1500 cents × 3
     // Block 5A-W-16E — headline change suppressed
@@ -735,13 +752,19 @@ describe('buildWeeklyDigestForUser — Block 5A-W-15B basis diagnostic', () => {
     })
   })
 
-  it('uses psa10_usd for a psa10 holding when both columns are populated', async () => {
+  it('uses card_trends.current_psa10 for a psa10 holding (Block 5A-W-16F dashboard parity)', async () => {
     seedPrefs('u1')
     seedCardLink('crz', '111', 'Charizard', 'Base')
-    seedPortfolio('u1', 'crz', { holding_type: 'psa10', quantity: 1 })
-    // Wildly different raw vs psa10 USD-cents — the holding chooses psa10
-    seedPrice('111', '2026-06-18', { raw: 100, psa10: 10_000 })   // $1 raw, $100 psa10
-    seedPrice('111', '2026-06-25', { raw: 100, psa10: 15_000 })   // $1 raw, $150 psa10
+    seedPortfolio('u1', 'crz', {
+      holding_type: 'psa10', quantity: 1,
+      card_name: 'Charizard', set_name: 'Base',
+    })
+    // psa10 must price via card_trends now. Daily-prices values
+    // (still seeded) MUST NOT influence the headline total — the
+    // helper no longer falls back to daily_prices for raw/psa9/psa10.
+    seedCardTrend('Charizard', 'Base', { raw: 100, psa10: 15_000 })
+    seedPrice('111', '2026-06-18', { raw: 100, psa10: 10_000 })
+    seedPrice('111', '2026-06-25', { raw: 100, psa10: 15_000 })
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
     expect(out.portfolio?.currentTotalCents).toBe(15_000)
     // Block 5A-W-16E — headline previous always null
@@ -969,6 +992,151 @@ describe('buildWeeklyDigestForUser — Block 5A-W-16C dashboard-aligned valuatio
   })
 })
 
+describe('buildWeeklyDigestForUser — Block 5A-W-16F dashboard parity', () => {
+  it('scopes to the user\'s is_default=true portfolio (matches dashboard Collection Value)', async () => {
+    seedPrefs('u1')
+    // Two portfolios: the default "My Collection" and an unused
+    // "Trading Stock". Dashboard shows only the default; the digest
+    // must match that scope or it'll over-count.
+    fakeDB.seed('portfolios', [
+      ...fakeDB.rows('portfolios'),
+      { id: 'pf-default', user_id: 'u1', is_default: true,  name: 'My Collection' },
+      { id: 'pf-other',   user_id: 'u1', is_default: false, name: 'Trading Stock' },
+    ])
+    seedCardLink('a', '111', 'A', 'S')
+    seedCardLink('b', '222', 'B', 'S')
+    seedCardTrend('A', 'S', { raw: 100_00 })
+    seedCardTrend('B', 'S', { raw: 200_00 })
+    fakeDB.seed('portfolio_items', [
+      ...fakeDB.rows('portfolio_items'),
+      { portfolio_id: 'pf-default', card_slug: 'a', holding_type: 'raw', quantity: 1, card_name_snapshot: 'A', set_name_snapshot: 'S' },
+      { portfolio_id: 'pf-other',   card_slug: 'b', holding_type: 'raw', quantity: 1, card_name_snapshot: 'B', set_name_snapshot: 'S' },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.itemCount).toBe(1)                    // only the default's item
+    expect(out.portfolio?.currentTotalCents).toBe(100_00)       // only A's value, NOT A+B
+    expect(out.diagnostics.portfolioScope).toBe('selected_dashboard_portfolio')
+    expect(out.diagnostics.portfolioNamesIncluded).toEqual(['My Collection'])
+    expect(out.portfolio?.scopeLabel).toBe('My Collection')
+  })
+
+  it('falls back to all portfolios when no portfolio carries is_default (legacy users)', async () => {
+    seedPrefs('u1')
+    fakeDB.seed('portfolios', [
+      ...fakeDB.rows('portfolios'),
+      { id: 'pf-legacy', user_id: 'u1', name: 'Legacy' },     // no is_default flag
+    ])
+    seedCardLink('a', '111', 'A', 'S')
+    seedCardTrend('A', 'S', { raw: 50_00 })
+    fakeDB.seed('portfolio_items', [
+      ...fakeDB.rows('portfolio_items'),
+      { portfolio_id: 'pf-legacy', card_slug: 'a', holding_type: 'raw', quantity: 1, card_name_snapshot: 'A', set_name_snapshot: 'S' },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.itemCount).toBe(1)
+    expect(out.portfolio?.currentTotalCents).toBe(50_00)
+    expect(out.diagnostics.portfolioScope).toBe('all_portfolios')
+  })
+
+  it('raw holding with NO card_trends row contributes 0 to headline (mirrors dashboard nulling)', async () => {
+    seedPrefs('u1')
+    fakeDB.seed('portfolios', [
+      ...fakeDB.rows('portfolios'),
+      { id: 'pf-u1', user_id: 'u1', is_default: true, name: 'My Collection' },
+    ])
+    seedCardLink('a', '111', 'A', 'S')
+    seedCardLink('b', '222', 'B', 'S')
+    seedCardTrend('A', 'S', { raw: 100_00 })
+    // B intentionally has NO card_trends row. Daily prices exist but
+    // dashboard ignores them for raw — so the digest must too.
+    seedPrice('222', '2026-06-25', { raw: 500_00 })
+    fakeDB.seed('portfolio_items', [
+      ...fakeDB.rows('portfolio_items'),
+      { portfolio_id: 'pf-u1', card_slug: 'a', holding_type: 'raw', quantity: 1, card_name_snapshot: 'A', set_name_snapshot: 'S' },
+      { portfolio_id: 'pf-u1', card_slug: 'b', holding_type: 'raw', quantity: 1, card_name_snapshot: 'B', set_name_snapshot: 'S' },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.itemCount).toBe(2)
+    expect(out.portfolio?.currentTotalCents).toBe(100_00)                    // A only — B contributes 0
+    expect(out.diagnostics.portfolioValueSourceCounts.card_trends).toBe(1)
+    expect(out.diagnostics.portfolioValueSourceCounts.missing).toBe(1)
+    expect(out.diagnostics.portfolioValueSourceCounts.daily_prices).toBe(0)   // no fallback for raw
+    expect(out.diagnostics.portfolioItemsIncludedInTotal).toBe(1)
+  })
+
+  it('psa9 with NO card_trends row also contributes 0 (no daily_prices fallback for psa9)', async () => {
+    seedPrefs('u1')
+    fakeDB.seed('portfolios', [
+      ...fakeDB.rows('portfolios'),
+      { id: 'pf-u1', user_id: 'u1', is_default: true, name: 'My Collection' },
+    ])
+    seedCardLink('a', '111', 'A', 'S')
+    seedPrice('111', '2026-06-25', { psa9: 67_32 })   // dashboard would ignore this
+    fakeDB.seed('portfolio_items', [
+      ...fakeDB.rows('portfolio_items'),
+      { portfolio_id: 'pf-u1', card_slug: 'a', holding_type: 'psa9', quantity: 1, card_name_snapshot: 'A', set_name_snapshot: 'S' },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.currentTotalCents).toBeNull()
+    expect(out.diagnostics.portfolioValueSourceCounts.missing).toBe(1)
+  })
+
+  it('cgc10 (extra tier) DOES use daily_prices fallback — matches dashboard pass 2', async () => {
+    seedPrefs('u1')
+    fakeDB.seed('portfolios', [
+      ...fakeDB.rows('portfolios'),
+      { id: 'pf-u1', user_id: 'u1', is_default: true, name: 'My Collection' },
+    ])
+    seedCardLink('a', '111', 'A', 'S')
+    // seedPrice only writes raw/psa9/psa10 columns — inline the full
+    // row so cgc10_usd survives into the FakeDB store.
+    fakeDB.seed('daily_prices', [
+      ...fakeDB.rows('daily_prices'),
+      { card_slug: 'pc-111', date: '2026-06-25', raw_usd: null, psa9_usd: null, psa10_usd: null, cgc10_usd: 200_00 },
+    ])
+    fakeDB.seed('portfolio_items', [
+      ...fakeDB.rows('portfolio_items'),
+      { portfolio_id: 'pf-u1', card_slug: 'a', holding_type: 'cgc10', quantity: 1, card_name_snapshot: 'A', set_name_snapshot: 'S' },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.currentTotalCents).toBe(200_00)
+    expect(out.diagnostics.portfolioValueSourceCounts.daily_prices).toBe(1)
+  })
+
+  it('row-by-row portfolioReconciliation surfaces per-item source + includedInTotal — no PII', async () => {
+    seedPrefs('u1')
+    fakeDB.seed('portfolios', [
+      ...fakeDB.rows('portfolios'),
+      { id: 'pf-u1', user_id: 'u1', is_default: true, name: 'My Collection' },
+    ])
+    seedCardLink('a', '111', 'A', 'S')
+    seedCardLink('b', '222', 'B', 'S')
+    seedCardTrend('A', 'S', { raw: 100_00 })
+    // B has no trend → reconciliation row marks includedInTotal=false
+    fakeDB.seed('portfolio_items', [
+      ...fakeDB.rows('portfolio_items'),
+      { portfolio_id: 'pf-u1', card_slug: 'a', holding_type: 'raw', quantity: 1, card_name_snapshot: 'A', set_name_snapshot: 'S' },
+      { portfolio_id: 'pf-u1', card_slug: 'b', holding_type: 'raw', quantity: 1, card_name_snapshot: 'B', set_name_snapshot: 'S' },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    const recon = out.diagnostics.portfolioReconciliation
+    expect(recon).toHaveLength(2)
+    const a = recon.find(r => r.cardName === 'A')!
+    const b = recon.find(r => r.cardName === 'B')!
+    expect(a.source).toBe('card_trends')
+    expect(a.includedInTotal).toBe(true)
+    expect(a.positionValueCents).toBe(100_00)
+    expect(b.source).toBe('missing')
+    expect(b.includedInTotal).toBe(false)
+    expect(b.positionValueCents).toBeNull()
+    // No PII fields
+    const blob = JSON.stringify(recon)
+    expect(blob).not.toMatch(/"user_id"/)
+    expect(blob).not.toMatch(/"portfolio_id"/)
+    expect(blob).not.toMatch(/[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/)
+  })
+})
+
 describe('buildWeeklyDigestForUser — Block 5A-W-16E no fake weekly moves', () => {
   // Real dashboard fixture, with the per-card 30d figures the
   // dashboard ACTUALLY shows. The pre-fix code was inventing
@@ -1145,16 +1313,12 @@ describe('buildWeeklyDigestForUser — Block 5A-W-16D regression (snapshot colum
   })
 
   it('falls back to a "core" SELECT when snapshot columns are unavailable', async () => {
-    // FakeDB tolerates any column, so this case primarily verifies
-    // the loader still works when rows lack snapshot columns — the
-    // PRIMARY production query may succeed even with NULL snapshot
-    // values (lenient PostgREST). The orchestrator must still surface
-    // those items via the cards-table fallback for naming.
+    // Loader survives when rows lack snapshot columns — the orchestrator
+    // backfills (card_name, set_name) from the cards-table lookup so
+    // card_trends matching still resolves a price. Block 5A-W-16F.
     seedPrefs('u1')
     seedCardLink('charizard-base-4', '1', 'Charizard', 'Base Set')
     seedCardTrend('Charizard', 'Base Set', { raw: 100_00 })
-    seedPrice('1', '2026-06-18', { raw: 80_00 })
-    seedPrice('1', '2026-06-25', { raw: 100_00 })
     fakeDB.seed('portfolios', [
       ...fakeDB.rows('portfolios'),
       { id: 'pf-u1', user_id: 'u1' },
@@ -1197,8 +1361,10 @@ describe('buildWeeklyDigestForUser — Block 5A-W-16B portfolio_items name prefe
         set_name:     'Base Set',
       },
     ])
-    seedPrice('111', '2026-06-18', { raw: 50_00_00 })   // $5,000 in cents
-    seedPrice('111', '2026-06-25', { raw: 60_00_00 })
+    // Block 5A-W-16F — raw holdings price via card_trends now.
+    // Seed it under the portfolio's OWN (name, set) so card_trends
+    // matches the portfolio's intended set, NOT the cards-table set.
+    seedCardTrend('Charizard', 'Base Set', { raw: 60_00_00 })
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
     expect(out.portfolio?.topItems[0].setName).toBe('Base Set')
     expect(out.portfolio?.topItems[0].cardName).toBe('Charizard')

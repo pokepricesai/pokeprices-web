@@ -160,25 +160,36 @@ export async function valuePortfolio(
         sourceCounts.card_trends += 1
         return makeItem(holding, market, qty, 'card_trends', pct30d)
       }
-      // No card_trends row for this card → still try a daily_prices
-      // fallback before giving up. This mirrors the dashboard's
-      // fallthrough when the card_trends join misses.
-    }
-
-    // --- Pass 2: daily_prices column lookup for extra tier holdings
-    const dpCol = HOLDING_TYPE_TO_PRICE_COLUMN[ht]
-    if (dpCol) {
-      const candidates = [
-        ...(urlToNumerics.get(holding.card_slug) || []),
-        ...(nameSetToNumerics.get(`${holding.card_name ?? ''}::${holding.set_name ?? ''}`) || []),
-      ]
-      for (const num of candidates) {
-        const dp = latestPriceRow.get('pc-' + num)
-        if (!dp) continue
-        const v = dp[dpCol]
-        if (v != null && Number.isFinite(v)) {
-          sourceCounts.daily_prices += 1
-          return makeItem(holding, Number(v), qty, 'daily_prices', pct30d)
+      // Block 5A-W-16F — DASHBOARD PARITY: raw / psa9 / psa10 holdings
+      // whose card_trends row is missing MUST NOT fall through to
+      // daily_prices. The dashboard explicitly nulls position_value
+      // for these (PortfolioDashboard.tsx pass 1) and the extra-tier
+      // enrichment in pass 2 skips them by holding_type, so they
+      // contribute 0 to the dashboard's Collection Value. Letting the
+      // digest fall through to daily_prices inflated the digest total
+      // over the dashboard for every raw/psa9/psa10 card whose
+      // card_trends row was missing — that was the $1,525.98 vs $1.1k
+      // gap the user reported. SKIP straight to manual override.
+    } else {
+      // --- Pass 2: daily_prices column lookup for extra tier holdings
+      // (cgc, bgs, sgc, tag, ace, low PSA grades). Dashboard handles
+      // these in pass 2 of its recompute. ONLY runs for non-raw/psa9/
+      // psa10 holdings, matching the dashboard's
+      // `!['raw','psa9','psa10'].includes(i.holding_type)` filter.
+      const dpCol = HOLDING_TYPE_TO_PRICE_COLUMN[ht]
+      if (dpCol) {
+        const candidates = [
+          ...(urlToNumerics.get(holding.card_slug) || []),
+          ...(nameSetToNumerics.get(`${holding.card_name ?? ''}::${holding.set_name ?? ''}`) || []),
+        ]
+        for (const num of candidates) {
+          const dp = latestPriceRow.get('pc-' + num)
+          if (!dp) continue
+          const v = dp[dpCol]
+          if (v != null && Number.isFinite(v)) {
+            sourceCounts.daily_prices += 1
+            return makeItem(holding, Number(v), qty, 'daily_prices', pct30d)
+          }
         }
       }
     }

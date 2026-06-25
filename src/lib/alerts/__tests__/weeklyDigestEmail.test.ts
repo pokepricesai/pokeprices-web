@@ -42,6 +42,10 @@ function emptyDiagnostics(generatedAt = '2026-06-25T12:00:00Z'): WeeklyDigestDia
     portfolioItemsValuedAsMissing:       0,
     portfolioHoldingsPricedCount:        0,
     portfolioHoldingsMissingPriceCount:  0,
+    portfolioScope:                'selected_dashboard_portfolio',
+    portfolioNamesIncluded:        [],
+    portfolioItemsIncludedInTotal: 0,
+    portfolioReconciliation:       [],
     sectionsOmittedByPreferences: [],
     generatedAt,
   }
@@ -143,12 +147,27 @@ describe('buildWeeklyDigestEmail — portfolio section', () => {
         itemCount: 35, currentTotalCents: 8749300, previousTotalCents: 9120000,
         absChangeCents: -370700, pctChange: -4.0,
         topItems: [],
+        scopeLabel: null,
       },
     }))
     expect(out.html).toMatch(/Estimated value across all portfolios · 35 items/i)
     expect(out.text).toMatch(/Estimated value across all portfolios/i)
     // The old, ambiguous copy MUST be gone.
     expect(out.html).not.toMatch(/>Estimated value · 35 items</)
+  })
+
+  it('shows the portfolio NAME in the header when scoped to a single dashboard portfolio (Block 5A-W-16F)', () => {
+    const out = buildWeeklyDigestEmail(baseData({
+      portfolio: {
+        itemCount: 35, currentTotalCents: 8749300, previousTotalCents: null,
+        absChangeCents: null, pctChange: null,
+        topItems: [],
+        scopeLabel: 'My Collection',
+      },
+    }))
+    expect(out.html).toMatch(/My Collection · 35 items/)
+    expect(out.html).not.toMatch(/across all portfolios/i)
+    expect(out.text).toMatch(/My Collection/)
   })
 
   it('omits the portfolio section entirely when not provided', () => {
