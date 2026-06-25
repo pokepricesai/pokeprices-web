@@ -104,6 +104,28 @@ export type WeeklyDigestPortfolioSection = {
    *  name so the renderer can say "My Collection · 35 items". Null /
    *  absent when the digest is aggregating across multiple portfolios. */
   scopeLabel?:        string | null
+  /** Block 5A-W-16G — true when the digest is aggregating ALL of the
+   *  user's portfolios because no is_default flag exists. Lets the
+   *  renderer differentiate "Estimated value across all portfolios"
+   *  from the named/unnamed-but-scoped cases. */
+  scopeIsAllPortfolios?: boolean
+  /** Block 5A-W-16G — change since the last weekly digest the user
+   *  received. Null on first-ever delivery (no email_delivery_log
+   *  row yet) OR when the previous send's snapshot is unusable
+   *  (currency changed, no portfolio total recorded). Renderer shows
+   *  a subtle "First weekly update" note when this is null. */
+  sinceLastDigest?:   WeeklyDigestSinceLastChange | null
+}
+
+/** Block 5A-W-16G — change since the previous weekly digest email
+ *  for this user. Backed by the metadata captured on the previous
+ *  send's email_delivery_log row. */
+export type WeeklyDigestSinceLastChange = {
+  lastSentAt:      string             // ISO of the previous weekly email
+  lastTotalCents:  number             // portfolio total at previous send (USD-cents)
+  lastCurrency:    DigestDisplayCurrency
+  absChangeCents:  number             // currentTotalCents - lastTotalCents
+  pctChange:       number | null      // null when lastTotalCents <= 0
 }
 
 export type WeeklyDigestWatchlistSection = {
@@ -220,6 +242,13 @@ export type WeeklyDigestDiagnostics = {
    *  dashboard but NO PII (no user_id, no email). Capped at 100
    *  rows so the response body stays small. */
   portfolioReconciliation:          Array<PortfolioReconciliationRow>
+  /** Block 5A-W-16G — alert-highlight URL resolution counts. Lets an
+   *  admin see why a "View card" button is missing on a specific
+   *  alert block (slug didn't resolve AND name+set fallback didn't
+   *  resolve either). */
+  alertCardsResolvedBySlug:         number
+  alertCardsResolvedByNameSet:      number
+  alertCardsWithNoUrl:              number
   sectionsOmittedByPreferences: Array<'portfolio' | 'watchlist'>
   generatedAt:                  string
 }
@@ -675,6 +704,13 @@ export async function buildWeeklyDigestForUser(
     const currentTotal = valuation.marketTotalCents > 0 || valuation.sourceCounts.card_trends + valuation.sourceCounts.daily_prices > 0
       ? valuation.marketTotalCents
       : null
+    // Block 5A-W-16G — try to load the previous weekly snapshot from
+    // email_delivery_log so the renderer can show real since-last
+    // change. Falls back to null → renderer renders a subtle
+    // "First weekly update" note instead of fabricating a number.
+    const lastSnapshot = await loadLastWeeklySnapshot(supa, userId)
+    const sinceLastDigest = computeSinceLastDigest(currentTotal, currency, lastSnapshot)
+
     portfolioSection = {
       itemCount:          portfolioRaw.length,
       currentTotalCents:  currentTotal,
@@ -685,6 +721,8 @@ export async function buildWeeklyDigestForUser(
       scopeLabel:         portfolioScope === 'selected_dashboard_portfolio' && portfolioNames.length === 1
                             ? portfolioNames[0]
                             : null,
+      scopeIsAllPortfolios: portfolioScope === 'all_portfolios',
+      sinceLastDigest,
     }
   }
 
@@ -730,7 +768,8 @@ export async function buildWeeklyDigestForUser(
 
   // 8. Alert summary — events for the user in the lookback window.
   //    READ-ONLY. We do NOT mutate alert_events.delivered_at.
-  const alertSummary = await buildAlertSummary(supa, userId, asOf, lookbackDays, maxAlertItems, urlToCard)
+  const { summary: alertSummary, urlDiagnostics: alertUrlDiagnostics } =
+    await buildAlertSummary(supa, userId, asOf, lookbackDays, maxAlertItems, urlToCard)
 
   // 9. Diagnostics — counts are over the union of considered cards.
   const portfolioCardsConsidered = portfolioRaw.length
@@ -774,6 +813,10 @@ export async function buildWeeklyDigestForUser(
       portfolioNamesIncluded:        portfolioNames,
       portfolioItemsIncludedInTotal: portfolioReconciliation.filter(r => r.includedInTotal).length,
       portfolioReconciliation,
+      // Block 5A-W-16G alert URL diagnostics
+      alertCardsResolvedBySlug:      alertUrlDiagnostics.alertCardsResolvedBySlug,
+      alertCardsResolvedByNameSet:   alertUrlDiagnostics.alertCardsResolvedByNameSet,
+      alertCardsWithNoUrl:           alertUrlDiagnostics.alertCardsWithNoUrl,
       sectionsOmittedByPreferences,
       generatedAt,
     },
@@ -937,6 +980,78 @@ async function loadPortfolioItems(supa: SupabaseClient, userId: string): Promise
   return { rows, portfoliosLoaded: portfolios.length, portfolioNames, scope }
 }
 
+/** Block 5A-W-16G — most recent successful weekly_report email for
+ *  the user, with the portfolio snapshot we tucked into metadata
+ *  when the email was sent. Returns null on first-ever delivery,
+ *  or when the previous send didn't carry the snapshot payload
+ *  (legacy sends before the snapshot was introduced). Defensive:
+ *  any DB error falls back to null so the digest still renders. */
+async function loadLastWeeklySnapshot(
+  supa:   SupabaseClient,
+  userId: string,
+): Promise<{ sentAt: string; currency: DigestDisplayCurrency; portfolioTotalCents: number | null; portfolioItemCount: number | null } | null> {
+  try {
+    const { data, error } = await supa
+      .from('email_delivery_log')
+      .select('sent_at, status, metadata_json')
+      .eq('user_id', userId)
+      .eq('category', 'weekly_report')
+      .in('status', ['sent', 'delivered'])
+      .order('sent_at', { ascending: false })
+      .limit(1)
+    if (error || !Array.isArray(data) || data.length === 0) return null
+    const row = data[0] as Record<string, unknown>
+    const meta = (row.metadata_json && typeof row.metadata_json === 'object')
+      ? row.metadata_json as Record<string, unknown>
+      : {}
+    // The snapshot was written by send-weekly-digest-test using these
+    // exact field names. Legacy rows without the snapshot fields
+    // resolve to a no-baseline result.
+    const totalRaw = meta.portfolioTotalMinorUnits
+    const currencyRaw = meta.currency
+    if (currencyRaw !== 'GBP' && currencyRaw !== 'USD') return null
+    if (typeof totalRaw !== 'number' || !Number.isFinite(totalRaw)) return null
+    const sentAt = row.sent_at == null ? null : String(row.sent_at)
+    if (!sentAt) return null
+    const itemCountRaw = meta.portfolioItemCount
+    return {
+      sentAt,
+      currency:            currencyRaw,
+      portfolioTotalCents: Math.round(totalRaw),
+      portfolioItemCount:  typeof itemCountRaw === 'number' && Number.isFinite(itemCountRaw)
+                            ? Math.floor(itemCountRaw)
+                            : null,
+    }
+  } catch {
+    return null
+  }
+}
+
+/** Pure helper — computes the since-last-digest change from a snapshot.
+ *  Returns null when the snapshot can't be safely compared (currency
+ *  switch, missing values). Exported for unit tests. */
+export function computeSinceLastDigest(
+  currentTotalCents: number | null,
+  currentCurrency:   DigestDisplayCurrency,
+  snapshot:          { sentAt: string; currency: DigestDisplayCurrency; portfolioTotalCents: number | null } | null,
+): WeeklyDigestSinceLastChange | null {
+  if (!snapshot) return null
+  if (snapshot.currency !== currentCurrency) return null   // no FX conversion across snapshots
+  if (snapshot.portfolioTotalCents == null) return null
+  if (currentTotalCents == null) return null
+  const abs = currentTotalCents - snapshot.portfolioTotalCents
+  const pct = snapshot.portfolioTotalCents > 0
+    ? (abs / snapshot.portfolioTotalCents) * 100
+    : null
+  return {
+    lastSentAt:      snapshot.sentAt,
+    lastTotalCents:  snapshot.portfolioTotalCents,
+    lastCurrency:    snapshot.currency,
+    absChangeCents:  abs,
+    pctChange:       pct,
+  }
+}
+
 /** Block 5A-W-16B — read the user's preferred display currency from
  *  user_email_preferences. Defaults to GBP (matches the portfolio
  *  dashboard's initial useState). Defensive: if the table or column
@@ -1054,6 +1169,13 @@ async function loadRecentSalesCounts(
   return out
 }
 
+/** Block 5A-W-16G — diagnostics for the alert highlight URL fix. */
+type AlertUrlDiagnostics = {
+  alertCardsResolvedBySlug:    number
+  alertCardsResolvedByNameSet: number
+  alertCardsWithNoUrl:         number
+}
+
 async function buildAlertSummary(
   supa:          SupabaseClient,
   userId:        string,
@@ -1061,7 +1183,10 @@ async function buildAlertSummary(
   lookbackDays:  number,
   maxAlertItems: number,
   urlToCard:     Map<string, CardDetails>,
-): Promise<WeeklyDigestAlertSummary> {
+): Promise<{ summary: WeeklyDigestAlertSummary; urlDiagnostics: AlertUrlDiagnostics }> {
+  const emptyDiag: AlertUrlDiagnostics = {
+    alertCardsResolvedBySlug: 0, alertCardsResolvedByNameSet: 0, alertCardsWithNoUrl: 0,
+  }
   const sinceIso = new Date(asOf.getTime() - lookbackDays * 86_400_000).toISOString()
   const { data, error } = await supa
     .from('alert_events')
@@ -1070,7 +1195,7 @@ async function buildAlertSummary(
     .gte('detected_at', sinceIso)
     .order('detected_at', { ascending: false })
   if (error || !Array.isArray(data) || data.length === 0) {
-    return { totalEvents: 0, cardBlocks: [] }
+    return { summary: { totalEvents: 0, cardBlocks: [] }, urlDiagnostics: emptyDiag }
   }
 
   type AlertRow = {
@@ -1087,18 +1212,43 @@ async function buildAlertSummary(
     detected_at: String(r.detected_at),
   }))
 
-  // Reverse-lookup cards.card_url_slug from the bare card_slug stored
-  // on alert_events. Built from the urlToCard map we already loaded
-  // for the portfolio/watchlist sections.
-  const bareToUrlCard = new Map<string, CardDetails>()
-  for (const c of Array.from(urlToCard.values())) bareToUrlCard.set(c.cardSlug, c)
+  // Block 5A-W-16G — independent cards-table lookups. The previous
+  // bareToUrlCard map only covered cards the user already had on
+  // their watchlist/portfolio, so any alert for a card NOT on those
+  // lists rendered without a View card button. Now: pull cards.* for
+  // every distinct bare slug seen in alert_events, and add a
+  // name+set fallback for events where the slug doesn't resolve.
+  const bareSlugs = uniq(rows.map(r => r.card_slug).filter(Boolean))
+  const bareToUrlCard = await loadCardsByBareSlug(supa, bareSlugs)
+  // Pre-seed with the URLs we already resolved for portfolio/watchlist.
+  // Doesn't change correctness but saves duplicate work when an alert
+  // is on a card the user already owns/watches.
+  for (const c of Array.from(urlToCard.values())) {
+    if (!bareToUrlCard.has(c.cardSlug)) bareToUrlCard.set(c.cardSlug, c)
+  }
 
   // Group by card_slug (bare). Falls back to a name|set key when slug
   // is missing — same fallback as emailDigest.groupEventsByCard.
-  const blocks = new Map<string, WeeklyDigestAlertCardBlock & { _score: number }>()
+  const blocks = new Map<string, WeeklyDigestAlertCardBlock & { _score: number; _urlSource?: 'slug' | 'name_set' | 'none' }>()
+  // Collect (name, set) pairs from rows whose slug didn't resolve, so
+  // we can do one batched name+set lookup against cards.
+  const nameSetFallbackKeys: Array<{ cardName: string; setName: string }> = []
+  for (const r of rows) {
+    if (!r.card_name || !r.set_name) continue
+    if (r.card_slug && bareToUrlCard.has(r.card_slug)) continue
+    nameSetFallbackKeys.push({ cardName: r.card_name, setName: r.set_name })
+  }
+  const nameSetToCard = await loadCardsByNameSet(supa, nameSetFallbackKeys)
+
   for (const r of rows) {
     const key = r.card_slug ? `slug:${r.card_slug}` : `name:${r.card_name ?? ''}|${r.set_name ?? ''}`
-    const lookup = r.card_slug ? bareToUrlCard.get(r.card_slug) : undefined
+    const slugLookup = r.card_slug ? bareToUrlCard.get(r.card_slug) : undefined
+    const nameSetLookup = (!slugLookup && r.card_name && r.set_name)
+      ? nameSetToCard.get(`${r.card_name}::${r.set_name}`)
+      : undefined
+    const lookup = slugLookup ?? nameSetLookup
+    const urlSource: 'slug' | 'name_set' | 'none' =
+      slugLookup ? 'slug' : nameSetLookup ? 'name_set' : 'none'
     const cardUrl = (lookup?.setName && lookup?.cardUrlSlug)
       ? `https://www.pokeprices.io/set/${encodeURIComponent(lookup.setName)}/card/${lookup.cardUrlSlug}`
       : null
@@ -1113,6 +1263,7 @@ async function buildAlertSummary(
         severities: { high: 0, normal: 0, low: 0 },
         rules:      [],
         _score:     0,
+        _urlSource: urlSource,
       }
       blocks.set(key, block)
     }
@@ -1122,12 +1273,91 @@ async function buildAlertSummary(
     block._score += r.severity === 'high' ? 3 : r.severity === 'normal' ? 2 : 1
   }
 
+  // Tally URL-resolution counts across the unique card blocks (NOT
+  // raw events) so the figure matches what the renderer will show.
+  const urlDiagnostics: AlertUrlDiagnostics = {
+    alertCardsResolvedBySlug:    0,
+    alertCardsResolvedByNameSet: 0,
+    alertCardsWithNoUrl:         0,
+  }
+  for (const b of Array.from(blocks.values())) {
+    if (b._urlSource === 'slug')         urlDiagnostics.alertCardsResolvedBySlug    += 1
+    else if (b._urlSource === 'name_set') urlDiagnostics.alertCardsResolvedByNameSet += 1
+    else                                  urlDiagnostics.alertCardsWithNoUrl         += 1
+  }
+
   const sorted = Array.from(blocks.values()).sort((a, b) => b._score - a._score)
-  const cardBlocks = sorted.slice(0, maxAlertItems).map(({ _score, ...rest }) => {
-    void _score
+  const cardBlocks = sorted.slice(0, maxAlertItems).map(({ _score, _urlSource, ...rest }) => {
+    void _score; void _urlSource
     return rest
   })
-  return { totalEvents: rows.length, cardBlocks }
+  return { summary: { totalEvents: rows.length, cardBlocks }, urlDiagnostics }
+}
+
+/** Block 5A-W-16G — independent cards lookup for alert highlights.
+ *  Indexed by bare numeric card_slug to match alert_events.card_slug. */
+async function loadCardsByBareSlug(
+  supa:      SupabaseClient,
+  bareSlugs: string[],
+): Promise<Map<string, CardDetails>> {
+  const out = new Map<string, CardDetails>()
+  if (bareSlugs.length === 0) return out
+  const { data, error } = await supa
+    .from('cards')
+    .select('card_url_slug, card_slug, card_name, set_name')
+    .in('card_slug', bareSlugs)
+  if (error || !Array.isArray(data)) return out
+  for (const r of data as Array<Record<string, unknown>>) {
+    const bare = r.card_slug == null ? '' : String(r.card_slug)
+    const url  = r.card_url_slug == null ? '' : String(r.card_url_slug)
+    if (!bare || !url) continue
+    // First row wins — name+set ambiguity is acceptable for alert links
+    // because the dest page is the same card.
+    if (out.has(bare)) continue
+    out.set(bare, {
+      cardSlug:    bare,
+      cardName:    r.card_name == null ? null : String(r.card_name),
+      setName:     r.set_name  == null ? null : String(r.set_name),
+      cardUrlSlug: url,
+    })
+  }
+  return out
+}
+
+/** Block 5A-W-16G — name+set fallback for alert events whose
+ *  card_slug doesn't resolve via cards.card_slug. Indexed by
+ *  `${cardName}::${setName}`. */
+async function loadCardsByNameSet(
+  supa: SupabaseClient,
+  keys: Array<{ cardName: string; setName: string }>,
+): Promise<Map<string, CardDetails>> {
+  const out = new Map<string, CardDetails>()
+  if (keys.length === 0) return out
+  const names = uniq(keys.map(k => k.cardName))
+  const sets  = uniq(keys.map(k => k.setName))
+  if (names.length === 0 || sets.length === 0) return out
+  const { data, error } = await supa
+    .from('cards')
+    .select('card_url_slug, card_slug, card_name, set_name')
+    .in('card_name', names)
+    .in('set_name',  sets)
+  if (error || !Array.isArray(data)) return out
+  for (const r of data as Array<Record<string, unknown>>) {
+    const cardName = r.card_name == null ? '' : String(r.card_name)
+    const setName  = r.set_name  == null ? '' : String(r.set_name)
+    const bare     = r.card_slug == null ? '' : String(r.card_slug)
+    const url      = r.card_url_slug == null ? '' : String(r.card_url_slug)
+    if (!cardName || !setName || !url) continue
+    const key = `${cardName}::${setName}`
+    if (out.has(key)) continue
+    out.set(key, {
+      cardSlug:    bare,
+      cardName,
+      setName,
+      cardUrlSlug: url,
+    })
+  }
+  return out
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1187,6 +1417,9 @@ function emptyDiagnostics(generatedAt: string, currency: DigestDisplayCurrency =
     portfolioNamesIncluded:        [],
     portfolioItemsIncludedInTotal: 0,
     portfolioReconciliation:       [],
+    alertCardsResolvedBySlug:      0,
+    alertCardsResolvedByNameSet:   0,
+    alertCardsWithNoUrl:           0,
     sectionsOmittedByPreferences: [],
     generatedAt,
   }

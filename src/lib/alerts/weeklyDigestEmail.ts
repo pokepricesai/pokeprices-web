@@ -157,6 +157,14 @@ export function buildSampleWeeklyDigestData(): WeeklyDigestData {
       absChangeCents:     null,
       pctChange:          null,
       scopeLabel:         'My Collection',
+      scopeIsAllPortfolios: false,
+      sinceLastDigest:    {
+        lastSentAt:     '2026-06-18T12:00:00Z',
+        lastTotalCents: 240_500,
+        lastCurrency:   'GBP',
+        absChangeCents: 8_250,
+        pctChange:      3.4,
+      },
       topItems: [
         {
           cardSlug: '1450205', cardName: "Lt. Surge's Raichu", setName: 'Gym Challenge',
@@ -243,6 +251,9 @@ export function buildSampleWeeklyDigestData(): WeeklyDigestData {
       portfolioNamesIncluded:        ['My Collection'],
       portfolioItemsIncludedInTotal: 14,
       portfolioReconciliation:       [],
+      alertCardsResolvedBySlug:      2,
+      alertCardsResolvedByNameSet:   0,
+      alertCardsWithNoUrl:           0,
       sectionsOmittedByPreferences: [],
       generatedAt:                 '2026-06-25T12:00:00Z',
     },
@@ -370,19 +381,34 @@ function renderPortfolioSectionHtml(data: WeeklyDigestData): string {
        </div>`
     : ''
 
-  // Block 5A-W-16F — when the digest is scoped to a single named
-  // portfolio (matches the dashboard's is_default=true scope), show
-  // that portfolio name so the user can reconcile against "My
-  // Collection" on the dashboard. Falls back to the generic
-  // "across all portfolios" copy when aggregating multiple.
-  const scopeLine = p.scopeLabel
-    ? `${esc(p.scopeLabel)} · ${p.itemCount} ${pluralize(p.itemCount, 'item', 'items')}`
-    : `Estimated value across all portfolios · ${p.itemCount} ${pluralize(p.itemCount, 'item', 'items')}`
+  // Block 5A-W-16G — three-way header copy.
+  //   1. Scoped + named portfolio → "My Collection · 35 items"
+  //   2. Scoped + unnamed         → "Portfolio · 35 items"
+  //   3. All portfolios (legacy)  → "Estimated value across all portfolios · 35 items"
+  const scopeLine = p.scopeIsAllPortfolios
+    ? `Estimated value across all portfolios · ${p.itemCount} ${pluralize(p.itemCount, 'item', 'items')}`
+    : p.scopeLabel
+      ? `${esc(p.scopeLabel)} · ${p.itemCount} ${pluralize(p.itemCount, 'item', 'items')}`
+      : `Portfolio · ${p.itemCount} ${pluralize(p.itemCount, 'item', 'items')}`
+
+  // Block 5A-W-16G — since-last-digest line. Real baseline only — no
+  // fabricated comparison. On first-ever delivery (or any path where
+  // no snapshot exists yet) we show a subtle "First weekly update"
+  // note so the user knows there's no comparison data yet.
+  const sinceLine = p.sinceLastDigest
+    ? `<div style="font-family:'Figtree',sans-serif;font-size:12px;margin-top:4px;color:${BRAND.muted};">
+         Since last weekly:
+         <span style="color:${changeColour(p.sinceLastDigest.absChangeCents)};font-weight:700;">${esc(fmtCents(p.sinceLastDigest.absChangeCents, currency))}</span>
+         ${p.sinceLastDigest.pctChange != null ? `· <span style="color:${changeColour(p.sinceLastDigest.pctChange)};font-weight:700;">${esc(fmtPct(p.sinceLastDigest.pctChange))}</span>` : ''}
+       </div>`
+    : `<div style="font-family:'Figtree',sans-serif;font-size:11px;margin-top:4px;color:${BRAND.mutedSoft};font-style:italic;">First weekly update — we'll show change-since-last-week from the next one.</div>`
+
   const summary = `
     <table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 12px;"><tr><td>
       <div style="font-family:'Figtree',sans-serif;font-size:11px;color:${BRAND.muted};text-transform:uppercase;letter-spacing:0.7px;font-weight:700;">${scopeLine}</div>
       ${totalLine}
       ${changeLine}
+      ${sinceLine}
     </td></tr></table>`
 
   const items = p.topItems.length > 0
@@ -414,21 +440,24 @@ function renderWatchlistSectionHtml(data: WeeklyDigestData): string {
 }
 
 function renderAlertBlockHtml(block: WeeklyDigestAlertCardBlock): string {
-  const sevChips: string[] = []
-  if (block.severities.high   > 0) sevChips.push(`<span style="background:${BRAND.red};color:#fff;padding:2px 7px;border-radius:999px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;">${block.severities.high} high</span>`)
-  if (block.severities.normal > 0) sevChips.push(`<span style="background:${BRAND.primarySoft};color:${BRAND.primary};padding:2px 7px;border-radius:999px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;">${block.severities.normal} normal</span>`)
-  if (block.severities.low    > 0) sevChips.push(`<span style="background:#f4f5f7;color:${BRAND.muted};padding:2px 7px;border-radius:999px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;">${block.severities.low} low</span>`)
+  // Block 5A-W-16G — user-friendly severity copy. The previous design
+  // exposed internal severity names ("2 normal") which confused
+  // collectors. Now: count + rule list is the main line; an
+  // "Important" badge only appears when at least one event is high.
+  const importantBadge = block.severities.high > 0
+    ? `<span style="background:${BRAND.red};color:#fff;padding:2px 7px;border-radius:999px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;">Important</span>`
+    : ''
   const rulesLine = block.rules.map(r => esc(RULE_LABEL[r])).join(' · ')
   const linkBtn = block.cardUrl
     ? `<a href="${esc(block.cardUrl)}" style="display:inline-block;margin-top:8px;padding:6px 12px;border-radius:8px;background:${BRAND.primary};color:#ffffff;font-family:'Figtree',sans-serif;font-size:11px;font-weight:700;text-decoration:none;letter-spacing:0.2px;">View card →</a>`
     : ''
   return `
     <tr><td style="padding:12px 14px;background:${BRAND.cardBg};border:1px solid ${BRAND.border};border-radius:10px;">
-      <div style="margin-bottom:6px;">${sevChips.join(' ')}</div>
+      ${importantBadge ? `<div style="margin-bottom:6px;">${importantBadge}</div>` : ''}
       <div style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:700;color:${BRAND.text};">${esc(block.cardName)}</div>
       <div style="font-family:'Figtree',sans-serif;font-size:11.5px;color:${BRAND.muted};margin-top:2px;">${esc(block.setName)}</div>
       <div style="font-family:'Figtree',sans-serif;font-size:12.5px;color:${BRAND.text};margin-top:8px;">
-        ${block.eventCount} ${pluralize(block.eventCount, 'alert', 'alerts')} · ${rulesLine}
+        ${block.eventCount} ${pluralize(block.eventCount, 'alert', 'alerts')} this week · ${rulesLine}
       </div>
       ${linkBtn}
     </td></tr>
@@ -549,9 +578,17 @@ function renderText(data: WeeklyDigestData, sample: boolean): string {
         // couldn't price them this week.
         lines.push(`Tracking ${data.portfolio.itemCount} ${pluralize(data.portfolio.itemCount, 'item', 'items')}, but no weekly value could be calculated.`)
       } else {
-        const scopeWord = data.portfolio.scopeLabel ?? 'all portfolios'
-        lines.push(`${data.portfolio.scopeLabel ? scopeWord : 'Estimated value across ' + scopeWord}: ${fmtCents(data.portfolio.currentTotalCents, data.currency)}  (was ${fmtCents(data.portfolio.previousTotalCents, data.currency)})`)
+        // Block 5A-W-16G — three-way scope copy mirrored from the HTML.
+        const headerLabel = data.portfolio.scopeIsAllPortfolios
+          ? 'Estimated value across all portfolios'
+          : data.portfolio.scopeLabel ?? 'Portfolio'
+        lines.push(`${headerLabel}: ${fmtCents(data.portfolio.currentTotalCents, data.currency)}  (was ${fmtCents(data.portfolio.previousTotalCents, data.currency)})`)
         lines.push(`Change: ${fmtCents(data.portfolio.absChangeCents, data.currency)}  (${fmtPct(data.portfolio.pctChange)})`)
+        if (data.portfolio.sinceLastDigest) {
+          lines.push(`Since last weekly: ${fmtCents(data.portfolio.sinceLastDigest.absChangeCents, data.currency)}  (${fmtPct(data.portfolio.sinceLastDigest.pctChange)})`)
+        } else {
+          lines.push(`First weekly update — change-since-last-week will appear from the next one.`)
+        }
         lines.push(`Items: ${data.portfolio.itemCount}`)
         if (data.portfolio.topItems.length === 0) {
           lines.push('No major portfolio changes this week.')
@@ -581,12 +618,12 @@ function renderText(data: WeeklyDigestData, sample: boolean): string {
       lines.push('----------------')
       lines.push(`${data.alertSummary.totalEvents} ${pluralize(data.alertSummary.totalEvents, 'alert', 'alerts')} this week`)
       for (const block of data.alertSummary.cardBlocks) {
-        lines.push(`* ${block.cardName} (${block.setName})`)
-        const sevs: string[] = []
-        if (block.severities.high   > 0) sevs.push(`${block.severities.high} high`)
-        if (block.severities.normal > 0) sevs.push(`${block.severities.normal} normal`)
-        if (block.severities.low    > 0) sevs.push(`${block.severities.low} low`)
-        lines.push(`    ${block.eventCount} ${pluralize(block.eventCount, 'alert', 'alerts')} · ${sevs.join(', ')} · ${block.rules.map(r => RULE_LABEL[r]).join(' · ')}`)
+        // Block 5A-W-16G — user-friendly text-body copy. Drop the
+        // "X normal / X low" word list; keep an "Important" flag only
+        // when at least one event is high severity.
+        const importantPrefix = block.severities.high > 0 ? '[Important] ' : ''
+        lines.push(`* ${importantPrefix}${block.cardName} (${block.setName})`)
+        lines.push(`    ${block.eventCount} ${pluralize(block.eventCount, 'alert', 'alerts')} this week · ${block.rules.map(r => RULE_LABEL[r]).join(' · ')}`)
         if (block.cardUrl) lines.push(`    ${block.cardUrl}`)
       }
       lines.push('')

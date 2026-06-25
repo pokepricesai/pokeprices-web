@@ -46,6 +46,9 @@ function emptyDiagnostics(generatedAt = '2026-06-25T12:00:00Z'): WeeklyDigestDia
     portfolioNamesIncluded:        [],
     portfolioItemsIncludedInTotal: 0,
     portfolioReconciliation:       [],
+    alertCardsResolvedBySlug:      0,
+    alertCardsResolvedByNameSet:   0,
+    alertCardsWithNoUrl:           0,
     sectionsOmittedByPreferences: [],
     generatedAt,
   }
@@ -141,13 +144,14 @@ describe('buildWeeklyDigestEmail — portfolio section', () => {
     expect(out.text).toMatch(/Charizard/)
   })
 
-  it('summary line makes the all-portfolios scope explicit (Block 5A-W-15B)', () => {
+  it('summary line says "across all portfolios" only when scopeIsAllPortfolios=true (Block 5A-W-16G)', () => {
     const out = buildWeeklyDigestEmail(baseData({
       portfolio: {
         itemCount: 35, currentTotalCents: 8749300, previousTotalCents: 9120000,
         absChangeCents: -370700, pctChange: -4.0,
         topItems: [],
         scopeLabel: null,
+        scopeIsAllPortfolios: true,
       },
     }))
     expect(out.html).toMatch(/Estimated value across all portfolios · 35 items/i)
@@ -163,11 +167,67 @@ describe('buildWeeklyDigestEmail — portfolio section', () => {
         absChangeCents: null, pctChange: null,
         topItems: [],
         scopeLabel: 'My Collection',
+        scopeIsAllPortfolios: false,
       },
     }))
     expect(out.html).toMatch(/My Collection · 35 items/)
     expect(out.html).not.toMatch(/across all portfolios/i)
     expect(out.text).toMatch(/My Collection/)
+  })
+
+  it('Block 5A-W-16G — renders since-last line when a baseline snapshot exists', () => {
+    const out = buildWeeklyDigestEmail(baseData({
+      currency: 'GBP',
+      portfolio: {
+        itemCount: 35, currentTotalCents: 110_000, previousTotalCents: null,
+        absChangeCents: null, pctChange: null,
+        topItems: [],
+        scopeLabel: 'My Collection',
+        scopeIsAllPortfolios: false,
+        sinceLastDigest: {
+          lastSentAt:     '2026-06-18T12:00:00Z',
+          lastTotalCents: 100_000,
+          lastCurrency:   'GBP',
+          absChangeCents: 10_000,
+          pctChange:      10.0,
+        },
+      },
+    }))
+    expect(out.html).toMatch(/Since last weekly:/)
+    expect(out.html).toMatch(/\+10\.0%/)
+    expect(out.text).toMatch(/Since last weekly:/)
+    expect(out.html).not.toMatch(/First weekly update/)
+  })
+
+  it('Block 5A-W-16G — renders subtle "First weekly update" note when no baseline snapshot exists', () => {
+    const out = buildWeeklyDigestEmail(baseData({
+      currency: 'GBP',
+      portfolio: {
+        itemCount: 35, currentTotalCents: 110_000, previousTotalCents: null,
+        absChangeCents: null, pctChange: null,
+        topItems: [],
+        scopeLabel: 'My Collection',
+        scopeIsAllPortfolios: false,
+        sinceLastDigest: null,
+      },
+    }))
+    expect(out.html).toMatch(/First weekly update/)
+    expect(out.html).not.toMatch(/Since last weekly:/)
+    expect(out.text).toMatch(/First weekly update/)
+  })
+
+  it('falls back to "Portfolio · N items" when scoped but the portfolio has no name (Block 5A-W-16G)', () => {
+    const out = buildWeeklyDigestEmail(baseData({
+      portfolio: {
+        itemCount: 35, currentTotalCents: 100000, previousTotalCents: null,
+        absChangeCents: null, pctChange: null,
+        topItems: [],
+        scopeLabel: null,
+        scopeIsAllPortfolios: false,    // scoped, just no name
+      },
+    }))
+    expect(out.html).toMatch(/>Portfolio · 35 items</)
+    expect(out.html).not.toMatch(/across all portfolios/i)
   })
 
   it('omits the portfolio section entirely when not provided', () => {
@@ -302,12 +362,52 @@ describe('buildWeeklyDigestEmail — alert highlights', () => {
     }))
     expect(out.html).toMatch(/Alert highlights/i)
     expect(out.html).toMatch(/3 alerts this week/)
-    expect(out.html).toMatch(/1 high/i)
+    // Block 5A-W-16G — high-severity card gets an "Important" badge,
+    // not the raw severity name. Normal/low severities have no badge.
+    expect(out.html).toMatch(/Important/)
+    expect(out.html).not.toMatch(/>\d+ normal</)   // raw severity word banned
+    expect(out.html).not.toMatch(/>\d+ low</)
     expect(out.html).toMatch(/Charizard/)
     expect(out.html).toMatch(/Haunter/)
     expect(out.html).toMatch(/Raw change/i)
     expect(out.html).toMatch(/PSA 10 change/i)
     expect(out.text).toMatch(/ALERT HIGHLIGHTS/)
+  })
+
+  it('Block 5A-W-16G — never renders raw severity names ("2 normal" / "1 low") as user-facing labels', () => {
+    const out = buildWeeklyDigestEmail(baseData({
+      alertSummary: {
+        totalEvents: 3,
+        cardBlocks: [{
+          cardSlug: '1', cardName: 'Card', setName: 'Set', cardUrl: null,
+          eventCount: 3,
+          severities: { high: 0, normal: 2, low: 1 },   // no high → no badge
+          rules: ['raw_change'],
+        }],
+      },
+    }))
+    expect(out.html).not.toMatch(/\b\d+ normal\b/)
+    expect(out.html).not.toMatch(/\b\d+ low\b/)
+    expect(out.html).not.toMatch(/\bImportant\b/)        // no high → no Important badge
+    expect(out.html).toMatch(/3 alerts this week/)
+    expect(out.text).not.toMatch(/\b\d+ normal\b/)
+    expect(out.text).not.toMatch(/\b\d+ low\b/)
+  })
+
+  it('Block 5A-W-16G — shows "Important" badge only when at least one event is high severity', () => {
+    const out = buildWeeklyDigestEmail(baseData({
+      alertSummary: {
+        totalEvents: 2,
+        cardBlocks: [{
+          cardSlug: '1', cardName: 'Card', setName: 'Set', cardUrl: null,
+          eventCount: 2,
+          severities: { high: 1, normal: 1, low: 0 },
+          rules: ['raw_change'],
+        }],
+      },
+    }))
+    expect(out.html).toMatch(/Important/)
+    expect(out.html).not.toMatch(/\b\d+ high\b/)         // no "1 high" count text
   })
 
   it('omits alert highlights when there are no card blocks', () => {

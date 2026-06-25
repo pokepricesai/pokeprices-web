@@ -28,6 +28,7 @@ import {
   usdToCents,
   dailyPriceCentsFromColumn,
   selectTopItems,
+  computeSinceLastDigest,
   MIN_MEANINGFUL_PCT,
   type ScoredCard,
 } from '../weeklyDigest'
@@ -1368,5 +1369,166 @@ describe('buildWeeklyDigestForUser — Block 5A-W-16B portfolio_items name prefe
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
     expect(out.portfolio?.topItems[0].setName).toBe('Base Set')
     expect(out.portfolio?.topItems[0].cardName).toBe('Charizard')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-16G — alert URL resolution + since-last-digest baseline
+// ─────────────────────────────────────────────────────────────────────
+
+describe('computeSinceLastDigest — pure helper', () => {
+  it('returns null when there is no previous snapshot', () => {
+    expect(computeSinceLastDigest(100, 'GBP', null)).toBeNull()
+  })
+
+  it('returns null when the previous snapshot is in a different currency', () => {
+    expect(
+      computeSinceLastDigest(100, 'GBP', { sentAt: 's', currency: 'USD', portfolioTotalCents: 80 }),
+    ).toBeNull()
+  })
+
+  it('returns null when current or snapshot total is missing', () => {
+    expect(
+      computeSinceLastDigest(null, 'GBP', { sentAt: 's', currency: 'GBP', portfolioTotalCents: 80 }),
+    ).toBeNull()
+    expect(
+      computeSinceLastDigest(100, 'GBP', { sentAt: 's', currency: 'GBP', portfolioTotalCents: null }),
+    ).toBeNull()
+  })
+
+  it('computes signed abs + pct change when both totals exist', () => {
+    const r = computeSinceLastDigest(110_000, 'GBP', { sentAt: 's', currency: 'GBP', portfolioTotalCents: 100_000 })
+    expect(r?.absChangeCents).toBe(10_000)
+    expect(r?.pctChange).toBeCloseTo(10.0)
+  })
+
+  it('returns abs but null pct when previous total is zero (no division-by-zero)', () => {
+    const r = computeSinceLastDigest(100_00, 'GBP', { sentAt: 's', currency: 'GBP', portfolioTotalCents: 0 })
+    expect(r?.absChangeCents).toBe(100_00)
+    expect(r?.pctChange).toBeNull()
+  })
+})
+
+describe('buildWeeklyDigestForUser — Block 5A-W-16G alert URL resolution', () => {
+  it('resolves alert highlight cardUrl from alert_events.card_slug via cards table (independent of watchlist/portfolio)', async () => {
+    seedPrefs('u1')
+    // User has NO watchlist or portfolio for this card — pre-fix the
+    // alert highlight would render without a View card link because
+    // the resolver only looked at watchlist/portfolio.
+    seedCardLink('charizard-base-4', '1450205', 'Charizard', 'Base Set')
+    seedAlertEvent('u1', { id: 'e1', card_slug: '1450205', card_name: 'Charizard', set_name: 'Base Set' })
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    const block = out.alertSummary.cardBlocks[0]
+    expect(block.cardUrl).toBe('https://www.pokeprices.io/set/Base%20Set/card/charizard-base-4')
+    expect(out.diagnostics.alertCardsResolvedBySlug).toBe(1)
+    expect(out.diagnostics.alertCardsResolvedByNameSet).toBe(0)
+    expect(out.diagnostics.alertCardsWithNoUrl).toBe(0)
+  })
+
+  it('falls back to (card_name, set_name) when alert_events.card_slug does not resolve', async () => {
+    seedPrefs('u1')
+    // cards-table row exists under a DIFFERENT bare slug but the
+    // (name, set) pair matches — the name+set fallback should win.
+    seedCardLink('charizard-base-4', '1450205', 'Charizard', 'Base Set')
+    seedAlertEvent('u1', {
+      id: 'e1',
+      card_slug:  'ghost-bare',           // not in cards.card_slug
+      card_name:  'Charizard',
+      set_name:   'Base Set',
+    })
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    const block = out.alertSummary.cardBlocks[0]
+    expect(block.cardUrl).toBe('https://www.pokeprices.io/set/Base%20Set/card/charizard-base-4')
+    expect(out.diagnostics.alertCardsResolvedByNameSet).toBe(1)
+    expect(out.diagnostics.alertCardsWithNoUrl).toBe(0)
+  })
+
+  it('reports alertCardsWithNoUrl when neither path resolves the link', async () => {
+    seedPrefs('u1')
+    seedAlertEvent('u1', { id: 'e1', card_slug: 'phantom', card_name: 'Unknown', set_name: 'Nowhere' })
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.alertSummary.cardBlocks[0].cardUrl).toBeNull()
+    expect(out.diagnostics.alertCardsResolvedBySlug).toBe(0)
+    expect(out.diagnostics.alertCardsResolvedByNameSet).toBe(0)
+    expect(out.diagnostics.alertCardsWithNoUrl).toBe(1)
+  })
+})
+
+describe('buildWeeklyDigestForUser — Block 5A-W-16G since-last-digest baseline', () => {
+  function seedScopedPortfolio() {
+    seedPrefs('u1')
+    fakeDB.seed('portfolios', [
+      ...fakeDB.rows('portfolios'),
+      { id: 'pf-u1', user_id: 'u1', is_default: true, name: 'My Collection' },
+    ])
+    seedCardLink('a', '111', 'A', 'S')
+    seedCardTrend('A', 'S', { raw: 100_00 })
+    fakeDB.seed('portfolio_items', [
+      ...fakeDB.rows('portfolio_items'),
+      { portfolio_id: 'pf-u1', card_slug: 'a', holding_type: 'raw', quantity: 1, card_name_snapshot: 'A', set_name_snapshot: 'S' },
+    ])
+  }
+
+  it('returns sinceLastDigest=null when the user has no previous weekly_report delivery_log entry', async () => {
+    seedScopedPortfolio()
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.sinceLastDigest).toBeNull()
+  })
+
+  it('returns a populated sinceLastDigest when the previous delivery_log entry carries a snapshot', async () => {
+    seedScopedPortfolio()
+    fakeDB.seed('email_delivery_log', [
+      {
+        id: 'log-1', user_id: 'u1',
+        category: 'weekly_report', status: 'sent',
+        template_key: 'weekly-digest-test',
+        sent_at: '2026-06-18T12:00:00Z',
+        metadata_json: {
+          source: 'admin_send_weekly_digest_test',
+          mode: 'real',
+          portfolioTotalMinorUnits: 80_00,
+          currency: 'GBP',
+          portfolioItemCount: 1,
+          portfolioScope: 'selected_dashboard_portfolio',
+        },
+      },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    const since = out.portfolio?.sinceLastDigest
+    expect(since).not.toBeNull()
+    expect(since?.lastTotalCents).toBe(80_00)
+    expect(since?.absChangeCents).toBe(100_00 - 80_00)   // 2000
+    expect(since?.pctChange).toBeCloseTo(25.0)
+    expect(since?.lastCurrency).toBe('GBP')
+  })
+
+  it('skips the snapshot when the previous send was in a different currency (no FX fabrication)', async () => {
+    seedScopedPortfolio()
+    fakeDB.seed('email_delivery_log', [
+      {
+        id: 'log-1', user_id: 'u1',
+        category: 'weekly_report', status: 'sent',
+        template_key: 'weekly-digest-test',
+        sent_at: '2026-06-18T12:00:00Z',
+        metadata_json: { portfolioTotalMinorUnits: 80_00, currency: 'USD' },
+      },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.sinceLastDigest).toBeNull()
+  })
+
+  it('ignores prior sends in other categories (does not confuse onboarding emails with weekly_report)', async () => {
+    seedScopedPortfolio()
+    fakeDB.seed('email_delivery_log', [
+      {
+        id: 'log-onb', user_id: 'u1',
+        category: 'onboarding', status: 'sent',
+        template_key: 'onboarding-1',
+        sent_at: '2026-06-20T12:00:00Z',
+        metadata_json: { portfolioTotalMinorUnits: 50_00, currency: 'GBP' },
+      },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.sinceLastDigest).toBeNull()
   })
 })

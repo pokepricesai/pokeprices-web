@@ -163,6 +163,22 @@ export async function POST(req: Request) {
         source:      'admin_send_weekly_digest_test',
         mode:        resolvedMode,
         status:      data.status,
+        // Block 5A-W-16G — snapshot fields read back on the NEXT
+        // digest as the "since last weekly" baseline. Keeps the
+        // baseline calculation honest: the digest renderer compares
+        // a real previous total to the current total, no fabrication.
+        // Stored only on REAL sends (sample previews of the same
+        // user would otherwise pollute the baseline).
+        portfolioTotalMinorUnits: resolvedMode === 'real'
+          ? data.portfolio?.currentTotalCents ?? null
+          : null,
+        currency:                 resolvedMode === 'real' ? data.currency : null,
+        portfolioItemCount:       resolvedMode === 'real'
+          ? data.portfolio?.itemCount ?? 0
+          : null,
+        portfolioScope:           resolvedMode === 'real'
+          ? data.diagnostics.portfolioScope
+          : null,
       },
     })
 
