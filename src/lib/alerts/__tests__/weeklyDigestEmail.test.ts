@@ -33,6 +33,10 @@ function emptyDiagnostics(generatedAt = '2026-06-25T12:00:00Z'): WeeklyDigestDia
     portfolioValueSource:        'shared_valuation_helper',
     portfolioPreviousValueSource:'daily_prices_baseline',
     portfolioValueSourceCounts:  { card_trends: 0, daily_prices: 0, manual: 0, missing: 0 },
+    portfolioPortfoliosLoaded:        0,
+    portfolioItemsLoaded:             0,
+    portfolioItemsMissingCardName:    0,
+    portfolioItemsValuedAsMissing:    0,
     sectionsOmittedByPreferences: [],
     generatedAt,
   }
@@ -165,6 +169,22 @@ describe('buildWeeklyDigestEmail — portfolio section', () => {
     }))
     expect(out.html).toMatch(/No portfolio items yet/)
     expect(out.text).toMatch(/No portfolio items yet/)
+  })
+
+  it('renders a distinct "items found but no value" fallback when itemCount > 0 yet nothing priced (Block 5A-W-16D)', () => {
+    const out = buildWeeklyDigestEmail(baseData({
+      portfolio: {
+        itemCount: 35, currentTotalCents: null, previousTotalCents: null,
+        absChangeCents: null, pctChange: null,
+        topItems: [],
+      },
+    }))
+    // Must NOT show the empty-state copy
+    expect(out.html).not.toMatch(/No portfolio items yet/)
+    // Must show the new fallback referencing the actual item count
+    expect(out.html).toMatch(/tracking 35 items/i)
+    expect(out.html).toMatch(/couldn['’]t calculate a weekly value/i)
+    expect(out.text).toMatch(/Tracking 35 items, but no weekly value/i)
   })
 })
 

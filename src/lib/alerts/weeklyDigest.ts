@@ -156,6 +156,15 @@ export type WeeklyDigestDiagnostics = {
   /** Block 5A-W-16C — per-source count of how each portfolio_items row
    *  resolved its market value. */
   portfolioValueSourceCounts:   Record<ValuationPriceSource, number>
+  /** Block 5A-W-16D — observability for the regression where the
+   *  portfolio section silently showed "No portfolio items yet" because
+   *  loadPortfolioItems was selecting columns that don't exist on the
+   *  table. Surfaces the row counts at each stage so an admin can spot
+   *  any future drift without reading code. */
+  portfolioPortfoliosLoaded:        number
+  portfolioItemsLoaded:             number
+  portfolioItemsMissingCardName:    number
+  portfolioItemsValuedAsMissing:    number
   sectionsOmittedByPreferences: Array<'portfolio' | 'watchlist'>
   generatedAt:                  string
 }
@@ -436,10 +445,14 @@ export async function buildWeeklyDigestForUser(
   if (!prefs.weeklyOverviewWatchlistEnabled) sectionsOmittedByPreferences.push('watchlist')
 
   // 3. Load source lists in parallel.
-  const [portfolioRaw, watchlistRaw] = await Promise.all([
-    wantPortfolio ? loadPortfolioItems(supa, userId) : Promise.resolve([] as PortRow[]),
+  const [portfolioResult, watchlistRaw] = await Promise.all([
+    wantPortfolio
+      ? loadPortfolioItems(supa, userId)
+      : Promise.resolve({ rows: [] as PortRow[], portfoliosLoaded: 0 }),
     wantWatchlist ? loadWatchlist(supa, userId)      : Promise.resolve([] as WatchRow[]),
   ])
+  const portfolioRaw     = portfolioResult.rows
+  const portfoliosLoaded = portfolioResult.portfoliosLoaded
 
   // 4. Resolve URL slugs → bare numeric + display fields via cards.
   const urlSlugs = uniq([
@@ -644,6 +657,11 @@ export async function buildWeeklyDigestForUser(
       portfolioValueSource:         'shared_valuation_helper',
       portfolioPreviousValueSource: 'daily_prices_baseline',
       portfolioValueSourceCounts,
+      // Block 5A-W-16D observability
+      portfolioPortfoliosLoaded:        portfoliosLoaded,
+      portfolioItemsLoaded:             portfolioRaw.length,
+      portfolioItemsMissingCardName:    portfolioRaw.filter(r => !r.card_name || !r.set_name).length,
+      portfolioItemsValuedAsMissing:    portfolioValueSourceCounts.missing,
       sectionsOmittedByPreferences,
       generatedAt,
     },
@@ -705,55 +723,80 @@ async function loadPrefs(supa: SupabaseClient, userId: string): Promise<UserAler
   }
 }
 
-async function loadPortfolioItems(supa: SupabaseClient, userId: string): Promise<PortRow[]> {
+type PortfolioLoadResult = {
+  rows:               PortRow[]
+  portfoliosLoaded:   number
+}
+
+async function loadPortfolioItems(supa: SupabaseClient, userId: string): Promise<PortfolioLoadResult> {
   // Mirror the evaluator's two-step lookup: user → portfolios → items.
   const { data: portfolios, error: pErr } = await supa
     .from('portfolios')
     .select('id, user_id')
     .eq('user_id', userId)
-  if (pErr || !Array.isArray(portfolios) || portfolios.length === 0) return []
+  if (pErr || !Array.isArray(portfolios) || portfolios.length === 0) {
+    return { rows: [], portfoliosLoaded: 0 }
+  }
   const portfolioIds = portfolios.map(r => String((r as Record<string, unknown>).id))
   const idToUser     = new Map<string, string>()
   for (const r of portfolios as Array<Record<string, unknown>>) idToUser.set(String(r.id), String(r.user_id))
 
-  // Block 5A-W-16B — also fetch card_name + set_name from
-  // portfolio_items so the digest shows the user's OWN holding labels
-  // (matches the dashboard, and shields against multi-row card_slug
-  // → cards collisions that can swap "Charizard #4 — Base Set" for a
-  // same-slug card in a different set). Falls back to the cards-table
-  // values when the portfolio row's columns are null.
-  // Block 5A-W-16C — also pulls manual_value_cents so the shared
-  // valuation helper can treat manual-grade holdings the same way the
-  // dashboard does. Defensive: legacy schemas without that column
-  // fall back to the previous query so a missing column doesn't
-  // crash the whole digest.
+  // Block 5A-W-16D — the production portfolio_items schema uses the
+  // `*_snapshot` suffix for denormalised card display fields (see the
+  // upsert payload in PortfolioDashboard.tsx::handleAddCard, where
+  // card_name_snapshot / set_name_snapshot / image_url_snapshot are
+  // the column names written). My Block 5A-W-16B/16C selects on
+  // `card_name` / `set_name` were targeting columns that simply
+  // do not exist on this table — PostgREST 400s the whole query and
+  // we returned an empty array, which the renderer mistook for a
+  // user with no portfolio at all.
+  //
+  // This loader now SELECTS the snapshot columns AND defensively
+  // falls back through two narrower queries so a future schema
+  // change can't silently disable the digest again.
   let items: Array<Record<string, unknown>> = []
-  const { data: full, error: fullErr } = await supa
-    .from('portfolio_items')
-    .select('portfolio_id, card_slug, holding_type, quantity, card_name, set_name, manual_value_cents')
-    .in('portfolio_id', portfolioIds)
-  if (fullErr || !Array.isArray(full)) {
-    const { data: legacy, error: lErr } = await supa
+  type Attempt = { name: string; columns: string }
+  const attempts: Attempt[] = [
+    { name: 'snapshot+manual', columns: 'portfolio_id, card_slug, holding_type, quantity, manual_value_cents, card_name_snapshot, set_name_snapshot' },
+    { name: 'snapshot',        columns: 'portfolio_id, card_slug, holding_type, quantity, card_name_snapshot, set_name_snapshot' },
+    { name: 'core+manual',     columns: 'portfolio_id, card_slug, holding_type, quantity, manual_value_cents' },
+    { name: 'core',            columns: 'portfolio_id, card_slug, holding_type, quantity' },
+  ]
+  for (const a of attempts) {
+    const { data, error } = await supa
       .from('portfolio_items')
-      .select('portfolio_id, card_slug, holding_type, quantity, card_name, set_name')
+      .select(a.columns)
       .in('portfolio_id', portfolioIds)
-    if (lErr || !Array.isArray(legacy)) return []
-    items = legacy as Array<Record<string, unknown>>
-  } else {
-    items = full as Array<Record<string, unknown>>
+    if (!error && Array.isArray(data)) {
+      items = data as unknown as Array<Record<string, unknown>>
+      break
+    }
   }
 
-  return items.map(r => ({
-    user_id:            idToUser.get(String(r.portfolio_id)) ?? userId,
-    card_slug:          String(r.card_slug ?? ''),
-    holding_type:       r.holding_type == null ? null : String(r.holding_type),
-    quantity:           r.quantity     == null ? 1    : Math.max(1, Math.floor(Number(r.quantity) || 1)),
-    card_name:          r.card_name == null ? null : String(r.card_name),
-    set_name:           r.set_name  == null ? null : String(r.set_name),
-    manual_value_cents: r.manual_value_cents == null || !Number.isFinite(Number(r.manual_value_cents))
-                          ? null
-                          : Math.round(Number(r.manual_value_cents)),
-  })).filter(r => r.card_slug)
+  const rows = items.map(r => {
+    // Prefer the snapshot columns the dashboard's upsert actually
+    // writes. Anything else from the row stays as-is so a future
+    // migration that adds a non-snapshot column doesn't need a code
+    // change to be picked up.
+    const snapshotName = r.card_name_snapshot
+    const snapshotSet  = r.set_name_snapshot
+    const fallbackName = (r as Record<string, unknown>).card_name
+    const fallbackSet  = (r as Record<string, unknown>).set_name
+    const cardName = snapshotName ?? fallbackName ?? null
+    const setName  = snapshotSet  ?? fallbackSet  ?? null
+    return {
+      user_id:            idToUser.get(String(r.portfolio_id)) ?? userId,
+      card_slug:          String(r.card_slug ?? ''),
+      holding_type:       r.holding_type == null ? null : String(r.holding_type),
+      quantity:           r.quantity     == null ? 1    : Math.max(1, Math.floor(Number(r.quantity) || 1)),
+      card_name:          cardName == null ? null : String(cardName),
+      set_name:           setName  == null ? null : String(setName),
+      manual_value_cents: r.manual_value_cents == null || !Number.isFinite(Number(r.manual_value_cents))
+                            ? null
+                            : Math.round(Number(r.manual_value_cents)),
+    }
+  }).filter(r => r.card_slug)
+  return { rows, portfoliosLoaded: portfolios.length }
 }
 
 /** Block 5A-W-16B — read the user's preferred display currency from
@@ -993,6 +1036,10 @@ function emptyDiagnostics(generatedAt: string, currency: DigestDisplayCurrency =
     portfolioValueSource:        'shared_valuation_helper',
     portfolioPreviousValueSource:'daily_prices_baseline',
     portfolioValueSourceCounts:  { card_trends: 0, daily_prices: 0, manual: 0, missing: 0 },
+    portfolioPortfoliosLoaded:        0,
+    portfolioItemsLoaded:             0,
+    portfolioItemsMissingCardName:    0,
+    portfolioItemsValuedAsMissing:    0,
     sectionsOmittedByPreferences: [],
     generatedAt,
   }

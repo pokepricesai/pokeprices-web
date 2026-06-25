@@ -219,6 +219,10 @@ export function buildSampleWeeklyDigestData(): WeeklyDigestData {
       portfolioValueSource:        'shared_valuation_helper',
       portfolioPreviousValueSource:'daily_prices_baseline',
       portfolioValueSourceCounts:  { card_trends: 11, daily_prices: 3, manual: 0, missing: 0 },
+      portfolioPortfoliosLoaded:        1,
+      portfolioItemsLoaded:             14,
+      portfolioItemsMissingCardName:    0,
+      portfolioItemsValuedAsMissing:    0,
       sectionsOmittedByPreferences: [],
       generatedAt:                 '2026-06-25T12:00:00Z',
     },
@@ -307,6 +311,18 @@ function renderPortfolioSectionHtml(data: WeeklyDigestData): string {
     return `${heading}
       <p style="font-family:'Figtree',sans-serif;font-size:13px;color:${BRAND.muted};margin:0 0 10px;line-height:1.5;">
         No portfolio items yet. <a href="${PORTFOLIO_URL}" style="color:${BRAND.primary};font-weight:700;text-decoration:none;">Add some cards</a> to get a weekly value summary.
+      </p>`
+  }
+
+  // Block 5A-W-16D — items exist on the user's portfolio but the
+  // valuation helper couldn't price any of them. Distinct from the
+  // "no items" state above so a real-world user doesn't see "Add
+  // some cards" when they already have 35 holdings.
+  if (p.currentTotalCents == null && p.topItems.length === 0) {
+    return `${heading}
+      <p style="font-family:'Figtree',sans-serif;font-size:13px;color:${BRAND.muted};margin:0 0 10px;line-height:1.5;">
+        We're tracking ${p.itemCount} ${pluralize(p.itemCount, 'item', 'items')} in your portfolio, but we couldn't calculate a weekly value this time.
+        Check back next week — or open <a href="${PORTFOLIO_URL}" style="color:${BRAND.primary};font-weight:700;text-decoration:none;">your portfolio</a> for live values.
       </p>`
   }
 
@@ -489,6 +505,10 @@ function renderText(data: WeeklyDigestData, sample: boolean): string {
       lines.push('------------------')
       if (data.portfolio.itemCount === 0) {
         lines.push('No portfolio items yet.')
+      } else if (data.portfolio.currentTotalCents == null && data.portfolio.topItems.length === 0) {
+        // Block 5A-W-16D — items exist but the valuation pipeline
+        // couldn't price them this week.
+        lines.push(`Tracking ${data.portfolio.itemCount} ${pluralize(data.portfolio.itemCount, 'item', 'items')}, but no weekly value could be calculated.`)
       } else {
         lines.push(`Estimated value across all portfolios: ${fmtCents(data.portfolio.currentTotalCents, data.currency)}  (was ${fmtCents(data.portfolio.previousTotalCents, data.currency)})`)
         lines.push(`Change: ${fmtCents(data.portfolio.absChangeCents, data.currency)}  (${fmtPct(data.portfolio.pctChange)})`)

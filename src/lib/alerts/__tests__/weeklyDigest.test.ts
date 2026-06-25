@@ -954,6 +954,121 @@ describe('buildWeeklyDigestForUser — Block 5A-W-16C dashboard-aligned valuatio
   })
 })
 
+describe('buildWeeklyDigestForUser — Block 5A-W-16D regression (snapshot columns)', () => {
+  it('reads card_name_snapshot / set_name_snapshot — the actual production column names', async () => {
+    // Production portfolio_items uses _snapshot suffixed columns
+    // (see PortfolioDashboard.tsx upsert payload). Seeding with the
+    // snapshot variant must produce the same digest as seeding the
+    // unsuffixed columns did in older tests.
+    seedPrefs('u1')
+    seedCardLink('charizard-base-4', '1', 'Charizard', 'Base Set')
+    seedCardTrend('Charizard', 'Base Set', { raw: 36_924 })
+    // Baseline 7d ago so the card qualifies as a meaningful mover
+    // and lands in topItems.
+    seedPrice('1', '2026-06-18', { raw: 30_000 })
+    seedPrice('1', '2026-06-25', { raw: 36_924 })
+    fakeDB.seed('portfolios', [
+      ...fakeDB.rows('portfolios'),
+      { id: 'pf-u1', user_id: 'u1' },
+    ])
+    fakeDB.seed('portfolio_items', [
+      ...fakeDB.rows('portfolio_items'),
+      {
+        portfolio_id:        'pf-u1',
+        card_slug:           'charizard-base-4',
+        holding_type:        'raw',
+        quantity:            1,
+        card_name_snapshot:  'Charizard',
+        set_name_snapshot:   'Base Set',
+        // NOTE: no card_name / set_name columns — production schema
+      },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.itemCount).toBe(1)
+    expect(out.portfolio?.currentTotalCents).toBe(36_924)
+    expect(out.portfolio?.topItems[0]?.cardName).toBe('Charizard')
+    expect(out.portfolio?.topItems[0]?.setName).toBe('Base Set')
+  })
+
+  it('itemCount reflects ALL loaded portfolio_items, not just successfully valued ones', async () => {
+    // Mirror the user's real case: 35 holdings, some unprice-able.
+    seedPrefs('u1')
+    fakeDB.seed('portfolios', [
+      ...fakeDB.rows('portfolios'),
+      { id: 'pf-u1', user_id: 'u1' },
+    ])
+    // 35 items, none with any pricing data in card_trends or daily_prices
+    for (let i = 0; i < 35; i++) {
+      fakeDB.seed('portfolio_items', [
+        ...fakeDB.rows('portfolio_items'),
+        {
+          portfolio_id:        'pf-u1',
+          card_slug:           `card-${i}`,
+          holding_type:        'raw',
+          quantity:            1,
+          card_name_snapshot:  `Card ${i}`,
+          set_name_snapshot:   'Set',
+        },
+      ])
+    }
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.itemCount).toBe(35)
+    expect(out.portfolio?.currentTotalCents).toBeNull()
+    expect(out.diagnostics.portfolioItemsLoaded).toBe(35)
+    expect(out.diagnostics.portfolioPortfoliosLoaded).toBe(1)
+    expect(out.diagnostics.portfolioItemsValuedAsMissing).toBe(35)
+  })
+
+  it('exposes portfoliosLoaded + portfolioItemsLoaded + missing counts in diagnostics', async () => {
+    seedPrefs('u1')
+    fakeDB.seed('portfolios', [
+      ...fakeDB.rows('portfolios'),
+      { id: 'pf-u1', user_id: 'u1' },
+      { id: 'pf-u1-second', user_id: 'u1' },
+    ])
+    fakeDB.seed('portfolio_items', [
+      ...fakeDB.rows('portfolio_items'),
+      { portfolio_id: 'pf-u1', card_slug: 'a', holding_type: 'raw', quantity: 1, card_name_snapshot: 'A', set_name_snapshot: 'S' },
+      { portfolio_id: 'pf-u1', card_slug: 'b', holding_type: 'raw', quantity: 1 /* no name */ },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.diagnostics.portfolioPortfoliosLoaded).toBe(2)
+    expect(out.diagnostics.portfolioItemsLoaded).toBe(2)
+    expect(out.diagnostics.portfolioItemsMissingCardName).toBe(1)   // the second row
+  })
+
+  it('falls back to a "core" SELECT when snapshot columns are unavailable', async () => {
+    // FakeDB tolerates any column, so this case primarily verifies
+    // the loader still works when rows lack snapshot columns — the
+    // PRIMARY production query may succeed even with NULL snapshot
+    // values (lenient PostgREST). The orchestrator must still surface
+    // those items via the cards-table fallback for naming.
+    seedPrefs('u1')
+    seedCardLink('charizard-base-4', '1', 'Charizard', 'Base Set')
+    seedCardTrend('Charizard', 'Base Set', { raw: 100_00 })
+    seedPrice('1', '2026-06-18', { raw: 80_00 })
+    seedPrice('1', '2026-06-25', { raw: 100_00 })
+    fakeDB.seed('portfolios', [
+      ...fakeDB.rows('portfolios'),
+      { id: 'pf-u1', user_id: 'u1' },
+    ])
+    fakeDB.seed('portfolio_items', [
+      ...fakeDB.rows('portfolio_items'),
+      {
+        portfolio_id: 'pf-u1',
+        card_slug:    'charizard-base-4',
+        holding_type: 'raw',
+        quantity:     1,
+        // Neither snapshot NOR direct card_name — name must come from cards lookup
+      },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.itemCount).toBe(1)
+    expect(out.portfolio?.topItems[0]?.cardName).toBe('Charizard')   // from cards-table lookup
+    expect(out.portfolio?.currentTotalCents).toBe(100_00)
+  })
+})
+
 describe('buildWeeklyDigestForUser — Block 5A-W-16B portfolio_items name preference', () => {
   it('prefers portfolio_items.card_name / set_name over the cards-table lookup', async () => {
     seedPrefs('u1')
