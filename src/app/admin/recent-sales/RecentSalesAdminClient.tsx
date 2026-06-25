@@ -925,6 +925,179 @@ function WeeklyDigestPreviewButton() {
   )
 }
 
+// Block 5A-W-16 — admin-only WEEKLY digest test-send. Sends ONE
+// weekly portfolio/watchlist digest email to the locked test/admin
+// recipient (never to a real user). POSTs to
+// /api/admin/alerts/send-weekly-digest-test. The button is single-
+// click because the recipient is hard-locked server-side; the only
+// addressable risk is "wrong inbox" which the response surfaces by
+// echoing the resolved recipient.
+function WeeklyDigestTestSendButton() {
+  const [busy,   setBusy]   = useState<'idle' | 'auto' | 'real' | 'sample'>('idle')
+  const [status, setStatus] = useState<number | null>(null)
+  const [body,   setBody]   = useState<{
+    ok?:              boolean
+    outcome?:         string
+    deliveryLogId?:   string | null
+    emailId?:         string | null
+    reason?:          string | null
+    recipient?:       string
+    recipientSource?: string
+    mode?:            string
+    status?:          string
+    subject?:         string
+    diagnostics?:     Record<string, unknown>
+    error?:           string
+  } | null>(null)
+  const [error,  setError]  = useState<string | null>(null)
+
+  function maskEmail(email: string): string {
+    const at = email.indexOf('@')
+    if (at <= 0 || at === email.length - 1) return '***'
+    const local  = email.slice(0, at)
+    const domain = email.slice(at + 1)
+    const visible = Math.min(2, Math.max(1, local.length))
+    return `${local.slice(0, visible)}***@${domain}`
+  }
+
+  async function run(mode: 'auto' | 'real' | 'sample') {
+    setBusy(mode); setError(null); setStatus(null); setBody(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        setError('Not signed in. Sign in with an authorised admin account.')
+        return
+      }
+      const res = await fetch('/api/admin/alerts/send-weekly-digest-test', {
+        method:  'POST',
+        headers: {
+          authorization:  `Bearer ${session.access_token}`,
+          'content-type': 'application/json',
+        },
+        body:    JSON.stringify({ mode }),
+        cache:   'no-store',
+      })
+      setStatus(res.status)
+      const text = await res.text()
+      try { setBody(JSON.parse(text)) } catch { setError(text || 'Empty response') }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'unknown error')
+    } finally {
+      setBusy('idle')
+    }
+  }
+
+  const isBusy = busy !== 'idle'
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Send weekly digest test email</div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+        Sends to the test/admin recipient only. <strong style={{ color: 'var(--text)' }}>Does not email users.</strong> Requires <code>ALERT_WEEKLY_DIGEST_TEST_EMAIL_ENABLED=true</code>. Recipient is locked to <code>ALERT_WEEKLY_DIGEST_TEST_EMAIL_TO</code> if set, otherwise your admin email. Subject is prefixed <code>[TEST]</code> (or <code>[TEST] [SAMPLE]</code>).
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <button
+          onClick={() => void run('auto')}
+          disabled={isBusy}
+          style={{
+            padding: '6px 12px', borderRadius: 6,
+            border: '1px solid var(--border)',
+            background: busy === 'auto' ? 'var(--bg-light)' : 'var(--primary)',
+            color: busy === 'auto' ? 'var(--text)' : '#fff',
+            cursor: isBusy ? 'wait' : 'pointer',
+            fontSize: 12, fontWeight: 700,
+            fontFamily: "'Figtree', sans-serif",
+          }}
+        >{busy === 'auto' ? 'Sending…' : 'Send weekly digest test (auto)'}</button>
+        <button
+          onClick={() => void run('real')}
+          disabled={isBusy}
+          style={{
+            padding: '6px 12px', borderRadius: 6,
+            border: '1px solid var(--border)',
+            background: 'transparent',
+            color: 'var(--text)',
+            cursor: isBusy ? 'wait' : 'pointer',
+            fontSize: 12, fontWeight: 700,
+            fontFamily: "'Figtree', sans-serif",
+          }}
+        >{busy === 'real' ? 'Sending…' : 'Force real'}</button>
+        <button
+          onClick={() => void run('sample')}
+          disabled={isBusy}
+          style={{
+            padding: '6px 12px', borderRadius: 6,
+            border: '1px solid var(--border)',
+            background: 'transparent',
+            color: 'var(--text)',
+            cursor: isBusy ? 'wait' : 'pointer',
+            fontSize: 12, fontWeight: 700,
+            fontFamily: "'Figtree', sans-serif",
+          }}
+        >{busy === 'sample' ? 'Sending…' : 'Force sample'}</button>
+      </div>
+
+      {(status != null || error) && (
+        <div style={{ marginTop: 12 }}>
+          {error && (
+            <div style={{ fontSize: 12, color: 'var(--red, #c00)', marginBottom: 4 }}>
+              {error}
+            </div>
+          )}
+          {status != null && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
+              HTTP <strong style={{ color: 'var(--text)' }}>{status}</strong>
+              {body?.mode && (
+                <>
+                  {' '}· mode <strong style={{ color: 'var(--text)' }}>{body.mode}</strong>
+                  {' '}· outcome <strong style={{ color: 'var(--text)' }}>{body.outcome ?? '—'}</strong>
+                  {body?.recipient && (
+                    <>
+                      {' '}· recipient <strong style={{ color: 'var(--text)', fontFamily: 'monospace' }}>{maskEmail(body.recipient)}</strong>
+                      {body.recipientSource && (
+                        <> <span style={{ color: 'var(--text-muted)' }}>({body.recipientSource})</span></>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+          {body?.subject != null && (
+            <div style={{
+              padding: '8px 10px', borderRadius: 6,
+              background: 'var(--bg-light)', border: '1px solid var(--border)',
+              marginBottom: 6,
+            }}>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700 }}>Subject</div>
+              <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 600 }}>{body.subject}</div>
+            </div>
+          )}
+          {(body?.deliveryLogId || body?.emailId || body?.reason) && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
+              {body.deliveryLogId && <>delivery_log_id: <code>{body.deliveryLogId}</code> </>}
+              {body.emailId && <>· email_id: <code>{body.emailId}</code> </>}
+              {body.reason && <>· reason: <code>{body.reason}</code></>}
+            </div>
+          )}
+          {body?.diagnostics && (
+            <details style={{ marginBottom: 8 }}>
+              <summary style={{ fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>Diagnostics</summary>
+              <pre style={{
+                margin: '6px 0 0', padding: 8, borderRadius: 6,
+                background: 'var(--card)', border: '1px solid var(--border)',
+                fontFamily: 'monospace', fontSize: 11,
+                overflowX: 'auto', whiteSpace: 'pre',
+                maxHeight: 240,
+              }}>{JSON.stringify(body.diagnostics, null, 2)}</pre>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Admin-only WRITE-mode button for the test-email send. POSTs to
 // /api/admin/alerts/send-test-email. Two-click confirmation reuses
 // the _armedClick state machine for parity with the evaluator's
@@ -1749,6 +1922,7 @@ export default function RecentSalesAdminClient() {
               <AlertDeliveryBatchControls />
               <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '14px 0 0' }} />
               <WeeklyDigestPreviewButton />
+              <WeeklyDigestTestSendButton />
               <pre style={{
                 margin: '6px 0 0', padding: 8, borderRadius: 6,
                 background: 'var(--card)', border: '1px solid var(--border)',
