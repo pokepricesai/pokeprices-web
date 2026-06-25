@@ -29,6 +29,7 @@ import {
   dailyPriceCentsFromColumn,
   selectTopItems,
   computeSinceLastDigest,
+  computePortfolioMovement30d,
   MIN_MEANINGFUL_PCT,
   type ScoredCard,
 } from '../weeklyDigest'
@@ -1530,5 +1531,141 @@ describe('buildWeeklyDigestForUser — Block 5A-W-16G since-last-digest baseline
     ])
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
     expect(out.portfolio?.sinceLastDigest).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-16H — section gating + 30d movement + scope-label fallback
+// ─────────────────────────────────────────────────────────────────────
+
+describe('buildWeeklyDigestForUser — Block 5A-W-16H weekly section gating', () => {
+  it('weekly portfolio section renders even when scopePortfolio is FALSE (decoupled from alert scope)', async () => {
+    // scopePortfolio gates alert EVALUATION (which lists the
+    // evaluator pulls from). The weekly DIGEST section is governed
+    // by weeklyOverviewPortfolioEnabled alone — confusing these
+    // silently lost the portfolio section in production.
+    seedPrefs('u1', { scopePortfolio: false, weeklyOverviewPortfolioEnabled: true })
+    fakeDB.seed('portfolios', [
+      ...fakeDB.rows('portfolios'),
+      { id: 'pf-u1', user_id: 'u1', is_default: true, name: 'My Collection' },
+    ])
+    seedCardLink('a', '111', 'A', 'S')
+    seedCardTrend('A', 'S', { raw: 100_00 })
+    fakeDB.seed('portfolio_items', [
+      ...fakeDB.rows('portfolio_items'),
+      { portfolio_id: 'pf-u1', card_slug: 'a', holding_type: 'raw', quantity: 1, card_name_snapshot: 'A', set_name_snapshot: 'S' },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio).toBeDefined()
+    expect(out.portfolio?.itemCount).toBe(1)
+    expect(out.portfolio?.currentTotalCents).toBe(100_00)
+  })
+
+  it('weekly watchlist section renders even when scopeWatchlist is FALSE', async () => {
+    seedPrefs('u1', { scopeWatchlist: false, weeklyOverviewWatchlistEnabled: true })
+    seedWatch('u1', 'something')
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.watchlist).toBeDefined()
+    expect(out.watchlist?.itemCount).toBe(1)
+  })
+
+  it('portfolio scopeLabel falls back to "My Collection" when default scope has no name set', async () => {
+    seedPrefs('u1')
+    fakeDB.seed('portfolios', [
+      ...fakeDB.rows('portfolios'),
+      // Legacy: is_default=true but no name column set
+      { id: 'pf-u1', user_id: 'u1', is_default: true },
+    ])
+    seedCardLink('a', '111', 'A', 'S')
+    seedCardTrend('A', 'S', { raw: 100_00 })
+    fakeDB.seed('portfolio_items', [
+      ...fakeDB.rows('portfolio_items'),
+      { portfolio_id: 'pf-u1', card_slug: 'a', holding_type: 'raw', quantity: 1, card_name_snapshot: 'A', set_name_snapshot: 'S' },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.scopeLabel).toBe('My Collection')
+  })
+})
+
+describe('computePortfolioMovement30d — pure helper', () => {
+  type Card = { cardName: string | null; setName: string | null; pctChange: number | null; pctChangeWindowDays?: number | null }
+
+  it('returns null when no card has a 30d pctChange', () => {
+    expect(computePortfolioMovement30d([])).toBeNull()
+    expect(computePortfolioMovement30d([{ cardName: 'A', setName: 'S', pctChange: 5, pctChangeWindowDays: 7 }])).toBeNull()
+    expect(computePortfolioMovement30d([{ cardName: 'A', setName: 'S', pctChange: null }])).toBeNull()
+  })
+
+  it('picks the best (max pct) and worst (min pct) 30d movers', () => {
+    const cards: Card[] = [
+      { cardName: 'Best',   setName: 'S', pctChange: 121.4, pctChangeWindowDays: 30 },
+      { cardName: 'Worst',  setName: 'S', pctChange: -57.5, pctChangeWindowDays: 30 },
+      { cardName: 'Middle', setName: 'S', pctChange: 5,     pctChangeWindowDays: 30 },
+    ]
+    const m = computePortfolioMovement30d(cards)
+    expect(m?.best.cardName).toBe('Best')
+    expect(m?.best.pct).toBeCloseTo(121.4)
+    expect(m?.worst.cardName).toBe('Worst')
+    expect(m?.worst.pct).toBeCloseTo(-57.5)
+  })
+
+  it('counts rising vs falling cards (strictly > 0 / < 0)', () => {
+    const cards: Card[] = [
+      { cardName: 'A', setName: 'S', pctChange: +5, pctChangeWindowDays: 30 },
+      { cardName: 'B', setName: 'S', pctChange: +10, pctChangeWindowDays: 30 },
+      { cardName: 'C', setName: 'S', pctChange: -3,  pctChangeWindowDays: 30 },
+      { cardName: 'D', setName: 'S', pctChange:  0,  pctChangeWindowDays: 30 },
+    ]
+    const m = computePortfolioMovement30d(cards)
+    expect(m?.risingCount).toBe(2)
+    expect(m?.fallingCount).toBe(1)
+  })
+
+  it('ignores cards whose pctChangeWindowDays is not 30 (no mixed-window contamination)', () => {
+    const cards: Card[] = [
+      { cardName: 'Watch', setName: 'S', pctChange: +200, pctChangeWindowDays: 7 },   // watchlist
+      { cardName: 'Real',  setName: 'S', pctChange: +5,   pctChangeWindowDays: 30 },
+    ]
+    const m = computePortfolioMovement30d(cards)
+    expect(m?.best.cardName).toBe('Real')
+    expect(m?.risingCount).toBe(1)
+  })
+})
+
+describe('buildWeeklyDigestForUser — Block 5A-W-16H movement30d in section', () => {
+  it('populates portfolio.movement30d from card_trends raw_pct_30d', async () => {
+    seedPrefs('u1')
+    fakeDB.seed('portfolios', [
+      ...fakeDB.rows('portfolios'),
+      { id: 'pf-u1', user_id: 'u1', is_default: true, name: 'My Collection' },
+    ])
+    seedCardLink('a', '111', 'A', 'S')
+    seedCardLink('b', '222', 'B', 'S')
+    seedCardLink('c', '333', 'C', 'S')
+    fakeDB.seed('card_trends', [
+      ...fakeDB.rows('card_trends'),
+      { card_name: 'A', set_name: 'S', current_raw: 100_00, raw_pct_30d: +121.4 },
+      { card_name: 'B', set_name: 'S', current_raw: 200_00, raw_pct_30d: -57.5  },
+      { card_name: 'C', set_name: 'S', current_raw: 300_00, raw_pct_30d: +12.0  },
+    ])
+    fakeDB.seed('portfolio_items', [
+      ...fakeDB.rows('portfolio_items'),
+      { portfolio_id: 'pf-u1', card_slug: 'a', holding_type: 'raw', quantity: 1, card_name_snapshot: 'A', set_name_snapshot: 'S' },
+      { portfolio_id: 'pf-u1', card_slug: 'b', holding_type: 'raw', quantity: 1, card_name_snapshot: 'B', set_name_snapshot: 'S' },
+      { portfolio_id: 'pf-u1', card_slug: 'c', holding_type: 'raw', quantity: 1, card_name_snapshot: 'C', set_name_snapshot: 'S' },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    const m = out.portfolio?.movement30d
+    expect(m).not.toBeNull()
+    expect(m?.best.cardName).toBe('A')
+    expect(m?.worst.cardName).toBe('B')
+    expect(m?.risingCount).toBe(2)
+    expect(m?.fallingCount).toBe(1)
+  })
+
+  it('movement30d is null when no portfolio card has a 30d pct (no card_trends rows)', async () => {
+    seedPrefs('u1')
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.movement30d ?? null).toBeNull()
   })
 })

@@ -165,6 +165,12 @@ export function buildSampleWeeklyDigestData(): WeeklyDigestData {
         absChangeCents: 8_250,
         pctChange:      3.4,
       },
+      movement30d: {
+        best:        { cardName: 'Meowstic',    setName: 'Generations', pct: 121.4 },
+        worst:       { cardName: 'Aegislash',   setName: 'Sun & Moon',  pct: -57.5 },
+        risingCount: 14,
+        fallingCount: 9,
+      },
       topItems: [
         {
           cardSlug: '1450205', cardName: "Lt. Surge's Raichu", setName: 'Gym Challenge',
@@ -403,17 +409,35 @@ function renderPortfolioSectionHtml(data: WeeklyDigestData): string {
        </div>`
     : `<div style="font-family:'Figtree',sans-serif;font-size:11px;margin-top:4px;color:${BRAND.mutedSoft};font-style:italic;">First weekly update — we'll show change-since-last-week from the next one.</div>`
 
+  // Block 5A-W-16H — 30-day movement summary, rendered between the
+  // headline value and the top-items list. Shows even when the
+  // since-last snapshot is missing so a first-weekly user still has
+  // fixed-period context.
+  const movementBlock = p.movement30d
+    ? `<div style="font-family:'Figtree',sans-serif;font-size:12px;margin:8px 0 0;padding:8px 10px;background:${BRAND.cardBg};border:1px solid ${BRAND.border};border-radius:8px;color:${BRAND.text};line-height:1.6;">
+         <div style="font-size:10px;color:${BRAND.muted};text-transform:uppercase;letter-spacing:0.7px;font-weight:700;margin-bottom:4px;">30-day snapshot</div>
+         <div><strong>Best 30d:</strong> ${esc(p.movement30d.best.cardName ?? '(unknown)')}${p.movement30d.best.setName ? ' · ' + esc(p.movement30d.best.setName) : ''} <span style="color:${changeColour(p.movement30d.best.pct)};font-weight:700;">${esc(fmtPct(p.movement30d.best.pct))}</span></div>
+         <div><strong>Worst 30d:</strong> ${esc(p.movement30d.worst.cardName ?? '(unknown)')}${p.movement30d.worst.setName ? ' · ' + esc(p.movement30d.worst.setName) : ''} <span style="color:${changeColour(p.movement30d.worst.pct)};font-weight:700;">${esc(fmtPct(p.movement30d.worst.pct))}</span></div>
+         <div><strong>Cards rising:</strong> ${p.movement30d.risingCount} · <strong>Cards falling:</strong> ${p.movement30d.fallingCount}</div>
+       </div>`
+    : ''
+
   const summary = `
     <table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 12px;"><tr><td>
       <div style="font-family:'Figtree',sans-serif;font-size:11px;color:${BRAND.muted};text-transform:uppercase;letter-spacing:0.7px;font-weight:700;">${scopeLine}</div>
       ${totalLine}
       ${changeLine}
       ${sinceLine}
+      ${movementBlock}
     </td></tr></table>`
 
+  // Block 5A-W-16H — explicit "Top portfolio items" sub-heading so
+  // the card list can never be visually mistaken for the alert
+  // highlights that follow.
+  const topItemsSubhead = `<div style="font-family:'Figtree',sans-serif;font-size:10px;color:${BRAND.muted};text-transform:uppercase;letter-spacing:0.7px;font-weight:700;margin:14px 0 6px;">Top portfolio items</div>`
   const items = p.topItems.length > 0
-    ? `<table role="presentation" style="width:100%;border-collapse:collapse;"><tbody>${p.topItems.map(i => renderItemRow(i, currency)).join('')}</tbody></table>`
-    : `<p style="font-family:'Figtree',sans-serif;font-size:13px;color:${BRAND.muted};margin:0;line-height:1.5;">No major portfolio changes this week.</p>`
+    ? `${topItemsSubhead}<table role="presentation" style="width:100%;border-collapse:collapse;"><tbody>${p.topItems.map(i => renderItemRow(i, currency)).join('')}</tbody></table>`
+    : `<p style="font-family:'Figtree',sans-serif;font-size:13px;color:${BRAND.muted};margin:8px 0 0;line-height:1.5;">No major portfolio changes this week.</p>`
 
   return heading + summary + items
 }
@@ -588,6 +612,15 @@ function renderText(data: WeeklyDigestData, sample: boolean): string {
           lines.push(`Since last weekly: ${fmtCents(data.portfolio.sinceLastDigest.absChangeCents, data.currency)}  (${fmtPct(data.portfolio.sinceLastDigest.pctChange)})`)
         } else {
           lines.push(`First weekly update — change-since-last-week will appear from the next one.`)
+        }
+        // Block 5A-W-16H — 30-day movement block in the text body.
+        if (data.portfolio.movement30d) {
+          const m = data.portfolio.movement30d
+          lines.push(``)
+          lines.push(`30-day snapshot:`)
+          lines.push(`  Best 30d: ${m.best.cardName ?? '(unknown)'}${m.best.setName ? ' · ' + m.best.setName : ''}  (${fmtPct(m.best.pct)})`)
+          lines.push(`  Worst 30d: ${m.worst.cardName ?? '(unknown)'}${m.worst.setName ? ' · ' + m.worst.setName : ''}  (${fmtPct(m.worst.pct)})`)
+          lines.push(`  Cards rising: ${m.risingCount} · Cards falling: ${m.fallingCount}`)
         }
         lines.push(`Items: ${data.portfolio.itemCount}`)
         if (data.portfolio.topItems.length === 0) {

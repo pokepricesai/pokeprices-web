@@ -115,6 +115,13 @@ export type WeeklyDigestPortfolioSection = {
    *  (currency changed, no portfolio total recorded). Renderer shows
    *  a subtle "First weekly update" note when this is null. */
   sinceLastDigest?:   WeeklyDigestSinceLastChange | null
+  /** Block 5A-W-16H — 30-day movement summary using the same
+   *  card_trends.raw_pct_30d field that powers per-item pct. Lets
+   *  the email show a fixed-period overview ("Best 30d / Worst 30d /
+   *  Cards rising") even when the since-last-week snapshot is
+   *  missing (first weekly etc.). Null when no priced item has a
+   *  usable raw_pct_30d. */
+  movement30d?:       PortfolioMovement30dSummary | null
 }
 
 /** Block 5A-W-16G — change since the previous weekly digest email
@@ -126,6 +133,17 @@ export type WeeklyDigestSinceLastChange = {
   lastCurrency:    DigestDisplayCurrency
   absChangeCents:  number             // currentTotalCents - lastTotalCents
   pctChange:       number | null      // null when lastTotalCents <= 0
+}
+
+/** Block 5A-W-16H — 30-day portfolio movement summary. Sourced from
+ *  card_trends.raw_pct_30d (same field powering the per-card pct).
+ *  Render under the headline value so the user has a fixed-period
+ *  reference even when the weekly snapshot baseline is missing. */
+export type PortfolioMovement30dSummary = {
+  best:        { cardName: string | null; setName: string | null; pct: number }
+  worst:       { cardName: string | null; setName: string | null; pct: number }
+  risingCount: number
+  fallingCount: number
 }
 
 export type WeeklyDigestWatchlistSection = {
@@ -539,8 +557,14 @@ export async function buildWeeklyDigestForUser(
   //    scope toggles. The brief asks the section to be OMITTED when
   //    weekly_overview_*_enabled is false; scope toggles still gate
   //    what cards we evaluate.
-  const wantPortfolio = prefs.weeklyOverviewPortfolioEnabled && prefs.scopePortfolio
-  const wantWatchlist = prefs.weeklyOverviewWatchlistEnabled && prefs.scopeWatchlist
+  // Block 5A-W-16H — decoupled from `scope*` flags. The scope flags
+  // gate ALERT EVALUATION (which lists feed evaluator.ts). The
+  // weekly-digest section visibility is its own pref. Previously
+  // a user who turned off `scopeWatchlist` for alerts also silently
+  // lost the watchlist section from their weekly email — that
+  // confused users and made the email look structurally broken.
+  const wantPortfolio = prefs.weeklyOverviewPortfolioEnabled
+  const wantWatchlist = prefs.weeklyOverviewWatchlistEnabled
   const sectionsOmittedByPreferences: Array<'portfolio' | 'watchlist'> = []
   if (!prefs.weeklyOverviewPortfolioEnabled) sectionsOmittedByPreferences.push('portfolio')
   if (!prefs.weeklyOverviewWatchlistEnabled) sectionsOmittedByPreferences.push('watchlist')
@@ -711,6 +735,17 @@ export async function buildWeeklyDigestForUser(
     const lastSnapshot = await loadLastWeeklySnapshot(supa, userId)
     const sinceLastDigest = computeSinceLastDigest(currentTotal, currency, lastSnapshot)
 
+    // Block 5A-W-16H — scopeLabel fallback. When the digest is scoped
+    // to the user's default portfolio but that portfolio's `name`
+    // column is empty (legacy rows predating the column), default to
+    // "My Collection" — the same string the dashboard inserts for
+    // newly-created defaults. Prevents the email reading "Portfolio"
+    // when the dashboard reads "My Collection".
+    const resolvedScopeLabel: string | null =
+      portfolioScope === 'selected_dashboard_portfolio'
+        ? (portfolioNames[0] && portfolioNames[0].length > 0 ? portfolioNames[0] : 'My Collection')
+        : null
+
     portfolioSection = {
       itemCount:          portfolioRaw.length,
       currentTotalCents:  currentTotal,
@@ -718,11 +753,14 @@ export async function buildWeeklyDigestForUser(
       absChangeCents:     null,
       pctChange:          null,
       topItems:           selectTopItems(scored, maxPortfolioItems, { includeMostValuable: true }),
-      scopeLabel:         portfolioScope === 'selected_dashboard_portfolio' && portfolioNames.length === 1
-                            ? portfolioNames[0]
-                            : null,
+      scopeLabel:         resolvedScopeLabel,
       scopeIsAllPortfolios: portfolioScope === 'all_portfolios',
       sinceLastDigest,
+      // Block 5A-W-16H — 30d movement summary built from the same
+      // scored cards we feed selectTopItems. Renderer shows
+      // "Best 30d / Worst 30d / Cards rising" under the headline
+      // value so a first-weekly user still gets fixed-period context.
+      movement30d:        computePortfolioMovement30d(scored),
     }
   }
 
@@ -1024,6 +1062,36 @@ async function loadLastWeeklySnapshot(
     }
   } catch {
     return null
+  }
+}
+
+/** Block 5A-W-16H — pure helper that builds the 30-day movement
+ *  summary from scored portfolio cards. Returns null when no card
+ *  has a usable raw_pct_30d so the renderer can omit the section
+ *  rather than show empty rows. Exported for unit tests. */
+export function computePortfolioMovement30d(
+  scoredCards: Array<{ cardName: string | null; setName: string | null; pctChange: number | null; pctChangeWindowDays?: number | null }>,
+): PortfolioMovement30dSummary | null {
+  // Only consider items that came from the dashboard 30d source.
+  // Anything else (e.g. a watchlist daily_prices pct) would mix windows.
+  const withPct = scoredCards.filter(c =>
+    c.pctChange != null && Number.isFinite(c.pctChange) && c.pctChangeWindowDays === 30,
+  )
+  if (withPct.length === 0) return null
+  const sortedByPct = [...withPct].sort((a, b) => (b.pctChange ?? 0) - (a.pctChange ?? 0))
+  const best  = sortedByPct[0]
+  const worst = sortedByPct[sortedByPct.length - 1]
+  let rising  = 0
+  let falling = 0
+  for (const c of withPct) {
+    if ((c.pctChange ?? 0) > 0) rising++
+    else if ((c.pctChange ?? 0) < 0) falling++
+  }
+  return {
+    best:        { cardName: best.cardName,  setName: best.setName,  pct: best.pctChange!  },
+    worst:       { cardName: worst.cardName, setName: worst.setName, pct: worst.pctChange! },
+    risingCount: rising,
+    fallingCount: falling,
   }
 }
 

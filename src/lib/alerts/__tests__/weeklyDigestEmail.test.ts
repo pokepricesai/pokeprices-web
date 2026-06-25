@@ -663,3 +663,125 @@ describe('buildSampleWeeklyDigestData — carries currency', () => {
     expect(d.diagnostics.portfolioValueSourceCounts).toBeDefined()
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-16H — section structure + ordering guards
+// ─────────────────────────────────────────────────────────────────────
+
+describe('buildWeeklyDigestEmail — Block 5A-W-16H structural ordering', () => {
+  function fullRealDigest() {
+    return baseData({
+      currency: 'GBP',
+      portfolio: {
+        itemCount: 35,
+        currentTotalCents: 100_000,
+        previousTotalCents: null,
+        absChangeCents: null,
+        pctChange: null,
+        scopeLabel: 'My Collection',
+        scopeIsAllPortfolios: false,
+        sinceLastDigest: null,
+        movement30d: {
+          best:        { cardName: 'Meowstic',  setName: 'Generations', pct: 121.4 },
+          worst:       { cardName: 'Aegislash', setName: 'Sun & Moon',  pct: -57.5 },
+          risingCount: 14,
+          fallingCount: 9,
+        },
+        topItems: [
+          {
+            cardSlug: '1', cardName: 'Charizard', setName: 'Base Set',
+            cardUrl: 'https://www.pokeprices.io/set/Base%20Set/card/charizard-base-4',
+            currentCents: 30_000, previousCents: null,
+            pctChange: 19.8, absChangeCents: null,
+            recentSalesCount: 0, reason: 'most_valuable', pctChangeWindowDays: 30,
+          },
+        ],
+      },
+      watchlist: {
+        itemCount: 3,
+        topItems: [{
+          cardSlug: '2', cardName: 'Haunter', setName: 'Fossil',
+          cardUrl: null,
+          currentCents: 5_000, previousCents: 4_000,
+          pctChange: 25, absChangeCents: 1_000,
+          recentSalesCount: 0, reason: 'biggest_riser',
+        }],
+      },
+      alertSummary: {
+        totalEvents: 4,
+        cardBlocks: [{
+          cardSlug: '3', cardName: 'Mewtwo', setName: 'Base Set', cardUrl: null,
+          eventCount: 4, severities: { high: 0, normal: 4, low: 0 },
+          rules: ['raw_change', 'recent_sales'],
+        }],
+      },
+    })
+  }
+
+  it('renders all three section headings in the documented order', () => {
+    const out = buildWeeklyDigestEmail(fullRealDigest())
+    const idxPortfolio = out.html.indexOf('Portfolio overview')
+    const idxWatchlist = out.html.indexOf('Watchlist overview')
+    const idxAlerts    = out.html.indexOf('Alert highlights')
+    expect(idxPortfolio).toBeGreaterThan(0)
+    expect(idxWatchlist).toBeGreaterThan(idxPortfolio)
+    expect(idxAlerts).toBeGreaterThan(idxWatchlist)
+  })
+
+  it('alert card names do NOT appear before the "Alert highlights" heading', () => {
+    const out = buildWeeklyDigestEmail(fullRealDigest())
+    const idxAlerts  = out.html.indexOf('Alert highlights')
+    const idxMewtwo  = out.html.indexOf('Mewtwo')
+    expect(idxAlerts).toBeGreaterThan(0)
+    expect(idxMewtwo).toBeGreaterThan(idxAlerts)
+  })
+
+  it('watchlist card names do NOT appear before the "Watchlist overview" heading', () => {
+    const out = buildWeeklyDigestEmail(fullRealDigest())
+    const idxWatchlist = out.html.indexOf('Watchlist overview')
+    const idxHaunter   = out.html.indexOf('Haunter')
+    expect(idxWatchlist).toBeGreaterThan(0)
+    expect(idxHaunter).toBeGreaterThan(idxWatchlist)
+  })
+
+  it('portfolio top items appear under "Top portfolio items" sub-heading', () => {
+    const out = buildWeeklyDigestEmail(fullRealDigest())
+    const idxSubhead   = out.html.indexOf('Top portfolio items')
+    const idxCharizard = out.html.indexOf('Charizard')
+    expect(idxSubhead).toBeGreaterThan(0)
+    expect(idxCharizard).toBeGreaterThan(idxSubhead)
+  })
+
+  it('portfolio header uses "My Collection" when scopeLabel = My Collection (no "Portfolio" fallback)', () => {
+    const out = buildWeeklyDigestEmail(fullRealDigest())
+    expect(out.html).toMatch(/My Collection · 35 items/)
+    // Must not show the bare "Portfolio · 35 items" fallback when the
+    // named scope label was supplied.
+    expect(out.html).not.toMatch(/>Portfolio · 35 items</)
+  })
+
+  it('renders the 30-day snapshot block under the portfolio headline', () => {
+    const out = buildWeeklyDigestEmail(fullRealDigest())
+    expect(out.html).toMatch(/30-day snapshot/i)
+    expect(out.html).toMatch(/Best 30d:.*Meowstic.*\+121\.4%/)
+    expect(out.html).toMatch(/Worst 30d:.*Aegislash.*-57\.5%/)
+    expect(out.html).toMatch(/Cards rising:.*14/)
+    expect(out.html).toMatch(/Cards falling:.*9/)
+  })
+
+  it('30-day snapshot still renders alongside "First weekly update" note', () => {
+    const data = fullRealDigest()
+    // first-weekly: sinceLastDigest is already null in fullRealDigest
+    const out = buildWeeklyDigestEmail(data)
+    expect(out.html).toMatch(/First weekly update/)
+    expect(out.html).toMatch(/30-day snapshot/i)
+  })
+
+  it('renders the Watchlist overview heading even when topItems is empty (fallback copy)', () => {
+    const out = buildWeeklyDigestEmail(baseData({
+      watchlist: { itemCount: 5, topItems: [] },
+    }))
+    expect(out.html).toMatch(/Watchlist overview/)
+    expect(out.html).toMatch(/No major watchlist changes this week/)
+  })
+})
