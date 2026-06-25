@@ -746,6 +746,185 @@ function AlertEmailPreviewButton() {
   )
 }
 
+// Block 5A-W-15 — admin-only WEEKLY digest preview. Renders the
+// portfolio + watchlist + alert highlights email the user would
+// receive. Auto-mode pulls the admin's own real data and falls back
+// to sample data when the admin has nothing on their account. POSTs
+// to /api/admin/alerts/preview-weekly-digest. Read-only.
+function WeeklyDigestPreviewButton() {
+  const [busy,   setBusy]   = useState(false)
+  const [status, setStatus] = useState<number | null>(null)
+  const [body,   setBody]   = useState<{
+    mode?:        string
+    sample?:      boolean
+    status?:      string
+    subject?:     string
+    previewText?: string
+    html?:        string
+    text?:        string
+    diagnostics?: Record<string, unknown>
+    error?:       string
+  } | null>(null)
+  const [error,  setError]  = useState<string | null>(null)
+
+  async function run(mode: 'auto' | 'real' | 'sample') {
+    setBusy(true); setError(null); setStatus(null); setBody(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        setError('Not signed in. Sign in with an authorised admin account.')
+        return
+      }
+      const res = await fetch('/api/admin/alerts/preview-weekly-digest', {
+        method:  'POST',
+        headers: {
+          authorization:  `Bearer ${session.access_token}`,
+          'content-type': 'application/json',
+        },
+        body:    JSON.stringify({ mode }),
+        cache:   'no-store',
+      })
+      setStatus(res.status)
+      const text = await res.text()
+      try { setBody(JSON.parse(text)) } catch { setError(text || 'Empty response') }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'unknown error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Preview weekly digest</div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+        Renders the weekly portfolio/watchlist overview the user would receive — <strong style={{ color: 'var(--text)' }}>preview only, no email sent, no DB writes</strong>. Auto-mode uses your own real data when present and falls back to sample data when not.
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <button
+          onClick={() => void run('auto')}
+          disabled={busy}
+          style={{
+            padding: '6px 12px', borderRadius: 6,
+            border: '1px solid var(--border)',
+            background: busy ? 'var(--bg-light)' : 'var(--primary)',
+            color: busy ? 'var(--text)' : '#fff',
+            cursor: busy ? 'wait' : 'pointer',
+            fontSize: 12, fontWeight: 700,
+            fontFamily: "'Figtree', sans-serif",
+          }}
+        >{busy ? 'Loading…' : 'Preview weekly digest (auto)'}</button>
+        <button
+          onClick={() => void run('real')}
+          disabled={busy}
+          style={{
+            padding: '6px 12px', borderRadius: 6,
+            border: '1px solid var(--border)',
+            background: 'transparent',
+            color: 'var(--text)',
+            cursor: busy ? 'wait' : 'pointer',
+            fontSize: 12, fontWeight: 700,
+            fontFamily: "'Figtree', sans-serif",
+          }}
+        >Force real</button>
+        <button
+          onClick={() => void run('sample')}
+          disabled={busy}
+          style={{
+            padding: '6px 12px', borderRadius: 6,
+            border: '1px solid var(--border)',
+            background: 'transparent',
+            color: 'var(--text)',
+            cursor: busy ? 'wait' : 'pointer',
+            fontSize: 12, fontWeight: 700,
+            fontFamily: "'Figtree', sans-serif",
+          }}
+        >Force sample</button>
+      </div>
+
+      {(status != null || error) && (
+        <div style={{ marginTop: 12 }}>
+          {error && (
+            <div style={{ fontSize: 12, color: 'var(--red, #c00)', marginBottom: 4 }}>
+              {error}
+            </div>
+          )}
+          {status != null && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
+              HTTP <strong style={{ color: 'var(--text)' }}>{status}</strong>
+              {body?.mode && (
+                <>
+                  {' '}· mode <strong style={{ color: 'var(--text)' }}>{body.mode}</strong>
+                  {' '}· status <strong style={{ color: 'var(--text)' }}>{body.status ?? '—'}</strong>
+                </>
+              )}
+            </div>
+          )}
+          {body?.subject != null && (
+            <div style={{
+              padding: '8px 10px', borderRadius: 6,
+              background: 'var(--bg-light)', border: '1px solid var(--border)',
+              marginBottom: 6,
+            }}>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700 }}>Subject</div>
+              <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 600 }}>{body.subject}</div>
+            </div>
+          )}
+          {body?.previewText != null && (
+            <div style={{
+              padding: '8px 10px', borderRadius: 6,
+              background: 'var(--bg-light)', border: '1px solid var(--border)',
+              marginBottom: 6,
+            }}>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700 }}>Preview text</div>
+              <div style={{ fontSize: 13, color: 'var(--text)' }}>{body.previewText}</div>
+            </div>
+          )}
+          {body?.html != null && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700, marginBottom: 4 }}>Rendered HTML</div>
+              <iframe
+                title="weekly digest preview"
+                srcDoc={body.html}
+                sandbox=""
+                style={{
+                  width: '100%', height: 640,
+                  border: '1px solid var(--border)', borderRadius: 6,
+                  background: '#fff',
+                }}
+              />
+            </div>
+          )}
+          {body?.diagnostics && (
+            <details style={{ marginBottom: 8 }}>
+              <summary style={{ fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>Diagnostics</summary>
+              <pre style={{
+                margin: '6px 0 0', padding: 8, borderRadius: 6,
+                background: 'var(--card)', border: '1px solid var(--border)',
+                fontFamily: 'monospace', fontSize: 11,
+                overflowX: 'auto', whiteSpace: 'pre',
+                maxHeight: 240,
+              }}>{JSON.stringify(body.diagnostics, null, 2)}</pre>
+            </details>
+          )}
+          {body?.text != null && (
+            <details style={{ marginBottom: 8 }}>
+              <summary style={{ fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>Plain text body</summary>
+              <pre style={{
+                margin: '6px 0 0', padding: 8, borderRadius: 6,
+                background: 'var(--card)', border: '1px solid var(--border)',
+                fontFamily: 'monospace', fontSize: 11,
+                overflowX: 'auto', whiteSpace: 'pre',
+                maxHeight: 320,
+              }}>{body.text}</pre>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Admin-only WRITE-mode button for the test-email send. POSTs to
 // /api/admin/alerts/send-test-email. Two-click confirmation reuses
 // the _armedClick state machine for parity with the evaluator's
@@ -1568,6 +1747,8 @@ export default function RecentSalesAdminClient() {
               <AlertTestEmailSendButton />
               <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '14px 0 0' }} />
               <AlertDeliveryBatchControls />
+              <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '14px 0 0' }} />
+              <WeeklyDigestPreviewButton />
               <pre style={{
                 margin: '6px 0 0', padding: 8, borderRadius: 6,
                 background: 'var(--card)', border: '1px solid var(--border)',

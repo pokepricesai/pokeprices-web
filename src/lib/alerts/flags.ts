@@ -60,6 +60,18 @@ export function isAlertDeliveryEnabled(): boolean {
 }
 
 /**
+ * Block 5A-W-15 — gates the admin-only weekly digest preview route
+ * (/api/admin/alerts/preview-weekly-digest). Accepts EITHER this flag
+ * or ALERT_EMAIL_PREVIEW_ENABLED so an operator who already enabled
+ * alert previewing can review the weekly layout without juggling two
+ * flags. The route still enforces requireAdmin and never sends email
+ * or mutates the database regardless of this flag.
+ */
+export function isAlertWeeklyDigestPreviewEnabled(): boolean {
+  return readLiteralTrue('ALERT_WEEKLY_DIGEST_PREVIEW_ENABLED')
+}
+
+/**
  * Block 5A-W-12 — per-user delivery cooldown (hours). If a user had
  * any alert_event marked delivered_at within this window, the next
  * batch SKIPS them with outcome=recent_delivery_cooldown — both in
@@ -83,4 +95,5 @@ export const ALERTS_EVALUATOR_FLAG_NAMES: ReadonlyArray<string> = [
   'ALERT_TEST_EMAIL_ENABLED',
   'ALERT_DELIVERY_ENABLED',
   'ALERT_DELIVERY_USER_COOLDOWN_HOURS',
+  'ALERT_WEEKLY_DIGEST_PREVIEW_ENABLED',
 ]
