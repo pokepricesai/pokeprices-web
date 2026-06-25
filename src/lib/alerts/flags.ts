@@ -103,6 +103,64 @@ export function getAlertDeliveryUserCooldownHours(): number {
   return n
 }
 
+/**
+ * Block 5A-W-17 — gates the admin-only WEEKLY digest BATCH route
+ * (/api/admin/alerts/send-weekly-digest-batch). Strictly its own flag
+ * — the preview / test-send flags do NOT unlock real user batch
+ * delivery. The route additionally enforces requireAdmin, dryRun=true
+ * as the default, and the engine-level user cap.
+ */
+export function isAlertWeeklyDigestBatchEnabled(): boolean {
+  return readLiteralTrue('ALERT_WEEKLY_DIGEST_BATCH_ENABLED')
+}
+
+/**
+ * Block 5A-W-17 — gates the Vercel-Cron-invoked weekly digest route
+ * (/api/cron/weekly-digests). The route is also CRON_SECRET-gated, so
+ * this flag is the SECOND lock specifically for the cron path; the
+ * admin batch route uses ALERT_WEEKLY_DIGEST_BATCH_ENABLED instead.
+ * When off, the cron route returns 503 even with a valid secret —
+ * lets the operator freeze automation without revoking the secret.
+ */
+export function isAlertWeeklyDigestCronEnabled(): boolean {
+  return readLiteralTrue('ALERT_WEEKLY_DIGEST_CRON_ENABLED')
+}
+
+/**
+ * Block 5A-W-17 — per-recipient WEEKLY cooldown (days). Default 7
+ * (one calendar week between baseline-eligible sends). Out-of-range
+ * values fall back to the default rather than silently disabling the
+ * cooldown — same posture as getAlertDeliveryUserCooldownHours.
+ *
+ * Cooldown only counts BASELINE-ELIGIBLE prior sends (Block 5A-W-16I)
+ * — admin test sends and samples are explicitly excluded by the
+ * orchestrator's metadata filter.
+ */
+export const DEFAULT_ALERT_WEEKLY_DIGEST_COOLDOWN_DAYS = 7
+
+export function getAlertWeeklyDigestCooldownDays(): number {
+  const raw = (process.env.ALERT_WEEKLY_DIGEST_COOLDOWN_DAYS ?? '').trim()
+  if (raw.length === 0) return DEFAULT_ALERT_WEEKLY_DIGEST_COOLDOWN_DAYS
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_ALERT_WEEKLY_DIGEST_COOLDOWN_DAYS
+  return n
+}
+
+/**
+ * Block 5A-W-17 — per-invocation cap for the cron route. Caller is
+ * Vercel Cron, so we can't read a body. Default 25, hard cap 100 is
+ * enforced engine-side regardless of this value.
+ */
+export const DEFAULT_ALERT_WEEKLY_DIGEST_CRON_MAX_USERS = 25
+
+export function getAlertWeeklyDigestCronMaxUsers(): number {
+  const raw = (process.env.ALERT_WEEKLY_DIGEST_CRON_MAX_USERS ?? '').trim()
+  if (raw.length === 0) return DEFAULT_ALERT_WEEKLY_DIGEST_CRON_MAX_USERS
+  const n = Math.floor(Number(raw))
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_ALERT_WEEKLY_DIGEST_CRON_MAX_USERS
+  return n
+}
+
 export const ALERTS_EVALUATOR_FLAG_NAMES: ReadonlyArray<string> = [
   'ALERTS_EVALUATOR_ENABLED',
   'ALERT_EMAIL_PREVIEW_ENABLED',
@@ -112,4 +170,8 @@ export const ALERTS_EVALUATOR_FLAG_NAMES: ReadonlyArray<string> = [
   'ALERT_WEEKLY_DIGEST_PREVIEW_ENABLED',
   'ALERT_WEEKLY_DIGEST_TEST_EMAIL_ENABLED',
   'ALERT_WEEKLY_DIGEST_TEST_EMAIL_TO',
+  'ALERT_WEEKLY_DIGEST_BATCH_ENABLED',
+  'ALERT_WEEKLY_DIGEST_CRON_ENABLED',
+  'ALERT_WEEKLY_DIGEST_COOLDOWN_DAYS',
+  'ALERT_WEEKLY_DIGEST_CRON_MAX_USERS',
 ]

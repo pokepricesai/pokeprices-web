@@ -4,6 +4,10 @@
     {
       "path": "/api/internal/process-onboarding-emails",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/weekly-digests",
+      "schedule": "0 9 * * *"
     }
   ]
 }

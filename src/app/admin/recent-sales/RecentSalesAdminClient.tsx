@@ -1098,6 +1098,218 @@ function WeeklyDigestTestSendButton() {
   )
 }
 
+// Block 5A-W-17 — admin batch controls for weekly digest delivery.
+// POSTs to /api/admin/alerts/send-weekly-digest-batch (preview + send).
+// Send mode uses the same two-click confirmation as the alert delivery
+// batch — destructive in the sense of "real users receive real email",
+// even though no DB rows are mutated outside email_delivery_log.
+function WeeklyDigestBatchControls() {
+  const [status, setStatus] = useState<number | null>(null)
+  const [busy,   setBusy]   = useState<'idle' | 'preview' | 'send'>('idle')
+  const [body,   setBody]   = useState<{
+    dryRun?:          boolean
+    source?:          string
+    asOf?:            string
+    asOfDayOfWeek?:   number
+    usersConsidered?: number
+    usersEmailed?:    number
+    usersInCooldown?: number
+    usersWrongDay?:   number
+    usersSkipped?:    number
+    usersFailed?:     number
+    cooldownDays?:    number
+    perUser?: Array<{
+      recipientMasked:    string
+      outcome:            string
+      weeklyDayOfWeek:    number | null
+      portfolioItemCount: number
+      watchlistItemCount: number
+      alertHighlightCount: number
+      reason?:            string | null
+    }>
+    error?:           string
+  } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const [arm, setArm] = useState<ArmedState>(initialArmedState())
+  const disarmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (disarmTimerRef.current) clearTimeout(disarmTimerRef.current)
+  }, [])
+
+  async function run(dryRun: boolean) {
+    setBusy(dryRun ? 'preview' : 'send')
+    setError(null); setStatus(null); setBody(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        setError('Not signed in. Sign in with an authorised admin account.')
+        return
+      }
+      const res = await fetch('/api/admin/alerts/send-weekly-digest-batch', {
+        method:  'POST',
+        headers: {
+          authorization:  `Bearer ${session.access_token}`,
+          'content-type': 'application/json',
+        },
+        body:    JSON.stringify(dryRun ? { dryRun: true } : { dryRun: false }),
+        cache:   'no-store',
+      })
+      setStatus(res.status)
+      const text = await res.text()
+      try { setBody(JSON.parse(text)) } catch { setError(text || 'Empty response') }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'unknown error')
+    } finally {
+      setBusy('idle')
+    }
+  }
+
+  function clickPreview() {
+    if (busy !== 'idle') return
+    void run(true)
+  }
+  function clickSend() {
+    if (busy !== 'idle') return
+    const decision = nextArmedState(arm, Date.now())
+    if (decision.shouldRun) {
+      if (disarmTimerRef.current) {
+        clearTimeout(disarmTimerRef.current)
+        disarmTimerRef.current = null
+      }
+      setArm(initialArmedState())
+      void run(false)
+      return
+    }
+    setArm({ armed: decision.armed, armedAt: decision.armedAt })
+    if (disarmTimerRef.current) clearTimeout(disarmTimerRef.current)
+    disarmTimerRef.current = setTimeout(() => {
+      setArm(initialArmedState())
+      disarmTimerRef.current = null
+    }, DEFAULT_ARM_THRESHOLD_MS)
+  }
+
+  const armed = arm.armed
+  const sendLabel = busy === 'send'
+    ? 'Sending…'
+    : armed
+      ? 'Click again to confirm — auto-cancels in 5s'
+      : 'Send weekly digest batch'
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Deliver weekly digest emails</div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+        Sends real weekly portfolio/watchlist digest emails to eligible users (master switch on, weekly digest on, at least one section on, has content this week, not in cooldown). <strong style={{ color: 'var(--text)' }}>Admin source ignores <code>weekly_digest_day_of_week</code></strong> — the cron path enforces it. Requires <code>ALERT_WEEKLY_DIGEST_BATCH_ENABLED=true</code>. Cooldown defaults to <code>{`${'{'}ALERT_WEEKLY_DIGEST_COOLDOWN_DAYS{'}'}`}</code> (7d). Recipients masked. Successful sends write <code>baselineEligible:true</code> so the next weekly comparison can compute since-last-week.
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <button
+          onClick={clickPreview}
+          disabled={busy !== 'idle'}
+          style={{
+            padding: '6px 12px', borderRadius: 6,
+            border: '1px solid var(--border)',
+            background: busy === 'preview' ? 'var(--bg-light)' : 'var(--primary)',
+            color: busy === 'preview' ? 'var(--text)' : '#fff',
+            cursor: busy !== 'idle' ? 'wait' : 'pointer',
+            fontSize: 12, fontWeight: 700,
+            fontFamily: "'Figtree', sans-serif",
+          }}
+        >{busy === 'preview' ? 'Loading…' : 'Preview weekly digest batch'}</button>
+        <button
+          onClick={clickSend}
+          disabled={busy !== 'idle'}
+          aria-pressed={armed}
+          style={{
+            padding: '6px 12px', borderRadius: 6,
+            border: '1px solid ' + (armed ? 'var(--red, #c00)' : 'var(--border)'),
+            background: armed ? 'var(--red, #c00)' : 'transparent',
+            color:      armed ? '#fff'             : 'var(--red, #c00)',
+            cursor: busy !== 'idle' ? 'wait' : 'pointer',
+            fontSize: 12, fontWeight: 700,
+            fontFamily: "'Figtree', sans-serif",
+          }}
+        >{sendLabel}</button>
+      </div>
+
+      {(status != null || error) && (
+        <div style={{ marginTop: 10 }}>
+          {error && (
+            <div style={{ fontSize: 12, color: 'var(--red, #c00)', marginBottom: 4 }}>
+              {error}
+            </div>
+          )}
+          {status != null && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
+              HTTP <strong style={{ color: 'var(--text)' }}>{status}</strong>
+              {body && typeof body.dryRun === 'boolean' && (
+                <> · mode <strong style={{ color: 'var(--text)' }}>{body.dryRun ? 'preview' : 'send'}</strong></>
+              )}
+              {body && body.source && <> · source <strong style={{ color: 'var(--text)' }}>{body.source}</strong></>}
+              {body && typeof body.asOfDayOfWeek === 'number' && (
+                <> · today is ISO weekday <strong style={{ color: 'var(--text)' }}>{body.asOfDayOfWeek}</strong></>
+              )}
+            </div>
+          )}
+          {body && (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginBottom: 8 }}>
+                <SmallStat label="users considered" value={body.usersConsidered} />
+                <SmallStat label={body.dryRun === false ? 'users emailed' : 'would email'} value={body.usersEmailed} />
+                <SmallStat label={`in cooldown (${typeof body.cooldownDays === 'number' ? body.cooldownDays : '?'}d)`} value={body.usersInCooldown} />
+                <SmallStat label="wrong weekly day" value={body.usersWrongDay} />
+                <SmallStat label="skipped"          value={body.usersSkipped} />
+                <SmallStat label="failed"           value={body.usersFailed} />
+              </div>
+              {Array.isArray(body.perUser) && body.perUser.length > 0 && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700, marginBottom: 4 }}>
+                    Per-recipient breakdown
+                  </div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead><tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
+                      <th style={{ padding: 6 }}>recipient</th>
+                      <th style={{ padding: 6, textAlign: 'right' }}>weekly day</th>
+                      <th style={{ padding: 6, textAlign: 'right' }}>portfolio</th>
+                      <th style={{ padding: 6, textAlign: 'right' }}>watchlist</th>
+                      <th style={{ padding: 6, textAlign: 'right' }}>alerts</th>
+                      <th style={{ padding: 6 }}>outcome</th>
+                      <th style={{ padding: 6 }}>reason</th>
+                    </tr></thead>
+                    <tbody>
+                      {body.perUser.map((u, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ padding: 6, fontFamily: 'monospace', fontSize: 11 }}>{u.recipientMasked}</td>
+                          <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{u.weeklyDayOfWeek ?? '—'}</td>
+                          <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{u.portfolioItemCount}</td>
+                          <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{u.watchlistItemCount}</td>
+                          <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{u.alertHighlightCount}</td>
+                          <td style={{ padding: 6 }}>{u.outcome}</td>
+                          <td style={{ padding: 6, color: 'var(--text-muted)' }}>{u.reason ?? '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <details>
+                <summary style={{ fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>Raw response JSON</summary>
+                <pre style={{
+                  margin: '6px 0 0', padding: 8, borderRadius: 6,
+                  background: 'var(--card)', border: '1px solid var(--border)',
+                  fontFamily: 'monospace', fontSize: 11,
+                  overflowX: 'auto', whiteSpace: 'pre',
+                  maxHeight: 320,
+                }}>{JSON.stringify(body, null, 2)}</pre>
+              </details>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Admin-only WRITE-mode button for the test-email send. POSTs to
 // /api/admin/alerts/send-test-email. Two-click confirmation reuses
 // the _armedClick state machine for parity with the evaluator's
@@ -1923,6 +2135,8 @@ export default function RecentSalesAdminClient() {
               <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '14px 0 0' }} />
               <WeeklyDigestPreviewButton />
               <WeeklyDigestTestSendButton />
+              <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '14px 0 0' }} />
+              <WeeklyDigestBatchControls />
               <pre style={{
                 margin: '6px 0 0', padding: 8, borderRadius: 6,
                 background: 'var(--card)', border: '1px solid var(--border)',
