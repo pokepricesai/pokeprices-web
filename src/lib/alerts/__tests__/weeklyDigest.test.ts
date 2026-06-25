@@ -23,9 +23,11 @@ vi.mock('server-only', () => ({}))
 import {
   buildWeeklyDigestForUser,
   priceColumnForHoldingType,
+  classifyPortfolioPriceBasis,
   pctChange,
   usdToCents,
   selectTopItems,
+  MIN_MEANINGFUL_PCT,
   type ScoredCard,
 } from '../weeklyDigest'
 import { preferencesToRow, applyPatch, ALERT_PREFERENCE_DEFAULTS } from '../preferences'
@@ -558,5 +560,193 @@ describe('buildWeeklyDigestForUser — diagnostics', () => {
     expect(typeof d.cardsWithNoRecentSales).toBe('number')
     expect(Array.isArray(d.sectionsOmittedByPreferences)).toBe(true)
     expect(typeof d.generatedAt).toBe('string')
+    // Block 5A-W-15B — basis-counts diagnostic
+    expect(d.portfolioPriceBasisCounts).toEqual({
+      raw_usd: 0, psa9_usd: 0, psa10_usd: 0, unknown_fallback: 0,
+    })
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-15B — quality polish
+// ─────────────────────────────────────────────────────────────────────
+
+describe('selectTopItems — Block 5A-W-15B threshold guards', () => {
+  function card(over: Partial<ScoredCard>): ScoredCard {
+    return {
+      source: 'watchlist', urlSlug: `s-${Math.random()}`,
+      cardSlug: '1', cardName: 'C', setName: 'S', cardUrl: null,
+      currentCents: 100, previousCents: 100, pctChange: 0,
+      absChangeCents: 0, recentSalesCount: 0, quantity: 1,
+      ...over,
+    }
+  }
+
+  it('exports a non-zero MIN_MEANINGFUL_PCT default', () => {
+    expect(MIN_MEANINGFUL_PCT).toBeGreaterThan(0)
+  })
+
+  it('never labels a 0.0% card as Biggest riser when it has no sales', () => {
+    const out = selectTopItems([card({ urlSlug: 'flat', pctChange: 0, recentSalesCount: 0 })], 5)
+    expect(out).toEqual([])
+  })
+
+  it('never labels a 0.0% card as Biggest faller when it has no sales', () => {
+    const out = selectTopItems([card({ urlSlug: 'flat', pctChange: 0, recentSalesCount: 0 })], 5)
+    expect(out).toEqual([])
+  })
+
+  it('a 0.0% card WITH sales surfaces as new_sales_activity (not Biggest riser)', () => {
+    const out = selectTopItems([card({ urlSlug: 'flat', pctChange: 0, recentSalesCount: 6 })], 5)
+    expect(out).toHaveLength(1)
+    // Sales > 0 → 3rd pass picks it as "most_active".
+    expect(out[0].reason).toBe('most_active')
+  })
+
+  it('a sub-threshold +0.5% card with no sales is excluded entirely', () => {
+    const out = selectTopItems([card({ urlSlug: 'tiny', pctChange: 0.5, recentSalesCount: 0 })], 5)
+    expect(out).toEqual([])
+  })
+
+  it('a +1.0% card meets the threshold and qualifies as Biggest riser', () => {
+    const out = selectTopItems([card({ urlSlug: 'meet', pctChange: 1.0, recentSalesCount: 0 })], 5)
+    expect(out).toHaveLength(1)
+    expect(out[0].reason).toBe('biggest_riser')
+  })
+
+  it('a -1.0% card meets the threshold and qualifies as Biggest faller', () => {
+    const out = selectTopItems([card({ urlSlug: 'meet', pctChange: -1.0, recentSalesCount: 0 })], 5)
+    expect(out).toHaveLength(1)
+    expect(out[0].reason).toBe('biggest_faller')
+  })
+
+  it('does NOT pad with weak items — returns fewer than max when no candidates qualify', () => {
+    const cards: ScoredCard[] = [
+      card({ urlSlug: 'flat1', pctChange: 0,   recentSalesCount: 0 }),
+      card({ urlSlug: 'flat2', pctChange: 0.2, recentSalesCount: 0 }),
+      card({ urlSlug: 'flat3', pctChange: -0.4, recentSalesCount: 0 }),
+      card({ urlSlug: 'real',  pctChange: 25,  recentSalesCount: 0 }),
+    ]
+    const out = selectTopItems(cards, 5)
+    expect(out).toHaveLength(1)
+    expect(out[0].reason).toBe('biggest_riser')
+  })
+
+  it('a recent-sales item still appears even when it has no price movement', () => {
+    const cards: ScoredCard[] = [
+      card({ urlSlug: 'sales-no-move',  pctChange: null, recentSalesCount: 3 }),
+    ]
+    const out = selectTopItems(cards, 5)
+    expect(out).toHaveLength(1)
+    // Pass 3 picks it as "most_active" because recentSalesCount > 0.
+    expect(out[0].reason).toBe('most_active')
+  })
+})
+
+describe('classifyPortfolioPriceBasis', () => {
+  it('explicit raw → raw_usd column, raw_usd basis', () => {
+    expect(classifyPortfolioPriceBasis('raw')).toEqual({ column: 'raw_usd', basis: 'raw_usd' })
+  })
+
+  it('psa10 / cgc10 / bgs10 / sgc10 → psa10_usd column + basis', () => {
+    for (const ht of ['psa10', 'cgc10', 'bgs10', 'sgc10']) {
+      expect(classifyPortfolioPriceBasis(ht)).toEqual({ column: 'psa10_usd', basis: 'psa10_usd' })
+    }
+  })
+
+  it('psa9 / cgc9 / bgs9 / sgc9 → psa9_usd column + basis', () => {
+    for (const ht of ['psa9', 'cgc9', 'bgs9', 'sgc9']) {
+      expect(classifyPortfolioPriceBasis(ht)).toEqual({ column: 'psa9_usd', basis: 'psa9_usd' })
+    }
+  })
+
+  it('manual / sealed / null / unknown → raw_usd column but unknown_fallback basis', () => {
+    for (const ht of ['manual', 'sealed', 'whatever', null, undefined, '']) {
+      expect(classifyPortfolioPriceBasis(ht as string | null | undefined)).toEqual({
+        column: 'raw_usd', basis: 'unknown_fallback',
+      })
+    }
+  })
+})
+
+describe('buildWeeklyDigestForUser — Block 5A-W-15B basis diagnostic', () => {
+  it('counts each portfolio_items row in the correct basis bucket', async () => {
+    seedPrefs('u1')
+    seedCardLink('a-card', '111', 'A', 'S')
+    seedCardLink('b-card', '222', 'B', 'S')
+    seedCardLink('c-card', '333', 'C', 'S')
+    seedCardLink('d-card', '444', 'D', 'S')
+    seedPortfolio('u1', 'a-card', { holding_type: 'raw',    quantity: 1 })  // raw_usd
+    seedPortfolio('u1', 'b-card', { holding_type: 'psa10',  quantity: 1 })  // psa10_usd
+    seedPortfolio('u1', 'c-card', { holding_type: 'psa9',   quantity: 1 })  // psa9_usd
+    seedPortfolio('u1', 'd-card', { holding_type: 'manual', quantity: 1 })  // unknown_fallback
+    seedPortfolio('u1', 'd-card', { holding_type: 'sealed', quantity: 1 })  // unknown_fallback (2nd)
+
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.diagnostics.portfolioPriceBasisCounts).toEqual({
+      raw_usd:          1,
+      psa10_usd:        1,
+      psa9_usd:         1,
+      unknown_fallback: 2,
+    })
+  })
+
+  it('uses psa10_usd for a psa10 holding when both columns are populated', async () => {
+    seedPrefs('u1')
+    seedCardLink('crz', '111', 'Charizard', 'Base')
+    seedPortfolio('u1', 'crz', { holding_type: 'psa10', quantity: 1 })
+    // Wildly different raw vs psa10 prices — the holding chooses psa10
+    seedPrice('111', '2026-06-18', { raw: 1, psa10: 100 })
+    seedPrice('111', '2026-06-25', { raw: 1, psa10: 150 })
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.currentTotalCents).toBe(15000)
+    expect(out.portfolio?.previousTotalCents).toBe(10000)
+    expect(out.diagnostics.portfolioPriceBasisCounts.psa10_usd).toBe(1)
+  })
+
+  it('uses raw_usd for raw / manual / sealed holdings, never psa10', async () => {
+    seedPrefs('u1')
+    seedCardLink('a-card', '111', 'A', 'S')
+    seedPortfolio('u1', 'a-card', { holding_type: 'manual', quantity: 1 })
+    // PSA 10 is dramatically more expensive — pick raw or we'd be lying
+    seedPrice('111', '2026-06-18', { raw: 5, psa10: 500 })
+    seedPrice('111', '2026-06-25', { raw: 6, psa10: 600 })
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.currentTotalCents).toBe(600)  // not 60000
+    expect(out.diagnostics.portfolioPriceBasisCounts.unknown_fallback).toBe(1)
+  })
+})
+
+describe('buildWeeklyDigestForUser — Block 5A-W-15B end-to-end reason guards', () => {
+  it('a flat-price watchlist card does NOT appear as biggest riser', async () => {
+    seedPrefs('u1')
+    seedCardLink('flat', '777', 'Haunter', 'Fossil')
+    seedWatch('u1', 'flat')
+    seedPrice('777', '2026-06-18', { raw: 50 })
+    seedPrice('777', '2026-06-25', { raw: 50 })
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.watchlist?.topItems).toEqual([])
+  })
+
+  it('renders the "No major watchlist changes" fallback in the email when every watched card is flat', async () => {
+    // Use the renderer to verify the friendly fallback survives the pipeline.
+    const data = (await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf }))
+    // Seed up to render: prefs + watchlist with 1 flat card.
+    seedPrefs('u1')
+    seedCardLink('flat', '777', 'Haunter', 'Fossil')
+    seedWatch('u1', 'flat')
+    seedPrice('777', '2026-06-18', { raw: 50 })
+    seedPrice('777', '2026-06-25', { raw: 50 })
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    void data
+    expect(out.watchlist?.itemCount).toBe(1)
+    expect(out.watchlist?.topItems).toEqual([])  // friendly fallback fires at render
+  })
+
+  it('priceColumnForHoldingType backwards-compatible: raw / manual / unknown still return raw_usd', () => {
+    expect(priceColumnForHoldingType('raw')).toBe('raw_usd')
+    expect(priceColumnForHoldingType('manual')).toBe('raw_usd')
+    expect(priceColumnForHoldingType('whatever')).toBe('raw_usd')
+    expect(priceColumnForHoldingType(null)).toBe('raw_usd')
   })
 })

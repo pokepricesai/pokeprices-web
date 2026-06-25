@@ -189,6 +189,7 @@ export function buildSampleWeeklyDigestData(): WeeklyDigestData {
       cardsWithNoSlugResolution:   0,
       cardsWithNoPriceData:        2,
       cardsWithNoRecentSales:      12,
+      portfolioPriceBasisCounts:   { raw_usd: 10, psa10_usd: 3, psa9_usd: 1, unknown_fallback: 0 },
       sectionsOmittedByPreferences: [],
       generatedAt:                 '2026-06-25T12:00:00Z',
     },
@@ -294,7 +295,7 @@ function renderPortfolioSectionHtml(data: WeeklyDigestData): string {
 
   const summary = `
     <table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 12px;"><tr><td>
-      <div style="font-family:'Figtree',sans-serif;font-size:11px;color:${BRAND.muted};text-transform:uppercase;letter-spacing:0.7px;font-weight:700;">Estimated value · ${p.itemCount} ${pluralize(p.itemCount, 'item', 'items')}</div>
+      <div style="font-family:'Figtree',sans-serif;font-size:11px;color:${BRAND.muted};text-transform:uppercase;letter-spacing:0.7px;font-weight:700;">Estimated value across all portfolios · ${p.itemCount} ${pluralize(p.itemCount, 'item', 'items')}</div>
       ${totalLine}
       ${changeLine}
     </td></tr></table>`
@@ -459,7 +460,7 @@ function renderText(data: WeeklyDigestData, sample: boolean): string {
       if (data.portfolio.itemCount === 0) {
         lines.push('No portfolio items yet.')
       } else {
-        lines.push(`Estimated value: ${fmtCents(data.portfolio.currentTotalCents)}  (was ${fmtCents(data.portfolio.previousTotalCents)})`)
+        lines.push(`Estimated value across all portfolios: ${fmtCents(data.portfolio.currentTotalCents)}  (was ${fmtCents(data.portfolio.previousTotalCents)})`)
         lines.push(`Change: ${fmtCents(data.portfolio.absChangeCents)}  (${fmtPct(data.portfolio.pctChange)})`)
         lines.push(`Items: ${data.portfolio.itemCount}`)
         if (data.portfolio.topItems.length === 0) {

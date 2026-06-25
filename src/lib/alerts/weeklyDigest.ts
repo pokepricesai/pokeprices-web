@@ -42,6 +42,14 @@ const DEFAULT_MAX_ALERT_ITEMS     = 5
 // baseline row when scraping skipped the exact pre-lookback date.
 const PRICE_FETCH_DAYS            = 14
 
+// Block 5A-W-15B — minimum signed pct change for a card to be reported
+// as a "Biggest riser" or "Biggest faller". Tiny moves (<1%) get
+// rounded down to 0.0% in the email and produced misleading "Biggest
+// riser · +0.0%" rows in the first real preview. Cards below this
+// threshold can still surface IF they have meaningful recent sales —
+// but they never claim a directional reason they don't deserve.
+export const MIN_MEANINGFUL_PCT   = 1
+
 // ─────────────────────────────────────────────────────────────────────
 // Public types
 // ─────────────────────────────────────────────────────────────────────
@@ -101,12 +109,28 @@ export type WeeklyDigestAlertSummary = {
   cardBlocks:  WeeklyDigestAlertCardBlock[]
 }
 
+/** Block 5A-W-15B — how many portfolio_items rows resolved to each
+ *  daily_prices column. `unknown_fallback` counts rows whose
+ *  holding_type was missing / unrecognised — these all default to
+ *  `raw_usd` (documented in priceColumnForHoldingType). Surfaced so an
+ *  admin can spot a population that's silently relying on the fallback. */
+export type PortfolioPriceBasisCounts = {
+  raw_usd:          number
+  psa9_usd:         number
+  psa10_usd:        number
+  unknown_fallback: number
+}
+
 export type WeeklyDigestDiagnostics = {
   portfolioCardsConsidered:     number
   watchlistCardsConsidered:     number
   cardsWithNoSlugResolution:    number
   cardsWithNoPriceData:         number
   cardsWithNoRecentSales:       number
+  /** Per Block 5A-W-15B — count of which price column was used for
+   *  each portfolio_items row. Empty zeroed object when the portfolio
+   *  section was omitted by preferences or scope. */
+  portfolioPriceBasisCounts:    PortfolioPriceBasisCounts
   sectionsOmittedByPreferences: Array<'portfolio' | 'watchlist'>
   generatedAt:                  string
 }
@@ -138,10 +162,25 @@ export type BuildWeeklyDigestOptions = {
  *  because raw is the most universally populated field on scraped
  *  cards. */
 export function priceColumnForHoldingType(holdingType: string | null | undefined): 'raw_usd' | 'psa9_usd' | 'psa10_usd' {
-  const ht = (holdingType ?? '').toLowerCase()
-  if (ht === 'psa10' || ht === 'cgc10' || ht === 'bgs10' || ht === 'sgc10') return 'psa10_usd'
-  if (ht === 'psa9'  || ht === 'cgc9'  || ht === 'bgs9'  || ht === 'sgc9' ) return 'psa9_usd'
-  return 'raw_usd'   // raw, manual, sealed, unknown — all fall through here
+  return classifyPortfolioPriceBasis(holdingType).column
+}
+
+/** Block 5A-W-15B — like `priceColumnForHoldingType` but also reports
+ *  WHY the column was chosen so we can populate the diagnostic
+ *  bucket. Three explicit grade families resolve to dedicated
+ *  columns; everything else (raw, manual, sealed, missing) collapses
+ *  to `raw_usd` AND is tagged `unknown_fallback` so the admin can
+ *  spot a population that's silently relying on the fallback. */
+export function classifyPortfolioPriceBasis(
+  holdingType: string | null | undefined,
+): { column: 'raw_usd' | 'psa9_usd' | 'psa10_usd'; basis: keyof PortfolioPriceBasisCounts } {
+  const ht = (holdingType ?? '').toLowerCase().trim()
+  if (ht === 'psa10' || ht === 'cgc10' || ht === 'bgs10' || ht === 'sgc10') return { column: 'psa10_usd', basis: 'psa10_usd' }
+  if (ht === 'psa9'  || ht === 'cgc9'  || ht === 'bgs9'  || ht === 'sgc9' ) return { column: 'psa9_usd',  basis: 'psa9_usd'  }
+  if (ht === 'raw') return { column: 'raw_usd', basis: 'raw_usd' }
+  // raw / sealed / manual / missing — same column, but DIFFERENT basis
+  // so we can tell explicit-raw from fallback in diagnostics.
+  return { column: 'raw_usd', basis: 'unknown_fallback' }
 }
 
 /** Convert a USD price (whatever scale daily_prices uses) to cents.
@@ -193,15 +232,20 @@ export type ScoredCard = {
   quantity:         number      // 1 for watchlist; portfolio items use real quantity
 }
 
-/** Pick the top N items for a section, applying the documented
- *  ranking rule:
- *    1. biggest riser (pctChange > 0, by max pct)
- *    2. biggest faller (pctChange < 0, by min pct)
- *    3. most active (recentSalesCount > 0, by max count)
- *    4. fill remaining slots with the largest |pctChange| not yet
- *       picked; ties broken by recentSalesCount desc.
- *  Each survivor is tagged with the reason it was picked, so the
- *  renderer can show "Biggest riser" etc. next to the card.
+/** Pick the top N items for a section. Updated in Block 5A-W-15B to
+ *  stop labelling weak/no-change items as "Biggest riser/faller".
+ *
+ *  Ranking:
+ *    1. Biggest riser  — pctChange ≥ +MIN_MEANINGFUL_PCT, by max pct
+ *    2. Biggest faller — pctChange ≤ -MIN_MEANINGFUL_PCT, by min pct
+ *    3. Most active    — recentSalesCount > 0, by max count, |pct|
+ *    4. Fill remaining slots with meaningful movers by |pct|, tagged
+ *       directionally (riser/faller) — only when the card is BOTH a
+ *       meaningful mover AND not yet picked. No padding with weak
+ *       items: cards below the threshold that also have no sales are
+ *       EXCLUDED, even if that means the section shows fewer than max.
+ *    5. Final pass: sales-only / sales-with-tiny-move cards get the
+ *       'new_sales_activity' label.
  *
  *  Pure — exported for tests. */
 export function selectTopItems(cards: ScoredCard[], max: number): WeeklyDigestItem[] {
@@ -214,54 +258,65 @@ export function selectTopItems(cards: ScoredCard[], max: number): WeeklyDigestIt
     picks.push({ card, reason })
   }
 
+  const isPositiveMover = (c: ScoredCard) => c.pctChange != null && c.pctChange >=  MIN_MEANINGFUL_PCT
+  const isNegativeMover = (c: ScoredCard) => c.pctChange != null && c.pctChange <= -MIN_MEANINGFUL_PCT
+  const isMeaningfulMover = (c: ScoredCard) => isPositiveMover(c) || isNegativeMover(c)
+  const hasSales        = (c: ScoredCard) => c.recentSalesCount > 0
+
   // 1. Biggest riser
-  const risers = cards.filter(c => c.pctChange != null && c.pctChange > 0)
+  const risers = cards.filter(isPositiveMover)
     .sort((a, b) => (b.pctChange ?? 0) - (a.pctChange ?? 0))
   take(risers[0], 'biggest_riser')
 
   // 2. Biggest faller
-  const fallers = cards.filter(c => c.pctChange != null && c.pctChange < 0)
+  const fallers = cards.filter(isNegativeMover)
     .sort((a, b) => (a.pctChange ?? 0) - (b.pctChange ?? 0))
   take(fallers[0], 'biggest_faller')
 
   // 3. Most active
-  const active = cards.filter(c => c.recentSalesCount > 0)
+  const active = cards.filter(hasSales)
     .sort((a, b) =>
       (b.recentSalesCount - a.recentSalesCount) ||
       Math.abs(b.pctChange ?? 0) - Math.abs(a.pctChange ?? 0)
     )
   take(active[0], 'most_active')
 
-  // 4. Fill — start with |pct| then activity
+  // 4. Fill — meaningful movers by |pct|. Each survivor keeps its
+  //    DIRECTIONAL label; no card with |pct| < MIN_MEANINGFUL_PCT
+  //    ever lands here, so "Biggest riser · +0.0%" cannot happen.
   if (picks.length < max) {
     const byMagnitude = cards
-      .filter(c => c.pctChange != null)
+      .filter(isMeaningfulMover)
       .sort((a, b) =>
         Math.abs(b.pctChange ?? 0) - Math.abs(a.pctChange ?? 0) ||
         (b.recentSalesCount - a.recentSalesCount)
       )
     for (const c of byMagnitude) {
       if (picks.length >= max) break
-      // Reuse "most_active" reason when this card has sales; otherwise
-      // fall back to a directional label so the email row label is
-      // never empty.
       const reason: WeeklyDigestItemReason =
-        c.recentSalesCount > 0 ? 'most_active'
-        : (c.pctChange ?? 0) >= 0 ? 'biggest_riser' : 'biggest_faller'
+        hasSales(c)              ? 'most_active'
+        : (c.pctChange ?? 0) > 0 ? 'biggest_riser'
+        :                          'biggest_faller'
       take(c, reason)
     }
   }
 
-  // 5. Still under-filled? Try cards with sales but no pct data.
+  // 5. Final pass — sales-only cards (no pct OR sub-threshold pct).
+  //    These cards have NO meaningful directional move, so they get
+  //    the activity label. Sorted by sales count desc.
   if (picks.length < max) {
     const salesOnly = cards
-      .filter(c => c.pctChange == null && c.recentSalesCount > 0)
+      .filter(c => hasSales(c) && !isMeaningfulMover(c))
       .sort((a, b) => b.recentSalesCount - a.recentSalesCount)
     for (const c of salesOnly) {
       if (picks.length >= max) break
       take(c, 'new_sales_activity')
     }
   }
+
+  // NOTE: deliberately no "directional fallback" pass any more.
+  // A 0.0% card with no sales is NOT a key change of the week and
+  // we'd rather show 4 items than 5 with a misleading row.
 
   return picks.map(({ card, reason }) => ({
     cardSlug:         card.cardSlug,
@@ -363,6 +418,9 @@ export async function buildWeeklyDigestForUser(
   // 6. Score portfolio cards. portfolio_items.holding_type drives the
   //    price-column choice; quantity scales the position value.
   let portfolioSection: WeeklyDigestPortfolioSection | undefined
+  const portfolioPriceBasisCounts: PortfolioPriceBasisCounts = {
+    raw_usd: 0, psa9_usd: 0, psa10_usd: 0, unknown_fallback: 0,
+  }
   if (wantPortfolio) {
     const scored: ScoredCard[] = []
     let currentTotal:  number | null = null
@@ -379,10 +437,11 @@ export async function buildWeeklyDigestForUser(
           ? `https://www.pokeprices.io/set/${encodeURIComponent(card.setName)}/card/${card.cardUrlSlug}`
           : null,
       }
-      const column = priceColumnForHoldingType(row.holding_type)
+      const basis  = classifyPortfolioPriceBasis(row.holding_type)
+      portfolioPriceBasisCounts[basis.basis] += 1
       const pair   = bare ? findPricePair(priceIndex.get(bare) ?? [], asOf, lookbackDays) : null
-      const curCts = pair ? usdToCents(pair.latest[column]   ?? null) : null
-      const prvCts = pair ? usdToCents(pair.baseline[column] ?? null) : null
+      const curCts = pair ? usdToCents(pair.latest[basis.column]   ?? null) : null
+      const prvCts = pair ? usdToCents(pair.baseline[basis.column] ?? null) : null
       const qty    = Math.max(1, Math.floor(row.quantity ?? 1))
       const posCurrent  = curCts != null ? curCts * qty : null
       const posPrevious = prvCts != null ? prvCts * qty : null
@@ -476,6 +535,7 @@ export async function buildWeeklyDigestForUser(
       cardsWithNoSlugResolution,
       cardsWithNoPriceData,
       cardsWithNoRecentSales,
+      portfolioPriceBasisCounts,
       sectionsOmittedByPreferences,
       generatedAt,
     },
@@ -767,6 +827,7 @@ function emptyDiagnostics(generatedAt: string): WeeklyDigestDiagnostics {
     cardsWithNoSlugResolution:   0,
     cardsWithNoPriceData:        0,
     cardsWithNoRecentSales:      0,
+    portfolioPriceBasisCounts:   { raw_usd: 0, psa9_usd: 0, psa10_usd: 0, unknown_fallback: 0 },
     sectionsOmittedByPreferences: [],
     generatedAt,
   }

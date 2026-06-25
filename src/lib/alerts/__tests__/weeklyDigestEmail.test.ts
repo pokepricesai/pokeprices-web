@@ -27,6 +27,7 @@ function emptyDiagnostics(generatedAt = '2026-06-25T12:00:00Z'): WeeklyDigestDia
     cardsWithNoSlugResolution:   0,
     cardsWithNoPriceData:        0,
     cardsWithNoRecentSales:      0,
+    portfolioPriceBasisCounts:   { raw_usd: 0, psa9_usd: 0, psa10_usd: 0, unknown_fallback: 0 },
     sectionsOmittedByPreferences: [],
     generatedAt,
   }
@@ -118,6 +119,20 @@ describe('buildWeeklyDigestEmail — portfolio section', () => {
     // Text body mirrors it
     expect(out.text).toMatch(/PORTFOLIO OVERVIEW/)
     expect(out.text).toMatch(/Charizard/)
+  })
+
+  it('summary line makes the all-portfolios scope explicit (Block 5A-W-15B)', () => {
+    const out = buildWeeklyDigestEmail(baseData({
+      portfolio: {
+        itemCount: 35, currentTotalCents: 8749300, previousTotalCents: 9120000,
+        absChangeCents: -370700, pctChange: -4.0,
+        topItems: [],
+      },
+    }))
+    expect(out.html).toMatch(/Estimated value across all portfolios · 35 items/i)
+    expect(out.text).toMatch(/Estimated value across all portfolios/i)
+    // The old, ambiguous copy MUST be gone.
+    expect(out.html).not.toMatch(/>Estimated value · 35 items</)
   })
 
   it('omits the portfolio section entirely when not provided', () => {
