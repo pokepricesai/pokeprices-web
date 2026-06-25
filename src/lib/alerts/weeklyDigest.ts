@@ -131,14 +131,39 @@ export type WeeklyDigestDiagnostics = {
    *  each portfolio_items row. Empty zeroed object when the portfolio
    *  section was omitted by preferences or scope. */
   portfolioPriceBasisCounts:    PortfolioPriceBasisCounts
+  /** Block 5A-W-16B — the currency the digest renderer will use.
+   *  Mirrors `WeeklyDigestData.currency` and is echoed here so a
+   *  diagnostics-only consumer (admin preview's JSON pane) sees the
+   *  same value the email body will display. */
+  displayCurrency:              DigestDisplayCurrency
+  /** Block 5A-W-16B — money source for the portfolio total. 'card_trends_rpc'
+   *  is what the dashboard uses (richer + handles non-raw tiers via
+   *  enrichment); 'daily_prices_pivot' is what THIS digest builder
+   *  uses today. The two CAN diverge — see the block 5A-W-16B report.
+   *  Surfaced so an admin can spot when the digest disagrees with the
+   *  dashboard without reading any code. */
+  portfolioValueSource:         'daily_prices_pivot'
   sectionsOmittedByPreferences: Array<'portfolio' | 'watchlist'>
   generatedAt:                  string
 }
+
+/** Block 5A-W-16B — user's preferred display currency. Mirrors
+ *  user_email_preferences.display_currency (the column the portfolio
+ *  dashboard reads at PortfolioDashboard.tsx). Default 'GBP' to match
+ *  the dashboard's initial useState. */
+export type DigestDisplayCurrency = 'GBP' | 'USD'
 
 export type WeeklyDigestData = {
   status:       WeeklyDigestStatus
   asOf:         string
   lookbackDays: number
+  /** Block 5A-W-16B — currency used to render ALL monetary fields in
+   *  this digest. The data layer keeps values as USD-cents (matching
+   *  what daily_prices.*_usd actually stores — those columns are
+   *  CENTS despite the suffix); the renderer divides by 100 (USD) or
+   *  ~127 (GBP at 1 USD ≈ 0.79 GBP) — same approximation the dashboard
+   *  uses today at PortfolioDashboard.tsx:fmtBig. */
+  currency:     DigestDisplayCurrency
   portfolio?:   WeeklyDigestPortfolioSection
   watchlist?:   WeeklyDigestWatchlistSection
   alertSummary: WeeklyDigestAlertSummary
@@ -183,12 +208,24 @@ export function classifyPortfolioPriceBasis(
   return { column: 'raw_usd', basis: 'unknown_fallback' }
 }
 
-/** Convert a USD price (whatever scale daily_prices uses) to cents.
- *  daily_prices columns are stored as numeric DOLLARS, so multiplying
- *  by 100 yields cents. */
+/** LEGACY (pre-5A-W-16B) helper retained only because its tests pin
+ *  the conversion semantics. NEVER call this on a daily_prices column
+ *  value — those columns are already minor units (USD-cents), so
+ *  multiplying by 100 is the bug 5A-W-16B fixed. Kept exported so any
+ *  external consumer relying on dollar→cent conversion stays working. */
 export function usdToCents(usd: number | null | undefined): number | null {
   if (usd == null || !Number.isFinite(usd)) return null
   return Math.round(Number(usd) * 100)
+}
+
+/** Block 5A-W-16B — pull a USD-cents value from a daily_prices row
+ *  column. The columns named `*_usd` actually store CENTS (see
+ *  PortfolioDashboard.tsx fmtBig + every other reader in the
+ *  codebase). This helper just normalises the value and returns it
+ *  as-is so the rest of the digest math operates on cents. */
+export function dailyPriceCentsFromColumn(value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value)) return null
+  return Math.round(Number(value))
 }
 
 /** Compute signed percent change from prev to current. Returns null
@@ -350,15 +387,18 @@ export async function buildWeeklyDigestForUser(
 
   const emptyAlerts: WeeklyDigestAlertSummary = { totalEvents: 0, cardBlocks: [] }
 
-  // 1. Load + decode preferences. Disabled = early-out, no DB reads.
-  const prefs = await loadPrefs(supa, userId)
+  // 1. Load + decode preferences. Disabled = early-out, no DB reads
+  //    beyond the prefs + display currency lookup.
+  const prefs    = await loadPrefs(supa, userId)
+  const currency = await loadDisplayCurrency(supa, userId)
   if (!prefs.enabled) {
     return {
       status:       'disabled_master',
       asOf:         generatedAt,
       lookbackDays,
+      currency,
       alertSummary: emptyAlerts,
-      diagnostics:  emptyDiagnostics(generatedAt),
+      diagnostics:  emptyDiagnostics(generatedAt, currency),
     }
   }
   if (!prefs.weeklyDigestEnabled) {
@@ -366,8 +406,9 @@ export async function buildWeeklyDigestForUser(
       status:       'disabled_weekly',
       asOf:         generatedAt,
       lookbackDays,
+      currency,
       alertSummary: emptyAlerts,
-      diagnostics:  emptyDiagnostics(generatedAt),
+      diagnostics:  emptyDiagnostics(generatedAt, currency),
     }
   }
 
@@ -429,19 +470,29 @@ export async function buildWeeklyDigestForUser(
     for (const row of portfolioRaw) {
       const card = urlToCard.get(row.card_slug)
       const bare = card?.cardSlug ?? null
+      // Block 5A-W-16B — prefer portfolio_items.card_name / set_name
+      // when present. cards.card_url_slug can resolve to MULTIPLE rows
+      // (see the dashboard's urlToNumerics Map<url, string[]>) and we
+      // were sometimes picking the wrong set (the Charizard #4 — Crystal
+      // Guardians vs Base Set mismatch). The user's portfolio row is
+      // the source of truth for what to call the card; cards is just
+      // a fallback for the cardUrl + bare-numeric resolution.
       const display = {
         cardSlug: bare,
-        cardName: card?.cardName ?? null,
-        setName:  card?.setName  ?? null,
-        cardUrl:  card?.cardName && card?.setName
+        cardName: row.card_name ?? card?.cardName ?? null,
+        setName:  row.set_name  ?? card?.setName  ?? null,
+        cardUrl:  card?.setName && card?.cardUrlSlug
           ? `https://www.pokeprices.io/set/${encodeURIComponent(card.setName)}/card/${card.cardUrlSlug}`
           : null,
       }
       const basis  = classifyPortfolioPriceBasis(row.holding_type)
       portfolioPriceBasisCounts[basis.basis] += 1
       const pair   = bare ? findPricePair(priceIndex.get(bare) ?? [], asOf, lookbackDays) : null
-      const curCts = pair ? usdToCents(pair.latest[basis.column]   ?? null) : null
-      const prvCts = pair ? usdToCents(pair.baseline[basis.column] ?? null) : null
+      // Block 5A-W-16B — daily_prices.*_usd columns are already USD
+      // CENTS. Pre-fix bug: we'd multiply by 100 here and report 100×
+      // the real value. Pass the column value through as-is.
+      const curCts = pair ? dailyPriceCentsFromColumn(pair.latest[basis.column]   ?? null) : null
+      const prvCts = pair ? dailyPriceCentsFromColumn(pair.baseline[basis.column] ?? null) : null
       const qty    = Math.max(1, Math.floor(row.quantity ?? 1))
       const posCurrent  = curCts != null ? curCts * qty : null
       const posPrevious = prvCts != null ? prvCts * qty : null
@@ -491,8 +542,9 @@ export async function buildWeeklyDigestForUser(
           : null,
       }
       const pair   = bare ? findPricePair(priceIndex.get(bare) ?? [], asOf, lookbackDays) : null
-      const curCts = pair ? usdToCents(pair.latest.raw_usd   ?? null) : null
-      const prvCts = pair ? usdToCents(pair.baseline.raw_usd ?? null) : null
+      // Block 5A-W-16B — see note in portfolio loop. raw_usd is CENTS.
+      const curCts = pair ? dailyPriceCentsFromColumn(pair.latest.raw_usd   ?? null) : null
+      const prvCts = pair ? dailyPriceCentsFromColumn(pair.baseline.raw_usd ?? null) : null
       scored.push({
         source:           'watchlist',
         urlSlug:          row.card_slug,
@@ -529,6 +581,7 @@ export async function buildWeeklyDigestForUser(
     ...(portfolioSection ? { portfolio: portfolioSection } : {}),
     ...(watchlistSection ? { watchlist: watchlistSection } : {}),
     alertSummary,
+    currency,
     diagnostics: {
       portfolioCardsConsidered,
       watchlistCardsConsidered,
@@ -536,6 +589,8 @@ export async function buildWeeklyDigestForUser(
       cardsWithNoPriceData,
       cardsWithNoRecentSales,
       portfolioPriceBasisCounts,
+      displayCurrency:       currency,
+      portfolioValueSource:  'daily_prices_pivot',
       sectionsOmittedByPreferences,
       generatedAt,
     },
@@ -551,6 +606,8 @@ type PortRow  = {
   card_slug:    string
   holding_type: string | null
   quantity:     number | null
+  card_name:    string | null
+  set_name:     string | null
 }
 
 type WatchRow = {
@@ -603,9 +660,15 @@ async function loadPortfolioItems(supa: SupabaseClient, userId: string): Promise
   const idToUser     = new Map<string, string>()
   for (const r of portfolios as Array<Record<string, unknown>>) idToUser.set(String(r.id), String(r.user_id))
 
+  // Block 5A-W-16B — also fetch card_name + set_name from
+  // portfolio_items so the digest shows the user's OWN holding labels
+  // (matches the dashboard, and shields against multi-row card_slug
+  // → cards collisions that can swap "Charizard #4 — Base Set" for a
+  // same-slug card in a different set). Falls back to the cards-table
+  // values when the portfolio row's columns are null.
   const { data: items, error: iErr } = await supa
     .from('portfolio_items')
-    .select('portfolio_id, card_slug, holding_type, quantity')
+    .select('portfolio_id, card_slug, holding_type, quantity, card_name, set_name')
     .in('portfolio_id', portfolioIds)
   if (iErr || !Array.isArray(items)) return []
   return (items as Array<Record<string, unknown>>).map(r => ({
@@ -613,7 +676,30 @@ async function loadPortfolioItems(supa: SupabaseClient, userId: string): Promise
     card_slug:    String(r.card_slug ?? ''),
     holding_type: r.holding_type == null ? null : String(r.holding_type),
     quantity:     r.quantity     == null ? 1    : Math.max(1, Math.floor(Number(r.quantity) || 1)),
+    card_name:    r.card_name == null ? null : String(r.card_name),
+    set_name:     r.set_name  == null ? null : String(r.set_name),
   })).filter(r => r.card_slug)
+}
+
+/** Block 5A-W-16B — read the user's preferred display currency from
+ *  user_email_preferences. Defaults to GBP (matches the portfolio
+ *  dashboard's initial useState). Defensive: if the table or column
+ *  doesn't exist on this environment, falls back to GBP rather than
+ *  throwing — the digest must always render. */
+async function loadDisplayCurrency(supa: SupabaseClient, userId: string): Promise<DigestDisplayCurrency> {
+  try {
+    const { data, error } = await supa
+      .from('user_email_preferences')
+      .select('display_currency')
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (error || !data) return 'GBP'
+    const raw = (data as Record<string, unknown>).display_currency
+    if (raw === 'USD' || raw === 'GBP') return raw
+    return 'GBP'
+  } catch {
+    return 'GBP'
+  }
 }
 
 async function loadWatchlist(supa: SupabaseClient, userId: string): Promise<WatchRow[]> {
@@ -820,7 +906,7 @@ function findPricePair(rows: PriceRow[], asOf: Date, lookbackDays: number): { la
   return null
 }
 
-function emptyDiagnostics(generatedAt: string): WeeklyDigestDiagnostics {
+function emptyDiagnostics(generatedAt: string, currency: DigestDisplayCurrency = 'GBP'): WeeklyDigestDiagnostics {
   return {
     portfolioCardsConsidered:    0,
     watchlistCardsConsidered:    0,
@@ -828,6 +914,8 @@ function emptyDiagnostics(generatedAt: string): WeeklyDigestDiagnostics {
     cardsWithNoPriceData:        0,
     cardsWithNoRecentSales:      0,
     portfolioPriceBasisCounts:   { raw_usd: 0, psa9_usd: 0, psa10_usd: 0, unknown_fallback: 0 },
+    displayCurrency:             currency,
+    portfolioValueSource:        'daily_prices_pivot',
     sectionsOmittedByPreferences: [],
     generatedAt,
   }

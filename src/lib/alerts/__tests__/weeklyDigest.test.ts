@@ -26,6 +26,7 @@ import {
   classifyPortfolioPriceBasis,
   pctChange,
   usdToCents,
+  dailyPriceCentsFromColumn,
   selectTopItems,
   MIN_MEANINGFUL_PCT,
   type ScoredCard,
@@ -307,9 +308,10 @@ describe('buildWeeklyDigestForUser — slug resolution', () => {
     seedCardLink('charizard-base-4', '1450205', 'Charizard', 'Base Set')
     seedWatch    ('u1', 'charizard-base-4')
     seedPortfolio('u1', 'charizard-base-4', { holding_type: 'raw', quantity: 1 })
-    // Prices indexed by pc-1450205
-    seedPrice('1450205', '2026-06-18', { raw: 10.00 })  // baseline 7d before asOf
-    seedPrice('1450205', '2026-06-25', { raw: 12.00 })  // latest
+    // Prices indexed by pc-1450205. Values are USD CENTS (matches the
+    // actual daily_prices column convention — fixed in Block 5A-W-16B).
+    seedPrice('1450205', '2026-06-18', { raw: 1000 })   // baseline 7d before asOf = $10.00
+    seedPrice('1450205', '2026-06-25', { raw: 1200 })   // latest = $12.00
     // Sales indexed by bare 1450205
     seedSale('1450205', '2026-06-23T08:00:00Z')
     seedSale('1450205', '2026-06-24T08:00:00Z')
@@ -317,7 +319,7 @@ describe('buildWeeklyDigestForUser — slug resolution', () => {
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
     expect(out.status).toBe('ok')
 
-    // Portfolio reflects the resolved price (in cents, quantity 1)
+    // Portfolio reflects the resolved price (USD-cents, quantity 1).
     expect(out.portfolio?.currentTotalCents).toBe(1200)
     expect(out.portfolio?.previousTotalCents).toBe(1000)
     expect(out.portfolio?.pctChange).toBeCloseTo(20)
@@ -370,9 +372,10 @@ describe('buildWeeklyDigestForUser — slug resolution', () => {
     seedPrefs('u1')
     seedCardLink('crz', '111', 'Charizard', 'Base')
     seedPortfolio('u1', 'crz', { holding_type: 'psa10', quantity: 1 })
-    // Different raw vs psa10 prices to prove we pick psa10
-    seedPrice('111', '2026-06-18', { raw:   1.00, psa10: 500.00 })
-    seedPrice('111', '2026-06-25', { raw:   2.00, psa10: 600.00 })
+    // USD-cents in the columns. Wildly different raw vs psa10 so a
+    // wrong-column read would be obvious.
+    seedPrice('111', '2026-06-18', { raw:   100, psa10: 50_000 })   // $1 raw, $500 psa10
+    seedPrice('111', '2026-06-25', { raw:   200, psa10: 60_000 })   // $2 raw, $600 psa10
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
     expect(out.portfolio?.currentTotalCents).toBe(60_000)
     expect(out.portfolio?.previousTotalCents).toBe(50_000)
@@ -382,8 +385,8 @@ describe('buildWeeklyDigestForUser — slug resolution', () => {
     seedPrefs('u1')
     seedCardLink('crz', '111', 'Charizard', 'Base')
     seedPortfolio('u1', 'crz', { holding_type: 'raw', quantity: 3 })
-    seedPrice('111', '2026-06-18', { raw: 10 })
-    seedPrice('111', '2026-06-25', { raw: 15 })
+    seedPrice('111', '2026-06-18', { raw: 1000 })   // $10.00 in USD-cents
+    seedPrice('111', '2026-06-25', { raw: 1500 })   // $15.00 in USD-cents
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
     expect(out.portfolio?.currentTotalCents).toBe(4500)   // 1500 cents × 3
     expect(out.portfolio?.previousTotalCents).toBe(3000)  // 1000 cents × 3
@@ -695,12 +698,12 @@ describe('buildWeeklyDigestForUser — Block 5A-W-15B basis diagnostic', () => {
     seedPrefs('u1')
     seedCardLink('crz', '111', 'Charizard', 'Base')
     seedPortfolio('u1', 'crz', { holding_type: 'psa10', quantity: 1 })
-    // Wildly different raw vs psa10 prices — the holding chooses psa10
-    seedPrice('111', '2026-06-18', { raw: 1, psa10: 100 })
-    seedPrice('111', '2026-06-25', { raw: 1, psa10: 150 })
+    // Wildly different raw vs psa10 USD-cents — the holding chooses psa10
+    seedPrice('111', '2026-06-18', { raw: 100, psa10: 10_000 })   // $1 raw, $100 psa10
+    seedPrice('111', '2026-06-25', { raw: 100, psa10: 15_000 })   // $1 raw, $150 psa10
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
-    expect(out.portfolio?.currentTotalCents).toBe(15000)
-    expect(out.portfolio?.previousTotalCents).toBe(10000)
+    expect(out.portfolio?.currentTotalCents).toBe(15_000)
+    expect(out.portfolio?.previousTotalCents).toBe(10_000)
     expect(out.diagnostics.portfolioPriceBasisCounts.psa10_usd).toBe(1)
   })
 
@@ -709,10 +712,10 @@ describe('buildWeeklyDigestForUser — Block 5A-W-15B basis diagnostic', () => {
     seedCardLink('a-card', '111', 'A', 'S')
     seedPortfolio('u1', 'a-card', { holding_type: 'manual', quantity: 1 })
     // PSA 10 is dramatically more expensive — pick raw or we'd be lying
-    seedPrice('111', '2026-06-18', { raw: 5, psa10: 500 })
-    seedPrice('111', '2026-06-25', { raw: 6, psa10: 600 })
+    seedPrice('111', '2026-06-18', { raw: 500, psa10: 50_000 })   // $5 raw, $500 psa10
+    seedPrice('111', '2026-06-25', { raw: 600, psa10: 60_000 })   // $6 raw, $600 psa10
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
-    expect(out.portfolio?.currentTotalCents).toBe(600)  // not 60000
+    expect(out.portfolio?.currentTotalCents).toBe(600)   // raw, not psa10 (would be 60_000)
     expect(out.diagnostics.portfolioPriceBasisCounts.unknown_fallback).toBe(1)
   })
 })
@@ -748,5 +751,110 @@ describe('buildWeeklyDigestForUser — Block 5A-W-15B end-to-end reason guards',
     expect(priceColumnForHoldingType('manual')).toBe('raw_usd')
     expect(priceColumnForHoldingType('whatever')).toBe('raw_usd')
     expect(priceColumnForHoldingType(null)).toBe('raw_usd')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-16B — unit correctness + currency selection
+// ─────────────────────────────────────────────────────────────────────
+
+describe('dailyPriceCentsFromColumn — Block 5A-W-16B', () => {
+  it('treats the daily_prices column value as USD CENTS — no ×100', () => {
+    expect(dailyPriceCentsFromColumn(1200)).toBe(1200)
+    expect(dailyPriceCentsFromColumn(116)).toBe(116)
+    expect(dailyPriceCentsFromColumn(0)).toBe(0)
+  })
+  it('returns null for null / non-finite', () => {
+    expect(dailyPriceCentsFromColumn(null)).toBeNull()
+    expect(dailyPriceCentsFromColumn(undefined)).toBeNull()
+    expect(dailyPriceCentsFromColumn(Number.NaN)).toBeNull()
+  })
+  it('legacy usdToCents helper still multiplies (kept for back-compat)', () => {
+    // The legacy helper must NOT be invoked on daily_prices values.
+    // The new helper above is the right surface for column reads.
+    expect(usdToCents(12.34)).toBe(1234)
+  })
+})
+
+describe('buildWeeklyDigestForUser — Block 5A-W-16B currency', () => {
+  it('defaults to GBP when the user has no display_currency preference', async () => {
+    seedPrefs('u1')
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.currency).toBe('GBP')
+    expect(out.diagnostics.displayCurrency).toBe('GBP')
+  })
+
+  it('honours USD when user_email_preferences.display_currency = USD', async () => {
+    seedPrefs('u1')
+    fakeDB.seed('user_email_preferences', [
+      { user_id: 'u1', display_currency: 'USD' },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.currency).toBe('USD')
+    expect(out.diagnostics.displayCurrency).toBe('USD')
+  })
+
+  it('honours GBP when user_email_preferences.display_currency = GBP', async () => {
+    seedPrefs('u1')
+    fakeDB.seed('user_email_preferences', [
+      { user_id: 'u1', display_currency: 'GBP' },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.currency).toBe('GBP')
+  })
+
+  it('ignores garbage values and falls back to GBP', async () => {
+    seedPrefs('u1')
+    fakeDB.seed('user_email_preferences', [
+      { user_id: 'u1', display_currency: 'JPY' },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.currency).toBe('GBP')
+  })
+
+  it('passes currency through to disabled-master / disabled-weekly states', async () => {
+    seedPrefs('u1', { enabled: false })
+    fakeDB.seed('user_email_preferences', [
+      { user_id: 'u1', display_currency: 'USD' },
+    ])
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.status).toBe('disabled_master')
+    expect(out.currency).toBe('USD')
+    expect(out.diagnostics.displayCurrency).toBe('USD')
+  })
+
+  it('echoes portfolioValueSource = daily_prices_pivot in diagnostics', async () => {
+    seedPrefs('u1')
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.diagnostics.portfolioValueSource).toBe('daily_prices_pivot')
+  })
+})
+
+describe('buildWeeklyDigestForUser — Block 5A-W-16B portfolio_items name preference', () => {
+  it('prefers portfolio_items.card_name / set_name over the cards-table lookup', async () => {
+    seedPrefs('u1')
+    // cards-table says "Crystal Guardians" — wrong set
+    seedCardLink('charizard-4', '111', 'Charizard', 'Crystal Guardians')
+    // portfolio row says "Base Set" — user's own label, should win
+    fakeDB.seed('portfolios', [
+      ...fakeDB.rows('portfolios'),
+      { id: 'pf-u1', user_id: 'u1' },
+    ])
+    fakeDB.seed('portfolio_items', [
+      ...fakeDB.rows('portfolio_items'),
+      {
+        portfolio_id: 'pf-u1',
+        card_slug:    'charizard-4',
+        holding_type: 'raw',
+        quantity:     1,
+        card_name:    'Charizard',
+        set_name:     'Base Set',
+      },
+    ])
+    seedPrice('111', '2026-06-18', { raw: 50_00_00 })   // $5,000 in cents
+    seedPrice('111', '2026-06-25', { raw: 60_00_00 })
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.portfolio?.topItems[0].setName).toBe('Base Set')
+    expect(out.portfolio?.topItems[0].cardName).toBe('Charizard')
   })
 })

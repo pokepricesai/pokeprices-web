@@ -81,8 +81,9 @@ function seedDigestableAdmin() {
     { user_id: 'admin-uid', card_slug: 'charizard-base-4', card_name: null, set_name: null },
   ])
   fakeDB.seed('daily_prices', [
-    { card_slug: 'pc-1450205', date: '2026-06-18', raw_usd: 10, psa9_usd: null, psa10_usd: null },
-    { card_slug: 'pc-1450205', date: '2026-06-25', raw_usd: 14, psa9_usd: null, psa10_usd: null },
+    // raw_usd is USD CENTS (see weeklyDigest.ts dailyPriceCentsFromColumn).
+    { card_slug: 'pc-1450205', date: '2026-06-18', raw_usd: 1000, psa9_usd: null, psa10_usd: null },  // $10.00
+    { card_slug: 'pc-1450205', date: '2026-06-25', raw_usd: 1400, psa9_usd: null, psa10_usd: null },  // $14.00
   ])
 }
 

@@ -14,8 +14,19 @@ import type {
   WeeklyDigestItem,
   WeeklyDigestAlertCardBlock,
   WeeklyDigestItemReason,
+  DigestDisplayCurrency,
 } from './weeklyDigest'
 import type { AlertRule } from './preferences'
+
+// Block 5A-W-16B — keep the digest renderer's money math IDENTICAL to
+// the portfolio dashboard (PortfolioDashboard.tsx::fmtBig). The
+// dashboard treats daily_prices.*_usd columns as USD-cents and:
+//   * for USD display, divides by 100
+//   * for GBP display, divides by 127 (≈ 1 USD * 0.79 GBP, i.e. a
+//     fixed approximate FX with no per-day rate)
+// Any drift between this constant and the dashboard's would produce a
+// figure the user can't reconcile against their own portfolio page.
+const USD_CENTS_PER_GBP_APPROX = 127
 
 // ─────────────────────────────────────────────────────────────────────
 // Public types
@@ -90,9 +101,22 @@ function esc(s: string): string {
     .replace(/'/g, '&#39;')
 }
 
-function fmtCents(cents: number | null | undefined): string {
+/** Block 5A-W-16B — currency-aware money formatter.
+ *
+ *  daily_prices.*_usd columns store USD-CENTS (despite the suffix);
+ *  the digest data layer keeps everything as USD-cents until the
+ *  render step. Here we convert + format using the same divisors the
+ *  portfolio dashboard uses, so a user comparing the email subject
+ *  line to their dashboard sees the SAME-CURRENCY headline number
+ *  (subject to per-card source differences documented in the block
+ *  report). Currency defaults to GBP for callers that don't specify,
+ *  matching the dashboard's initial state. */
+export function fmtCents(cents: number | null | undefined, currency: DigestDisplayCurrency = 'GBP'): string {
   if (cents == null || !Number.isFinite(cents)) return '—'
-  return '$' + (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  if (currency === 'USD') {
+    return '$' + (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  }
+  return '£' + (cents / USD_CENTS_PER_GBP_APPROX).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 function fmtPct(pct: number | null | undefined): string {
@@ -122,6 +146,7 @@ export function buildSampleWeeklyDigestData(): WeeklyDigestData {
     status:       'ok',
     asOf:         '2026-06-25T12:00:00Z',
     lookbackDays: 7,
+    currency:     'GBP',
     portfolio: {
       itemCount:          14,
       currentTotalCents:  248_750,
@@ -190,6 +215,8 @@ export function buildSampleWeeklyDigestData(): WeeklyDigestData {
       cardsWithNoPriceData:        2,
       cardsWithNoRecentSales:      12,
       portfolioPriceBasisCounts:   { raw_usd: 10, psa10_usd: 3, psa9_usd: 1, unknown_fallback: 0 },
+      displayCurrency:             'GBP',
+      portfolioValueSource:        'daily_prices_pivot',
       sectionsOmittedByPreferences: [],
       generatedAt:                 '2026-06-25T12:00:00Z',
     },
@@ -233,13 +260,13 @@ function buildPreviewText(data: WeeklyDigestData, sample: boolean): string {
 // HTML section renderers
 // ─────────────────────────────────────────────────────────────────────
 
-function renderItemRow(item: WeeklyDigestItem): string {
+function renderItemRow(item: WeeklyDigestItem, currency: DigestDisplayCurrency): string {
   const reasonChip = `<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:${BRAND.primarySoft};color:${BRAND.primary};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.7px;">${esc(REASON_LABEL[item.reason])}</span>`
 
   const priceLine = item.currentCents != null
-    ? `<span style="font-weight:700;color:${BRAND.text};">${esc(fmtCents(item.currentCents))}</span>` +
+    ? `<span style="font-weight:700;color:${BRAND.text};">${esc(fmtCents(item.currentCents, currency))}</span>` +
       (item.previousCents != null
-        ? ` <span style="color:${BRAND.mutedSoft};font-size:11px;">was ${esc(fmtCents(item.previousCents))}</span>`
+        ? ` <span style="color:${BRAND.mutedSoft};font-size:11px;">was ${esc(fmtCents(item.previousCents, currency))}</span>`
         : '')
     : `<span style="color:${BRAND.mutedSoft};font-size:11px;">No price data this week</span>`
 
@@ -271,6 +298,7 @@ function renderItemRow(item: WeeklyDigestItem): string {
 function renderPortfolioSectionHtml(data: WeeklyDigestData): string {
   if (!data.portfolio) return ''
   const p = data.portfolio
+  const currency = data.currency
   const heading = `<h2 style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:800;color:${BRAND.navy};margin:24px 0 10px;text-transform:uppercase;letter-spacing:0.8px;">Portfolio overview</h2>`
 
   if (p.itemCount === 0) {
@@ -281,12 +309,12 @@ function renderPortfolioSectionHtml(data: WeeklyDigestData): string {
   }
 
   const totalLine = p.currentTotalCents != null
-    ? `<div style="font-family:'Outfit',sans-serif;font-size:22px;font-weight:800;color:${BRAND.navy};">${esc(fmtCents(p.currentTotalCents))}</div>`
+    ? `<div style="font-family:'Outfit',sans-serif;font-size:22px;font-weight:800;color:${BRAND.navy};">${esc(fmtCents(p.currentTotalCents, currency))}</div>`
     : `<div style="font-family:'Figtree',sans-serif;font-size:12px;color:${BRAND.muted};">Estimated total unavailable this week.</div>`
 
   const changeLine = (p.absChangeCents != null || p.pctChange != null)
     ? `<div style="font-family:'Figtree',sans-serif;font-size:13px;margin-top:4px;">
-         <span style="color:${changeColour(p.absChangeCents)};font-weight:700;">${esc(fmtCents(p.absChangeCents))}</span>
+         <span style="color:${changeColour(p.absChangeCents)};font-weight:700;">${esc(fmtCents(p.absChangeCents, currency))}</span>
          <span style="color:${BRAND.mutedSoft};"> · </span>
          <span style="color:${changeColour(p.pctChange)};font-weight:700;">${esc(fmtPct(p.pctChange))}</span>
          <span style="color:${BRAND.muted};"> vs ${data.lookbackDays} days ago</span>
@@ -301,7 +329,7 @@ function renderPortfolioSectionHtml(data: WeeklyDigestData): string {
     </td></tr></table>`
 
   const items = p.topItems.length > 0
-    ? `<table role="presentation" style="width:100%;border-collapse:collapse;"><tbody>${p.topItems.map(renderItemRow).join('')}</tbody></table>`
+    ? `<table role="presentation" style="width:100%;border-collapse:collapse;"><tbody>${p.topItems.map(i => renderItemRow(i, currency)).join('')}</tbody></table>`
     : `<p style="font-family:'Figtree',sans-serif;font-size:13px;color:${BRAND.muted};margin:0;line-height:1.5;">No major portfolio changes this week.</p>`
 
   return heading + summary + items
@@ -322,7 +350,7 @@ function renderWatchlistSectionHtml(data: WeeklyDigestData): string {
   const summary = `<div style="font-family:'Figtree',sans-serif;font-size:11px;color:${BRAND.muted};text-transform:uppercase;letter-spacing:0.7px;font-weight:700;margin-bottom:6px;">${w.itemCount} watched ${pluralize(w.itemCount, 'card', 'cards')}</div>`
 
   const items = w.topItems.length > 0
-    ? `<table role="presentation" style="width:100%;border-collapse:collapse;"><tbody>${w.topItems.map(renderItemRow).join('')}</tbody></table>`
+    ? `<table role="presentation" style="width:100%;border-collapse:collapse;"><tbody>${w.topItems.map(i => renderItemRow(i, data.currency)).join('')}</tbody></table>`
     : `<p style="font-family:'Figtree',sans-serif;font-size:13px;color:${BRAND.muted};margin:0;line-height:1.5;">No major watchlist changes this week.</p>`
 
   return heading + summary + items
@@ -460,13 +488,13 @@ function renderText(data: WeeklyDigestData, sample: boolean): string {
       if (data.portfolio.itemCount === 0) {
         lines.push('No portfolio items yet.')
       } else {
-        lines.push(`Estimated value across all portfolios: ${fmtCents(data.portfolio.currentTotalCents)}  (was ${fmtCents(data.portfolio.previousTotalCents)})`)
-        lines.push(`Change: ${fmtCents(data.portfolio.absChangeCents)}  (${fmtPct(data.portfolio.pctChange)})`)
+        lines.push(`Estimated value across all portfolios: ${fmtCents(data.portfolio.currentTotalCents, data.currency)}  (was ${fmtCents(data.portfolio.previousTotalCents, data.currency)})`)
+        lines.push(`Change: ${fmtCents(data.portfolio.absChangeCents, data.currency)}  (${fmtPct(data.portfolio.pctChange)})`)
         lines.push(`Items: ${data.portfolio.itemCount}`)
         if (data.portfolio.topItems.length === 0) {
           lines.push('No major portfolio changes this week.')
         } else {
-          for (const item of data.portfolio.topItems) lines.push(...itemTextLines(item))
+          for (const item of data.portfolio.topItems) lines.push(...itemTextLines(item, data.currency))
         }
       }
       lines.push('')
@@ -481,7 +509,7 @@ function renderText(data: WeeklyDigestData, sample: boolean): string {
         if (data.watchlist.topItems.length === 0) {
           lines.push('No major watchlist changes this week.')
         } else {
-          for (const item of data.watchlist.topItems) lines.push(...itemTextLines(item))
+          for (const item of data.watchlist.topItems) lines.push(...itemTextLines(item, data.currency))
         }
       }
       lines.push('')
@@ -516,11 +544,11 @@ function renderText(data: WeeklyDigestData, sample: boolean): string {
   return lines.join('\n')
 }
 
-function itemTextLines(item: WeeklyDigestItem): string[] {
+function itemTextLines(item: WeeklyDigestItem, currency: DigestDisplayCurrency): string[] {
   const out: string[] = []
   out.push(`* [${REASON_LABEL[item.reason]}] ${item.cardName ?? '(unknown)'} (${item.setName ?? ''})`)
   const priceBit = item.currentCents != null
-    ? `${fmtCents(item.currentCents)}${item.previousCents != null ? ' (was ' + fmtCents(item.previousCents) + ')' : ''}`
+    ? `${fmtCents(item.currentCents, currency)}${item.previousCents != null ? ' (was ' + fmtCents(item.previousCents, currency) + ')' : ''}`
     : 'no price data'
   const pctBit   = item.pctChange != null ? ` · ${fmtPct(item.pctChange)}` : ''
   const salesBit = item.recentSalesCount > 0 ? ` · ${item.recentSalesCount} ${pluralize(item.recentSalesCount, 'sale', 'sales')}` : ''

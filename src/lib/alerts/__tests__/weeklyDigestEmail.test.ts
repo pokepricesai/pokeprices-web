@@ -14,6 +14,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildWeeklyDigestEmail,
   buildSampleWeeklyDigestData,
+  fmtCents,
 } from '../weeklyDigestEmail'
 import type {
   WeeklyDigestData,
@@ -28,6 +29,8 @@ function emptyDiagnostics(generatedAt = '2026-06-25T12:00:00Z'): WeeklyDigestDia
     cardsWithNoPriceData:        0,
     cardsWithNoRecentSales:      0,
     portfolioPriceBasisCounts:   { raw_usd: 0, psa9_usd: 0, psa10_usd: 0, unknown_fallback: 0 },
+    displayCurrency:             'GBP',
+    portfolioValueSource:        'daily_prices_pivot',
     sectionsOmittedByPreferences: [],
     generatedAt,
   }
@@ -38,6 +41,7 @@ function baseData(over: Partial<WeeklyDigestData> = {}): WeeklyDigestData {
     status:       'ok',
     asOf:         '2026-06-25T12:00:00Z',
     lookbackDays: 7,
+    currency:     'GBP',
     alertSummary: { totalEvents: 0, cardBlocks: [] },
     diagnostics:  emptyDiagnostics(),
     ...over,
@@ -97,8 +101,9 @@ describe('buildWeeklyDigestEmail — previewText', () => {
 // ─────────────────────────────────────────────────────────────────────
 
 describe('buildWeeklyDigestEmail — portfolio section', () => {
-  it('includes the heading and totals when portfolio is provided', () => {
+  it('includes the heading and totals when portfolio is provided (USD currency)', () => {
     const out = buildWeeklyDigestEmail(baseData({
+      currency: 'USD',
       portfolio: {
         itemCount: 2, currentTotalCents: 250000, previousTotalCents: 200000,
         absChangeCents: 50000, pctChange: 25.0,
@@ -355,5 +360,130 @@ describe('buildWeeklyDigestEmail — PII guard', () => {
     const blob = [out.subject, out.previewText, out.html, out.text].join('\n')
     expect(blob).not.toMatch(/[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/)
     expect(blob).not.toMatch(/"user_id"|"email"|"token"/i)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-16B — currency-aware money + unit correctness
+// ─────────────────────────────────────────────────────────────────────
+
+describe('fmtCents — Block 5A-W-16B', () => {
+  it('treats input as USD-cents and divides by 100 for USD', () => {
+    expect(fmtCents(8_75, 'USD')).toBe('$8.75')
+    expect(fmtCents(100_00, 'USD')).toBe('$100.00')
+  })
+
+  it('treats input as USD-cents and divides by ~127 for GBP (mirrors dashboard)', () => {
+    // 87_519 USD-cents at 1 USD ≈ 0.79 GBP → £689.13 (the dashboard's
+    // approximation; not exactly £852.42 because the dashboard pulls
+    // from a different price source — see block report).
+    expect(fmtCents(87_519, 'GBP')).toBe('£689.13')
+    // 91 USD-cents = $0.91 ≈ £0.72 — the kind of low-value card that
+    // pre-fix would have rendered as £91 (100× too high).
+    expect(fmtCents(91,   'GBP')).toBe('£0.72')
+    expect(fmtCents(0,    'GBP')).toBe('£0.00')
+  })
+
+  it('returns the em-dash for null / non-finite', () => {
+    expect(fmtCents(null,        'GBP')).toBe('—')
+    expect(fmtCents(undefined,   'USD')).toBe('—')
+    expect(fmtCents(Number.NaN,  'GBP')).toBe('—')
+  })
+
+  it('defaults to GBP when no currency is supplied (matches dashboard default)', () => {
+    expect(fmtCents(127_00).startsWith('£')).toBe(true)
+  })
+})
+
+describe('buildWeeklyDigestEmail — currency selection (Block 5A-W-16B)', () => {
+  it('renders pounds when data.currency is GBP', () => {
+    const out = buildWeeklyDigestEmail(baseData({
+      currency: 'GBP',
+      portfolio: {
+        itemCount: 1,
+        currentTotalCents: 100_00, previousTotalCents: 90_00,
+        absChangeCents: 10_00, pctChange: 11.1,
+        topItems: [{
+          cardSlug: '1', cardName: 'Chien-Pao', setName: 'Set',
+          cardUrl: null,
+          currentCents: 100_00, previousCents: 90_00,
+          pctChange: 11.1, absChangeCents: 10_00,
+          recentSalesCount: 0, reason: 'biggest_riser',
+        }],
+      },
+    }))
+    expect(out.html).toMatch(/£78\.74/)            // 10000 / 127 ≈ 78.74
+    expect(out.html).not.toMatch(/\$100\.00/)      // never dollars when GBP
+    expect(out.text).toMatch(/£78\.74/)
+  })
+
+  it('renders dollars when data.currency is USD', () => {
+    const out = buildWeeklyDigestEmail(baseData({
+      currency: 'USD',
+      portfolio: {
+        itemCount: 1,
+        currentTotalCents: 100_00, previousTotalCents: 90_00,
+        absChangeCents: 10_00, pctChange: 11.1,
+        topItems: [{
+          cardSlug: '1', cardName: 'Chien-Pao', setName: 'Set',
+          cardUrl: null,
+          currentCents: 100_00, previousCents: 90_00,
+          pctChange: 11.1, absChangeCents: 10_00,
+          recentSalesCount: 0, reason: 'biggest_riser',
+        }],
+      },
+    }))
+    expect(out.html).toMatch(/\$100\.00/)
+    expect(out.html).not.toMatch(/£/)
+  })
+
+  it('low-value cards render as low values — never 100× too high', () => {
+    // £0.91 in the dashboard is roughly 116 USD-cents. The pre-fix bug
+    // would have multiplied this by 100 and rendered something like
+    // £91.00 (or $115). Pin both for regression coverage.
+    const out = buildWeeklyDigestEmail(baseData({
+      currency: 'GBP',
+      portfolio: {
+        itemCount: 3,
+        currentTotalCents: 116 + 39 + 30,    // Chien-Pao + Espurr + Meowstic
+        previousTotalCents: 116 + 39 + 30,
+        absChangeCents: 0, pctChange: 0,
+        topItems: [
+          {
+            cardSlug: '1', cardName: 'Chien-Pao [Reverse Holo]', setName: 'Set',
+            cardUrl: null,
+            currentCents: 116, previousCents: 110,
+            pctChange: 5.5, absChangeCents: 6,
+            recentSalesCount: 0, reason: 'biggest_riser',
+          },
+          {
+            cardSlug: '2', cardName: 'Espurr', setName: 'Set',
+            cardUrl: null,
+            currentCents: 39, previousCents: 40,
+            pctChange: -2.5, absChangeCents: -1,
+            recentSalesCount: 0, reason: 'biggest_faller',
+          },
+        ],
+      },
+    }))
+    // None of these should render as £100+ — the bug was 100× inflation.
+    expect(out.html).toMatch(/£0\.91/)            // 116 / 127 ≈ 0.91
+    expect(out.html).toMatch(/£0\.31/)            // 39  / 127 ≈ 0.31
+    expect(out.html).not.toMatch(/£91\.00/)
+    expect(out.html).not.toMatch(/£100\.00/)
+    expect(out.html).not.toMatch(/\$115\.00/)
+  })
+})
+
+describe('buildSampleWeeklyDigestData — carries currency', () => {
+  it('declares a currency on the sample shape', () => {
+    const d = buildSampleWeeklyDigestData()
+    expect(d.currency === 'GBP' || d.currency === 'USD').toBe(true)
+    expect(d.diagnostics.displayCurrency).toBe(d.currency)
+  })
+
+  it('echoes the daily_prices_pivot value source in diagnostics', () => {
+    const d = buildSampleWeeklyDigestData()
+    expect(d.diagnostics.portfolioValueSource).toBe('daily_prices_pivot')
   })
 })
