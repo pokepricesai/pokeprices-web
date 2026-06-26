@@ -1,21 +1,13 @@
 // src/app/dashboard/alerts/page.tsx
-import type { Metadata } from 'next'
-import { Suspense } from 'react'
-import { requireAuthUser } from '@/lib/auth-server'
-import AlertsClient from './AlertsClient'
+// Block 5A-W-18 — /dashboard/alerts redirects to the unified
+// Watchlist & Alerts surface. Replaces the prior "coming soon"
+// placeholder. AlertsClient.tsx is kept on disk for git history
+// but is no longer reachable through routing.
 
-export const metadata: Metadata = {
-  title: 'Smart Alerts — PokePrices Dashboard',
-  robots: { index: false, follow: false },
-}
+import { redirect } from 'next/navigation'
 
-// AlertsClient uses useSearchParams() (deep-link from /watchlist?new=…),
-// which requires a Suspense boundary for static prerender.
-export default async function AlertsPage() {
-  await requireAuthUser('/dashboard/alerts')
-  return (
-    <Suspense fallback={null}>
-      <AlertsClient />
-    </Suspense>
-  )
+export const dynamic = 'force-static'
+
+export default function AlertsPage() {
+  redirect('/dashboard/watchlist-alerts')
 }

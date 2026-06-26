@@ -161,6 +161,54 @@ export function getAlertWeeklyDigestCronMaxUsers(): number {
   return n
 }
 
+/**
+ * Block 5A-W-18 — gates the Vercel-Cron-invoked instant-alerts route
+ * (/api/cron/instant-alerts). The route is also CRON_SECRET-gated, so
+ * this flag is the SECOND lock specifically for the cron path; admin-
+ * triggered evaluator + delivery still use their own per-route flags
+ * (ALERTS_EVALUATOR_ENABLED, ALERT_DELIVERY_ENABLED). When off, the
+ * cron route returns 503 even with a valid secret — lets the operator
+ * freeze instant-alert automation without revoking the secret.
+ */
+export function isAlertInstantAlertsCronEnabled(): boolean {
+  return readLiteralTrue('ALERT_INSTANT_ALERTS_CRON_ENABLED')
+}
+
+/**
+ * Block 5A-W-18 — per-invocation cap for the EVALUATOR step inside
+ * the instant-alerts cron. Default 100, hard cap 500. The evaluator
+ * is expensive (per-user scan across watchlist + portfolio + prices)
+ * so this needs to stay low until throughput is measured.
+ */
+export const DEFAULT_ALERT_INSTANT_EVALUATOR_CRON_MAX_USERS = 100
+export const HARD_MAX_ALERT_INSTANT_EVALUATOR_CRON_MAX_USERS = 500
+
+export function getAlertInstantEvaluatorCronMaxUsers(): number {
+  const raw = (process.env.ALERT_INSTANT_EVALUATOR_CRON_MAX_USERS ?? '').trim()
+  if (raw.length === 0) return DEFAULT_ALERT_INSTANT_EVALUATOR_CRON_MAX_USERS
+  const n = Math.floor(Number(raw))
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_ALERT_INSTANT_EVALUATOR_CRON_MAX_USERS
+  return Math.min(n, HARD_MAX_ALERT_INSTANT_EVALUATOR_CRON_MAX_USERS)
+}
+
+/**
+ * Block 5A-W-18 — per-invocation cap for the DELIVERY step inside
+ * the instant-alerts cron. Default 25, hard cap 100. The delivery
+ * engine is rate-limited by the upstream Resend client; the per-cron
+ * cap is a second wall so a single cron tick can't fan out into
+ * hundreds of emails.
+ */
+export const DEFAULT_ALERT_INSTANT_DELIVERY_CRON_MAX_USERS = 25
+export const HARD_MAX_ALERT_INSTANT_DELIVERY_CRON_MAX_USERS = 100
+
+export function getAlertInstantDeliveryCronMaxUsers(): number {
+  const raw = (process.env.ALERT_INSTANT_DELIVERY_CRON_MAX_USERS ?? '').trim()
+  if (raw.length === 0) return DEFAULT_ALERT_INSTANT_DELIVERY_CRON_MAX_USERS
+  const n = Math.floor(Number(raw))
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_ALERT_INSTANT_DELIVERY_CRON_MAX_USERS
+  return Math.min(n, HARD_MAX_ALERT_INSTANT_DELIVERY_CRON_MAX_USERS)
+}
+
 export const ALERTS_EVALUATOR_FLAG_NAMES: ReadonlyArray<string> = [
   'ALERTS_EVALUATOR_ENABLED',
   'ALERT_EMAIL_PREVIEW_ENABLED',
@@ -174,4 +222,7 @@ export const ALERTS_EVALUATOR_FLAG_NAMES: ReadonlyArray<string> = [
   'ALERT_WEEKLY_DIGEST_CRON_ENABLED',
   'ALERT_WEEKLY_DIGEST_COOLDOWN_DAYS',
   'ALERT_WEEKLY_DIGEST_CRON_MAX_USERS',
+  'ALERT_INSTANT_ALERTS_CRON_ENABLED',
+  'ALERT_INSTANT_EVALUATOR_CRON_MAX_USERS',
+  'ALERT_INSTANT_DELIVERY_CRON_MAX_USERS',
 ]

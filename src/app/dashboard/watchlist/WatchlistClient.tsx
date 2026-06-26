@@ -144,7 +144,11 @@ function AddWatchModal({ onAdd, onClose }: { onAdd: (card: any) => Promise<void>
 
 // ── Main client ──────────────────────────────────────────────────────────────
 
-export default function WatchlistClient() {
+// Block 5A-W-18 — `embedded` lets the unified /dashboard/watchlist-alerts
+// page reuse the entire watchlist body without rendering a second
+// DashboardNav or the standalone page header. Default false preserves
+// the original standalone surface in case a future block needs it.
+export default function WatchlistClient({ embedded = false }: { embedded?: boolean } = {}) {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [items, setItems] = useState<WatchItem[]>([])
@@ -251,14 +255,23 @@ export default function WatchlistClient() {
   const risers          = items.filter(i => (i.pct_30d ?? 0) > 0).length
   const fallers         = items.filter(i => (i.pct_30d ?? 0) < 0).length
 
+  const Outer: React.ElementType = embedded ? 'div' : 'div'
+  const outerStyle: React.CSSProperties = embedded
+    ? {}
+    : { maxWidth: 960, margin: '0 auto', padding: '24px 16px' }
+
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 16px' }}>
-      <DashboardNav current="watchlist" email={user?.email} />
+    <Outer style={outerStyle}>
+      {!embedded && <DashboardNav current="watchlist" email={user?.email} />}
 
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 26, margin: '0 0 4px', color: 'var(--text)' }}>Watchlist</h1>
+          <h1 style={embedded
+            ? { fontFamily: "'Outfit', sans-serif", fontSize: 18, margin: '0 0 4px', color: 'var(--text)' }
+            : { fontFamily: "'Outfit', sans-serif", fontSize: 26, margin: '0 0 4px', color: 'var(--text)' }}>
+            {embedded ? 'Your watchlist' : 'Watchlist'}
+          </h1>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0 }}>
             Cards you are watching — current value, 7d / 30d change, PSA premium.
           </p>
@@ -413,7 +426,7 @@ export default function WatchlistClient() {
           onClose={() => setPortfolioAddItem(null)}
         />
       )}
-    </div>
+    </Outer>
   )
 }
 

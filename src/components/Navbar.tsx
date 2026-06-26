@@ -69,9 +69,8 @@ const NAV: NavGroup[] = [
       { label: 'Quick Price Checker',href: '/dashboard/quick-price', gated: true },
       { label: 'Card Show Planner',  href: '/dashboard/card-shows',  gated: true },
       { label: 'Portfolio',          href: '/dashboard/portfolio',   gated: true },
-      { label: 'Watchlist',          href: '/dashboard/watchlist',   gated: true },
-      { label: 'Set Completion',     href: '/dashboard/sets',        gated: true },
-      { label: 'Smart Alerts',       href: '/dashboard/alerts',      gated: true },
+      { label: 'Watchlist & Alerts', href: '/dashboard/watchlist-alerts', gated: true },
+      { label: 'Set Completion',     href: '/dashboard/sets',             gated: true },
     ],
     footer: { label: 'View All Tools →', href: '/tools' },
   },
@@ -555,7 +554,7 @@ export default function Navbar() {
 
                 <ProfileLink href="/dashboard"             label="Dashboard" onClose={() => setProfileOpen(false)} />
                 <ProfileLink href="/dashboard/portfolio"   label="Portfolio" onClose={() => setProfileOpen(false)} />
-                <ProfileLink href="/dashboard/watchlist"   label="Watchlist" onClose={() => setProfileOpen(false)} />
+                <ProfileLink href="/dashboard/watchlist-alerts" label="Watchlist & Alerts" onClose={() => setProfileOpen(false)} />
 
                 <div style={{ height: 1, background: 'var(--border)', margin: '6px 0' }} />
                 <ProfileLink href="/dashboard/settings"    label="Settings"  onClose={() => setProfileOpen(false)} />
@@ -681,7 +680,7 @@ export default function Navbar() {
                 </div>
                 <Link href="/dashboard"           onClick={() => setMenuOpen(false)} style={mobAuthLink}>Dashboard</Link>
                 <Link href="/dashboard/portfolio" onClick={() => setMenuOpen(false)} style={mobAuthLink}>Portfolio</Link>
-                <Link href="/dashboard/watchlist" onClick={() => setMenuOpen(false)} style={mobAuthLink}>Watchlist</Link>
+                <Link href="/dashboard/watchlist-alerts" onClick={() => setMenuOpen(false)} style={mobAuthLink}>Watchlist &amp; Alerts</Link>
                 <Link href="/dashboard/settings"  onClick={() => setMenuOpen(false)} style={mobAuthLink}>Settings</Link>
                 <button onClick={async () => { await handleSignOut(); setMenuOpen(false) }}
                   style={{ ...mobAuthLink, background: 'transparent', border: '1px solid rgba(239,68,68,0.45)', color: '#fecaca', textAlign: 'left', cursor: 'pointer' }}>

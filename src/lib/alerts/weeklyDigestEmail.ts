@@ -53,7 +53,11 @@ export type BuildWeeklyDigestEmailOptions = {
 // ─────────────────────────────────────────────────────────────────────
 
 const BRAND_TAGLINE = 'Your weekly portfolio and watchlist update'
-const MANAGE_URL    = 'https://www.pokeprices.io/dashboard/settings'
+// Block 5A-W-18 — alert management moved to the unified Watchlist &
+// Alerts page. Keeps the weekly digest's "Manage alerts" link in sync
+// with the instant alert digest so users land in the same place from
+// either email.
+const MANAGE_URL    = 'https://www.pokeprices.io/dashboard/watchlist-alerts'
 const PORTFOLIO_URL = 'https://www.pokeprices.io/dashboard/portfolio'
 const WATCHLIST_URL = 'https://www.pokeprices.io/dashboard'   // closest landing
 
@@ -548,7 +552,7 @@ function renderHtml(data: WeeklyDigestData, sample: boolean): string {
           <div style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:800;color:${BRAND.navy};letter-spacing:-0.1px;">PokePrices</div>
           <p style="font-family:'Figtree',sans-serif;font-size:11px;color:${BRAND.mutedSoft};line-height:1.6;margin:6px 0 0;">
             You are receiving this because you enabled the weekly overview.<br>
-            <a href="${MANAGE_URL}" style="color:${BRAND.primary};text-decoration:none;font-weight:700;">Manage alerts</a> ·
+            <a href="${MANAGE_URL}" style="color:${BRAND.primary};text-decoration:none;font-weight:700;">Manage Watchlist &amp; Alerts</a> ·
             <a href="${PORTFOLIO_URL}" style="color:${BRAND.primary};text-decoration:none;font-weight:700;">Your portfolio</a> ·
             <a href="${WATCHLIST_URL}" style="color:${BRAND.primary};text-decoration:none;font-weight:700;">Your dashboard</a>
             · We never share your address. We never sell your data.
@@ -672,7 +676,7 @@ function renderText(data: WeeklyDigestData, sample: boolean): string {
   lines.push('---')
   lines.push('PokePrices')
   lines.push('You are receiving this because you enabled the weekly overview.')
-  lines.push(`Manage alerts at ${MANAGE_URL}`)
+  lines.push(`Manage Watchlist & Alerts at ${MANAGE_URL}`)
   return lines.join('\n')
 }
 

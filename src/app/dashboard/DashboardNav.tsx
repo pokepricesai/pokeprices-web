@@ -4,7 +4,12 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import ComingSoonBadge from '@/components/ComingSoonBadge'
 
-type ToolId = 'portfolio' | 'watchlist' | 'sets' | 'grading' | 'card-shows' | 'alerts' | 'settings' | 'quick-price'
+// Block 5A-W-18 — 'alerts' is no longer a distinct tab. The
+// standalone /dashboard/alerts route now redirects into the unified
+// /dashboard/watchlist-alerts page; the Track group represents that
+// page under the existing 'watchlist' id so the active highlight
+// still works for callers that pass current="watchlist".
+type ToolId = 'portfolio' | 'watchlist' | 'sets' | 'grading' | 'card-shows' | 'settings' | 'quick-price'
 
 type Tool = { id: ToolId; label: string; href: string; icon: string; soon?: boolean }
 type Group = { label: string; tools: Tool[] }
@@ -13,10 +18,9 @@ const GROUPS: Group[] = [
   {
     label: 'Track',
     tools: [
-      { id: 'portfolio', label: 'Portfolio',  href: '/dashboard/portfolio',  icon: '💼' },
-      { id: 'watchlist', label: 'Watchlist',  href: '/dashboard/watchlist',  icon: '👁' },
-      { id: 'sets',      label: 'Sets',       href: '/dashboard/sets',       icon: '🧩' },
-      { id: 'alerts',    label: 'Alerts',     href: '/dashboard/alerts',     icon: '🔔', soon: true },
+      { id: 'portfolio', label: 'Portfolio',           href: '/dashboard/portfolio',         icon: '💼' },
+      { id: 'watchlist', label: 'Watchlist & Alerts', href: '/dashboard/watchlist-alerts', icon: '👁' },
+      { id: 'sets',      label: 'Sets',                href: '/dashboard/sets',              icon: '🧩' },
     ],
   },
   {

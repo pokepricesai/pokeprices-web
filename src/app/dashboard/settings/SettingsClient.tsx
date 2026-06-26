@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import DashboardNav from '../DashboardNav'
@@ -427,6 +428,29 @@ export default function SettingsClient() {
               {saving ? 'Saving…' : savedAt && Date.now() - savedAt < 2000 ? 'Saved.' : ''}
             </div>
           </div>
+
+          {/* Block 5A-W-18 — alerts have their own dedicated home now.
+              The full settings card stays here for users who already
+              know the settings page, but we point at the unified
+              surface so the discovery story is consistent. */}
+          {user?.id && (
+            <div style={{
+              background: 'rgba(26,95,173,0.06)',
+              border: '1px solid rgba(26,95,173,0.18)',
+              borderRadius: 12,
+              padding: '12px 16px',
+              marginBottom: 16,
+              fontSize: 12.5,
+              color: 'var(--text)',
+              fontFamily: "'Figtree', sans-serif",
+              lineHeight: 1.5,
+            }}>
+              Looking for your watchlist or recent alerts?{' '}
+              <Link href="/dashboard/watchlist-alerts" style={{ color: 'var(--primary)', fontWeight: 700, textDecoration: 'none' }}>
+                Manage Watchlist &amp; Alerts →
+              </Link>
+            </div>
+          )}
 
           {/* Smart alerts (Block 5A-W-1) */}
           {user?.id && <AlertPreferencesCard userId={user.id} />}

@@ -62,9 +62,9 @@ const CATEGORIES: Category[] = [
         emoji: '⚡',
       },
       {
-        title: 'Watchlist',
-        blurb: 'Cards you are tracking but do not own yet. One click to follow, see weekly trend at a glance.',
-        href: '/dashboard/watchlist',
+        title: 'Watchlist & Alerts',
+        blurb: 'Cards you are tracking plus the alerts that fire on them. Set sensitivity, see recent alerts, manage what you watch.',
+        href: '/dashboard/watchlist-alerts',
         gated: true,
         accent: 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)',
         emoji: '👀',
@@ -76,14 +76,6 @@ const CATEGORIES: Category[] = [
         gated: true,
         accent: 'linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%)',
         emoji: '📚',
-      },
-      {
-        title: 'Smart Alerts',
-        blurb: 'Get pinged when a card breaks a price you care about — up or down. Email only, no spam.',
-        href: '/dashboard/alerts',
-        gated: true,
-        accent: 'linear-gradient(135deg, #ec4899 0%, #f472b6 100%)',
-        emoji: '🔔',
       },
       {
         title: 'Card Show Planner',

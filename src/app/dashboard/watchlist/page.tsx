@@ -1,14 +1,14 @@
 // src/app/dashboard/watchlist/page.tsx
-import type { Metadata } from 'next'
-import { requireAuthUser } from '@/lib/auth-server'
-import WatchlistClient from './WatchlistClient'
+// Block 5A-W-18 — /dashboard/watchlist now redirects to the unified
+// Watchlist & Alerts surface. WatchlistClient.tsx is still imported
+// (in embedded mode) by /dashboard/watchlist-alerts; the standalone
+// page is kept only as a stable URL for any existing bookmarks or
+// inbound links.
 
-export const metadata: Metadata = {
-  title: 'Watchlist — PokePrices Dashboard',
-  robots: { index: false, follow: false },
-}
+import { redirect } from 'next/navigation'
 
-export default async function WatchlistPage() {
-  await requireAuthUser('/dashboard/watchlist')
-  return <WatchlistClient />
+export const dynamic = 'force-static'
+
+export default function WatchlistPage() {
+  redirect('/dashboard/watchlist-alerts')
 }

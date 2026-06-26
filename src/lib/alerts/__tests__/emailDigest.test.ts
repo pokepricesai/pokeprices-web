@@ -240,16 +240,16 @@ describe('buildEmailDigest — branding', () => {
 
   it('renders a footer with the brand line, opt-in reason, and the manage-alerts link', () => {
     const d = buildEmailDigest([ev({})])
-    // HTML footer must contain the reason copy + manage link + the
-    // wordmark a second time (top + bottom).
-    expect(d.html).toMatch(/You are receiving this because you enabled card alerts/)
-    expect(d.html).toMatch(/href="https:\/\/www\.pokeprices\.io\/dashboard\/settings"[^>]*>Manage alerts<\/a>/)
+    // Block 5A-W-18 — footer now points at the unified Watchlist &
+    // Alerts surface; reason copy and link label updated in lockstep.
+    expect(d.html).toMatch(/You are receiving this because alerts are enabled for your Watchlist &amp; Alerts/)
+    expect(d.html).toMatch(/href="https:\/\/www\.pokeprices\.io\/dashboard\/watchlist-alerts"[^>]*>Manage Watchlist &amp; Alerts<\/a>/)
     // The HTML contains the PokePrices wordmark at least twice (header + footer).
     expect((d.html.match(/PokePrices/g) ?? []).length).toBeGreaterThanOrEqual(2)
 
     // Plain text mirrors the structure.
-    expect(d.text).toMatch(/You are receiving this because you enabled card alerts/)
-    expect(d.text).toMatch(/Manage alerts at https:\/\/www\.pokeprices\.io\/dashboard\/settings/)
+    expect(d.text).toMatch(/You are receiving this because alerts are enabled for your Watchlist & Alerts/)
+    expect(d.text).toMatch(/Manage Watchlist & Alerts at https:\/\/www\.pokeprices\.io\/dashboard\/watchlist-alerts/)
   })
 
   it('does NOT include an unsubscribe link (in-app settings is the opt-out flow)', () => {

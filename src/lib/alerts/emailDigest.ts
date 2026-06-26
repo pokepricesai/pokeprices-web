@@ -323,7 +323,12 @@ const BRAND = {
 } as const
 
 const TAGLINE = 'Track your Pokémon card market moves'
-const MANAGE_URL = 'https://www.pokeprices.io/dashboard/settings'
+// Block 5A-W-18 — alert management moved to the unified Watchlist &
+// Alerts page. /dashboard/settings still hosts the same controls but
+// the canonical destination from email is now the combined surface
+// (which also shows recent alerts so the user can see what triggered
+// the email).
+const MANAGE_URL = 'https://www.pokeprices.io/dashboard/watchlist-alerts'
 
 function renderHtml(events: DigestEvent[], sample: boolean): string {
   const blocks = sortCardBlocksByPriority(groupEventsByCard(events))
@@ -388,8 +393,8 @@ function renderHtml(events: DigestEvent[], sample: boolean): string {
         <td style="padding:18px 0 0;">
           <div style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:800;color:${BRAND.navy};letter-spacing:-0.1px;">PokePrices</div>
           <p style="font-family:'Figtree',sans-serif;font-size:11px;color:${BRAND.mutedSoft};line-height:1.6;margin:6px 0 0;">
-            You are receiving this because you enabled card alerts.<br>
-            <a href="${MANAGE_URL}" style="color:${BRAND.primary};text-decoration:none;font-weight:700;">Manage alerts</a>
+            You are receiving this because alerts are enabled for your Watchlist &amp; Alerts.<br>
+            <a href="${MANAGE_URL}" style="color:${BRAND.primary};text-decoration:none;font-weight:700;">Manage Watchlist &amp; Alerts</a>
             · We never share your address. We never sell your data.
           </p>
         </td>
@@ -450,8 +455,8 @@ function renderText(events: DigestEvent[], sample: boolean): string {
   }
   lines.push('---')
   lines.push('PokePrices')
-  lines.push('You are receiving this because you enabled card alerts.')
-  lines.push(`Manage alerts at ${MANAGE_URL}`)
+  lines.push('You are receiving this because alerts are enabled for your Watchlist & Alerts.')
+  lines.push(`Manage Watchlist & Alerts at ${MANAGE_URL}`)
   return lines.join('\n')
 }
 

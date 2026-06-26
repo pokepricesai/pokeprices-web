@@ -23,7 +23,7 @@ const PATHS: Record<OnboardingLinkKey, string> = {
   dashboard:    '/dashboard',
   browse:       '/browse',
   portfolio:    '/dashboard/portfolio',
-  watchlist:    '/dashboard/watchlist',
+  watchlist:    '/dashboard/watchlist-alerts',
   ai_assistant: '/ai-assistant',
   card_shows:   '/card-shows',
   settings:     '/dashboard/settings',

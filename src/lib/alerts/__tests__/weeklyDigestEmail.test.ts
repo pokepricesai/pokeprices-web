@@ -499,9 +499,12 @@ describe('buildWeeklyDigestEmail — branding + footer', () => {
   it('renders a footer with the reason + manage link + portfolio link', () => {
     const out = buildWeeklyDigestEmail(baseData())
     expect(out.html).toMatch(/You are receiving this because you enabled the weekly overview/)
-    expect(out.html).toMatch(/href="https:\/\/www\.pokeprices\.io\/dashboard\/settings"[^>]*>Manage alerts<\/a>/)
+    // Block 5A-W-18 — manage link points at the unified Watchlist &
+    // Alerts page so users land in the same spot whether they click
+    // through from the weekly digest or the instant alert digest.
+    expect(out.html).toMatch(/href="https:\/\/www\.pokeprices\.io\/dashboard\/watchlist-alerts"[^>]*>Manage Watchlist &amp; Alerts<\/a>/)
     expect(out.html).toMatch(/href="https:\/\/www\.pokeprices\.io\/dashboard\/portfolio"/)
-    expect(out.text).toMatch(/Manage alerts at https:\/\/www\.pokeprices\.io\/dashboard\/settings/)
+    expect(out.text).toMatch(/Manage Watchlist & Alerts at https:\/\/www\.pokeprices\.io\/dashboard\/watchlist-alerts/)
   })
   it('does NOT include an unsubscribe link (in-app settings is the opt-out flow)', () => {
     const out = buildWeeklyDigestEmail(baseData())
