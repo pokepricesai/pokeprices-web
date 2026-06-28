@@ -39,6 +39,12 @@ export type DigestEvent = {
    *  events that actually fit in the digest (after the card cap). The
    *  renderer never reads this. */
   id?:      string
+  /** Block 5A-W-20 — ISO timestamp of `alert_events.detected_at`.
+   *  Used by `dedupeEventsPerCardRule` as the tie-breaker when two
+   *  events for the same (card, rule) have equal magnitudes. The
+   *  renderer doesn't display this; it's plumbed through the same
+   *  call shape as `id`. */
+  detectedAt?: string
 }
 
 /** A card-grouped block — one entry per (user, card) with all of that
@@ -100,6 +106,31 @@ function fmtPct(pct: unknown): string {
   return `${sign}${pct.toFixed(1)}%`
 }
 
+/** Block 5A-W-20 — singular/plural for inline counts inside reason
+ *  copy. Earlier blocks shipped "1 new verified sales" because every
+ *  count rendered through a fixed plural string. */
+function countNoun(n: unknown, singular: string, plural: string): string {
+  if (typeof n !== 'number' || !Number.isFinite(n)) return `— ${plural}`
+  return `${n} ${n === 1 ? singular : plural}`
+}
+
+/** Block 5A-W-20 — appendix that explains WHICH threshold the event
+ *  crossed. Only renders when the evaluator stamped the payload (i.e.
+ *  the event was generated against the per-card override, or any
+ *  post-5A-W-19 evaluator run for a global threshold). Older events
+ *  without the metadata render as before — no "(above your N%
+ *  threshold)" tail. */
+function thresholdSuffix(payload: Record<string, unknown>): string {
+  const src   = payload.threshold_source
+  const thr   = payload.threshold_pct
+  if (src !== 'global' && src !== 'override') return ''
+  if (typeof thr !== 'number' || !Number.isFinite(thr)) return ''
+  // "above your 20% alert threshold" works for either direction —
+  // |pct| has already passed the gate, and we don't bother labelling
+  // rise vs drop here because the price line already shows the sign.
+  return ` — above your ${thr}% alert threshold`
+}
+
 function reasonText(ev: DigestEvent): string {
   const p = ev.payload
   switch (ev.rule) {
@@ -107,14 +138,23 @@ function reasonText(ev: DigestEvent): string {
     case 'psa10_change':
     case 'price_move': {
       const field = ev.rule === 'price_move' ? (p.price_field === 'psa10_usd' ? 'PSA 10' : 'Raw') : ev.rule === 'psa10_change' ? 'PSA 10' : 'Raw'
-      return `${field} ${fmtCents(p.old)} → ${fmtCents(p.new)} (${fmtPct(p.pct)})`
+      return `${field} ${fmtCents(p.old)} → ${fmtCents(p.new)} (${fmtPct(p.pct)})${thresholdSuffix(p)}`
     }
-    case 'spread_change':
-      return `Spread ${typeof p.old_spread === 'number' ? p.old_spread.toFixed(1) + '×' : '—'} → ${typeof p.new_spread === 'number' ? p.new_spread.toFixed(1) + '×' : '—'} (${fmtPct(p.pct)})`
-    case 'recent_sales':
-      return `${p.recent_active_count ?? '—'} new verified sales in the last ${p.window_days ?? '—'} days`
-    case 'market_activity':
-      return `${p.active_count ?? '—'} verified sales in the last ${p.window_days ?? '—'} days`
+    case 'spread_change': {
+      const old = typeof p.old_spread === 'number' ? p.old_spread.toFixed(1) + '×' : '—'
+      const neu = typeof p.new_spread === 'number' ? p.new_spread.toFixed(1) + '×' : '—'
+      return `Spread ${old} → ${neu} (${fmtPct(p.pct)})${thresholdSuffix(p)}`
+    }
+    case 'recent_sales': {
+      const sales = countNoun(p.recent_active_count, 'new verified sale', 'new verified sales')
+      const days  = countNoun(p.window_days, 'day', 'days')
+      return `${sales} in the last ${days}`
+    }
+    case 'market_activity': {
+      const sales = countNoun(p.active_count, 'verified sale', 'verified sales')
+      const days  = countNoun(p.window_days, 'day', 'days')
+      return `${sales} in the last ${days}`
+    }
   }
 }
 
@@ -198,6 +238,111 @@ function payloadMagnitude(payload: Record<string, unknown>): number {
   const pct = Number(payload.pct ?? 0)
   const cnt = Number(payload.recent_active_count ?? payload.active_count ?? 0)
   return Math.max(Number.isFinite(pct) ? Math.abs(pct) : 0, Number.isFinite(cnt) ? cnt : 0)
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-20 — per-(card, rule) dedupe
+// ─────────────────────────────────────────────────────────────────────
+
+/** Same key the renderer groups by. Mirrors the logic in
+ *  `groupEventsByCard` so dedupe and grouping always agree on what
+ *  "the same card" means. */
+function cardKey(ev: DigestEvent): string {
+  return ev.cardSlug ? `slug:${ev.cardSlug}` : `name:${ev.cardName}|${ev.setName}`
+}
+
+/** Rule-aware score for dedupe winner selection.
+ *    * recent_sales / market_activity → count (higher wins)
+ *    * price rules                    → |pct|  (bigger move wins)
+ *  Returned as a non-negative number; ties are broken by detectedAt
+ *  (latest wins). */
+function eventDedupeScore(ev: DigestEvent): number {
+  const p = ev.payload
+  switch (ev.rule) {
+    case 'recent_sales': {
+      const n = Number(p.recent_active_count ?? 0)
+      return Number.isFinite(n) ? n : 0
+    }
+    case 'market_activity': {
+      const n = Number(p.active_count ?? 0)
+      return Number.isFinite(n) ? n : 0
+    }
+    case 'raw_change':
+    case 'psa10_change':
+    case 'price_move':
+    case 'spread_change': {
+      const pct = Number(p.pct ?? 0)
+      return Number.isFinite(pct) ? Math.abs(pct) : 0
+    }
+  }
+}
+
+function detectedAtMs(ev: DigestEvent): number {
+  if (!ev.detectedAt) return 0
+  const t = Date.parse(ev.detectedAt)
+  return Number.isFinite(t) ? t : 0
+}
+
+/** Block 5A-W-20 — collapse duplicate-by-(card, rule) events to one
+ *  winner per pair. Returns the winners (kept) plus a map of
+ *  winnerId → [supersededIds] so the delivery orchestrator can mark
+ *  the rolled-up losers delivered alongside their winner.
+ *
+ *  Winner selection (brief 5A-W-20 §2):
+ *    1. eventDedupeScore (higher wins).
+ *       — sales/activity = count; price rules = |pct|.
+ *    2. Tie-break: latest detectedAt wins.
+ *    3. Final tie-break: array order wins (stable).
+ *
+ *  Pure — exported for unit tests. Events without an `id` cannot
+ *  be cited as a superseded entry (delivery only marks ID-bearing
+ *  rows) so they are silently dropped from the map; the winner
+ *  ranking is unaffected. */
+export function dedupeEventsPerCardRule(
+  events: DigestEvent[],
+): { keptEvents: DigestEvent[]; supersededByWinnerId: Map<string, string[]> } {
+  // Track best-so-far per (cardKey, rule) plus every loser that's
+  // ever lost to that winner. Re-keying on the winner's id at the
+  // end keeps the public shape easy to plumb into delivery.
+  type Bucket = {
+    winner:        DigestEvent
+    superseded:    string[]    // ids of losers — winner may not have an id yet
+  }
+  const buckets = new Map<string, Bucket>()
+  for (const ev of events) {
+    const k = `${cardKey(ev)}|${ev.rule}`
+    const existing = buckets.get(k)
+    if (!existing) {
+      buckets.set(k, { winner: ev, superseded: [] })
+      continue
+    }
+    // Compare new vs incumbent. Whichever loses gets its id (if any)
+    // pushed onto the bucket's superseded list — same card/rule, and
+    // the user has effectively been notified by the winner.
+    const newScore = eventDedupeScore(ev)
+    const oldScore = eventDedupeScore(existing.winner)
+    let newerWins: boolean
+    if (newScore !== oldScore) {
+      newerWins = newScore > oldScore
+    } else {
+      newerWins = detectedAtMs(ev) > detectedAtMs(existing.winner)
+    }
+    if (newerWins) {
+      if (existing.winner.id) existing.superseded.push(existing.winner.id)
+      buckets.set(k, { winner: ev, superseded: existing.superseded })
+    } else {
+      if (ev.id) existing.superseded.push(ev.id)
+    }
+  }
+  const keptEvents:           DigestEvent[]              = []
+  const supersededByWinnerId: Map<string, string[]>      = new Map()
+  for (const b of Array.from(buckets.values())) {
+    keptEvents.push(b.winner)
+    if (b.winner.id && b.superseded.length > 0) {
+      supersededByWinnerId.set(b.winner.id, b.superseded)
+    }
+  }
+  return { keptEvents, supersededByWinnerId }
 }
 
 /** Composite priority used to order CARDS in the digest. Higher = first.

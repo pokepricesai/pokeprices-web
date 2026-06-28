@@ -31,6 +31,7 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   buildEmailDigest,
+  dedupeEventsPerCardRule,
   groupEventsByCard,
   sortCardBlocksByPriority,
   type DigestEvent,
@@ -352,12 +353,21 @@ export async function deliverAlerts(
     // SELECTIVE: only the events that fit in the digest are marked.
     // Events trimmed by the card cap stay undelivered and roll into
     // the next batch.
+    //
+    // Block 5A-W-20 — plus any "superseded" IDs from the per-(card,
+    // rule) dedupe step whose winner is in includedEvents. The user
+    // has effectively been notified about that (card, rule)
+    // condition by the winner event; leaving the duplicates
+    // undelivered would just re-stack them on top of the next
+    // digest. selectDigestPlan only returns supersededIds whose
+    // winner survived the card cap, so this is safe.
     if (result.outcome === 'sent') {
-      const includedIds = plan.includedEvents
+      const winnerIds = plan.includedEvents
         .map(e => e.id)
         .filter((id): id is string => typeof id === 'string' && id.length > 0)
-      if (includedIds.length > 0) {
-        await markEventsDelivered(supa, includedIds, asOfIso)
+      const allIds = [...winnerIds, ...plan.supersededIds]
+      if (allIds.length > 0) {
+        await markEventsDelivered(supa, allIds, asOfIso)
       }
     }
   }
@@ -390,23 +400,65 @@ export type DigestPlan = {
    *  per-card safety cap. Surface this in the admin response so the
    *  operator can spot a leftover trend. */
   leftover:       number
+  /** Block 5A-W-20 — alert_events ids that were dropped by the
+   *  per-(card, rule) dedupe step AND whose winning sibling event
+   *  survives in `includedEvents`. The orchestrator marks these
+   *  delivered alongside the winners on a successful send, on the
+   *  theory that the user has effectively been notified about the
+   *  same (card, rule) condition.
+   *
+   *  IDs from losers whose winner ALSO got cut by the card cap are
+   *  NOT included here — neither side of that pair was put in front
+   *  of the user, so neither side should be marked delivered. */
+  supersededIds:  string[]
 }
 
 /** Group raw digest events into card blocks, sort blocks by priority,
  *  trim to the card cap, and trim each card to MAX_EVENTS_PER_CARD.
- *  Returns the flat list of surviving events plus counters. Pure. */
+ *  Returns the flat list of surviving events plus counters. Pure.
+ *
+ *  Block 5A-W-20 — dedupes per (card, rule) BEFORE grouping so the
+ *  card-cap loop sees the deduped event count, not the raw count.
+ *  This keeps the digest visually tight (one line per rule per card)
+ *  AND prevents the card cap from eating real cards when one card
+ *  has dozens of near-duplicate events stacked on it. */
 export function selectDigestPlan(events: DigestEvent[], maxCards: number): DigestPlan {
-  if (events.length === 0) return { includedEvents: [], cardCount: 0, leftover: 0 }
-  const blocks = sortCardBlocksByPriority(groupEventsByCard(events))
+  if (events.length === 0) return { includedEvents: [], cardCount: 0, leftover: 0, supersededIds: [] }
+  // 1. Dedupe per (card, rule). Winners proceed; losers are tracked
+  //    so we can roll them into delivered_at when the winner ships.
+  const { keptEvents, supersededByWinnerId } = dedupeEventsPerCardRule(events)
+
+  // 2. Group + sort + cap (same as pre-5A-W-20, but on the deduped set).
+  const blocks = sortCardBlocksByPriority(groupEventsByCard(keptEvents))
   const capped = blocks.slice(0, maxCards).map(b => ({
     ...b,
     events: b.events.slice(0, MAX_EVENTS_PER_CARD),
   }))
   const includedEvents = capped.flatMap(b => b.events)
+
+  // 3. Pick only the superseded IDs whose winner survived to
+  //    includedEvents — others got cut and shouldn't be claimed
+  //    as "user was notified".
+  const includedWinnerIds = new Set(
+    includedEvents.map(e => e.id).filter((id): id is string => typeof id === 'string' && id.length > 0),
+  )
+  const supersededIds: string[] = []
+  for (const winnerId of Array.from(includedWinnerIds)) {
+    const losers = supersededByWinnerId.get(winnerId)
+    if (losers && losers.length > 0) supersededIds.push(...losers)
+  }
+
   return {
     includedEvents,
     cardCount: capped.length,
-    leftover:  Math.max(0, events.length - includedEvents.length),
+    // leftover counts events DROPPED by the card cap (or the per-card
+    // safety cap) — superseded duplicates are intentionally NOT
+    // counted as leftover because they were never going to render
+    // even if no cap had applied. Matches the operator's mental
+    // model: "leftover means unrendered cards we couldn't fit", not
+    // "every event the dedupe collapsed".
+    leftover:  Math.max(0, keptEvents.length - includedEvents.length),
+    supersededIds,
   }
 }
 
@@ -584,15 +636,19 @@ async function toDigestEvents(supa: SupabaseClient, events: AlertEventRow[]): Pr
   // Block 5A-W-11 — plumb `id` and `cardSlug` so the digest builder
   // groups by card AND the delivery orchestrator can map blocks back
   // to alert_events ids for selective delivered_at marking.
+  // Block 5A-W-20 — also plumb `detectedAt` so the renderer's
+  // dedupe helper has a tie-breaker when two events for the same
+  // (card, rule) have equal magnitudes.
   return events.map(e => ({
-    cardName: e.card_name ?? e.card_slug,
-    setName:  e.set_name ?? '',
-    cardSlug: e.card_slug,
-    cardUrl:  urlMap.get(e.card_slug),
-    rule:     e.rule,
-    severity: e.severity,
-    payload:  e.payload_json ?? {},
-    id:       e.id,
+    cardName:   e.card_name ?? e.card_slug,
+    setName:    e.set_name ?? '',
+    cardSlug:   e.card_slug,
+    cardUrl:    urlMap.get(e.card_slug),
+    rule:       e.rule,
+    severity:   e.severity,
+    payload:    e.payload_json ?? {},
+    id:         e.id,
+    detectedAt: e.detected_at,
   }))
 }
 

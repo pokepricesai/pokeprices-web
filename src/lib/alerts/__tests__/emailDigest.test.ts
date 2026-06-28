@@ -8,6 +8,7 @@ import {
   buildEmailDigest,
   buildSampleEvents,
   cardPriorityScore,
+  dedupeEventsPerCardRule,
   groupEventsByCard,
   sortCardBlocksByPriority,
   type DigestCardBlock,
@@ -418,5 +419,138 @@ describe('buildEmailDigest — PII guard', () => {
     expect(blob).not.toMatch(/u-should-not-leak/)
     expect(blob).not.toMatch(/"email"|"user_id"|"token"/i)
     expect(blob).not.toMatch(/shhh/)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-20 — pluralisation
+// ─────────────────────────────────────────────────────────────────────
+
+describe('reasonText — pluralisation (Block 5A-W-20)', () => {
+  it('renders "1 new verified sale" (singular) for a count of 1', () => {
+    const d = buildEmailDigest([ev({ rule: 'recent_sales', payload: { recent_active_count: 1, window_days: 7 } })])
+    expect(d.text).toMatch(/1 new verified sale in the last 7 days/)
+    expect(d.text).not.toMatch(/1 new verified sales/)
+  })
+
+  it('renders "2 new verified sales" (plural) for a count of 2', () => {
+    const d = buildEmailDigest([ev({ rule: 'recent_sales', payload: { recent_active_count: 2, window_days: 7 } })])
+    expect(d.text).toMatch(/2 new verified sales in the last 7 days/)
+  })
+
+  it('renders "1 verified sale in the last 14 days" for market_activity', () => {
+    const d = buildEmailDigest([ev({ rule: 'market_activity', payload: { active_count: 1, window_days: 14 } })])
+    expect(d.text).toMatch(/1 verified sale in the last 14 days/)
+    expect(d.text).not.toMatch(/1 verified sales/)
+  })
+
+  it('singularises the day word too: "1 verified sale in the last 1 day"', () => {
+    const d = buildEmailDigest([ev({ rule: 'market_activity', payload: { active_count: 1, window_days: 1 } })])
+    expect(d.text).toMatch(/1 verified sale in the last 1 day/)
+    expect(d.text).not.toMatch(/1 day s/)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-20 — threshold-aware copy
+// ─────────────────────────────────────────────────────────────────────
+
+describe('reasonText — threshold suffix (Block 5A-W-20)', () => {
+  it('appends "above your N% alert threshold" when payload has threshold metadata', () => {
+    const d = buildEmailDigest([ev({
+      rule: 'raw_change',
+      payload: { old: 1000, new: 1167, pct: 16.7, threshold_source: 'global', threshold_pct: 15, direction: 'rise' },
+    })])
+    expect(d.text).toMatch(/above your 15% alert threshold/)
+  })
+
+  it('appends threshold suffix for override-source payloads too', () => {
+    const d = buildEmailDigest([ev({
+      rule: 'raw_change',
+      payload: { old: 1000, new: 800, pct: -20, threshold_source: 'override', threshold_pct: 10, direction: 'drop' },
+    })])
+    expect(d.text).toMatch(/above your 10% alert threshold/)
+  })
+
+  it('does NOT append the suffix for legacy payloads (no threshold metadata)', () => {
+    const d = buildEmailDigest([ev({
+      rule: 'raw_change',
+      payload: { old: 1000, new: 1200, pct: 20 },
+    })])
+    expect(d.text).not.toMatch(/alert threshold/)
+  })
+
+  it('does NOT append the suffix for sales/activity rules (count-based)', () => {
+    const d = buildEmailDigest([ev({
+      rule: 'recent_sales',
+      payload: { recent_active_count: 5, window_days: 7, threshold_source: 'global' },
+    })])
+    // Threshold copy is for price-style triggers; sales/activity lines
+    // stay clean.
+    expect(d.text).not.toMatch(/alert threshold/)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-20 — dedupe + single-block-per-card rendering
+// ─────────────────────────────────────────────────────────────────────
+
+describe('dedupeEventsPerCardRule (Block 5A-W-20)', () => {
+  it('keeps one event per (card, rule); rolls losers into supersededByWinnerId', () => {
+    const events: DigestEvent[] = [
+      ev({ id: 'rs1', cardSlug: '1', rule: 'recent_sales',
+           payload: { recent_active_count: 37, window_days: 7 },
+           detectedAt: '2026-06-24T10:00:00Z' }),
+      ev({ id: 'rs2', cardSlug: '1', rule: 'recent_sales',
+           payload: { recent_active_count: 41, window_days: 7 },
+           detectedAt: '2026-06-25T10:00:00Z' }),
+    ]
+    const { keptEvents, supersededByWinnerId } = dedupeEventsPerCardRule(events)
+    expect(keptEvents).toHaveLength(1)
+    expect(keptEvents[0].id).toBe('rs2')
+    expect(supersededByWinnerId.get('rs2')).toEqual(['rs1'])
+  })
+
+  it('supersededByWinnerId omits the winner key when no loser exists for that rule', () => {
+    const events: DigestEvent[] = [
+      ev({ id: 'rs1', cardSlug: '1', rule: 'recent_sales',
+           payload: { recent_active_count: 41, window_days: 7 } }),
+    ]
+    const { keptEvents, supersededByWinnerId } = dedupeEventsPerCardRule(events)
+    expect(keptEvents).toHaveLength(1)
+    expect(supersededByWinnerId.has('rs1')).toBe(false)
+  })
+
+  it('renders ONE card block per card even when duplicate events were supplied', () => {
+    // Mirrors the user's reported email shape: Charizard with two
+    // recent_sales + two market_activity events. After dedupe the
+    // card has exactly two lines, not four.
+    const events: DigestEvent[] = [
+      ev({ id: '1', cardSlug: '1', cardName: 'Charizard #4', setName: 'Base Set',
+           rule: 'recent_sales',
+           payload: { recent_active_count: 37, window_days: 7 },
+           detectedAt: '2026-06-24T10:00:00Z' }),
+      ev({ id: '2', cardSlug: '1', cardName: 'Charizard #4', setName: 'Base Set',
+           rule: 'recent_sales',
+           payload: { recent_active_count: 41, window_days: 7 },
+           detectedAt: '2026-06-25T10:00:00Z' }),
+      ev({ id: '3', cardSlug: '1', cardName: 'Charizard #4', setName: 'Base Set',
+           rule: 'market_activity',
+           payload: { active_count: 48, window_days: 14 },
+           detectedAt: '2026-06-24T10:00:00Z' }),
+      ev({ id: '4', cardSlug: '1', cardName: 'Charizard #4', setName: 'Base Set',
+           rule: 'market_activity',
+           payload: { active_count: 48, window_days: 14 },
+           detectedAt: '2026-06-25T10:00:00Z' }),
+    ]
+    const { keptEvents } = dedupeEventsPerCardRule(events)
+    expect(keptEvents).toHaveLength(2)
+    const ruleSet = new Set(keptEvents.map(e => e.rule))
+    expect(ruleSet.has('recent_sales')).toBe(true)
+    expect(ruleSet.has('market_activity')).toBe(true)
+    // Winners: rs2 (count 41 beats 37), ma2 (tied on count → latest wins).
+    const ids = new Set(keptEvents.map(e => e.id))
+    expect(ids.has('2')).toBe(true)
+    expect(ids.has('4')).toBe(true)
   })
 })

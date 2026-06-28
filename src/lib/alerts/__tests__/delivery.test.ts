@@ -490,19 +490,27 @@ describe('selectDigestPlan — pure card grouping + capping', () => {
   })
 
   it('trims a card to MAX_EVENTS_PER_CARD = 10 so a runaway card cannot dominate', () => {
-    const events: DigestEvent[] = []
-    for (let i = 0; i < 25; i++) {
-      events.push(ev({ id: `e${i}`, cardSlug: 'one', rule: 'raw_change', severity: 'normal', payload: { pct: 5 } }))
-    }
+    // Block 5A-W-20 — per-(card, rule) dedupe runs BEFORE the per-card
+    // cap, so a runaway card now needs distinct RULES to exercise the
+    // 10-event ceiling. (Pre-dedupe, 25 raw_change events on one card
+    // would have been trimmed to 10; post-dedupe they collapse to 1.)
+    // We cycle through the six rule kinds with varied magnitudes so
+    // dedupe leaves one per rule; that gives 6 distinct events for
+    // the card, all surviving the per-card cap.
+    const rules = ['raw_change','psa10_change','price_move','spread_change','recent_sales','market_activity'] as const
+    const events: DigestEvent[] = rules.map((r, i) => ev({
+      id: `e${i}`, cardSlug: 'one', rule: r, severity: 'normal',
+      payload: { pct: 10 + i, recent_active_count: 5 + i, active_count: 5 + i },
+    }))
     const plan = selectDigestPlan(events, 10)
     expect(plan.cardCount).toBe(1)
-    expect(plan.includedEvents).toHaveLength(10)
-    expect(plan.leftover).toBe(15)
+    expect(plan.includedEvents).toHaveLength(6)
+    expect(plan.leftover).toBe(0)
   })
 
   it('returns empty plan for empty input', () => {
     const plan = selectDigestPlan([], 10)
-    expect(plan).toEqual({ includedEvents: [], cardCount: 0, leftover: 0 })
+    expect(plan).toEqual({ includedEvents: [], cardCount: 0, leftover: 0, supersededIds: [] })
   })
 })
 
@@ -802,20 +810,37 @@ describe('deliverAlerts — Block 5A-W-12 cooldown gate (preview mode)', () => {
 
 describe('deliverAlerts — Block 5A-W-12 accurate backlog counts', () => {
   it('reports the FULL backlog in eventsLeftUndelivered, not just the loaded slice', async () => {
-    // Mirror the production case: 69 undelivered, 40 delivered (more
-    // than a day ago so cooldown does not skip), maxEventsPerUser caps
-    // at 20 so the loaded slice under-reports the queue depth.
-    seedBackloggedUser({ userId: 'u1', undeliveredN: 69, lastDeliveredAt: '2026-06-22T00:00:00Z' })
-    // Add 39 extra delivered events to bring delivered count to 40 (1
-    // is the lastDelivered seeded by the helper).
-    for (let i = 0; i < 39; i++) {
+    // Mirror the production case: lots of undelivered events spread
+    // across distinct cards. maxEventsPerUser caps the loaded slice
+    // at 20 so the in-memory view under-reports the queue depth — we
+    // expect eventsLeftUndelivered to reflect the FULL backlog.
+    //
+    // Block 5A-W-20 — events are now seeded on DISTINCT cards so the
+    // per-(card, rule) dedupe is a no-op. (Pre-20 the helper put 69
+    // events on the same card and same rule — dedupe would collapse
+    // them to 1, defeating the per-card cap this test exists to
+    // exercise.)
+    seedPrefs('u1')
+    // 1 prior delivered event so cooldown is well past.
+    fakeDB.seed('alert_events', [
+      ...fakeDB.rows('alert_events'),
+      {
+        id: 'e-u1-prior', user_id: 'u1', card_slug: '1450205',
+        card_name: 'Charizard', set_name: 'Base',
+        rule: 'raw_change', severity: 'normal', payload_json: {},
+        detected_at: '2026-06-22T00:00:00Z',
+        delivered_at: '2026-06-22T01:00:00Z', delivery_channel: 'email',
+      },
+    ])
+    for (let i = 0; i < 69; i++) {
       fakeDB.seed('alert_events', [
         ...fakeDB.rows('alert_events'),
         {
-          id: `e-u1-d${i}`, user_id: 'u1', card_slug: '1450205',
-          rule: 'raw_change', severity: 'normal', payload_json: {},
-          detected_at: '2026-06-22T00:00:00Z',
-          delivered_at: '2026-06-22T01:00:00Z', delivery_channel: 'email',
+          id: `e-u1-u${i}`, user_id: 'u1', card_slug: `card-${i}`,
+          card_name: `Card ${i}`, set_name: 'Base',
+          rule: 'raw_change', severity: 'normal', payload_json: { pct: 10 + i },
+          detected_at:  `2026-06-24T10:0${i % 10}:00Z`,
+          delivered_at: null,
         },
       ])
     }
@@ -827,8 +852,9 @@ describe('deliverAlerts — Block 5A-W-12 accurate backlog counts', () => {
       getUserEmail: emailMap([['u1','user@example.com']]),
       sendFn: send.fn,
     })
-    // All 69 undelivered events sit on one card → MAX_EVENTS_PER_CARD trims to 10 included.
-    // eventsLeftUndelivered must be 69 - 10 = 59 (not 0 from the trimmed slice).
+    // 20 events loaded → 20 distinct cards → maxCardsPerEmail trims
+    // to 10 included. eventsLeftUndelivered = 69 (total) - 10 (sent)
+    // = 59 — not 0 from the trimmed slice.
     expect(result.perUser[0].eventCount).toBe(10)
     expect(result.perUser[0].eventsLeftUndelivered).toBe(59)
     expect(result.eventsLeftUndelivered).toBe(59)
@@ -868,5 +894,171 @@ describe('deliverAlerts — Block 5A-W-12 candidate-selection mix', () => {
     expect(sentRow).toBeDefined()
     expect(result.usersInCooldown).toBe(1)
     expect(result.usersEmailed).toBe(1)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-20 — selectDigestPlan dedupe + supersededIds plumbing
+// + delivery-side delivered_at strategy for superseded duplicates.
+// ─────────────────────────────────────────────────────────────────────
+
+describe('selectDigestPlan — Block 5A-W-20 dedupe', () => {
+  it('collapses duplicate recent_sales events on the same card to ONE event', () => {
+    const events: DigestEvent[] = [
+      ev({ id: 'rs1', cardSlug: '1', rule: 'recent_sales',
+           payload: { recent_active_count: 37, window_days: 7 },
+           detectedAt: '2026-06-24T10:00:00Z' }),
+      ev({ id: 'rs2', cardSlug: '1', rule: 'recent_sales',
+           payload: { recent_active_count: 41, window_days: 7 },
+           detectedAt: '2026-06-25T10:00:00Z' }),
+    ]
+    const plan = selectDigestPlan(events, 10)
+    expect(plan.includedEvents).toHaveLength(1)
+    // Higher count wins (41 > 37).
+    expect(plan.includedEvents[0].id).toBe('rs2')
+    // The loser's id rolls into supersededIds so delivery can mark it.
+    expect(plan.supersededIds).toEqual(['rs1'])
+  })
+
+  it('collapses duplicate market_activity events; ties on count → latest wins', () => {
+    const events: DigestEvent[] = [
+      ev({ id: 'ma1', cardSlug: '1', rule: 'market_activity',
+           payload: { active_count: 48, window_days: 14 },
+           detectedAt: '2026-06-24T10:00:00Z' }),
+      ev({ id: 'ma2', cardSlug: '1', rule: 'market_activity',
+           payload: { active_count: 48, window_days: 14 },     // SAME count
+           detectedAt: '2026-06-25T10:00:00Z' }),               // later
+    ]
+    const plan = selectDigestPlan(events, 10)
+    expect(plan.includedEvents).toHaveLength(1)
+    expect(plan.includedEvents[0].id).toBe('ma2')
+    expect(plan.supersededIds).toEqual(['ma1'])
+  })
+
+  it('collapses duplicate raw_change; biggest |pct| wins', () => {
+    const events: DigestEvent[] = [
+      ev({ id: 'r1', cardSlug: '1', rule: 'raw_change',
+           payload: { pct: 12, old: 1000, new: 1120 },
+           detectedAt: '2026-06-25T10:00:00Z' }),               // later, smaller move
+      ev({ id: 'r2', cardSlug: '1', rule: 'raw_change',
+           payload: { pct: -20, old: 1000, new: 800 },
+           detectedAt: '2026-06-24T10:00:00Z' }),               // earlier, bigger move
+    ]
+    const plan = selectDigestPlan(events, 10)
+    expect(plan.includedEvents).toHaveLength(1)
+    expect(plan.includedEvents[0].id).toBe('r2')                // |-20| > |12|
+    expect(plan.supersededIds).toEqual(['r1'])
+  })
+
+  it('keeps different RULES on the same card (dedupe is per rule, not per card)', () => {
+    const events: DigestEvent[] = [
+      ev({ id: 'rs1', cardSlug: '1', rule: 'recent_sales',
+           payload: { recent_active_count: 41, window_days: 7 } }),
+      ev({ id: 'rs2', cardSlug: '1', rule: 'recent_sales',
+           payload: { recent_active_count: 37, window_days: 7 } }),
+      ev({ id: 'ma1', cardSlug: '1', rule: 'market_activity',
+           payload: { active_count: 48, window_days: 14 } }),
+      ev({ id: 'ma2', cardSlug: '1', rule: 'market_activity',
+           payload: { active_count: 48, window_days: 14 } }),
+    ]
+    const plan = selectDigestPlan(events, 10)
+    expect(plan.cardCount).toBe(1)
+    expect(plan.includedEvents).toHaveLength(2)                 // one per rule, not four
+    const rules = plan.includedEvents.map(e => e.rule).sort()
+    expect(rules).toEqual(['market_activity', 'recent_sales'])
+    expect(plan.supersededIds.sort()).toEqual(['ma2', 'rs2'])
+  })
+
+  it('does NOT mark superseded the loser of a pair whose winner got cut by the card cap', () => {
+    // Two cards. With maxCards=1 only the winner-card survives the cap.
+    // The other card's loser must NOT appear in supersededIds — the
+    // user was never notified about that (card, rule).
+    const events: DigestEvent[] = [
+      // Card "kept" — high score so it survives the cap.
+      ev({ id: 'kept-win',  cardSlug: 'kept', rule: 'raw_change',
+           payload: { pct: 30 }, severity: 'high',  detectedAt: '2026-06-25T10:00:00Z' }),
+      ev({ id: 'kept-lose', cardSlug: 'kept', rule: 'raw_change',
+           payload: { pct: 5  }, severity: 'normal', detectedAt: '2026-06-24T10:00:00Z' }),
+      // Card "cut" — low score so the card cap eats it.
+      ev({ id: 'cut-win',   cardSlug: 'cut',  rule: 'recent_sales',
+           payload: { recent_active_count: 9 }, severity: 'low', detectedAt: '2026-06-25T10:00:00Z' }),
+      ev({ id: 'cut-lose',  cardSlug: 'cut',  rule: 'recent_sales',
+           payload: { recent_active_count: 3 }, severity: 'low', detectedAt: '2026-06-24T10:00:00Z' }),
+    ]
+    const plan = selectDigestPlan(events, 1)
+    expect(plan.cardCount).toBe(1)
+    expect(plan.includedEvents.map(e => e.id)).toEqual(['kept-win'])
+    // kept-lose was superseded by an INCLUDED winner → rolls in.
+    // cut-lose was superseded but its winner was CUT → must NOT roll in.
+    expect(plan.supersededIds).toEqual(['kept-lose'])
+  })
+})
+
+describe('deliverAlerts — Block 5A-W-20 marks superseded duplicates delivered', () => {
+  it('marks BOTH the winner and the superseded duplicate delivered on a successful send', async () => {
+    // Two real-shape recent_sales events on the same card, freshly
+    // inserted by a previous evaluator pass.
+    seedPrefs('u1')
+    fakeDB.seed('alert_events', [
+      ...fakeDB.rows('alert_events'),
+      {
+        id: 'rs-37', user_id: 'u1', card_slug: '1450205',
+        card_name: 'Charizard', set_name: 'Base Set',
+        rule: 'recent_sales', severity: 'normal',
+        payload_json: { recent_active_count: 37, window_days: 7 },
+        detected_at: '2026-06-24T10:00:00Z', delivered_at: null,
+      },
+      {
+        id: 'rs-41', user_id: 'u1', card_slug: '1450205',
+        card_name: 'Charizard', set_name: 'Base Set',
+        rule: 'recent_sales', severity: 'normal',
+        payload_json: { recent_active_count: 41, window_days: 7 },
+        detected_at: '2026-06-25T10:00:00Z', delivered_at: null,
+      },
+    ])
+    const send = stubSend('sent', { emailId: 'r-1' })
+    const result = await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      getUserEmail: emailMap([['u1', 'user@example.com']]),
+      sendFn: send.fn,
+    })
+    expect(result.perUser[0].outcome).toBe('sent')
+    // Card cap renders ONE row in the email — the winner (41 > 37).
+    expect(result.perUser[0].eventCount).toBe(1)
+    // BOTH events now carry delivered_at; the loser does not get to
+    // re-stack on the next digest.
+    const rows = fakeDB.rows('alert_events') as Array<{ id: string; delivered_at: string | null }>
+    const byId = new Map(rows.map(r => [r.id, r]))
+    expect(byId.get('rs-37')!.delivered_at).toBe(asOf.toISOString())
+    expect(byId.get('rs-41')!.delivered_at).toBe(asOf.toISOString())
+  })
+
+  it('does NOT mark superseded delivered when the send fails', async () => {
+    seedPrefs('u1')
+    fakeDB.seed('alert_events', [
+      ...fakeDB.rows('alert_events'),
+      {
+        id: 'rs-a', user_id: 'u1', card_slug: '1450205',
+        card_name: 'Charizard', set_name: 'Base Set',
+        rule: 'recent_sales', severity: 'normal',
+        payload_json: { recent_active_count: 5, window_days: 7 },
+        detected_at: '2026-06-25T10:00:00Z', delivered_at: null,
+      },
+      {
+        id: 'rs-b', user_id: 'u1', card_slug: '1450205',
+        card_name: 'Charizard', set_name: 'Base Set',
+        rule: 'recent_sales', severity: 'normal',
+        payload_json: { recent_active_count: 9, window_days: 7 },
+        detected_at: '2026-06-25T11:00:00Z', delivered_at: null,
+      },
+    ])
+    const send = stubSend('provider_error', { reason: 'sdk_exception' })
+    await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      getUserEmail: emailMap([['u1', 'user@example.com']]),
+      sendFn: send.fn,
+    })
+    const rows = fakeDB.rows('alert_events') as Array<{ delivered_at: string | null }>
+    for (const r of rows) expect(r.delivered_at).toBeNull()
   })
 })
