@@ -12,6 +12,10 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import type { AlertRule } from '@/lib/alerts/preferences'
+import {
+  sortReasonsPriceFirst,
+  sortCardsPriceFirst,
+} from './recentAlertsLogic'
 
 type AlertEventRow = {
   id:           string
@@ -97,9 +101,15 @@ function groupByCard(rows: AlertEventRow[]): CardGroup[] {
       })
     }
   }
-  return Array.from(map.values()).sort(
-    (a, b) => new Date(b.latestAt).getTime() - new Date(a.latestAt).getTime(),
-  )
+  // Block 5A-W-23 — sort cards so price-rule cards rank above
+  // sales-only cards (ties: newest first). Reorder each card's
+  // reason chips so price reasons render before sales reasons.
+  // Pure helpers — see recentAlertsLogic.ts.
+  const sorted = sortCardsPriceFirst(Array.from(map.values()))
+  for (const g of sorted) {
+    g.reasons = sortReasonsPriceFirst(g.reasons)
+  }
+  return sorted
 }
 
 export default function RecentAlerts({ userId }: { userId: string }) {

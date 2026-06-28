@@ -167,8 +167,8 @@ export default function WatchlistAlertOverrideControl({
 
           {/* Use-global toggle */}
           <RowToggle
-            label="Use my global Watchlist defaults"
-            sub="When on, this card inherits your Watchlist alert sensitivity. Turn off to set custom thresholds for this card."
+            label="Use my global defaults"
+            sub="Inherit your Watchlist alert sensitivity. Turn off to set custom rise/drop thresholds just for this card."
             value={row.use_global_defaults}
             onChange={v => v ? void resetToGlobal() : void startCustomising()}
             disabled={!row.enabled}
