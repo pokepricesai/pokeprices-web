@@ -894,3 +894,171 @@ describe('ProposedAlertEvent shape', () => {
     expect(sample).toBeDefined()
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-19 — per-card watchlist alert overrides, end-to-end via
+// FakeDB. Exercises the loader, the resolver, and the asymmetric
+// threshold path through evaluateAlerts.
+// ─────────────────────────────────────────────────────────────────────
+
+function seedOverride(
+  userId:   string,
+  cardSlug: string,
+  patch: Partial<{
+    enabled:                  boolean
+    use_global_defaults:      boolean
+    rise_pct:                 number | null
+    drop_pct:                 number | null
+    recent_sales_enabled:     boolean
+    market_activity_enabled:  boolean
+  }> = {},
+) {
+  fakeDB.seed('watchlist_alert_overrides', [
+    ...fakeDB.rows('watchlist_alert_overrides'),
+    {
+      id:                      `over-${userId}-${cardSlug}`,
+      user_id:                 userId,
+      card_slug:               cardSlug,
+      enabled:                 true,
+      use_global_defaults:     false,
+      rise_pct:                null,
+      drop_pct:                null,
+      recent_sales_enabled:    true,
+      market_activity_enabled: true,
+      ...patch,
+    },
+  ])
+}
+
+describe('evaluateAlerts — Block 5A-W-19 per-card overrides', () => {
+  // The pre-19 behaviour is preserved end-to-end when no override row
+  // exists. We rely on the 60+ existing tests above to assert that;
+  // this block focuses on the new branches.
+
+  it('global defaults still apply when no override row exists', async () => {
+    seedPrefs('u1', { rulePriceMovePct: 10, ruleRawChangePct: 10 })
+    seedWatch('u1', '1450205')
+    seedPriceTwoPoints('1450205', 1000, 1200)   // +20%
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    const ev = r.proposedEvents.find(e => e.rule === 'raw_change')
+    expect(ev).toBeDefined()
+    expect(ev!.payload).toMatchObject({ threshold_source: 'global', threshold_pct: 10, direction: 'rise' })
+  })
+
+  it('use_global_defaults=true behaves identically to no row', async () => {
+    seedPrefs('u1', { rulePriceMovePct: 10, ruleRawChangePct: 10 })
+    seedWatch('u1', '1450205')
+    seedOverride('u1', '1450205', { use_global_defaults: true, rise_pct: 50, drop_pct: 50 })  // wide custom thresholds — IGNORED
+    seedPriceTwoPoints('1450205', 1000, 1200)   // +20%
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    const ev = r.proposedEvents.find(e => e.rule === 'raw_change')
+    expect(ev).toBeDefined()
+    expect(ev!.payload).toMatchObject({ threshold_source: 'global', threshold_pct: 10 })
+  })
+
+  it('custom rise threshold suppresses a +5% move when the user set rise=20%', async () => {
+    seedPrefs('u1', { rulePriceMovePct: 4, ruleRawChangePct: 4 })   // would fire at globals
+    seedWatch('u1', '1450205')
+    seedOverride('u1', '1450205', { use_global_defaults: false, rise_pct: 20, drop_pct: 10 })
+    seedPriceTwoPoints('1450205', 1000, 1050)   // +5% only
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    expect(r.proposedEvents.find(e => e.rule === 'raw_change' || e.rule === 'price_move')).toBeUndefined()
+  })
+
+  it('custom rise threshold FIRES a +21% move when the user set rise=20% (payload tags it as override)', async () => {
+    seedPrefs('u1', { rulePriceMovePct: 30, ruleRawChangePct: 30 })   // would NOT fire at globals
+    seedWatch('u1', '1450205')
+    seedOverride('u1', '1450205', { use_global_defaults: false, rise_pct: 20, drop_pct: 10 })
+    seedPriceTwoPoints('1450205', 1000, 1210)   // +21%
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    const ev = r.proposedEvents.find(e => e.rule === 'raw_change')
+    expect(ev).toBeDefined()
+    expect(ev!.payload).toMatchObject({
+      threshold_source: 'override',
+      threshold_pct:    20,
+      direction:        'rise',
+    })
+  })
+
+  it('custom drop threshold suppresses a -5% move when the user set drop=20%', async () => {
+    seedPrefs('u1', { rulePriceMovePct: 4, ruleRawChangePct: 4 })
+    seedWatch('u1', '1450205')
+    seedOverride('u1', '1450205', { use_global_defaults: false, rise_pct: 50, drop_pct: 20 })
+    seedPriceTwoPoints('1450205', 1000, 950)   // -5%
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    expect(r.proposedEvents.find(e => e.rule === 'raw_change' || e.rule === 'price_move')).toBeUndefined()
+  })
+
+  it('custom drop threshold FIRES a -12% move when the user set drop=10%', async () => {
+    seedPrefs('u1', { rulePriceMovePct: 30, ruleRawChangePct: 30 })
+    seedWatch('u1', '1450205')
+    seedOverride('u1', '1450205', { use_global_defaults: false, rise_pct: 50, drop_pct: 10 })
+    seedPriceTwoPoints('1450205', 1000, 880)   // -12%
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    const ev = r.proposedEvents.find(e => e.rule === 'raw_change')
+    expect(ev).toBeDefined()
+    expect(ev!.payload).toMatchObject({
+      threshold_source: 'override',
+      threshold_pct:    10,
+      direction:        'drop',
+    })
+  })
+
+  it('enabled=false silences ALL rules for the card even when global toggles are on', async () => {
+    seedPrefs('u1')
+    seedWatch('u1', '1450205')
+    seedOverride('u1', '1450205', { enabled: false })
+    seedPriceTwoPoints('1450205', 1000, 2000)   // +100%, would always fire
+    // Recent sales too — should ALSO be suppressed.
+    fakeDB.seed('recent_sales', [
+      { internal_card_slug: '1450205', sale_date: '2026-06-22', parse_status: 'ok', review_status: 'active' },
+      { internal_card_slug: '1450205', sale_date: '2026-06-21', parse_status: 'ok', review_status: 'active' },
+    ])
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    expect(r.proposedEvents.filter(e => e.cardSlug === '1450205')).toEqual([])
+  })
+
+  it('portfolio alerts unaffected when an override exists (source gate)', async () => {
+    seedPrefs('u1', { rulePriceMovePct: 4, ruleRawChangePct: 4 })
+    seedPortfolio('u1', '1450205')
+    // Override would silence a watchlist card, but this card is
+    // PORTFOLIO only — the override must be ignored.
+    seedOverride('u1', '1450205', { enabled: false })
+    seedPriceTwoPoints('1450205', 1000, 1100)   // +10%
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    const ev = r.proposedEvents.find(e => e.rule === 'raw_change')
+    expect(ev).toBeDefined()
+    expect(ev!.source).toBe('portfolio')
+    expect(ev!.payload).toMatchObject({ threshold_source: 'global', source: 'portfolio' })
+  })
+
+  it('cooldown still suppresses an override-triggered alert', async () => {
+    seedPrefs('u1', { minHoursBetweenAlerts: 24, rulePriceMovePct: 30, ruleRawChangePct: 30 })
+    seedWatch('u1', '1450205')
+    seedOverride('u1', '1450205', { use_global_defaults: false, rise_pct: 10, drop_pct: 10 })
+    seedPriceTwoPoints('1450205', 1000, 1200)   // +20% — clears override gate
+    fakeDB.seed('alert_events', [{
+      user_id: 'u1', card_slug: '1450205', rule: 'raw_change',
+      detected_at: new Date(asOf.getTime() - 2 * 3_600_000).toISOString(),
+    }])
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    expect(r.triggersSuppressedByCooldown).toBe(1)
+    expect(r.proposedEvents).toEqual([])
+  })
+
+  it('override recent_sales_enabled=false suppresses the recent_sales rule for that card only', async () => {
+    seedPrefs('u1')
+    seedWatch('u1', '1450205')
+    seedWatch('u1', '9999999', 'Mew', 'Promo')   // second card without override
+    seedOverride('u1', '1450205', { use_global_defaults: false, rise_pct: 50, drop_pct: 50, recent_sales_enabled: false })
+    fakeDB.seed('recent_sales', [
+      { internal_card_slug: '1450205', sale_date: '2026-06-22', parse_status: 'ok', review_status: 'active' },
+      { internal_card_slug: '9999999', sale_date: '2026-06-22', parse_status: 'ok', review_status: 'active' },
+    ])
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    const overridden = r.proposedEvents.find(e => e.cardSlug === '1450205' && e.rule === 'recent_sales')
+    const otherCard  = r.proposedEvents.find(e => e.cardSlug === '9999999' && e.rule === 'recent_sales')
+    expect(overridden).toBeUndefined()
+    expect(otherCard).toBeDefined()
+  })
+})

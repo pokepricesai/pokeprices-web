@@ -15,6 +15,13 @@ import {
   type AlertRule,
   type UserAlertPreferences,
 } from './preferences'
+import {
+  resolveCardAlertSettings,
+  thresholdForSignedPct,
+  loadWatchlistAlertOverrides,
+  lookupOverride,
+  type EffectiveCardAlertSettings,
+} from './watchlistOverrides'
 
 // ─────────────────────────────────────────────────────────────────────
 // Tunables (constants for now; future block surfaces in admin UI)
@@ -363,6 +370,13 @@ export async function evaluateAlerts(
   // 5. Load recent alert_events for cooldown.
   const cooldownIndex = await loadCooldownIndex(supa, Array.from(userCards.keys()), asOfDate)
 
+  // 5b. Block 5A-W-19 — load per-card watchlist overrides for every
+  //     considered user. Index by `${userId}|${urlSlug}`; lookups in
+  //     the per-card loop are O(1). Overrides only affect pure
+  //     watchlist cards — see resolveCardAlertSettings for the source
+  //     gate that protects portfolio + 'both' alerts.
+  const overrideIndex = await loadWatchlistAlertOverrides(supa, Array.from(userCards.keys()))
+
   // 6. Evaluate.
   const proposed: ProposedAlertEvent[] = []
   let suppressed = 0
@@ -380,7 +394,14 @@ export async function evaluateAlerts(
 
       const marketId  = card.cardSlug
       const priceRows = priceIndex.get(marketId) ?? []
-      const events    = evaluateCardForUser({
+      // Block 5A-W-19 — resolve effective per-card thresholds. The
+      // override is keyed by URL slug (the same key the watchlist UI
+      // saves under). For source≠'watchlist' the resolver short-
+      // circuits to global thresholds so portfolio + both stay on
+      // the pre-19 behaviour.
+      const override = lookupOverride(overrideIndex, userId, card.urlSlug)
+      const effective = resolveCardAlertSettings(prefs, override, card.source)
+      const events    = effective.enabled ? evaluateCardForUser({
         userId,
         // ProposedAlertEvent.cardSlug carries the BARE NUMERIC so
         // alert_events.card_slug aligns with cards.card_slug — the
@@ -391,10 +412,11 @@ export async function evaluateAlerts(
         // populated in the resolution loop above.
         card: { cardSlug: marketId, cardName: card.cardName, setName: card.setName, source: card.source },
         prefs,
+        effective,
         priceRows,
         recentCount7d:  recentSales7d.get(marketId)  ?? 0,
         recentCount14d: recentSales14d.get(marketId) ?? 0,
-      })
+      }) : []
       for (const ev of events) {
         triggersByRule[ev.rule]++   // count every generated trigger, pre-cooldown
         if (isOnCooldown(cooldownIndex, userId, marketId, ev.rule, prefs.minHoursBetweenAlerts, asOfDate)) {
@@ -441,6 +463,11 @@ export function evaluateCardForUser(args: {
   userId:          string
   card:            { cardSlug: string; cardName: string | null; setName: string | null; source: EvalSource }
   prefs:           UserAlertPreferences
+  /** Block 5A-W-19 — resolved per-card thresholds. Optional so
+   *  pre-19 callers (and the existing test suite) keep working: when
+   *  omitted we synthesise a "global" settings object from `prefs`,
+   *  giving the symmetric pre-19 behaviour. */
+  effective?:      EffectiveCardAlertSettings
   priceRows:       PriceRow[]
   recentCount7d:   number
   recentCount14d:  number
@@ -448,39 +475,91 @@ export function evaluateCardForUser(args: {
   const { userId, card, prefs, priceRows, recentCount7d, recentCount14d } = args
   const out: ProposedAlertEvent[] = []
   if (!prefs.enabled) return out
+  // Synthesise global settings when the caller didn't supply one —
+  // matches the pre-5A-W-19 symmetric behaviour exactly (one
+  // threshold both directions, sourced from rulePriceMovePct).
+  const eff: EffectiveCardAlertSettings = args.effective ?? {
+    enabled:               true,
+    thresholdSource:       'global',
+    risePct:               prefs.rulePriceMovePct,
+    dropPct:               prefs.rulePriceMovePct,
+    recentSalesEnabled:    prefs.ruleRecentSalesEnabled,
+    marketActivityEnabled: prefs.ruleMarketActivityEnabled,
+  }
+  if (!eff.enabled) return out
 
   const pair = findPriceComparisonPair(priceRows)
   const rawPct    = pair ? pctChange(pair.baseline.raw_usd,   pair.latest.raw_usd)   : null
   const psa10Pct  = pair ? pctChange(pair.baseline.psa10_usd, pair.latest.psa10_usd) : null
+  const isOverride = eff.thresholdSource === 'override'
+
+  // Block 5A-W-19 — when a per-card OVERRIDE is in effect the
+  // collapsed threshold (rise or drop, whichever matches the sign
+  // of the move) replaces both the outer move gate AND the per-rule
+  // raw/psa10 gates. Otherwise we use the pre-19 layered behaviour
+  // EXACTLY: rulePriceMovePct as the outer gate, the per-rule
+  // threshold as the inner gate — so a user without an override
+  // sees zero behaviour change.
+  function gates(pct: number): { outer: number; inner: { raw: number; psa10: number } } {
+    if (isOverride) {
+      const t = thresholdForSignedPct(eff, pct)
+      return { outer: t, inner: { raw: t, psa10: t } }
+    }
+    return {
+      outer: prefs.rulePriceMovePct,
+      inner: { raw: prefs.ruleRawChangePct, psa10: prefs.ruleMyPSA10ChangePct },
+    }
+  }
 
   // ── Raw price change ──
-  if (rawPct != null && Math.abs(rawPct) >= prefs.rulePriceMovePct) {
-    // Most-specific first: raw_change beats price_move when both are enabled.
-    if (prefs.ruleRawChangeEnabled && Math.abs(rawPct) >= prefs.ruleRawChangePct) {
-      out.push(makeEvent(userId, card, 'raw_change', severityForPct(rawPct), {
-        old: pair!.baseline.raw_usd, new: pair!.latest.raw_usd, pct: round1(rawPct), source: card.source,
-      }))
-    } else if (prefs.rulePriceMoveEnabled) {
-      out.push(makeEvent(userId, card, 'price_move', severityForPct(rawPct), {
-        price_field: 'raw_usd', old: pair!.baseline.raw_usd, new: pair!.latest.raw_usd, pct: round1(rawPct), source: card.source,
-      }))
+  if (rawPct != null) {
+    const g = gates(rawPct)
+    if (Math.abs(rawPct) >= g.outer) {
+      // Most-specific first: raw_change beats price_move when both are enabled.
+      if (prefs.ruleRawChangeEnabled && Math.abs(rawPct) >= g.inner.raw) {
+        out.push(makeEvent(userId, card, 'raw_change', severityForPct(rawPct), {
+          old: pair!.baseline.raw_usd, new: pair!.latest.raw_usd, pct: round1(rawPct), source: card.source,
+          threshold_source: eff.thresholdSource,
+          threshold_pct:    g.inner.raw,
+          direction:        rawPct >= 0 ? 'rise' : 'drop',
+        }))
+      } else if (prefs.rulePriceMoveEnabled) {
+        out.push(makeEvent(userId, card, 'price_move', severityForPct(rawPct), {
+          price_field: 'raw_usd', old: pair!.baseline.raw_usd, new: pair!.latest.raw_usd, pct: round1(rawPct), source: card.source,
+          threshold_source: eff.thresholdSource,
+          threshold_pct:    g.outer,
+          direction:        rawPct >= 0 ? 'rise' : 'drop',
+        }))
+      }
     }
   }
 
   // ── PSA10 price change ──
-  if (psa10Pct != null && Math.abs(psa10Pct) >= prefs.rulePriceMovePct) {
-    if (prefs.ruleMyPSA10ChangeEnabled && Math.abs(psa10Pct) >= prefs.ruleMyPSA10ChangePct) {
-      out.push(makeEvent(userId, card, 'psa10_change', severityForPct(psa10Pct), {
-        old: pair!.baseline.psa10_usd, new: pair!.latest.psa10_usd, pct: round1(psa10Pct), source: card.source,
-      }))
-    } else if (prefs.rulePriceMoveEnabled) {
-      out.push(makeEvent(userId, card, 'price_move', severityForPct(psa10Pct), {
-        price_field: 'psa10_usd', old: pair!.baseline.psa10_usd, new: pair!.latest.psa10_usd, pct: round1(psa10Pct), source: card.source,
-      }))
+  if (psa10Pct != null) {
+    const g = gates(psa10Pct)
+    if (Math.abs(psa10Pct) >= g.outer) {
+      if (prefs.ruleMyPSA10ChangeEnabled && Math.abs(psa10Pct) >= g.inner.psa10) {
+        out.push(makeEvent(userId, card, 'psa10_change', severityForPct(psa10Pct), {
+          old: pair!.baseline.psa10_usd, new: pair!.latest.psa10_usd, pct: round1(psa10Pct), source: card.source,
+          threshold_source: eff.thresholdSource,
+          threshold_pct:    g.inner.psa10,
+          direction:        psa10Pct >= 0 ? 'rise' : 'drop',
+        }))
+      } else if (prefs.rulePriceMoveEnabled) {
+        out.push(makeEvent(userId, card, 'price_move', severityForPct(psa10Pct), {
+          price_field: 'psa10_usd', old: pair!.baseline.psa10_usd, new: pair!.latest.psa10_usd, pct: round1(psa10Pct), source: card.source,
+          threshold_source: eff.thresholdSource,
+          threshold_pct:    g.outer,
+          direction:        psa10Pct >= 0 ? 'rise' : 'drop',
+        }))
+      }
     }
   }
 
   // ── Spread (raw → PSA10) change ──
+  // Block 5A-W-19 — no per-card override for spread thresholds; the
+  // override surface is intentionally smaller than every per-rule
+  // toggle. Keeps the UI to one rise + one drop field.
   if (prefs.ruleSpreadChangeEnabled && pair) {
     const oldSpread = spreadMultiple(pair.baseline.raw_usd, pair.baseline.psa10_usd)
     const newSpread = spreadMultiple(pair.latest.raw_usd,   pair.latest.psa10_usd)
@@ -500,25 +579,31 @@ export function evaluateCardForUser(args: {
   }
 
   // ── New recent_sales available ──
-  if (prefs.ruleRecentSalesEnabled && recentCount7d >= 1) {
+  // Block 5A-W-19 — honour the per-card override toggle when present;
+  // override.recent_sales_enabled=false silences the rule even when
+  // the global toggle is on.
+  if (eff.recentSalesEnabled && recentCount7d >= 1) {
     out.push(makeEvent(userId, card, 'recent_sales', 'normal', {
       recent_active_count: recentCount7d,
       window_days:         RECENT_SALES_WINDOW_DAYS,
       source:              card.source,
+      threshold_source:    eff.thresholdSource,
     }))
   }
 
   // ── Meaningful market activity ──
-  if (prefs.ruleMarketActivityEnabled && recentCount14d >= MARKET_ACTIVITY_MIN_SALES) {
+  if (eff.marketActivityEnabled && recentCount14d >= MARKET_ACTIVITY_MIN_SALES) {
     out.push(makeEvent(userId, card, 'market_activity', 'normal', {
-      active_count: recentCount14d,
-      window_days:  MARKET_ACTIVITY_WINDOW_DAYS,
-      source:       card.source,
+      active_count:     recentCount14d,
+      window_days:      MARKET_ACTIVITY_WINDOW_DAYS,
+      source:           card.source,
+      threshold_source: eff.thresholdSource,
     }))
   }
 
   return out
 }
+
 
 function makeEvent(
   userId:   string,

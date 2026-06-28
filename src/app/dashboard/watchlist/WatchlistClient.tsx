@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import DashboardNav from '../DashboardNav'
 import { CardPortfolioAddModal } from '@/components/CardQuickActions'
 import EbayHoldingAction from '@/components/affiliate/EbayHoldingAction'
+import WatchlistAlertOverrideControl from '../watchlist-alerts/WatchlistAlertOverrideControl'
 
 interface WatchItem {
   id: string
@@ -400,6 +401,17 @@ export default function WatchlistClient({ embedded = false }: { embedded?: boole
                       >Remove</button>
                     </div>
                   </div>
+
+                  {/* Block 5A-W-19 — per-card alert override control.
+                      Sits on its own row inside the card so the existing
+                      grid stays untouched and the customise panel can
+                      expand inline without breaking layout. */}
+                  {user && (
+                    <WatchlistAlertOverrideControl
+                      userId={user.id}
+                      cardSlug={item.card_url_slug || item.card_slug}
+                    />
+                  )}
                 </div>
               )
             })}
