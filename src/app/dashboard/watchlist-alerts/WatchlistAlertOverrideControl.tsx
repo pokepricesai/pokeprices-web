@@ -20,6 +20,9 @@ import {
   describeOverrideState,
   type OverrideRow,
 } from './overrideStatus'
+import { canAddCustomAlertOverride } from '@/lib/account/entitlements'
+import { useUserPlan } from '@/lib/account/useUserPlan'
+import { loadCustomAlertOverrideCount } from '@/lib/account/usage'
 
 function clampPct(n: number): number {
   if (!Number.isFinite(n)) return 10
@@ -46,6 +49,12 @@ export default function WatchlistAlertOverrideControl({
   const [open,      setOpen]      = useState(false)
   const [saving,    setSaving]    = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  // Block 5A-W-24 — free plan caps the user at N custom overrides
+  // across the whole watchlist. `gateMessage` surfaces the upgrade
+  // copy inline above the panel when the user tries to customise a
+  // card past their cap. Pure copy from the entitlements helper.
+  const [gateMessage, setGateMessage] = useState<string | null>(null)
+  const { plan } = useUserPlan(userId)
 
   useEffect(() => {
     let live = true
@@ -103,8 +112,25 @@ export default function WatchlistAlertOverrideControl({
 
   /** Switch from "global defaults" to a real custom override. Seeds
    *  rise/drop with the suggested values so the user sees concrete
-   *  numbers as soon as the panel opens. */
+   *  numbers as soon as the panel opens.
+   *
+   *  Block 5A-W-24 — free plan caps custom overrides at N across the
+   *  whole watchlist. If the user is at the cap AND this card is
+   *  not already a custom override, refuse the switch with friendly
+   *  upgrade copy. Re-customising a card that already counts (i.e.
+   *  toggling back from "off" to a custom threshold) does NOT
+   *  consume an additional slot — the row already exists. */
   async function startCustomising() {
+    setGateMessage(null)
+    const isAlreadyCustom = row.enabled && !row.use_global_defaults
+    if (!isAlreadyCustom) {
+      const count = await loadCustomAlertOverrideCount(supabase, userId)
+      const gate  = canAddCustomAlertOverride(plan, count)
+      if (!gate.allowed) {
+        setGateMessage(gate.reason ?? 'Custom alert limit reached.')
+        return
+      }
+    }
     await persist({
       ...row,
       use_global_defaults: false,
@@ -152,6 +178,12 @@ export default function WatchlistAlertOverrideControl({
         <div style={warnBoxStyle}>
           Couldn&apos;t load saved alert settings for this card. Showing global defaults; saving is unavailable until this is fixed.
           {' '}<span style={{ color: 'var(--text-muted)' }}>({loadError})</span>
+        </div>
+      )}
+
+      {gateMessage && (
+        <div style={warnBoxStyle}>
+          {gateMessage}
         </div>
       )}
 

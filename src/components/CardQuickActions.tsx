@@ -18,6 +18,15 @@ import {
 } from '@/lib/ebayAffiliate'
 import { setIntendedAction, consumeIntendedAction } from '@/lib/intendedAction'
 import { trackEvent } from '@/lib/analytics'
+import {
+  canAddWatchlistItem,
+  canAddPortfolioItem,
+} from '@/lib/account/entitlements'
+import { useUserPlan } from '@/lib/account/useUserPlan'
+import {
+  loadWatchlistCount,
+  loadPortfolioItemCount,
+} from '@/lib/account/usage'
 
 interface Card {
   card_slug: string
@@ -44,8 +53,13 @@ const GRADE_GROUPS: { company: string; types: HoldingType[] }[] = (() => {
 export default function CardQuickActions({ card }: { card: Card }) {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
+  const { plan } = useUserPlan(user?.id ?? null)
   const [watchId, setWatchId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // Block 5A-W-24 — surfaces the friendly upgrade copy from the
+  // entitlements helper when a free user hits a limit. Cleared on
+  // the next interaction so it never lingers.
+  const [gateMessage, setGateMessage] = useState<string | null>(null)
   const [showPortfolioModal, setShowPortfolioModal] = useState(false)
   const cardSlug = (card.card_url_slug || card.card_slug || '').toString().replace(/^pc-/, '')
 
@@ -99,6 +113,17 @@ export default function CardQuickActions({ card }: { card: Card }) {
   async function handleWatch() {
     if (!user) return
     setBusy(true)
+    setGateMessage(null)
+    // Block 5A-W-24 — gate the ADD path; removal is always allowed.
+    if (!watchId) {
+      const count = await loadWatchlistCount(supabase, user.id)
+      const gate = canAddWatchlistItem(plan, count)
+      if (!gate.allowed) {
+        setGateMessage(gate.reason ?? 'Watchlist limit reached.')
+        setBusy(false)
+        return
+      }
+    }
     if (watchId) {
       await supabase.from('watchlist').delete().eq('id', watchId)
       setWatchId(null)
@@ -343,13 +368,36 @@ export default function CardQuickActions({ card }: { card: Card }) {
         <button onClick={handleWatch} disabled={busy} style={watchId ? watchingBtn : baseBtn}>
           {watchId ? <><span>✓</span> Watching</> : <><span>👁</span> Watch</>}
         </button>
-        <button onClick={() => {
+        <button onClick={async () => {
           trackEvent('portfolio_add_attempt', { card_slug: cardSlug, source_component: 'card_quick_actions' })
+          setGateMessage(null)
+          // Block 5A-W-24 — gate BEFORE opening the modal so the
+          // user sees the upgrade copy at the click site instead of
+          // bouncing into a modal that would refuse the save.
+          if (user) {
+            const count = await loadPortfolioItemCount(supabase, user.id)
+            const gate  = canAddPortfolioItem(plan, count)
+            if (!gate.allowed) {
+              setGateMessage(gate.reason ?? 'Portfolio limit reached.')
+              return
+            }
+          }
           setShowPortfolioModal(true)
         }} style={baseBtn}>
           <span>📊</span> Add to portfolio
         </button>
       </div>
+      {gateMessage && (
+        <div role="status" style={{
+          marginTop: -4, marginBottom: 12, padding: '8px 12px', borderRadius: 8,
+          background: 'rgba(245,158,11,0.10)',
+          border: '1px solid rgba(245,158,11,0.30)',
+          color: '#92400e', fontSize: 12,
+          fontFamily: "'Figtree', sans-serif", lineHeight: 1.45,
+        }}>
+          {gateMessage}
+        </div>
+      )}
       {ebayBox}
       {showPortfolioModal && (
         <CardPortfolioAddModal
@@ -373,6 +421,9 @@ export function CardPortfolioAddModal({
   user: any
   onClose: () => void
 }) {
+  // Block 5A-W-24 — plan is read once at modal mount; used as the
+  // belt-and-braces gate inside handleAdd.
+  const { plan: modalPlan } = useUserPlan(user?.id ?? null)
   // Currency comes from the user's email-prefs row. Fall back to GBP.
   const [currency, setCurrency] = useState<'GBP' | 'USD'>('GBP')
   const [holdingType, setHoldingType] = useState('raw')
@@ -424,6 +475,15 @@ export function CardPortfolioAddModal({
       if (manual && !manualValue) {
         throw new Error('Please enter a current value — we don\'t have live market data for this grade.')
       }
+      // Block 5A-W-24 — defence in depth. The card-page button
+      // already gates BEFORE opening this modal, but other call
+      // sites (PortfolioDashboard quick-actions) reach the modal
+      // through their own paths. Re-checking here means no add path
+      // can skip the cap. modalPlan resolves to 'free' for now.
+      const currentCount = await loadPortfolioItemCount(supabase, user.id)
+      const gate         = canAddPortfolioItem(modalPlan, currentCount)
+      if (!gate.allowed) throw new Error(gate.reason ?? 'Portfolio limit reached.')
+
       const portfolio_id = await getOrCreatePortfolioId()
       if (!portfolio_id) throw new Error('Could not load your portfolio.')
 

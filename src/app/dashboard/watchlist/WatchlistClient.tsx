@@ -7,6 +7,9 @@ import DashboardNav from '../DashboardNav'
 import { CardPortfolioAddModal } from '@/components/CardQuickActions'
 import EbayHoldingAction from '@/components/affiliate/EbayHoldingAction'
 import WatchlistAlertOverrideControl from '../watchlist-alerts/WatchlistAlertOverrideControl'
+import { canAddWatchlistItem } from '@/lib/account/entitlements'
+import { useUserPlan } from '@/lib/account/useUserPlan'
+import { loadWatchlistCount } from '@/lib/account/usage'
 
 interface WatchItem {
   id: string
@@ -152,6 +155,7 @@ function AddWatchModal({ onAdd, onClose }: { onAdd: (card: any) => Promise<void>
 export default function WatchlistClient({ embedded = false }: { embedded?: boolean } = {}) {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
+  const { plan } = useUserPlan(user?.id ?? null)
   const [items, setItems] = useState<WatchItem[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
@@ -202,6 +206,12 @@ export default function WatchlistClient({ embedded = false }: { embedded?: boole
     const setName  = card.subtitle || card.set_name
     const cardName = card.name || card.card_name
     if (!cardSlug || !setName || !cardName) throw new Error('Missing card data')
+
+    // Block 5A-W-24 — free-plan watchlist cap. Throws upgrade copy
+    // which AddWatchModal surfaces via its existing error slot.
+    const currentCount = await loadWatchlistCount(supabase, user.id)
+    const gate = canAddWatchlistItem(plan, currentCount)
+    if (!gate.allowed) throw new Error(gate.reason ?? 'Watchlist limit reached.')
 
     // Snapshot current prices to enable "since added" tracking
     const { data: trend } = await supabase

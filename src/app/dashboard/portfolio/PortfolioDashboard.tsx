@@ -6,6 +6,9 @@ import { supabase, CHAT_ENDPOINT } from '@/lib/supabase'
 import DashboardNav from '../DashboardNav'
 import CardScanner, { ConfirmedCard, ConfirmContext } from '@/components/CardScanner'
 import EbayHoldingAction from '@/components/affiliate/EbayHoldingAction'
+import { canAddPortfolioItem } from '@/lib/account/entitlements'
+import { useUserPlan } from '@/lib/account/useUserPlan'
+import { loadPortfolioItemCount } from '@/lib/account/usage'
 import {
   HOLDING_TYPES as ALL_HOLDING_TYPES,
   GRADE_LABELS as ALL_GRADE_LABELS,
@@ -914,6 +917,7 @@ ${JSON.stringify(portfolioSummary, null, 2)}`
 export default function PortfolioDashboard() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
+  const { plan } = useUserPlan(user?.id ?? null)
   const [portfolioId, setPortfolioId] = useState<string | null>(null)
   const [summary, setSummary] = useState<PortfolioSummary | null>(null)
   const [loading, setLoading] = useState(true)
@@ -1250,6 +1254,26 @@ export default function PortfolioDashboard() {
 
   async function handleAddCard(itemData: any) {
     if (!portfolioId || !user) return
+    // Block 5A-W-24 — only gate when this would create a NEW row.
+    // The upsert below uses `onConflict` to UPDATE an existing
+    // (portfolio_id, card_slug, holding_type) row in place; updates
+    // don't grow the count, so blocking them on the limit would
+    // erroneously prevent edits.
+    const { data: existing } = await supabase
+      .from('portfolio_items')
+      .select('id')
+      .eq('portfolio_id',  portfolioId)
+      .eq('card_slug',     itemData.card_slug)
+      .eq('holding_type',  itemData.holding_type ?? 'raw')
+      .maybeSingle()
+    if (!existing) {
+      const count = await loadPortfolioItemCount(supabase, user.id)
+      const gate  = canAddPortfolioItem(plan, count)
+      if (!gate.allowed) {
+        alert(gate.reason ?? 'Portfolio limit reached.')
+        return
+      }
+    }
     await supabase.from('portfolio_items').upsert([{
       ...itemData, portfolio_id: portfolioId, user_id: user.id,
     }], { onConflict: 'portfolio_id,card_slug,holding_type' })
@@ -1276,6 +1300,15 @@ export default function PortfolioDashboard() {
         .update({ quantity: (existing.quantity || 1) + safeQty })
         .eq('id', existing.id)
     } else {
+      // Block 5A-W-24 — scanner-confirmed NEW rows count toward the
+      // free-plan portfolio cap. Bumping the quantity of an existing
+      // row above is allowed regardless of plan (no new row).
+      const count = await loadPortfolioItemCount(supabase, user.id)
+      const gate  = canAddPortfolioItem(plan, count)
+      if (!gate.allowed) {
+        alert(gate.reason ?? 'Portfolio limit reached.')
+        return
+      }
       await supabase.from('portfolio_items').insert([{
         portfolio_id: portfolioId,
         user_id: user.id,

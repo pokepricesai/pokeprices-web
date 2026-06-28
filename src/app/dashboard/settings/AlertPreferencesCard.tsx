@@ -33,6 +33,8 @@ import {
   type SensitivityPreset,
   type UserAlertPreferences,
 } from '@/lib/alerts/preferences'
+import { canUseInstantAlerts, UPGRADE_COPY } from '@/lib/account/entitlements'
+import { useUserPlan } from '@/lib/account/useUserPlan'
 
 const DOW_LABELS: Array<{ value: number; label: string }> = [
   { value: 1, label: 'Mon' },
@@ -55,6 +57,8 @@ export default function AlertPreferencesCard({ userId }: { userId: string }) {
   const [loading, setLoading] = useState(true)
   const [saving,  setSaving]  = useState(false)
   const [savedAt, setSavedAt] = useState<number | null>(null)
+  const { plan } = useUserPlan(userId)
+  const instantAlertsGate = canUseInstantAlerts(plan)
 
   useEffect(() => {
     let live = true
@@ -157,9 +161,28 @@ export default function AlertPreferencesCard({ userId }: { userId: string }) {
         <Toggle
           label="Instant alert emails"
           sub="Send me a short alert whenever a tracked card crosses an alert threshold. Independent from the weekly overview."
-          value={prefs.instantAlertsEnabled}
-          onChange={v => update({ instantAlertsEnabled: v })}
+          value={prefs.instantAlertsEnabled && instantAlertsGate.allowed}
+          onChange={v => {
+            // Block 5A-W-24 — gate enabling on the user's plan.
+            // Turning OFF is always allowed, even on free; only
+            // enabling fires the upgrade copy. Existing free users
+            // who somehow have it on (legacy data) can still turn
+            // it off without seeing the gate.
+            if (v && !instantAlertsGate.allowed) return
+            update({ instantAlertsEnabled: v })
+          }}
         />
+        {!instantAlertsGate.allowed && (
+          <div style={{
+            marginTop: 6, padding: '8px 10px', borderRadius: 8,
+            background: 'rgba(245,158,11,0.10)',
+            border: '1px solid rgba(245,158,11,0.30)',
+            color: '#92400e', fontSize: 11.5,
+            fontFamily: "'Figtree', sans-serif", lineHeight: 1.5,
+          }}>
+            {UPGRADE_COPY.instantAlerts}
+          </div>
+        )}
 
         {/* ─── Sensitivity preset ────────────────────────────────────── */}
         <SectionLabel>Alert sensitivity</SectionLabel>

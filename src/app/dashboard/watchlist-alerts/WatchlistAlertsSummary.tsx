@@ -21,12 +21,16 @@ import {
   type WatchlistOverrideRowLite,
   type AlertEventLite,
 } from './summaryStats'
+import { getPlanLimits } from '@/lib/account/entitlements'
+import { useUserPlan } from '@/lib/account/useUserPlan'
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 
 export default function WatchlistAlertsSummaryPanel({ userId }: { userId: string }) {
   const [summary, setSummary] = useState<WatchlistAlertsSummary | null>(null)
   const [error,   setError]   = useState<string | null>(null)
+  const { plan } = useUserPlan(userId)
+  const limits   = getPlanLimits(plan)
 
   useEffect(() => {
     let live = true
@@ -104,12 +108,27 @@ export default function WatchlistAlertsSummaryPanel({ userId }: { userId: string
       <p style={subStyle}>How your alerts are set up across the cards you watch.</p>
 
       <div style={statsGridStyle}>
-        <Stat label="Watched cards"      value={summary.watchedCount} />
+        <Stat
+          label="Watched cards"
+          value={summary.watchedCount}
+          limit={limits.watchlistItems}
+        />
         <Stat label="Global defaults"    value={summary.globalDefault} tone={summary.globalDefault > 0 ? 'primary' : 'muted'} />
-        <Stat label="Custom thresholds"  value={summary.customThreshold} tone={summary.customThreshold > 0 ? 'primary' : 'muted'} />
+        <Stat
+          label="Custom thresholds"
+          value={summary.customThreshold}
+          limit={limits.customAlertOverrides}
+          tone={summary.customThreshold > 0 ? 'primary' : 'muted'}
+        />
         <Stat label="Alerts off"         value={summary.alertsOff}      tone={summary.alertsOff > 0 ? 'warn' : 'muted'} />
         <Stat label="Alerts this week"   value={summary.recent7dCount}  tone={summary.recent7dCount > 0 ? 'primary' : 'muted'} />
       </div>
+      {plan === 'free' && (
+        <p style={planNoteStyle}>
+          Free account · Watchlist up to {limits.watchlistItems} cards · {limits.customAlertOverrides} custom alert thresholds · Weekly overview email.
+          {' '}<span style={{ color: 'var(--text-muted)' }}>Upgrade coming soon for unlimited cards and instant alerts.</span>
+        </p>
+      )}
 
       {!summary.masterEnabled && (
         <div style={offBannerStyle}>
@@ -127,14 +146,23 @@ export default function WatchlistAlertsSummaryPanel({ userId }: { userId: string
   )
 }
 
-function Stat({ label, value, tone = 'muted' }: { label: string; value: number; tone?: 'primary' | 'muted' | 'warn' }) {
+function Stat({ label, value, tone = 'muted', limit }: {
+  label: string
+  value: number
+  tone?: 'primary' | 'muted' | 'warn'
+  /** Optional usage cap. -1 = unlimited (hidden). Renders as "X / N". */
+  limit?: number
+}) {
   const color =
     tone === 'primary' ? 'var(--primary)' :
     tone === 'warn'    ? '#b45309' :
                           'var(--text)'
+  const showLimit = typeof limit === 'number' && limit > 0
   return (
     <div style={statCellStyle}>
-      <div style={{ fontSize: 22, fontWeight: 900, color, fontFamily: "'Figtree', sans-serif", lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: 22, fontWeight: 900, color, fontFamily: "'Figtree', sans-serif", lineHeight: 1 }}>
+        {value}{showLimit && <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)', marginLeft: 4 }}>/ {limit}</span>}
+      </div>
       <div style={statLabelStyle}>{label}</div>
     </div>
   )
@@ -172,6 +200,14 @@ const statLabelStyle: React.CSSProperties = {
   color: 'var(--text-muted)',
   fontFamily: "'Figtree', sans-serif",
   marginTop: 6,
+}
+const planNoteStyle: React.CSSProperties = {
+  marginTop: 12,
+  fontSize: 11.5,
+  color: 'var(--text)',
+  fontFamily: "'Figtree', sans-serif",
+  lineHeight: 1.5,
+  margin: '12px 0 0',
 }
 const offBannerStyle: React.CSSProperties = {
   marginTop: 14,
