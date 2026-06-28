@@ -30,6 +30,8 @@ import {
   selectTopItems,
   computeSinceLastDigest,
   computePortfolioMovement30d,
+  cardImportanceScore,
+  isPriceRule,
   MIN_MEANINGFUL_PCT,
   type ScoredCard,
 } from '../weeklyDigest'
@@ -216,14 +218,18 @@ describe('selectTopItems', () => {
     }
   }
 
-  it('picks biggest riser first, biggest faller second, most active third', () => {
+  it('picks biggest riser first, biggest faller second, then fills directional (Block 5A-W-21)', () => {
+    // Block 5A-W-21 — `most_active` is no longer chosen proactively;
+    // fill picks are labelled by direction (biggest_riser /
+    // biggest_faller) regardless of sales presence. The third card
+    // (pct=+5, sales=8) lands in fill as `biggest_riser`.
     const cards: ScoredCard[] = [
       card({ urlSlug: 'a', pctChange: +30,   recentSalesCount: 0 }),
       card({ urlSlug: 'b', pctChange: -25,   recentSalesCount: 1 }),
       card({ urlSlug: 'c', pctChange: +5,    recentSalesCount: 8 }),
     ]
     const out = selectTopItems(cards, 3)
-    expect(out.map(i => i.reason)).toEqual(['biggest_riser', 'biggest_faller', 'most_active'])
+    expect(out.map(i => i.reason)).toEqual(['biggest_riser', 'biggest_faller', 'biggest_riser'])
   })
 
   it('caps to max items', () => {
@@ -259,8 +265,10 @@ describe('selectTopItems', () => {
     ]
     const out = selectTopItems(cards, 5)
     expect(out).toHaveLength(1)
-    // Card has sales > 0 so it qualifies as most_active in the third pass.
-    expect(out[0].reason).toBe('most_active')
+    // Block 5A-W-21 — sales-only cards now always land in the
+    // final-pass `new_sales_activity` bucket; the eager `most_active`
+    // slot was dropped.
+    expect(out[0].reason).toBe('new_sales_activity')
   })
 })
 
@@ -465,7 +473,7 @@ describe('buildWeeklyDigestForUser — top-N selection', () => {
     expect(out.watchlist?.topItems).toHaveLength(3)
   })
 
-  it('orders the first three top items as biggest riser, biggest faller, most active', async () => {
+  it('orders the first three top items as biggest riser, biggest faller, then fill (Block 5A-W-21)', async () => {
     seedPrefs('u1')
     // Riser
     seedCardLink('riser',  '101', 'Riser',  'S')
@@ -477,7 +485,7 @@ describe('buildWeeklyDigestForUser — top-N selection', () => {
     seedWatch('u1', 'faller')
     seedPrice('102', '2026-06-18', { raw: 30 })
     seedPrice('102', '2026-06-25', { raw: 10 })   // -66%
-    // Most active (small move, many sales)
+    // Third card with a small +10% move and lots of sales.
     seedCardLink('active', '103', 'Active', 'S')
     seedWatch('u1', 'active')
     seedPrice('103', '2026-06-18', { raw: 10 })
@@ -486,7 +494,10 @@ describe('buildWeeklyDigestForUser — top-N selection', () => {
 
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf, maxWatchlistItems: 3 })
     const reasons = out.watchlist?.topItems.map(i => i.reason) ?? []
-    expect(reasons).toEqual(['biggest_riser', 'biggest_faller', 'most_active'])
+    // Block 5A-W-21 — `most_active` no longer chosen proactively.
+    // Third card has pct=+10% so it lands in fill as biggest_riser
+    // (directional label), NOT most_active.
+    expect(reasons).toEqual(['biggest_riser', 'biggest_faller', 'biggest_riser'])
     expect(out.watchlist?.topItems[0].cardName).toBe('Riser')
     expect(out.watchlist?.topItems[1].cardName).toBe('Faller')
     expect(out.watchlist?.topItems[2].cardName).toBe('Active')
@@ -660,10 +671,13 @@ describe('selectTopItems — Block 5A-W-15B threshold guards', () => {
   })
 
   it('a 0.0% card WITH sales surfaces as new_sales_activity (not Biggest riser)', () => {
+    // Block 5A-W-21 — flat-pct sales-only cards land in the
+    // final-pass `new_sales_activity` bucket (no eager most_active).
     const out = selectTopItems([card({ urlSlug: 'flat', pctChange: 0, recentSalesCount: 6 })], 5)
     expect(out).toHaveLength(1)
-    // Sales > 0 → 3rd pass picks it as "most_active".
-    expect(out[0].reason).toBe('most_active')
+    // Block 5A-W-21 — sales-only / flat-pct cards now land in the
+    // final-pass `new_sales_activity` bucket.
+    expect(out[0].reason).toBe('new_sales_activity')
   })
 
   it('a sub-threshold +0.5% card with no sales is excluded entirely', () => {
@@ -701,8 +715,10 @@ describe('selectTopItems — Block 5A-W-15B threshold guards', () => {
     ]
     const out = selectTopItems(cards, 5)
     expect(out).toHaveLength(1)
-    // Pass 3 picks it as "most_active" because recentSalesCount > 0.
-    expect(out[0].reason).toBe('most_active')
+    // Block 5A-W-21 — sales-only items land in the final-pass
+    // `new_sales_activity` bucket (not `most_active` — that label is
+    // no longer chosen proactively).
+    expect(out[0].reason).toBe('new_sales_activity')
   })
 })
 
@@ -1833,5 +1849,169 @@ describe('buildWeeklyDigestForUser — Block 5A-W-16H movement30d in section', (
     seedPrefs('u1')
     const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
     expect(out.portfolio?.movement30d ?? null).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-21 — rebalanced ranking + price-led alert ordering
+// ─────────────────────────────────────────────────────────────────────
+
+describe('cardImportanceScore — Block 5A-W-21', () => {
+  it('uses |absChangeCents| / 100 when available', () => {
+    expect(cardImportanceScore({ pctChange: 5, currentCents: 30_000, absChangeCents: 1500 })).toBe(15)
+    expect(cardImportanceScore({ pctChange: 5, currentCents: 30_000, absChangeCents: -1500 })).toBe(15)
+  })
+
+  it('falls back to pct × currentDollars / 100 when absChange is null', () => {
+    // $300 card moving +5% → 5 × 300 / 100 = $15 importance.
+    expect(cardImportanceScore({ pctChange: 5, currentCents: 30_000 })).toBe(15)
+    // $30 card moving +50% → 50 × 30 / 100 = $15 importance.
+    expect(cardImportanceScore({ pctChange: 50, currentCents: 3000 })).toBe(15)
+    // $0.33 card moving +120% → 120 × 0.33 / 100 = $0.40 importance.
+    expect(cardImportanceScore({ pctChange: 120, currentCents: 33 })).toBeCloseTo(0.396, 2)
+  })
+
+  it('returns 0 when both pct and currentCents are missing', () => {
+    expect(cardImportanceScore({ pctChange: null, currentCents: null })).toBe(0)
+  })
+})
+
+describe('isPriceRule — Block 5A-W-21', () => {
+  it('classifies price-style rules as true', () => {
+    expect(isPriceRule('raw_change')).toBe(true)
+    expect(isPriceRule('psa10_change')).toBe(true)
+    expect(isPriceRule('price_move')).toBe(true)
+    expect(isPriceRule('spread_change')).toBe(true)
+  })
+  it('classifies sales/activity rules as false', () => {
+    expect(isPriceRule('recent_sales')).toBe(false)
+    expect(isPriceRule('market_activity')).toBe(false)
+  })
+})
+
+describe('selectTopItems — Block 5A-W-21 rebalanced ordering', () => {
+  function card(over: Partial<ScoredCard>): ScoredCard {
+    return {
+      source: 'portfolio', urlSlug: `s-${Math.random()}`,
+      cardSlug: '1', cardName: 'C', setName: 'S', cardUrl: null,
+      currentCents: 100, previousCents: 100, pctChange: 0,
+      absChangeCents: 0, recentSalesCount: 0, quantity: 1,
+      ...over,
+    }
+  }
+
+  it('most_valuable lands in the FIRST slot when includeMostValuable=true', () => {
+    const cards: ScoredCard[] = [
+      card({ urlSlug: 'big',    pctChange: null, currentCents: 29_074, recentSalesCount: 0 }),  // $290.74
+      card({ urlSlug: 'riser',  pctChange: +50,  currentCents: 1_000,  recentSalesCount: 0 }),
+      card({ urlSlug: 'faller', pctChange: -30,  currentCents: 800,    recentSalesCount: 0 }),
+    ]
+    const out = selectTopItems(cards, 3, { includeMostValuable: true })
+    expect(out[0].reason).toBe('most_valuable')
+    expect(out[0].currentCents).toBe(29_074)
+    expect(out[1].reason).toBe('biggest_riser')
+    expect(out[2].reason).toBe('biggest_faller')
+  })
+
+  it('high-value modest mover beats low-value sales-only card in the fill pass', () => {
+    // Without rebalancing, a sales-heavy $5 card would crowd out a
+    // meaningful $300 mover. Block 5A-W-21 reverses that: fill uses
+    // value-weighted importance so the $300 card surfaces first.
+    const cards: ScoredCard[] = [
+      // Take the dedicated risers/fallers slots with strong tiny cards
+      // so the rebalancing only affects the fill pass.
+      card({ urlSlug: 'huge-up',   pctChange: +200, currentCents: 33,    recentSalesCount: 0 }),
+      card({ urlSlug: 'huge-down', pctChange: -90,  currentCents: 33,    recentSalesCount: 0 }),
+      // Fill candidates — both with meaningful pct but very different value.
+      card({ urlSlug: 'big-mover', pctChange: +5,   currentCents: 30_000, recentSalesCount: 0 }),  // $15 importance
+      card({ urlSlug: 'tiny-pct',  pctChange: +50,  currentCents: 33,     recentSalesCount: 0 }),  // $0.17 importance
+      // Sales-only candidate — must not appear before either of the above.
+      card({ urlSlug: 'sales',     pctChange: null, currentCents: 500,    recentSalesCount: 99 }),
+    ]
+    const out = selectTopItems(cards, 4)
+    const slugs = out.map(i => i.cardSlug)
+    void slugs
+    // Slot 3 should be the value-weighted fill winner: 'big-mover'.
+    // Slot 4 is the next-best mover by importance: 'tiny-pct'.
+    expect(out[2].currentCents).toBe(30_000)
+    expect(out[2].reason).toBe('biggest_riser')
+    expect(out[3].currentCents).toBe(33)
+    expect(out[3].reason).toBe('biggest_riser')
+    // Sales-only must NOT appear when meaningful movers exist for fill.
+    expect(out.map(i => i.reason)).not.toContain('new_sales_activity')
+  })
+
+  it('a sales-only card only surfaces after all meaningful movers are used', () => {
+    const cards: ScoredCard[] = [
+      card({ urlSlug: 'real',  pctChange: +25, currentCents: 1_000, recentSalesCount: 0 }),
+      card({ urlSlug: 'sales', pctChange: null, currentCents: 500,  recentSalesCount: 12 }),
+    ]
+    const out = selectTopItems(cards, 5)
+    expect(out).toHaveLength(2)
+    expect(out[0].reason).toBe('biggest_riser')
+    expect(out[1].reason).toBe('new_sales_activity')
+  })
+
+  it('Meowstic-style: tiny card with huge pct STILL earns the biggest_riser slot', () => {
+    // The brief explicitly says a $0.33 card moving +120% should
+    // still appear as "Best 30d riser". Only the FILL pass damps
+    // tiny cards; the dedicated slots are still raw-pct based.
+    const cards: ScoredCard[] = [
+      card({ urlSlug: 'meow',   pctChange: +120, currentCents: 33,     recentSalesCount: 0 }),
+      card({ urlSlug: 'modest', pctChange: +5,   currentCents: 30_000, recentSalesCount: 0 }),
+    ]
+    const out = selectTopItems(cards, 5)
+    expect(out[0].currentCents).toBe(33)
+    expect(out[0].reason).toBe('biggest_riser')
+    // 'modest' then takes the fill slot, also labelled biggest_riser.
+    expect(out[1].currentCents).toBe(30_000)
+    expect(out[1].reason).toBe('biggest_riser')
+  })
+
+  it('never labels a fill pick as "most_active" (the eager slot is gone)', () => {
+    const cards: ScoredCard[] = [
+      card({ urlSlug: 'a', pctChange: +30, recentSalesCount: 0 }),
+      card({ urlSlug: 'b', pctChange: -25, recentSalesCount: 1 }),
+      card({ urlSlug: 'c', pctChange: +5,  recentSalesCount: 8 }),
+      card({ urlSlug: 'd', pctChange: -7,  recentSalesCount: 12 }),
+    ]
+    const out = selectTopItems(cards, 4)
+    expect(out.map(i => i.reason)).not.toContain('most_active')
+  })
+})
+
+describe('buildWeeklyDigestForUser — Block 5A-W-21 alert highlight ordering', () => {
+  it('cards with price-rule alerts rank above sales-only alert cards', async () => {
+    seedPrefs('u1')
+    // Sales-only card (recent_sales rule) — seeded FIRST so its
+    // detected_at is earliest. Under the pre-21 score-only sort this
+    // could win if its event count were comparable.
+    seedAlertEvent('u1', { id: 'sa1', card_slug: 'sales-card', card_name: 'Salesy', set_name: 'S',
+                            rule: 'recent_sales', severity: 'normal' })
+    seedAlertEvent('u1', { id: 'sa2', card_slug: 'sales-card', card_name: 'Salesy', set_name: 'S',
+                            rule: 'recent_sales', severity: 'normal' })
+    // Price-rule card — single event, but a price rule.
+    seedAlertEvent('u1', { id: 'pr1', card_slug: 'price-card', card_name: 'Mover',  set_name: 'S',
+                            rule: 'raw_change', severity: 'normal' })
+
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.alertSummary.cardBlocks).toHaveLength(2)
+    expect(out.alertSummary.cardBlocks[0].cardName).toBe('Mover')   // price-rule card first
+    expect(out.alertSummary.cardBlocks[1].cardName).toBe('Salesy')  // sales-only card second
+  })
+
+  it('within a card block, price rules sort before sales rules', async () => {
+    seedPrefs('u1')
+    // Seed events in REVERSE order (sales rule first) to confirm the
+    // sort actually runs; insertion order on the rules array is
+    // first-occurrence by default.
+    seedAlertEvent('u1', { id: 's1', card_slug: 'mixed', card_name: 'Mixed', set_name: 'S',
+                            rule: 'recent_sales', severity: 'normal' })
+    seedAlertEvent('u1', { id: 'r1', card_slug: 'mixed', card_name: 'Mixed', set_name: 'S',
+                            rule: 'raw_change',   severity: 'normal' })
+
+    const out = await buildWeeklyDigestForUser(asSupa(fakeDB), 'u1', { asOf })
+    expect(out.alertSummary.cardBlocks).toHaveLength(1)
+    expect(out.alertSummary.cardBlocks[0].rules).toEqual(['raw_change', 'recent_sales'])
   })
 })

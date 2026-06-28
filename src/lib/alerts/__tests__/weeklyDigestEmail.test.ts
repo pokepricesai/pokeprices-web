@@ -361,7 +361,11 @@ describe('buildWeeklyDigestEmail — alert highlights', () => {
       },
     }))
     expect(out.html).toMatch(/Alert highlights/i)
-    expect(out.html).toMatch(/3 alerts this week/)
+    // Block 5A-W-21 — headline copy softened: lead with card count,
+    // total events surface only as a secondary inline figure when
+    // there's more than one signal per card.
+    expect(out.html).toMatch(/2 cards with alerts this week/)
+    expect(out.html).toMatch(/3 signals total/)
     // Block 5A-W-16G — high-severity card gets an "Important" badge,
     // not the raw severity name. Normal/low severities have no badge.
     expect(out.html).toMatch(/Important/)
@@ -389,7 +393,9 @@ describe('buildWeeklyDigestEmail — alert highlights', () => {
     expect(out.html).not.toMatch(/\b\d+ normal\b/)
     expect(out.html).not.toMatch(/\b\d+ low\b/)
     expect(out.html).not.toMatch(/\bImportant\b/)        // no high → no Important badge
-    expect(out.html).toMatch(/3 alerts this week/)
+    // Block 5A-W-21 — 1 card with 3 events → "1 card with alerts this week · 3 signals total"
+    expect(out.html).toMatch(/1 card with alerts this week/)
+    expect(out.html).toMatch(/3 signals total/)
     expect(out.text).not.toMatch(/\b\d+ normal\b/)
     expect(out.text).not.toMatch(/\b\d+ low\b/)
   })

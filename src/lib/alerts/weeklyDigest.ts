@@ -402,21 +402,81 @@ export type SelectTopItemsOptions = {
    *  as a `most_valuable` row. Used for the portfolio section where
    *  showing the user's biggest holding is genuinely useful even if
    *  it didn't move this week. Defaults FALSE — watchlist doesn't
-   *  benefit from this since the user doesn't own the cards. */
+   *  benefit from this since the user doesn't own the cards.
+   *
+   *  Block 5A-W-21 — when set, `most_valuable` becomes the FIRST pick
+   *  (was slot 4); the brief moves it to slot A so a quiet week
+   *  still surfaces the user's biggest holding. */
   includeMostValuable?: boolean
 }
 
-/** Pick the top N items for a section. Updated in Block 5A-W-15B to
- *  stop labelling weak/no-change items as "Biggest riser/faller".
- *  Updated in Block 5A-W-16E to support a `most_valuable` pick.
+/** Block 5A-W-21 — value-weighted importance score used to rank fill
+ *  picks after the dedicated risers / fallers slots. Quantifies "how
+ *  much did this card matter to the portfolio this period?":
  *
- *  Ranking (in order; each takes one slot at most):
- *    1. Biggest riser  — pctChange ≥ +MIN_MEANINGFUL_PCT
- *    2. Biggest faller — pctChange ≤ -MIN_MEANINGFUL_PCT
- *    3. Most active    — recentSalesCount > 0
- *    4. Most valuable  — opt-in, by max currentCents
- *    5. Fill remaining slots with meaningful movers by |pct|
- *    6. Final pass: sales-only / sales-with-tiny-move → new_sales_activity
+ *    1. If `absChangeCents` is known (watchlist scoring path), use
+ *       |absChange in $| directly — that's the real dollar movement.
+ *    2. Otherwise (portfolio path; pct comes from card_trends.raw_pct_30d
+ *       and no absolute baseline exists), approximate with
+ *       |pctChange| × currentDollars / 100 — algebraically the same
+ *       quantity, derived from the values we DO have.
+ *
+ *  The brief: prefer "biggest absolute value increase/decrease if
+ *  available; otherwise use current value × pct change as an
+ *  approximation of importance." Pure — exported for unit tests. */
+export function cardImportanceScore(card: {
+  pctChange:       number | null
+  currentCents:    number | null
+  absChangeCents?: number | null
+}): number {
+  if (card.absChangeCents != null && Number.isFinite(card.absChangeCents)) {
+    return Math.abs(card.absChangeCents / 100)
+  }
+  const pct = card.pctChange    != null && Number.isFinite(card.pctChange)    ? Math.abs(card.pctChange)            : 0
+  const dol = card.currentCents != null && Number.isFinite(card.currentCents) ? Math.max(0, card.currentCents / 100) : 0
+  return (pct * dol) / 100
+}
+
+/** Block 5A-W-21 — does this rule belong to the "price/value moved"
+ *  category? Used to sort alert-highlight cards so price-rule cards
+ *  outrank sales-only cards, AND to reorder each block's `rules`
+ *  array so the price reason renders before any sales reason. */
+export function isPriceRule(rule: AlertRule): boolean {
+  return rule === 'raw_change'
+      || rule === 'psa10_change'
+      || rule === 'price_move'
+      || rule === 'spread_change'
+}
+
+/** Pick the top N items for a section.
+ *
+ *  Block 5A-W-21 — rebalanced toward price/value movement and away
+ *  from sales activity, per user feedback that the weekly digest
+ *  over-emphasised sales counts. The new ordering:
+ *
+ *    A. Most valuable — opt-in; ALWAYS first when value > 0 (was 4th).
+ *    B. Biggest riser  — by raw pct (lets a tiny-but-screaming card
+ *                        like Meowstic +120% still earn the headline).
+ *    C. Biggest faller — same, opposite direction.
+ *    D. Fill           — meaningful movers ranked by VALUE-WEIGHTED
+ *                        importance (|abs $ change|, or pct × $ when
+ *                        no absolute baseline exists). Surfaces a
+ *                        $300 modest mover over a $0.30 huge mover.
+ *                        Fill picks ALWAYS get a directional label
+ *                        (biggest_riser / biggest_faller); the
+ *                        "most_active" label is no longer chosen
+ *                        proactively — sales-only cards land in step E.
+ *    E. Sales-only     — last resort; new_sales_activity label.
+ *
+ *  Notes for the historical record:
+ *    * The pre-21 selector picked "most_active" eagerly in slot 3,
+ *      which meant a 5-sale card on a flat-priced position could
+ *      out-rank a meaningful Charizard move when fill was tight.
+ *      Brief 5A-W-21: "do not label a card 'Most active' unless
+ *      activity is the only meaningful reason."
+ *    * The `most_active` label stays in REASON_LABEL for backward
+ *      compatibility with any in-flight rendering payloads; the
+ *      selector simply stops emitting it.
  *
  *  Pure — exported for tests. */
 export function selectTopItems(
@@ -438,25 +498,7 @@ export function selectTopItems(
   const isMeaningfulMover = (c: ScoredCard) => isPositiveMover(c) || isNegativeMover(c)
   const hasSales        = (c: ScoredCard) => c.recentSalesCount > 0
 
-  // 1. Biggest riser
-  const risers = cards.filter(isPositiveMover)
-    .sort((a, b) => (b.pctChange ?? 0) - (a.pctChange ?? 0))
-  take(risers[0], 'biggest_riser')
-
-  // 2. Biggest faller
-  const fallers = cards.filter(isNegativeMover)
-    .sort((a, b) => (a.pctChange ?? 0) - (b.pctChange ?? 0))
-  take(fallers[0], 'biggest_faller')
-
-  // 3. Most active
-  const active = cards.filter(hasSales)
-    .sort((a, b) =>
-      (b.recentSalesCount - a.recentSalesCount) ||
-      Math.abs(b.pctChange ?? 0) - Math.abs(a.pctChange ?? 0)
-    )
-  take(active[0], 'most_active')
-
-  // 4. Most valuable (opt-in)
+  // A. Most valuable — opt-in, always first slot when set.
   if (opts.includeMostValuable) {
     const mostValuable = [...cards]
       .filter(c => c.currentCents != null && c.currentCents > 0)
@@ -464,27 +506,39 @@ export function selectTopItems(
     take(mostValuable[0], 'most_valuable')
   }
 
-  // 5. Fill — meaningful movers by |pct|. Each survivor keeps its
-  //    DIRECTIONAL label; no card with |pct| < MIN_MEANINGFUL_PCT
-  //    ever lands here, so "Biggest riser · +0.0%" cannot happen.
+  // B. Biggest riser — by raw pct (intentionally not damped here so
+  //    a tiny card with a huge move still earns its dedicated slot).
+  const risers = cards.filter(isPositiveMover)
+    .sort((a, b) => (b.pctChange ?? 0) - (a.pctChange ?? 0))
+  take(risers[0], 'biggest_riser')
+
+  // C. Biggest faller.
+  const fallers = cards.filter(isNegativeMover)
+    .sort((a, b) => (a.pctChange ?? 0) - (b.pctChange ?? 0))
+  take(fallers[0], 'biggest_faller')
+
+  // D. Fill — meaningful movers by VALUE-WEIGHTED importance. The
+  //    tie-break is recentSalesCount so a heavily-traded $5 mover
+  //    edges out a quiet $5 mover, but volume never bumps a card
+  //    UP a slot all on its own.
   if (picks.length < max) {
-    const byMagnitude = cards
+    const byImportance = cards
       .filter(isMeaningfulMover)
       .sort((a, b) =>
-        Math.abs(b.pctChange ?? 0) - Math.abs(a.pctChange ?? 0) ||
+        cardImportanceScore(b) - cardImportanceScore(a) ||
         (b.recentSalesCount - a.recentSalesCount)
       )
-    for (const c of byMagnitude) {
+    for (const c of byImportance) {
       if (picks.length >= max) break
-      const reason: WeeklyDigestItemReason =
-        hasSales(c)              ? 'most_active'
-        : (c.pctChange ?? 0) > 0 ? 'biggest_riser'
-        :                          'biggest_faller'
+      const reason: WeeklyDigestItemReason = (c.pctChange ?? 0) > 0 ? 'biggest_riser' : 'biggest_faller'
       take(c, reason)
     }
   }
 
-  // 6. Final pass — sales-only cards (no pct OR sub-threshold pct).
+  // E. Sales-only fallback — only when there aren't enough movement
+  //    candidates. Always labelled new_sales_activity (NOT most_active);
+  //    the "Most active" label is reserved for the rare case where
+  //    activity truly is the only meaningful reason a card surfaced.
   if (picks.length < max) {
     const salesOnly = cards
       .filter(c => hasSales(c) && !isMeaningfulMover(c))
@@ -1373,7 +1427,20 @@ async function buildAlertSummary(
     else                                  urlDiagnostics.alertCardsWithNoUrl         += 1
   }
 
-  const sorted = Array.from(blocks.values()).sort((a, b) => b._score - a._score)
+  // Block 5A-W-21 — sort cards so PRICE-rule alerts outrank
+  // sales-only alerts, then by severity-weighted score, then by raw
+  // event count. Per-block, also reorder `rules` so price reasons
+  // render before sales reasons inside the rendered card line.
+  for (const b of Array.from(blocks.values())) {
+    b.rules.sort((x, y) => (isPriceRule(x) ? 0 : 1) - (isPriceRule(y) ? 0 : 1))
+  }
+  const sorted = Array.from(blocks.values()).sort((a, b) => {
+    const aPrice = a.rules.some(isPriceRule) ? 1 : 0
+    const bPrice = b.rules.some(isPriceRule) ? 1 : 0
+    if (aPrice !== bPrice)      return bPrice - aPrice
+    if (b._score !== a._score)  return b._score - a._score
+    return b.eventCount - a.eventCount
+  })
   const cardBlocks = sorted.slice(0, maxAlertItems).map(({ _score, _urlSource, ...rest }) => {
     void _score; void _urlSource
     return rest

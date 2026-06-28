@@ -176,6 +176,15 @@ export function buildSampleWeeklyDigestData(): WeeklyDigestData {
         fallingCount: 9,
       },
       topItems: [
+        // Block 5A-W-21 — sample order mirrors the new selector
+        // ordering: most_valuable first, then riser, faller, then
+        // sales-only (rare; only when there aren't enough movers).
+        {
+          cardSlug: '1450205', cardName: 'Charizard', setName: 'Base Set',
+          cardUrl:  'https://www.pokeprices.io/set/Base%20Set/card/charizard-base-set-4-102',
+          currentCents: 29_074, previousCents: null, pctChange: null, absChangeCents: null,
+          recentSalesCount: 0, reason: 'most_valuable', pctChangeWindowDays: null,
+        },
         {
           cardSlug: '1450205', cardName: "Lt. Surge's Raichu", setName: 'Gym Challenge',
           cardUrl:  'https://www.pokeprices.io/set/Gym%20Challenge/card/lt-surges-raichu-1st-edition-11',
@@ -191,14 +200,8 @@ export function buildSampleWeeklyDigestData(): WeeklyDigestData {
         {
           cardSlug: '12054014', cardName: 'Energy Coins [Poke Ball]', setName: 'Black Bolt',
           cardUrl:  'https://www.pokeprices.io/set/Black%20Bolt/card/energy-coins-poke-ball-81',
-          currentCents: 800, previousCents: null, pctChange: 6.7, absChangeCents: null,
-          recentSalesCount: 9, reason: 'most_active', pctChangeWindowDays: 30,
-        },
-        {
-          cardSlug: '1450205', cardName: 'Charizard', setName: 'Base Set',
-          cardUrl:  'https://www.pokeprices.io/set/Base%20Set/card/charizard-base-set-4-102',
-          currentCents: 29_074, previousCents: null, pctChange: null, absChangeCents: null,
-          recentSalesCount: 0, reason: 'most_valuable', pctChangeWindowDays: null,
+          currentCents: 800, previousCents: null, pctChange: null, absChangeCents: null,
+          recentSalesCount: 9, reason: 'new_sales_activity', pctChangeWindowDays: null,
         },
       ],
     },
@@ -495,7 +498,20 @@ function renderAlertBlockHtml(block: WeeklyDigestAlertCardBlock): string {
 function renderAlertSectionHtml(data: WeeklyDigestData): string {
   if (data.alertSummary.cardBlocks.length === 0) return ''
   const heading = `<h2 style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:800;color:${BRAND.navy};margin:28px 0 10px;text-transform:uppercase;letter-spacing:0.8px;">Alert highlights</h2>`
-  const intro   = `<div style="font-family:'Figtree',sans-serif;font-size:11px;color:${BRAND.muted};text-transform:uppercase;letter-spacing:0.7px;font-weight:700;margin-bottom:6px;">${data.alertSummary.totalEvents} ${pluralize(data.alertSummary.totalEvents, 'alert', 'alerts')} this week</div>`
+  // Block 5A-W-21 — soften the headline copy. The previous form,
+  // "32 alerts this week", led with the raw event count and read
+  // alarming. The brief: "Do not make the large raw alert count the
+  // headline." We lead with cards (the unit the user actually
+  // thinks in) and surface the signal total only as a quieter
+  // secondary inline figure, and only when there's more than one
+  // signal per card on average (otherwise it's just noise).
+  const cardCount   = data.alertSummary.cardBlocks.length
+  const totalEvents = data.alertSummary.totalEvents
+  const cardsCopy   = `${cardCount} ${pluralize(cardCount, 'card', 'cards')} with alerts this week`
+  const signalsCopy = totalEvents > cardCount
+    ? ` <span style="color:${BRAND.mutedSoft};text-transform:none;letter-spacing:0;font-weight:600;">· ${totalEvents} signals total</span>`
+    : ''
+  const intro = `<div style="font-family:'Figtree',sans-serif;font-size:11px;color:${BRAND.muted};text-transform:uppercase;letter-spacing:0.7px;font-weight:700;margin-bottom:6px;">${cardsCopy}${signalsCopy}</div>`
   const items   = `<table role="presentation" style="width:100%;border-collapse:collapse;"><tbody>${data.alertSummary.cardBlocks.map(renderAlertBlockHtml).join('')}</tbody></table>`
   return heading + intro + items
 }
@@ -653,7 +669,15 @@ function renderText(data: WeeklyDigestData, sample: boolean): string {
     if (data.alertSummary.cardBlocks.length > 0) {
       lines.push('ALERT HIGHLIGHTS')
       lines.push('----------------')
-      lines.push(`${data.alertSummary.totalEvents} ${pluralize(data.alertSummary.totalEvents, 'alert', 'alerts')} this week`)
+      // Block 5A-W-21 — soften: lead with card count, signals as a
+      // secondary inline figure (and only when there's >1 per card).
+      const cardCount   = data.alertSummary.cardBlocks.length
+      const totalEvents = data.alertSummary.totalEvents
+      const cardsLine   = `${cardCount} ${pluralize(cardCount, 'card', 'cards')} with alerts this week`
+      lines.push(totalEvents > cardCount
+        ? `${cardsLine} · ${totalEvents} signals total`
+        : cardsLine,
+      )
       for (const block of data.alertSummary.cardBlocks) {
         // Block 5A-W-16G — user-friendly text-body copy. Drop the
         // "X normal / X low" word list; keep an "Important" flag only
