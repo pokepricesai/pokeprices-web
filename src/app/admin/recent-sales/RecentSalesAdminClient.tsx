@@ -1669,6 +1669,320 @@ function AlertDeliveryBatchControls() {
   )
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-22 — Instant Alert Safety panel
+//
+// Three admin actions in one card:
+//   1. Preview the next instant alert batch in dry-run mode. Shows
+//      per-user counters (loaded vs rendered, superseded duplicates,
+//      sales-only card mix) plus a warnings summary that flags any
+//      user who'd receive an unusually noisy email.
+//   2. Render the exact instant alert digest the admin themselves
+//      would receive on the next cron run — post-dedupe, post-cap,
+//      full HTML preview in a sandboxed iframe.
+//   3. Show the last 20 watchlist_alert email_delivery_log rows so
+//      the operator can see what's actually shipped.
+//
+// No send buttons here — this panel is strictly inspection. Real
+// instant-alert sends still come from the existing cron route
+// (/api/cron/instant-alerts), which has its own secret + flag gate.
+// ─────────────────────────────────────────────────────────────────────
+
+function InstantAlertSafetyPanel() {
+  type PreviewBody = {
+    dryRun?:               boolean
+    usersConsidered?:      number
+    usersEmailed?:         number
+    eventsDelivered?:      number
+    cardsDelivered?:       number
+    usersInCooldown?:      number
+    suppressedOrSkipped?:  number
+    failed?:               number
+    cooldownHours?:        number
+    allowlist?: { active: boolean; size: number; filteredOut: number }
+    warnings?: {
+      usersWithHighEventCount:        number
+      usersWithHighCardCount:         number
+      usersWithManySalesOnlyCards:    number
+      usersWithPreDedupeDuplicates:   number
+      flagged:                        boolean
+    }
+    warningThresholds?: { events: number; cards: number; salesOnlyCards: number }
+    perUser?: Array<{
+      recipientMasked:        string
+      outcome:                string
+      eventCount:             number
+      cardCount?:             number
+      eventCountLoaded?:      number
+      eventCountRendered?:    number
+      supersededEventCount?:  number
+      salesOnlyCardCount?:    number
+      eventsLeftUndelivered?: number
+      reason?:                string | null
+    }>
+    error?:                 string
+  }
+  type RenderBody = {
+    eventCountLoaded?:     number
+    eventCountRendered?:   number
+    supersededEventCount?: number
+    cardCount?:            number
+    leftover?:             number
+    subject?:              string
+    html?:                 string
+    text?:                 string
+    error?:                string
+  }
+  type LogRow = {
+    id:                       string
+    sent_at:                  string | null
+    failed_at:                string | null
+    status:                   string
+    template_key:             string | null
+    user_id_masked:           string
+    resend_email_id:          string | null
+    error_code:               string | null
+    card_count:               number | null
+    event_count:              number | null
+    event_count_loaded:       number | null
+    event_count_rendered:     number | null
+    superseded_event_count:   number | null
+    source:                   string | null
+    delivery_engine_version:  string | null
+    dedupe_applied:           boolean | null
+  }
+  type LogsBody = { rows?: LogRow[]; limit?: number; error?: string }
+
+  const [busy,    setBusy]    = useState<'idle' | 'preview' | 'render' | 'logs'>('idle')
+  const [preview, setPreview] = useState<PreviewBody | null>(null)
+  const [render,  setRender]  = useState<RenderBody | null>(null)
+  const [logs,    setLogs]    = useState<LogsBody | null>(null)
+  const [error,   setError]   = useState<string | null>(null)
+
+  async function call(path: string, setter: (body: unknown) => void, label: 'preview' | 'render' | 'logs') {
+    if (busy !== 'idle') return
+    setBusy(label); setError(null); setter(null as unknown as never)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        setError('Not signed in. Sign in with an authorised admin account.')
+        return
+      }
+      const res = await fetch(path, {
+        method:  'POST',
+        headers: {
+          authorization:  `Bearer ${session.access_token}`,
+          'content-type': 'application/json',
+        },
+        body:    '{}',
+        cache:   'no-store',
+      })
+      const text = await res.text()
+      try { setter(JSON.parse(text)) }
+      catch { setError(text || 'Empty response') }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'unknown error')
+    } finally {
+      setBusy('idle')
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Instant Alert Safety</div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+        Preview the next instant alert batch before any cron run. <strong style={{ color: 'var(--text)' }}>No emails are sent</strong> from this panel — it&apos;s strictly inspection. Use <code>ALERT_INSTANT_DELIVERY_ALLOWED_USER_IDS</code> (comma-separated) to limit cron sends to a staged-rollout allowlist; the preview shows whether that gate is active.
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <button
+          onClick={() => void call('/api/admin/alerts/instant-preview',  v => setPreview(v as PreviewBody), 'preview')}
+          disabled={busy !== 'idle'}
+          style={{
+            padding: '6px 12px', borderRadius: 6,
+            border: '1px solid var(--border)',
+            background: busy === 'preview' ? 'var(--bg-light)' : 'var(--primary)',
+            color: busy === 'preview' ? 'var(--text)' : '#fff',
+            cursor: busy !== 'idle' ? 'wait' : 'pointer',
+            fontSize: 12, fontWeight: 700,
+            fontFamily: "'Figtree', sans-serif",
+          }}
+        >{busy === 'preview' ? 'Loading…' : 'Preview next instant batch'}</button>
+        <button
+          onClick={() => void call('/api/admin/alerts/render-instant-digest', v => setRender(v as RenderBody), 'render')}
+          disabled={busy !== 'idle'}
+          style={{
+            padding: '6px 12px', borderRadius: 6,
+            border: '1px solid var(--border)',
+            background: busy === 'render' ? 'var(--bg-light)' : 'transparent',
+            color: 'var(--text)',
+            cursor: busy !== 'idle' ? 'wait' : 'pointer',
+            fontSize: 12, fontWeight: 700,
+            fontFamily: "'Figtree', sans-serif",
+          }}
+        >{busy === 'render' ? 'Loading…' : 'Render my next digest'}</button>
+        <button
+          onClick={() => void call('/api/admin/alerts/instant-logs', v => setLogs(v as LogsBody), 'logs')}
+          disabled={busy !== 'idle'}
+          style={{
+            padding: '6px 12px', borderRadius: 6,
+            border: '1px solid var(--border)',
+            background: busy === 'logs' ? 'var(--bg-light)' : 'transparent',
+            color: 'var(--text)',
+            cursor: busy !== 'idle' ? 'wait' : 'pointer',
+            fontSize: 12, fontWeight: 700,
+            fontFamily: "'Figtree', sans-serif",
+          }}
+        >{busy === 'logs' ? 'Loading…' : 'Recent watchlist_alert logs'}</button>
+      </div>
+
+      {error && (
+        <div style={{ marginTop: 10, fontSize: 12, color: 'var(--red, #c00)' }}>{error}</div>
+      )}
+
+      {preview && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700, marginBottom: 6 }}>
+            Preview batch (dry-run)
+          </div>
+          {preview.allowlist?.active && (
+            <div style={{ padding: '8px 10px', borderRadius: 6, background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.30)', color: '#b45309', fontSize: 12, marginBottom: 8 }}>
+              <strong>Staged rollout active</strong> — only {preview.allowlist.size} allow-listed user(s) will be considered. {preview.allowlist.filteredOut} other candidate(s) were filtered out.
+            </div>
+          )}
+          {preview.warnings?.flagged && (
+            <div style={{ padding: '8px 10px', borderRadius: 6, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.30)', color: '#b91c1c', fontSize: 12, marginBottom: 8 }}>
+              <strong>Heads up:</strong>{' '}
+              {preview.warnings.usersWithHighEventCount     > 0 && <> {preview.warnings.usersWithHighEventCount} user(s) with &gt;{preview.warningThresholds?.events ?? '?'} events ·</>}
+              {preview.warnings.usersWithHighCardCount      > 0 && <> {preview.warnings.usersWithHighCardCount} with &gt;{preview.warningThresholds?.cards ?? '?'} cards ·</>}
+              {preview.warnings.usersWithManySalesOnlyCards > 0 && <> {preview.warnings.usersWithManySalesOnlyCards} with &gt;{preview.warningThresholds?.salesOnlyCards ?? '?'} sales-only cards ·</>}
+              {preview.warnings.usersWithPreDedupeDuplicates > 0 && <> {preview.warnings.usersWithPreDedupeDuplicates} with pre-dedupe duplicates</>}
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginBottom: 8 }}>
+            <SmallStat label="users considered" value={preview.usersConsidered} />
+            <SmallStat label="would email"      value={preview.usersEmailed} />
+            <SmallStat label="cards in digest"  value={preview.cardsDelivered} />
+            <SmallStat label="events in digest" value={preview.eventsDelivered} />
+            <SmallStat label={`in cooldown (${preview.cooldownHours ?? '?'}h)`} value={preview.usersInCooldown} />
+            <SmallStat label="suppressed / skipped" value={preview.suppressedOrSkipped} />
+            <SmallStat label="failed"           value={preview.failed} />
+            <SmallStat label="allowlist size"   value={preview.allowlist?.size} />
+          </div>
+          {Array.isArray(preview.perUser) && preview.perUser.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead><tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
+                  <th style={{ padding: 6 }}>recipient</th>
+                  <th style={{ padding: 6, textAlign: 'right' }}>loaded</th>
+                  <th style={{ padding: 6, textAlign: 'right' }}>rendered</th>
+                  <th style={{ padding: 6, textAlign: 'right' }}>dedup'd</th>
+                  <th style={{ padding: 6, textAlign: 'right' }}>cards</th>
+                  <th style={{ padding: 6, textAlign: 'right' }}>sales-only</th>
+                  <th style={{ padding: 6, textAlign: 'right' }}>left</th>
+                  <th style={{ padding: 6 }}>outcome</th>
+                </tr></thead>
+                <tbody>
+                  {preview.perUser.map((u, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: 6, fontFamily: 'monospace', fontSize: 11 }}>{u.recipientMasked}</td>
+                      <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{u.eventCountLoaded ?? '—'}</td>
+                      <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{u.eventCountRendered ?? '—'}</td>
+                      <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{u.supersededEventCount ?? '—'}</td>
+                      <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{u.cardCount ?? '—'}</td>
+                      <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{u.salesOnlyCardCount ?? '—'}</td>
+                      <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: (u.eventsLeftUndelivered ?? 0) > 0 ? 'var(--accent)' : 'var(--text-muted)' }}>{u.eventsLeftUndelivered ?? 0}</td>
+                      <td style={{ padding: 6 }}>{u.outcome}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <details>
+            <summary style={{ fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>Raw response JSON</summary>
+            <pre style={{ margin: '6px 0 0', padding: 8, borderRadius: 6, background: 'var(--card)', border: '1px solid var(--border)', fontFamily: 'monospace', fontSize: 11, overflowX: 'auto', whiteSpace: 'pre', maxHeight: 320 }}>{JSON.stringify(preview, null, 2)}</pre>
+          </details>
+        </div>
+      )}
+
+      {render && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700, marginBottom: 6 }}>
+            Rendered digest for you (post-dedupe)
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginBottom: 8 }}>
+            <SmallStat label="loaded"             value={render.eventCountLoaded} />
+            <SmallStat label="rendered"           value={render.eventCountRendered} />
+            <SmallStat label="dedup'd"            value={render.supersededEventCount} />
+            <SmallStat label="cards"              value={render.cardCount} />
+            <SmallStat label="leftover (post-cap)" value={render.leftover} />
+          </div>
+          {render.subject && (
+            <div style={{ marginBottom: 6, fontSize: 12, color: 'var(--text)' }}>
+              <strong>Subject:</strong> {render.subject}
+            </div>
+          )}
+          {render.html && (
+            <iframe
+              title="Rendered instant digest"
+              srcDoc={render.html}
+              style={{ width: '100%', height: 480, border: '1px solid var(--border)', borderRadius: 6, background: '#fff' }}
+            />
+          )}
+          {render.text && (
+            <details style={{ marginTop: 8 }}>
+              <summary style={{ fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>Plain text</summary>
+              <pre style={{ margin: '6px 0 0', padding: 8, borderRadius: 6, background: 'var(--card)', border: '1px solid var(--border)', fontFamily: 'monospace', fontSize: 11, overflowX: 'auto', whiteSpace: 'pre', maxHeight: 320 }}>{render.text}</pre>
+            </details>
+          )}
+        </div>
+      )}
+
+      {logs && Array.isArray(logs.rows) && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700, marginBottom: 6 }}>
+            Recent watchlist_alert email_delivery_log ({logs.rows.length} of last {logs.limit})
+          </div>
+          {logs.rows.length === 0
+            ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No watchlist_alert sends recorded yet.</div>
+            : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead><tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
+                  <th style={{ padding: 6 }}>when</th>
+                  <th style={{ padding: 6 }}>status</th>
+                  <th style={{ padding: 6 }}>user</th>
+                  <th style={{ padding: 6 }}>template</th>
+                  <th style={{ padding: 6 }}>source</th>
+                  <th style={{ padding: 6, textAlign: 'right' }}>cards</th>
+                  <th style={{ padding: 6, textAlign: 'right' }}>events</th>
+                  <th style={{ padding: 6, textAlign: 'right' }}>loaded</th>
+                  <th style={{ padding: 6, textAlign: 'right' }}>sup.</th>
+                  <th style={{ padding: 6 }}>engine</th>
+                </tr></thead>
+                <tbody>
+                  {logs.rows.map(r => (
+                    <tr key={r.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: 6, fontFamily: 'monospace', fontSize: 11 }}>{r.sent_at ?? r.failed_at ?? '—'}</td>
+                      <td style={{ padding: 6 }}>{r.status}</td>
+                      <td style={{ padding: 6, fontFamily: 'monospace', fontSize: 11 }}>{r.user_id_masked}</td>
+                      <td style={{ padding: 6 }}>{r.template_key ?? '—'}</td>
+                      <td style={{ padding: 6 }}>{r.source ?? '—'}</td>
+                      <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.card_count ?? '—'}</td>
+                      <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.event_count ?? '—'}</td>
+                      <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.event_count_loaded ?? '—'}</td>
+                      <td style={{ padding: 6, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.superseded_event_count ?? '—'}</td>
+                      <td style={{ padding: 6, fontFamily: 'monospace', fontSize: 11 }}>{r.delivery_engine_version ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SmallStat({ label, value }: { label: string; value: unknown }) {
   const display = typeof value === 'number' ? value : '—'
   return (
@@ -2137,6 +2451,8 @@ export default function RecentSalesAdminClient() {
               <WeeklyDigestTestSendButton />
               <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '14px 0 0' }} />
               <WeeklyDigestBatchControls />
+              <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '14px 0 0' }} />
+              <InstantAlertSafetyPanel />
               <pre style={{
                 margin: '6px 0 0', padding: 8, borderRadius: 6,
                 background: 'var(--card)', border: '1px solid var(--border)',

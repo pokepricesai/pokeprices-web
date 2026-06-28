@@ -209,6 +209,34 @@ export function getAlertInstantDeliveryCronMaxUsers(): number {
   return Math.min(n, HARD_MAX_ALERT_INSTANT_DELIVERY_CRON_MAX_USERS)
 }
 
+/**
+ * Block 5A-W-22 — optional staged-rollout allowlist for instant alert
+ * delivery. Comma-separated user_id values. When the list is non-empty
+ * the orchestrator filters the candidate pool BEFORE any prefs / cooldown
+ * / digest work, so only listed users can receive an instant alert
+ * email. When unset/empty, behaviour is unchanged.
+ *
+ * Lets us test the cron in production against Luke (and any other
+ * listed admin) before scaling to the whole user base. The admin
+ * preview route surfaces the active allowlist state so the operator
+ * can see they're in "staged rollout" mode at a glance.
+ *
+ * Returns a frozen array so callers can't accidentally mutate the
+ * canonical list.
+ */
+export function getAlertInstantDeliveryAllowedUserIds(): ReadonlyArray<string> {
+  const raw = (process.env.ALERT_INSTANT_DELIVERY_ALLOWED_USER_IDS ?? '').trim()
+  if (raw.length === 0) return Object.freeze([])
+  const parts = raw.split(',')
+    .map(s => s.trim())
+    .filter(s => s.length > 0)
+  return Object.freeze(parts)
+}
+
+export function isAlertInstantDeliveryAllowlistActive(): boolean {
+  return getAlertInstantDeliveryAllowedUserIds().length > 0
+}
+
 export const ALERTS_EVALUATOR_FLAG_NAMES: ReadonlyArray<string> = [
   'ALERTS_EVALUATOR_ENABLED',
   'ALERT_EMAIL_PREVIEW_ENABLED',
@@ -225,4 +253,5 @@ export const ALERTS_EVALUATOR_FLAG_NAMES: ReadonlyArray<string> = [
   'ALERT_INSTANT_ALERTS_CRON_ENABLED',
   'ALERT_INSTANT_EVALUATOR_CRON_MAX_USERS',
   'ALERT_INSTANT_DELIVERY_CRON_MAX_USERS',
+  'ALERT_INSTANT_DELIVERY_ALLOWED_USER_IDS',
 ]

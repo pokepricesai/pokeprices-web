@@ -43,7 +43,10 @@ import {
   type AlertRule,
   type UserAlertPreferences,
 } from './preferences'
-import { getAlertDeliveryUserCooldownHours } from './flags'
+import {
+  getAlertDeliveryUserCooldownHours,
+  getAlertInstantDeliveryAllowedUserIds,
+} from './flags'
 
 // ─────────────────────────────────────────────────────────────────────
 // Hard caps. Caller-supplied limits are clamped to these values.
@@ -99,6 +102,23 @@ export type UserDeliveryResult = {
   emailId?:        string | null
   deliveryLogId?:  string | null
   reason?:         string | null
+  /** Block 5A-W-22 — raw event count loaded from alert_events for this
+   *  user, BEFORE per-(card, rule) dedupe. Optional because skipped
+   *  paths (cooldown, prefs_disabled, no_events) never reach the load
+   *  step. Surfaced for admin preview visibility. */
+  eventCountLoaded?:    number
+  /** Block 5A-W-22 — events actually rendered into the digest (post-
+   *  dedupe + card cap). Equal to `eventCount`; named explicitly to
+   *  read symmetrically with `eventCountLoaded` in preview output. */
+  eventCountRendered?:  number
+  /** Block 5A-W-22 — count of superseded duplicate events that got
+   *  rolled into this digest's winners (and so will be marked
+   *  delivered on a successful send). */
+  supersededEventCount?: number
+  /** Block 5A-W-22 — count of cards in this digest whose rule mix is
+   *  EXCLUSIVELY sales/activity (recent_sales, market_activity). Used
+   *  by the admin preview to flag "this batch is mostly trade noise". */
+  salesOnlyCardCount?:  number
 }
 
 export type DeliveryResult = {
@@ -126,6 +146,12 @@ export type DeliveryResult = {
    *  in hours. Echoed back so the admin UI can label things. */
   cooldownHours:          number
   perUser:                UserDeliveryResult[]
+  /** Block 5A-W-22 — staged-rollout allowlist visibility. When
+   *  `active=true`, only the listed user_ids were considered; every
+   *  other candidate the SQL pool surfaced was filtered out before
+   *  any prefs / cooldown / digest work. The admin preview UI uses
+   *  this to render a clear "staged rollout" banner. */
+  allowlist:              { active: boolean; size: number; filteredOut: number }
 }
 
 export type DeliveryOptions = {
@@ -216,7 +242,19 @@ export async function deliverAlerts(
   //    non-cooldown users when filling the batch. Without this, a
   //    single user with hundreds of undelivered events can dominate
   //    the first maxUsers slots even when other users are waiting.
-  const pool = await loadCandidateUserIds(supa, maxUsers * 4)
+  const rawPool = await loadCandidateUserIds(supa, maxUsers * 4)
+
+  // Block 5A-W-22 — staged-rollout allowlist. When set, only the
+  // listed user_ids reach the prefs / cooldown / digest pipeline.
+  // Everyone else is silently filtered out (we report the filtered
+  // count in the result so the admin can see the gate is active).
+  const allowlist        = getAlertInstantDeliveryAllowedUserIds()
+  const allowlistActive  = allowlist.length > 0
+  const allowlistSet     = allowlistActive ? new Set(allowlist) : null
+  const pool             = allowlistSet
+    ? rawPool.filter(uid => allowlistSet.has(uid))
+    : rawPool
+  const usersFilteredByAllowlist = allowlistActive ? rawPool.length - pool.length : 0
 
   // 2. Load prefs for the WHOLE pool so we can re-check enabled at
   //    delivery time (consent can change after the evaluator ran).
@@ -285,6 +323,11 @@ export async function deliverAlerts(
     // ── Group + cap (shared by dry-run and send paths) ────────────
     const allDigestEvents = await toDigestEvents(supa, events)
     const plan            = selectDigestPlan(allDigestEvents, maxCardsPerEmail)
+    // Block 5A-W-22 — preview counters shared by dry-run + send.
+    const eventCountLoaded     = events.length
+    const eventCountRendered   = plan.includedEvents.length
+    const supersededEventCount = plan.supersededIds.length
+    const salesOnlyCardCount   = countSalesOnlyCards(plan.includedEvents)
 
     // Block 5A-W-12 — count the FULL backlog (not just the loaded
     // slice). leftAfterDigest = (total undelivered for the user) -
@@ -295,10 +338,14 @@ export async function deliverAlerts(
     if (dryRun) {
       perUser.push({
         recipientMasked:       masked,
-        eventCount:            plan.includedEvents.length,
+        eventCount:            eventCountRendered,
         cardCount:             plan.cardCount,
         eventsLeftUndelivered: leftAfterDigest,
         outcome:               'would_send',
+        eventCountLoaded,
+        eventCountRendered,
+        supersededEventCount,
+        salesOnlyCardCount,
       })
       continue
     }
@@ -319,34 +366,54 @@ export async function deliverAlerts(
         // Fresh idempotency key per batch attempt so retries don't
         // collapse with prior failed attempts.
         idempotencyKey: `alert-digest-${userId}-${asOfDate.getTime()}`,
+        // Block 5A-W-22 — richer metadata so the admin email log
+        // pane can show what each send actually shipped, AND so a
+        // future block can diff "loaded vs rendered" trends without
+        // re-running the engine. `source`, `event_count`, `card_count`
+        // preserved verbatim for backward-compat with any pre-22
+        // inspecting tool.
         metadata: {
-          source:      'alert_delivery_batch',
-          event_count: plan.includedEvents.length,
-          card_count:  plan.cardCount,
+          source:                   'alert_delivery_batch',
+          event_count:              eventCountRendered,
+          card_count:               plan.cardCount,
+          event_count_loaded:       eventCountLoaded,
+          event_count_rendered:     eventCountRendered,
+          superseded_event_count:   supersededEventCount,
+          max_cards_per_email:      maxCardsPerEmail,
+          dedupe_applied:           true,
+          delivery_engine_version:  'deduped-card-rule-v1',
         },
       })
     } catch (e) {
       const reason = e instanceof Error ? e.message : 'unknown'
       perUser.push({
         recipientMasked:       masked,
-        eventCount:            plan.includedEvents.length,
+        eventCount:            eventCountRendered,
         cardCount:             plan.cardCount,
         eventsLeftUndelivered: leftAfterDigest,
         outcome:               'provider_error',
         reason,
+        eventCountLoaded,
+        eventCountRendered,
+        supersededEventCount,
+        salesOnlyCardCount,
       })
       continue
     }
 
     perUser.push({
       recipientMasked:       masked,
-      eventCount:            plan.includedEvents.length,
+      eventCount:            eventCountRendered,
       cardCount:             plan.cardCount,
       eventsLeftUndelivered: leftAfterDigest,
       outcome:               result.outcome as DeliveryOutcome,
       emailId:               result.emailId ?? null,
       deliveryLogId:         result.deliveryLogId ?? null,
       reason:                result.reason ?? null,
+      eventCountLoaded,
+      eventCountRendered,
+      supersededEventCount,
+      salesOnlyCardCount,
     })
 
     // ── Mark delivered ONLY when the send actually went through ──
@@ -372,7 +439,35 @@ export async function deliverAlerts(
     }
   }
 
-  return summarise(perUser, dryRun, asOfIso, candidateUserIds.length, cooldownHours)
+  return summarise(perUser, dryRun, asOfIso, candidateUserIds.length, cooldownHours, {
+    active:      allowlistActive,
+    size:        allowlist.length,
+    filteredOut: usersFilteredByAllowlist,
+  })
+}
+
+/** Block 5A-W-22 — count cards in a digest whose ONLY rules are
+ *  sales/activity. The brief flags batches with >3 of these so an
+ *  operator can spot when an instant alert run is mostly trade
+ *  noise rather than meaningful price moves. Pure. */
+function countSalesOnlyCards(events: DigestEvent[]): number {
+  const rulesByKey = new Map<string, Set<string>>()
+  for (const e of events) {
+    const k = e.cardSlug ? `slug:${e.cardSlug}` : `name:${e.cardName}|${e.setName}`
+    let set = rulesByKey.get(k)
+    if (!set) { set = new Set(); rulesByKey.set(k, set) }
+    set.add(e.rule)
+  }
+  const SALES_RULES = new Set(['recent_sales', 'market_activity'])
+  let count = 0
+  for (const ruleSet of Array.from(rulesByKey.values())) {
+    let allSales = true
+    for (const r of Array.from(ruleSet)) {
+      if (!SALES_RULES.has(r)) { allSales = false; break }
+    }
+    if (allSales && ruleSet.size > 0) count++
+  }
+  return count
 }
 
 /** Resolve the effective cooldown window. Caller-supplied option wins,
@@ -476,6 +571,12 @@ export function summarise(
   asOf:            string,
   usersConsidered: number,
   cooldownHours:   number,
+  /** Block 5A-W-22 — staged-rollout allowlist state. Optional so
+   *  pre-22 callers (and the existing test suite) still compile;
+   *  defaults to "inactive" when omitted. */
+  allowlist:       { active: boolean; size: number; filteredOut: number } = {
+    active: false, size: 0, filteredOut: 0,
+  },
 ): DeliveryResult {
   let usersEmailed          = 0
   let eventsDelivered       = 0
@@ -518,6 +619,7 @@ export function summarise(
     failed,
     cooldownHours,
     perUser,
+    allowlist,
   }
 }
 

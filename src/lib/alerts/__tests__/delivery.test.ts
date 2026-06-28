@@ -3,7 +3,7 @@
 // shape, mark-delivered semantics (only on outcome=sent), batch caps,
 // suppressed / failed / no-email branches, and the maskEmail helper.
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { FakeDB } from '@/lib/email/__tests__/_fakeSupabase'
 
@@ -1060,5 +1060,134 @@ describe('deliverAlerts — Block 5A-W-20 marks superseded duplicates delivered'
     })
     const rows = fakeDB.rows('alert_events') as Array<{ delivered_at: string | null }>
     for (const r of rows) expect(r.delivered_at).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-22 — staged-rollout allowlist + preview counters + metadata
+// ─────────────────────────────────────────────────────────────────────
+
+describe('deliverAlerts — Block 5A-W-22 allowlist', () => {
+  const KEY = 'ALERT_INSTANT_DELIVERY_ALLOWED_USER_IDS' as const
+  let snap: string | undefined
+  beforeEach(() => { snap = process.env[KEY]; delete process.env[KEY] })
+  afterEach(()  => { if (snap === undefined) delete process.env[KEY]; else process.env[KEY] = snap })
+
+  it('default (env unset): every candidate is considered; allowlist.active=false', async () => {
+    seedPrefs('u1'); seedPrefs('u2')
+    seedEvent({ user_id: 'u1' })
+    seedEvent({ user_id: 'u2' })
+    const send = stubSend('sent')
+    const r = await deliverAlerts(asSupa(fakeDB), {
+      asOf,
+      getUserEmail: emailMap([['u1','a@x.io'],['u2','b@x.io']]),
+      sendFn: send.fn,
+    })
+    expect(r.allowlist).toEqual({ active: false, size: 0, filteredOut: 0 })
+    expect(r.usersConsidered).toBe(2)
+  })
+
+  it('when set: only listed users reach the digest pipeline; filteredOut counts the rest', async () => {
+    process.env[KEY] = 'u1'
+    seedPrefs('u1'); seedPrefs('u2')
+    seedEvent({ user_id: 'u1' })
+    seedEvent({ user_id: 'u2' })
+    const send = stubSend('sent')
+    const r = await deliverAlerts(asSupa(fakeDB), {
+      asOf,
+      getUserEmail: emailMap([['u1','a@x.io'],['u2','b@x.io']]),
+      sendFn: send.fn,
+    })
+    expect(r.allowlist.active).toBe(true)
+    expect(r.allowlist.size).toBe(1)
+    expect(r.allowlist.filteredOut).toBe(1)
+    // Only u1 reaches perUser; u2 is filtered before the loop.
+    expect(r.usersConsidered).toBe(1)
+    expect(r.perUser.some(p => p.outcome === 'would_send')).toBe(true)
+  })
+
+  it('whitespace + empty entries in the env are tolerated', async () => {
+    process.env[KEY] = ' u1 ,, ,  u3 '
+    seedPrefs('u1'); seedPrefs('u2'); seedPrefs('u3')
+    seedEvent({ user_id: 'u1' })
+    seedEvent({ user_id: 'u2' })
+    seedEvent({ user_id: 'u3' })
+    const send = stubSend('sent')
+    const r = await deliverAlerts(asSupa(fakeDB), {
+      asOf,
+      getUserEmail: emailMap([['u1','a@x.io'],['u2','b@x.io'],['u3','c@x.io']]),
+      sendFn: send.fn,
+    })
+    expect(r.allowlist.size).toBe(2)
+    expect(r.usersConsidered).toBe(2)
+  })
+})
+
+describe('deliverAlerts — Block 5A-W-22 preview counters', () => {
+  it('dry-run perUser includes eventCountLoaded / eventCountRendered / supersededEventCount / salesOnlyCardCount', async () => {
+    // Two duplicate recent_sales events on the same card → dedupe to
+    // one rendered event with one superseded ID; the card is
+    // exclusively a sales/activity card.
+    seedPrefs('u1')
+    seedEvent({ id: 'rs1', user_id: 'u1', rule: 'recent_sales',
+                payload_json: { recent_active_count: 5,  window_days: 7 },
+                detected_at: '2026-06-24T10:00:00Z' })
+    seedEvent({ id: 'rs2', user_id: 'u1', rule: 'recent_sales',
+                payload_json: { recent_active_count: 9,  window_days: 7 },
+                detected_at: '2026-06-25T10:00:00Z' })
+    const r = await deliverAlerts(asSupa(fakeDB), {
+      asOf,
+      getUserEmail: emailMap([['u1','a@x.io']]),
+      sendFn: stubSend('sent').fn,
+    })
+    const u = r.perUser.find(p => p.outcome === 'would_send')
+    expect(u).toBeDefined()
+    expect(u!.eventCountLoaded).toBe(2)
+    expect(u!.eventCountRendered).toBe(1)
+    expect(u!.supersededEventCount).toBe(1)
+    expect(u!.salesOnlyCardCount).toBe(1)
+  })
+
+  it('preview mode never sends and never marks delivered', async () => {
+    seedPrefs('u1')
+    seedEvent()
+    const send = stubSend('sent')
+    await deliverAlerts(asSupa(fakeDB), {
+      asOf,                                  // dryRun defaults TRUE
+      getUserEmail: emailMap([['u1','a@x.io']]),
+      sendFn: send.fn,
+    })
+    expect(send.calls).toHaveLength(0)
+    expect(fakeDB.rows('alert_events')[0].delivered_at).toBeNull()
+  })
+})
+
+describe('deliverAlerts — Block 5A-W-22 metadata enrichment on real sends', () => {
+  it('metadata_json carries dedupe counters + engine version on a successful send', async () => {
+    seedPrefs('u1')
+    seedEvent({ id: 'rs1', rule: 'recent_sales',
+                payload_json: { recent_active_count: 5, window_days: 7 },
+                detected_at: '2026-06-24T10:00:00Z' })
+    seedEvent({ id: 'rs2', rule: 'recent_sales',
+                payload_json: { recent_active_count: 9, window_days: 7 },
+                detected_at: '2026-06-25T10:00:00Z' })
+    const send = stubSend('sent', { emailId: 'r-1', deliveryLogId: 'log-1' })
+    await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      getUserEmail: emailMap([['u1','a@x.io']]),
+      sendFn: send.fn,
+    })
+    const m = send.calls[0].metadata as Record<string, unknown>
+    // Pre-22 keys preserved for backward compatibility.
+    expect(m.source).toBe('alert_delivery_batch')
+    expect(m.event_count).toBe(1)
+    expect(m.card_count).toBe(1)
+    // Block 5A-W-22 additions.
+    expect(m.event_count_loaded).toBe(2)
+    expect(m.event_count_rendered).toBe(1)
+    expect(m.superseded_event_count).toBe(1)
+    expect(m.dedupe_applied).toBe(true)
+    expect(m.delivery_engine_version).toBe('deduped-card-rule-v1')
+    expect(m.max_cards_per_email).toBeGreaterThan(0)
   })
 })
