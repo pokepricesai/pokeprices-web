@@ -136,3 +136,76 @@ export function buildDashboardChecklist(
     allComplete: completedCount === items.length,
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-31 — all-set state copy.
+//
+// When the dashboard checklist hits allComplete=true, the component
+// renders this instead of disappearing. Pure data so the same shape
+// is unit-testable and the visual layer stays a thin renderer.
+//
+// Free users see a "you're set up on Free" summary plus a soft
+// upgrade pointer ("Pro is coming soon"). Pro users see a confident
+// "you're on Pro" summary with the unlocked entitlements listed —
+// this doubles as the compact Pro value card on the dashboard hub.
+// ─────────────────────────────────────────────────────────────────────
+
+export type AllSetState = {
+  /** Hero title shown for everyone when the checklist is complete. */
+  title:             string
+  /** One-line lead under the title. */
+  description:       string
+  /** Plan-specific sub-heading ("You're on Pro" / "You're set up on Free"). */
+  planHeading:       string
+  /** Plan-specific bullets describing what the user has. */
+  planBullets:       string[]
+  /** Optional upgrade footer. Present only for free users; null for pro. */
+  upgrade: {
+    heading:       string
+    description:   string
+    ctaLabel:      string
+    ctaHref:       string
+  } | null
+}
+
+const PRO_BENEFITS: readonly string[] = [
+  'Unlimited portfolio',
+  'Unlimited watchlist',
+  'Custom alerts on every watched card',
+  'Instant alert emails',
+  'Weekly market overview',
+]
+
+const FREE_BENEFITS: readonly string[] = [
+  'Portfolio tracking',
+  'Watchlist alerts',
+  'Weekly overview',
+]
+
+/**
+ * Build the copy block shown when every checklist item is complete.
+ * Pure — same input always produces the same output.
+ */
+export function buildAllSetState(plan: UserPlanLite): AllSetState {
+  if (plan === 'pro') {
+    return {
+      title:        "You're all set",
+      description:  'Your portfolio, watchlist and alerts are active.',
+      planHeading:  "You're on Pro",
+      planBullets:  [...PRO_BENEFITS],
+      upgrade:      null,
+    }
+  }
+  return {
+    title:        "You're all set",
+    description:  'Your portfolio, watchlist and alerts are active.',
+    planHeading:  "You're set up on Free",
+    planBullets:  [...FREE_BENEFITS],
+    upgrade: {
+      heading:     'Pro is coming soon',
+      description: 'Unlock unlimited cards, custom alerts and instant emails.',
+      ctaLabel:    'Join Pro early access',
+      ctaHref:     '/dashboard/settings',
+    },
+  }
+}

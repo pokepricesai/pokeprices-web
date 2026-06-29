@@ -3,6 +3,7 @@
 
 import { describe, it, expect } from 'vitest'
 import {
+  buildAllSetState,
   buildDashboardChecklist,
   type DashboardChecklistInputs,
 } from '../dashboardChecklist'
@@ -175,5 +176,94 @@ describe('buildDashboardChecklist — totals', () => {
     }))
     expect(r.allComplete).toBe(true)
     expect(r.completedCount).toBe(r.totalCount)
+  })
+})
+
+// ─── Block 5A-W-31 — all-set state copy ──────────────────────────────
+
+describe('buildAllSetState — shared shape', () => {
+  it('always returns a non-empty title and lead description', () => {
+    for (const plan of ['free', 'pro'] as const) {
+      const s = buildAllSetState(plan)
+      expect(s.title.length).toBeGreaterThan(0)
+      expect(s.description.length).toBeGreaterThan(0)
+      expect(s.planHeading.length).toBeGreaterThan(0)
+      expect(s.planBullets.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('uses the same title for free and pro (single "all set" message)', () => {
+    expect(buildAllSetState('free').title).toBe(buildAllSetState('pro').title)
+    expect(buildAllSetState('free').title).toBe("You're all set")
+  })
+})
+
+describe('buildAllSetState — pro variant', () => {
+  it('shows the Pro plan heading and Pro benefits', () => {
+    const s = buildAllSetState('pro')
+    expect(s.planHeading).toBe("You're on Pro")
+    expect(s.planBullets).toEqual([
+      'Unlimited portfolio',
+      'Unlimited watchlist',
+      'Custom alerts on every watched card',
+      'Instant alert emails',
+      'Weekly market overview',
+    ])
+  })
+
+  it('does NOT include an upgrade footer for pro users', () => {
+    expect(buildAllSetState('pro').upgrade).toBeNull()
+  })
+
+  it('never mentions Pro early access in pro variant', () => {
+    const blob = JSON.stringify(buildAllSetState('pro'))
+    expect(blob.toLowerCase()).not.toContain('early access')
+    expect(blob.toLowerCase()).not.toContain('coming soon')
+  })
+})
+
+describe('buildAllSetState — free variant', () => {
+  it('shows the Free plan heading and Free benefits', () => {
+    const s = buildAllSetState('free')
+    expect(s.planHeading).toBe("You're set up on Free")
+    expect(s.planBullets).toEqual([
+      'Portfolio tracking',
+      'Watchlist alerts',
+      'Weekly overview',
+    ])
+  })
+
+  it('includes a Pro upgrade footer with the early-access CTA pointing at settings', () => {
+    const s = buildAllSetState('free')
+    expect(s.upgrade).not.toBeNull()
+    expect(s.upgrade?.heading).toBe('Pro is coming soon')
+    expect(s.upgrade?.description.toLowerCase()).toContain('unlimited')
+    expect(s.upgrade?.description.toLowerCase()).toContain('instant')
+    expect(s.upgrade?.ctaLabel.toLowerCase()).toContain('pro early access')
+    expect(s.upgrade?.ctaHref).toBe('/dashboard/settings')
+  })
+
+  it('does not include Pro entitlement bullets that Free users don\'t actually have', () => {
+    const bullets = buildAllSetState('free').planBullets.map(b => b.toLowerCase())
+    expect(bullets.some(b => b.includes('unlimited'))).toBe(false)
+    expect(bullets.some(b => b.includes('instant'))).toBe(false)
+    expect(bullets.some(b => b.includes('custom alerts on every'))).toBe(false)
+  })
+
+  it('never mentions Stripe, billing, or payment', () => {
+    const blob = JSON.stringify(buildAllSetState('free')).toLowerCase()
+    expect(blob).not.toContain('stripe')
+    expect(blob).not.toContain('checkout')
+    expect(blob).not.toContain('payment')
+    expect(blob).not.toContain('credit card')
+  })
+})
+
+describe('buildAllSetState — referenced routes', () => {
+  it('only references dashboard routes (no public SEO surfaces)', () => {
+    const free = buildAllSetState('free')
+    if (free.upgrade) {
+      expect(free.upgrade.ctaHref.startsWith('/dashboard')).toBe(true)
+    }
   })
 })
