@@ -7,6 +7,7 @@ import AvatarPicker from '@/components/AvatarPicker'
 import ComingSoonBadge from '@/components/ComingSoonBadge'
 import DashboardNav from './DashboardNav'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge'
+import DashboardOnboardingChecklist from '@/components/dashboard/DashboardOnboardingChecklist'
 
 interface Counts {
   portfolio: number | null
@@ -222,6 +223,11 @@ export default function DashboardHubClient() {
             + settings pages. */}
         {user?.id && <AccountPlanBadge userId={user.id} mode="compact" source="dashboard" />}
       </div>
+
+      {/* Block 5A-W-30 — onboarding checklist. Self-hides once every
+          item is complete so it doesn't clutter the hub for active
+          users. */}
+      {user?.id && <DashboardOnboardingChecklist userId={user.id} />}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>
         {tools.map(t => (
