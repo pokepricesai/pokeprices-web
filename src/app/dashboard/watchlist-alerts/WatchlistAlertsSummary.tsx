@@ -136,7 +136,7 @@ export default function WatchlistAlertsSummaryPanel({ userId }: { userId: string
           so the wording stays in sync across the dashboard. */}
       {!planLoading && (
         <div style={{ marginTop: 14 }}>
-          <AccountPlanBadge userId={userId} mode="full" />
+          <AccountPlanBadge userId={userId} mode="full" source="watchlist_alerts" />
         </div>
       )}
 

@@ -1450,7 +1450,7 @@ export default function PortfolioDashboard() {
           The over-limit note below shows for legacy users carrying
           more than the free cap of 25 items (e.g. early-access
           collectors with hundreds of cards). */}
-      {user && <AccountPlanBadge userId={user.id} mode="full" />}
+      {user && <AccountPlanBadge userId={user.id} mode="full" source="portfolio" />}
       {(() => {
         const msg = portfolioOverLimitMessage(plan, summary?.item_count ?? 0)
         return msg ? (

@@ -220,7 +220,7 @@ export default function DashboardHubClient() {
             so a hub visitor sees their tier at a glance without
             scanning. Full badge lives on the watchlist + portfolio
             + settings pages. */}
-        {user?.id && <AccountPlanBadge userId={user.id} mode="compact" />}
+        {user?.id && <AccountPlanBadge userId={user.id} mode="compact" source="dashboard" />}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>

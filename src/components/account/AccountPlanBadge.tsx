@@ -15,9 +15,9 @@
 // the badge renders a discreet skeleton so the panel reserves
 // space and never flashes free→pro copy.
 
-import Link from 'next/link'
 import { useUserPlan } from '@/lib/account/useUserPlan'
 import { getPlanCopy, UPGRADE_CTA, PRO_CONFIRMATION_LINES } from './accountPlanCopy'
+import ProEarlyAccessForm, { type ProEarlyAccessSource } from './ProEarlyAccessForm'
 
 export type AccountPlanBadgeProps = {
   /** Caller passes the signed-in user's id so the hook can fetch
@@ -31,12 +31,18 @@ export type AccountPlanBadgeProps = {
    *  CTA. Set to false on surfaces that already have their own
    *  upgrade CTA so the page doesn't show two side-by-side. */
   showUpgradeCta?: boolean
+  /** Block 5A-W-28 — passed straight through to the early-access
+   *  form's POST body so we can attribute upgrade interest to the
+   *  page the user clicked from. Whitelisted server-side; unknown
+   *  values fall back to 'unknown'. */
+  source?: ProEarlyAccessSource
 }
 
 export default function AccountPlanBadge({
   userId,
   mode = 'full',
   showUpgradeCta = true,
+  source = 'unknown',
 }: AccountPlanBadgeProps) {
   const { plan, loading } = useUserPlan(userId ?? null)
   if (!userId) return null
@@ -84,9 +90,10 @@ export default function AccountPlanBadge({
         <div style={ctaWrapStyle}>
           <div style={ctaHeadingStyle}>{UPGRADE_CTA.heading}</div>
           <div style={ctaBlurbStyle}>{UPGRADE_CTA.blurb}</div>
-          <Link href={UPGRADE_CTA.buttonHref} style={ctaButtonStyle}>
-            {UPGRADE_CTA.buttonLabel}
-          </Link>
+          {/* Block 5A-W-28 — inline form replaces the plain mailto.
+              The form keeps a mailto fallback in its error state so
+              a busted API can't trap a user out of joining. */}
+          <ProEarlyAccessForm source={source} />
         </div>
       )}
     </div>
@@ -188,13 +195,5 @@ const ctaBlurbStyle: React.CSSProperties = {
   lineHeight: 1.5,
   marginBottom: 10,
 }
-const ctaButtonStyle: React.CSSProperties = {
-  display: 'inline-block',
-  padding: '8px 14px',
-  borderRadius: 10,
-  background: 'var(--primary)',
-  color: '#fff',
-  fontSize: 12, fontWeight: 700,
-  fontFamily: "'Figtree', sans-serif",
-  textDecoration: 'none',
-}
+// Block 5A-W-28 — ctaButtonStyle removed; ProEarlyAccessForm
+// supplies its own primary button now.

@@ -198,7 +198,7 @@ export default function SettingsClient() {
       {/* Block 5A-W-26 — plan badge surfaces here so a settings
           visitor sees their tier without needing to navigate to the
           watchlist page. Free users get the early-access CTA inline. */}
-      {user?.id && <AccountPlanBadge userId={user.id} mode="full" />}
+      {user?.id && <AccountPlanBadge userId={user.id} mode="full" source="settings" />}
 
       {loading || !prefs ? (
         <div className="skeleton" style={{ height: 200, borderRadius: 16 }} />
