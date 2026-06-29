@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import AccountPlanBadge from '@/components/account/AccountPlanBadge'
 import DashboardNav from '../DashboardNav'
 import Avatar from '@/components/Avatar'
 import AvatarPicker from '@/components/AvatarPicker'
@@ -190,9 +191,14 @@ export default function SettingsClient() {
       <DashboardNav current="settings" email={user?.email} />
 
       <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 26, margin: '0 0 4px', color: 'var(--text)' }}>Settings</h1>
-      <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 24px' }}>
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 20px' }}>
         Email preferences and account.
       </p>
+
+      {/* Block 5A-W-26 — plan badge surfaces here so a settings
+          visitor sees their tier without needing to navigate to the
+          watchlist page. Free users get the early-access CTA inline. */}
+      {user?.id && <AccountPlanBadge userId={user.id} mode="full" />}
 
       {loading || !prefs ? (
         <div className="skeleton" style={{ height: 200, borderRadius: 16 }} />

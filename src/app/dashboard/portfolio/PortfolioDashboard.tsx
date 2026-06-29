@@ -9,6 +9,8 @@ import EbayHoldingAction from '@/components/affiliate/EbayHoldingAction'
 import { canAddPortfolioItem } from '@/lib/account/entitlements'
 import { useUserPlan } from '@/lib/account/useUserPlan'
 import { loadPortfolioItemCount } from '@/lib/account/usage'
+import AccountPlanBadge from '@/components/account/AccountPlanBadge'
+import { portfolioOverLimitMessage } from '@/components/account/overLimitMessages'
 import {
   HOLDING_TYPES as ALL_HOLDING_TYPES,
   GRADE_LABELS as ALL_GRADE_LABELS,
@@ -1424,7 +1426,7 @@ export default function PortfolioDashboard() {
       <DashboardNav current="portfolio" email={user?.email} />
 
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 26, margin: '0 0 2px', color: 'var(--text)' }}>My Collection</h1>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0 }}>Track what you own — value, P&amp;L, grading insights.</p>
@@ -1442,6 +1444,27 @@ export default function PortfolioDashboard() {
           </button>
         </div>
       </div>
+
+      {/* Block 5A-W-26 — plan visibility on the portfolio page so
+          users see their tier alongside their collection numbers.
+          The over-limit note below shows for legacy users carrying
+          more than the free cap of 25 items (e.g. early-access
+          collectors with hundreds of cards). */}
+      {user && <AccountPlanBadge userId={user.id} mode="full" />}
+      {(() => {
+        const msg = portfolioOverLimitMessage(plan, summary?.item_count ?? 0)
+        return msg ? (
+          <div style={{
+            marginBottom: 16, padding: '10px 12px', borderRadius: 10,
+            background: 'rgba(245,158,11,0.10)',
+            border: '1px solid rgba(245,158,11,0.30)',
+            color: '#92400e', fontSize: 12.5,
+            fontFamily: "'Figtree', sans-serif", lineHeight: 1.5,
+          }}>
+            {msg}
+          </div>
+        ) : null
+      })()}
 
       {items.length === 0 ? (
         <div style={{ background: 'var(--card)', border: '2px dashed var(--border)', borderRadius: 20, padding: '60px 24px', textAlign: 'center' }}>

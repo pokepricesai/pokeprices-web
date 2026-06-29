@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import AvatarPicker from '@/components/AvatarPicker'
 import ComingSoonBadge from '@/components/ComingSoonBadge'
 import DashboardNav from './DashboardNav'
+import AccountPlanBadge from '@/components/account/AccountPlanBadge'
 
 interface Counts {
   portfolio: number | null
@@ -211,10 +212,15 @@ export default function DashboardHubClient() {
 
       {/* Header — sign out + email already live on DashboardNav, so the
           page header is just the title now. */}
-      <div style={{ marginBottom: 24 }}>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 30, margin: 0, color: 'var(--text)' }}>
           Dashboard
         </h1>
+        {/* Block 5A-W-26 — compact plan chip next to the page title
+            so a hub visitor sees their tier at a glance without
+            scanning. Full badge lives on the watchlist + portfolio
+            + settings pages. */}
+        {user?.id && <AccountPlanBadge userId={user.id} mode="compact" />}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>

@@ -23,6 +23,11 @@ import {
 } from './summaryStats'
 import { getPlanLimits } from '@/lib/account/entitlements'
 import { useUserPlan } from '@/lib/account/useUserPlan'
+import AccountPlanBadge from '@/components/account/AccountPlanBadge'
+import {
+  watchlistOverLimitMessage,
+  customAlertOverLimitMessage,
+} from '@/components/account/overLimitMessages'
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -126,18 +131,27 @@ export default function WatchlistAlertsSummaryPanel({ userId }: { userId: string
         <Stat label="Alerts off"         value={summary.alertsOff}      tone={summary.alertsOff > 0 ? 'warn' : 'muted'} />
         <Stat label="Alerts this week"   value={summary.recent7dCount}  tone={summary.recent7dCount > 0 ? 'primary' : 'muted'} />
       </div>
-      {!planLoading && plan === 'free' && (
-        <p style={planNoteStyle}>
-          Free account · Watchlist up to {limits.watchlistItems} cards · {limits.customAlertOverrides} custom alert thresholds · Weekly overview email.
-          {' '}<span style={{ color: 'var(--text-muted)' }}>Upgrade coming soon for unlimited cards and instant alerts.</span>
-        </p>
+      {/* Block 5A-W-26 — canonical plan badge. Replaces the inline
+          plan-note paragraph from 5A-W-25 with the shared component
+          so the wording stays in sync across the dashboard. */}
+      {!planLoading && (
+        <div style={{ marginTop: 14 }}>
+          <AccountPlanBadge userId={userId} mode="full" />
+        </div>
       )}
-      {!planLoading && plan === 'pro' && (
-        <p style={planNoteStyle}>
-          <span style={proBadgeStyle}>Pro</span>
-          {' '}Unlimited watchlist, portfolio and custom alert thresholds · weekly overview AND instant alert emails.
-        </p>
-      )}
+
+      {/* Block 5A-W-26 — over-limit copy for free users who already
+          carry more than the new caps. Non-destructive: their
+          existing watchlist / custom alerts stay; this just explains
+          why new adds will refuse until Pro / lower count. */}
+      {(() => {
+        const wl = watchlistOverLimitMessage(plan, summary.watchedCount)
+        return wl ? <div style={offBannerStyle}>{wl}</div> : null
+      })()}
+      {(() => {
+        const ca = customAlertOverLimitMessage(plan, summary.customThreshold)
+        return ca ? <div style={offBannerStyle}>{ca}</div> : null
+      })()}
 
       {!summary.masterEnabled && (
         <div style={offBannerStyle}>
@@ -210,25 +224,8 @@ const statLabelStyle: React.CSSProperties = {
   fontFamily: "'Figtree', sans-serif",
   marginTop: 6,
 }
-const planNoteStyle: React.CSSProperties = {
-  marginTop: 12,
-  fontSize: 11.5,
-  color: 'var(--text)',
-  fontFamily: "'Figtree', sans-serif",
-  lineHeight: 1.5,
-  margin: '12px 0 0',
-}
-const proBadgeStyle: React.CSSProperties = {
-  display: 'inline-block',
-  fontSize: 10, fontWeight: 900,
-  letterSpacing: 0.8, textTransform: 'uppercase',
-  padding: '2px 8px', borderRadius: 6,
-  background: 'rgba(26,95,173,0.10)',
-  color: 'var(--primary)',
-  border: '1px solid rgba(26,95,173,0.30)',
-  fontFamily: "'Figtree', sans-serif",
-  verticalAlign: 'middle',
-}
+// Block 5A-W-26 — plan-note + Pro-chip styles removed; the shared
+// AccountPlanBadge supplies that visual now.
 const offBannerStyle: React.CSSProperties = {
   marginTop: 14,
   padding: '10px 12px',
