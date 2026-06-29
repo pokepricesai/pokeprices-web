@@ -1985,6 +1985,130 @@ function InstantAlertSafetyPanel() {
   )
 }
 
+// ── Block 5A-W-29: Pro Early Access inspection panel ────────────────
+// Read-only admin view of the most recent pro_early_access_requests
+// submissions. No mutation; no public exposure. The route masks email
+// + user_id before they ever leave the server.
+// ────────────────────────────────────────────────────────────────────
+
+function ProEarlyAccessRequestsPanel() {
+  type Row = {
+    id:               string
+    created_at:       string
+    source:           string
+    plan_interest:    string
+    email_masked:     string | null
+    user_id_masked:   string | null
+    message_snippet:  string | null
+  }
+  type Body = { rows?: Row[]; total?: number; limit?: number; error?: string; detail?: string }
+
+  const [busy,  setBusy]  = useState<'idle' | 'loading'>('idle')
+  const [body,  setBody]  = useState<Body | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function load() {
+    if (busy !== 'idle') return
+    setBusy('loading'); setError(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        setError('Not signed in. Sign in with an authorised admin account.')
+        return
+      }
+      const res = await fetch('/api/admin/account/pro-early-access-requests', {
+        method:  'GET',
+        headers: { authorization: `Bearer ${session.access_token}` },
+        cache:   'no-store',
+      })
+      const text = await res.text()
+      try {
+        const parsed = JSON.parse(text) as Body
+        if (!res.ok) {
+          setError(parsed.error ? `${parsed.error}${parsed.detail ? ` — ${parsed.detail}` : ''}` : `Request failed (${res.status})`)
+          return
+        }
+        setBody(parsed)
+      } catch {
+        setError(text || 'Empty response')
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'unknown error')
+    } finally {
+      setBusy('idle')
+    }
+  }
+
+  const rows = body?.rows ?? []
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Pro Early Access</div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+        Recent Pro waitlist submissions from the in-app form. <strong style={{ color: 'var(--text)' }}>Read-only.</strong> Email and user IDs are masked here — full values stay in Supabase for follow-up.
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <button
+          onClick={() => void load()}
+          disabled={busy !== 'idle'}
+          style={{
+            padding: '6px 12px', borderRadius: 6,
+            border: '1px solid var(--border)',
+            background: busy === 'loading' ? 'var(--bg-light)' : 'var(--primary)',
+            color: busy === 'loading' ? 'var(--text)' : '#fff',
+            cursor: busy !== 'idle' ? 'wait' : 'pointer',
+            fontSize: 12, fontWeight: 700,
+            fontFamily: "'Figtree', sans-serif",
+          }}
+        >{busy === 'loading' ? 'Loading…' : (body ? 'Refresh' : 'Load recent requests')}</button>
+      </div>
+
+      {error && (
+        <div style={{ marginTop: 10, fontSize: 12, color: 'var(--red, #c00)' }}>{error}</div>
+      )}
+
+      {body && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700, marginBottom: 6 }}>
+            {body.total ?? rows.length} request{(body.total ?? rows.length) === 1 ? '' : 's'} · capped at {body.limit ?? 50}
+          </div>
+          {rows.length === 0 ? (
+            <div style={{
+              padding: '10px 12px', borderRadius: 6,
+              background: 'var(--bg-light)', border: '1px solid var(--border)',
+              fontSize: 12, color: 'var(--text-muted)',
+            }}>
+              No Pro early-access requests yet. Submissions from the in-app form will appear here.
+            </div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead><tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
+                <th style={{ padding: 6 }}>created</th>
+                <th style={{ padding: 6 }}>source</th>
+                <th style={{ padding: 6 }}>plan</th>
+                <th style={{ padding: 6 }}>email</th>
+                <th style={{ padding: 6 }}>user</th>
+                <th style={{ padding: 6 }}>message</th>
+              </tr></thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: 6, fontFamily: 'monospace', fontSize: 11, whiteSpace: 'nowrap' }}>{r.created_at || '—'}</td>
+                    <td style={{ padding: 6 }}>{r.source}</td>
+                    <td style={{ padding: 6 }}>{r.plan_interest}</td>
+                    <td style={{ padding: 6, fontFamily: 'monospace', fontSize: 11 }}>{r.email_masked ?? '—'}</td>
+                    <td style={{ padding: 6, fontFamily: 'monospace', fontSize: 11 }}>{r.user_id_masked ?? '—'}</td>
+                    <td style={{ padding: 6, color: 'var(--text-muted)', maxWidth: 360, overflowWrap: 'anywhere' }}>{r.message_snippet ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SmallStat({ label, value }: { label: string; value: unknown }) {
   const display = typeof value === 'number' ? value : '—'
   return (
@@ -2455,6 +2579,8 @@ export default function RecentSalesAdminClient() {
               <WeeklyDigestBatchControls />
               <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '14px 0 0' }} />
               <InstantAlertSafetyPanel />
+              <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '14px 0 0' }} />
+              <ProEarlyAccessRequestsPanel />
               <pre style={{
                 margin: '6px 0 0', padding: 8, borderRadius: 6,
                 background: 'var(--card)', border: '1px solid var(--border)',
