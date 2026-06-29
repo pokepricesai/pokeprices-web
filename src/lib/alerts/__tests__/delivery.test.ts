@@ -25,7 +25,27 @@ import type { SendEmailInput, SendResult } from '@/lib/email/types'
 const fakeDB = new FakeDB()
 const asOf   = new Date('2026-06-24T12:00:00Z')
 
-beforeEach(() => { fakeDB.reset() })
+// Block 5A-W-27 — instant alert delivery now requires pro entitlement.
+// Pre-populate ACCOUNT_PRO_USER_IDS with the common test user ids so
+// the existing tests (which expect events to ship) keep passing. A
+// dedicated describe block at the bottom of the file overrides this
+// env to exercise the FREE / entitlement_blocked path.
+const TEST_PRO_USER_IDS = (() => {
+  // Covers u0…u60 (the batch-cap test seeds 60 users), plus the
+  // named users used elsewhere in the file.
+  const numbered = Array.from({ length: 61 }, (_, i) => `u${i}`)
+  return [...numbered, 'cool', 'fresh'].join(',')
+})()
+let envSnap: string | undefined
+beforeEach(() => {
+  fakeDB.reset()
+  envSnap = process.env.ACCOUNT_PRO_USER_IDS
+  process.env.ACCOUNT_PRO_USER_IDS = TEST_PRO_USER_IDS
+})
+afterEach(() => {
+  if (envSnap === undefined) delete process.env.ACCOUNT_PRO_USER_IDS
+  else process.env.ACCOUNT_PRO_USER_IDS = envSnap
+})
 
 function seedEvent(over: Record<string, unknown> = {}) {
   fakeDB.seed('alert_events', [
@@ -1189,5 +1209,127 @@ describe('deliverAlerts — Block 5A-W-22 metadata enrichment on real sends', ()
     expect(m.dedupe_applied).toBe(true)
     expect(m.delivery_engine_version).toBe('deduped-card-rule-v1')
     expect(m.max_cards_per_email).toBeGreaterThan(0)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-27 — instant alert entitlement gating
+// ─────────────────────────────────────────────────────────────────────
+
+describe('deliverAlerts — Block 5A-W-27 entitlement', () => {
+  it('free user with undelivered events → outcome=entitlement_blocked, no send, no delivered_at mutation', async () => {
+    process.env.ACCOUNT_PRO_USER_IDS = ''   // u1 is now free
+    seedPrefs('u1')
+    seedEvent()
+    const send = stubSend('sent')
+    const r = await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      getUserEmail: emailMap([['u1', 'user@example.com']]),
+      sendFn: send.fn,
+    })
+    expect(r.perUser[0].outcome).toBe('entitlement_blocked')
+    expect(r.perUser[0].reason).toMatch(/instant alerts not allowed/i)
+    expect(send.calls).toHaveLength(0)
+    // The event row stays exactly as seeded — delivered_at null.
+    expect(fakeDB.rows('alert_events')[0].delivered_at).toBeNull()
+  })
+
+  it('summary surfaces usersBlockedByEntitlement separately from cooldown / failed', async () => {
+    process.env.ACCOUNT_PRO_USER_IDS = ''
+    seedPrefs('u1'); seedEvent({ id: 'e1', user_id: 'u1' })
+    seedPrefs('u2'); seedEvent({ id: 'e2', user_id: 'u2' })
+    const r = await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      getUserEmail: emailMap([['u1','a@x.io'],['u2','b@x.io']]),
+      sendFn: stubSend('sent').fn,
+    })
+    expect(r.usersBlockedByEntitlement).toBe(2)
+    expect(r.usersEmailed).toBe(0)
+    expect(r.usersInCooldown).toBe(0)
+    expect(r.failed).toBe(0)
+  })
+
+  it('pro user with instantAlertsEnabled=true → events ship as usual', async () => {
+    process.env.ACCOUNT_PRO_USER_IDS = 'u1'
+    seedPrefs('u1', { instantAlertsEnabled: true })
+    seedEvent()
+    const send = stubSend('sent', { emailId: 'r-1' })
+    const r = await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      getUserEmail: emailMap([['u1', 'user@example.com']]),
+      sendFn: send.fn,
+    })
+    expect(r.perUser[0].outcome).toBe('sent')
+    expect(send.calls).toHaveLength(1)
+    expect(r.usersBlockedByEntitlement).toBe(0)
+  })
+
+  it('mixed batch: pro user sends, free user is blocked, both surface in perUser', async () => {
+    process.env.ACCOUNT_PRO_USER_IDS = 'u1'
+    seedPrefs('u1'); seedEvent({ id: 'e1', user_id: 'u1' })
+    seedPrefs('u2'); seedEvent({ id: 'e2', user_id: 'u2' })
+    const send = stubSend('sent', { emailId: 'r-1' })
+    const r = await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      getUserEmail: emailMap([['u1','a@x.io'],['u2','b@x.io']]),
+      sendFn: send.fn,
+    })
+    expect(send.calls).toHaveLength(1)
+    expect(send.calls[0].toEmail).toBe('a@x.io')
+    expect(r.usersEmailed).toBe(1)
+    expect(r.usersBlockedByEntitlement).toBe(1)
+    const blocked = r.perUser.find(p => p.outcome === 'entitlement_blocked')
+    expect(blocked).toBeDefined()
+  })
+
+  it('legacy free user (instantAlertsEnabled=true) is NEVER emailed; alert_events untouched', async () => {
+    process.env.ACCOUNT_PRO_USER_IDS = ''
+    seedPrefs('u1', { instantAlertsEnabled: true })
+    seedEvent({ id: 'legacy', user_id: 'u1', delivered_at: null })
+    const before = JSON.stringify(fakeDB.rows('alert_events'))
+    const send   = stubSend('sent')
+    await deliverAlerts(asSupa(fakeDB), {
+      asOf, dryRun: false,
+      getUserEmail: emailMap([['u1','user@example.com']]),
+      sendFn: send.fn,
+    })
+    expect(send.calls).toHaveLength(0)
+    expect(JSON.stringify(fakeDB.rows('alert_events'))).toBe(before)
+  })
+
+  it('entitlement-blocked user backlog count appears in eventsLeftUndelivered', async () => {
+    process.env.ACCOUNT_PRO_USER_IDS = ''
+    seedPrefs('u1')
+    for (let i = 0; i < 5; i++) seedEvent({ id: `e-${i}`, user_id: 'u1' })
+    const r = await deliverAlerts(asSupa(fakeDB), {
+      asOf,
+      getUserEmail: emailMap([['u1','user@example.com']]),
+      sendFn: stubSend('sent').fn,
+    })
+    expect(r.perUser[0].outcome).toBe('entitlement_blocked')
+    expect(r.perUser[0].eventsLeftUndelivered).toBe(5)
+    expect(r.eventsLeftUndelivered).toBe(5)
+  })
+
+  it('cooldown gate runs AFTER entitlement → blocked user never reports as cooldown', async () => {
+    process.env.ACCOUNT_PRO_USER_IDS = ''
+    seedPrefs('u1')
+    seedEvent({ id: 'e1', user_id: 'u1' })
+    fakeDB.seed('alert_events', [
+      ...fakeDB.rows('alert_events'),
+      {
+        id: 'recent-delivered', user_id: 'u1', card_slug: '1',
+        rule: 'raw_change', severity: 'normal', payload_json: {},
+        detected_at:  '2026-06-24T11:00:00Z',
+        delivered_at: '2026-06-24T11:30:00Z',  // 30m ago — would normally cooldown
+      },
+    ])
+    const r = await deliverAlerts(asSupa(fakeDB), {
+      asOf,
+      getUserEmail: emailMap([['u1','user@example.com']]),
+      sendFn: stubSend('sent').fn,
+    })
+    expect(r.perUser[0].outcome).toBe('entitlement_blocked')
+    expect(r.usersInCooldown).toBe(0)
   })
 })

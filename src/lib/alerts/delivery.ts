@@ -47,6 +47,7 @@ import {
   getAlertDeliveryUserCooldownHours,
   getAlertInstantDeliveryAllowedUserIds,
 } from './flags'
+import { isInstantAlertEntitled } from '@/lib/account/serverEntitlements'
 
 // ─────────────────────────────────────────────────────────────────────
 // Hard caps. Caller-supplied limits are clamped to these values.
@@ -80,6 +81,7 @@ export type DeliveryOutcome =
   | 'configuration_error'        // sendEmail: missing key, etc.
   | 'duplicate'                  // sendEmail: idempotency conflict
   | 'prefs_disabled'             // user_alert_preferences.enabled = false (or no row)
+  | 'entitlement_blocked'        // Block 5A-W-27: free user / no instant-alerts entitlement
   | 'no_email'                   // could not resolve a recipient address
   | 'no_events'                  // no undelivered events at delivery time (rare race)
   | 'recent_delivery_cooldown'   // Block 5A-W-12 — skipped because the user
@@ -140,6 +142,12 @@ export type DeliveryResult = {
    *  tell "we have 30 candidates but 25 are in cooldown" from "30
    *  candidates, 5 had no events to send". */
   usersInCooldown:        number
+  /** Block 5A-W-27 — count of users skipped because their plan
+   *  doesn't entitle them to instant alerts (free plan). Surfaced
+   *  alongside cooldown so the admin preview can show "12 candidates
+   *  total, 5 blocked by plan, 3 in cooldown, 4 eligible" without
+   *  having to grep through `perUser` for outcome=entitlement_blocked. */
+  usersBlockedByEntitlement: number
   suppressedOrSkipped:    number
   failed:                 number
   /** Block 5A-W-12 — effective cooldown window the batch ran with,
@@ -285,6 +293,32 @@ export async function deliverAlerts(
     const prefs = prefsByUser.get(userId)
     if (!prefs || !prefs.enabled) {
       perUser.push({ recipientMasked: '***', eventCount: 0, cardCount: 0, eventsLeftUndelivered: 0, outcome: 'prefs_disabled' })
+      continue
+    }
+
+    // Block 5A-W-27 — instant alert entitlement gate. Free users
+    // (anyone not in ACCOUNT_PRO_USER_IDS today) are skipped here
+    // BEFORE any email lookup / digest build / send. Their existing
+    // alert_events stay where they are; delivered_at is NEVER
+    // mutated as a side effect of being blocked, so any future
+    // upgrade to pro picks up the backlog cleanly. The evaluator
+    // already prevents new events being inserted for these users
+    // (Block 5A-W-27 §2), so this branch is mostly defence in depth
+    // for the legacy-events case.
+    if (!isInstantAlertEntitled(userId)) {
+      // Surface the per-user backlog count so the admin preview can
+      // tell "this user has 12 stale events from when they were on
+      // the trial" — not strictly necessary for behaviour, but the
+      // operator visibility is worth the extra count query.
+      const totalUndelivered = await countUndeliveredEventsForUser(supa, userId)
+      perUser.push({
+        recipientMasked:       '***',
+        eventCount:            0,
+        cardCount:             0,
+        eventsLeftUndelivered: totalUndelivered,
+        outcome:               'entitlement_blocked',
+        reason:                'instant alerts not allowed on free plan',
+      })
       continue
     }
 
@@ -562,7 +596,7 @@ export function selectDigestPlan(events: DigestEvent[], maxCards: number): Diges
 // ─────────────────────────────────────────────────────────────────────
 
 const COUNTS_AS_EMAILED = new Set<DeliveryOutcome>(['sent', 'would_send'])
-const COUNTS_AS_SKIPPED = new Set<DeliveryOutcome>(['suppressed','unsubscribed','preference_disabled','prefs_disabled','no_email','no_events','duplicate','recent_delivery_cooldown'])
+const COUNTS_AS_SKIPPED = new Set<DeliveryOutcome>(['suppressed','unsubscribed','preference_disabled','prefs_disabled','entitlement_blocked','no_email','no_events','duplicate','recent_delivery_cooldown'])
 const COUNTS_AS_FAILED  = new Set<DeliveryOutcome>(['provider_error','invalid_recipient','configuration_error'])
 
 export function summarise(
@@ -578,13 +612,14 @@ export function summarise(
     active: false, size: 0, filteredOut: 0,
   },
 ): DeliveryResult {
-  let usersEmailed          = 0
-  let eventsDelivered       = 0
-  let cardsDelivered        = 0
-  let eventsLeftUndelivered = 0
-  let usersInCooldown       = 0
-  let suppressedSkip        = 0
-  let failed                = 0
+  let usersEmailed              = 0
+  let eventsDelivered           = 0
+  let cardsDelivered            = 0
+  let eventsLeftUndelivered     = 0
+  let usersInCooldown           = 0
+  let usersBlockedByEntitlement = 0
+  let suppressedSkip            = 0
+  let failed                    = 0
   for (const r of perUser) {
     if (COUNTS_AS_EMAILED.has(r.outcome)) {
       usersEmailed++
@@ -597,6 +632,14 @@ export function summarise(
       // into the aggregate so the admin sees real queue depth.
       if (r.outcome === 'recent_delivery_cooldown') {
         usersInCooldown++
+        eventsLeftUndelivered += r.eventsLeftUndelivered ?? 0
+      }
+      // Block 5A-W-27 — entitlement-blocked users also carry their
+      // existing backlog (legacy events from before they were
+      // downgraded / from a pre-plan deploy). Add to the aggregate
+      // so the admin sees there's still data parked on free users.
+      if (r.outcome === 'entitlement_blocked') {
+        usersBlockedByEntitlement++
         eventsLeftUndelivered += r.eventsLeftUndelivered ?? 0
       }
     } else if (COUNTS_AS_FAILED.has(r.outcome)) {
@@ -615,6 +658,7 @@ export function summarise(
     cardsDelivered,
     eventsLeftUndelivered,
     usersInCooldown,
+    usersBlockedByEntitlement,
     suppressedOrSkipped: suppressedSkip,
     failed,
     cooldownHours,

@@ -1696,6 +1696,7 @@ function InstantAlertSafetyPanel() {
     eventsDelivered?:      number
     cardsDelivered?:       number
     usersInCooldown?:      number
+    usersBlockedByEntitlement?: number
     suppressedOrSkipped?:  number
     failed?:               number
     cooldownHours?:        number
@@ -1864,6 +1865,7 @@ function InstantAlertSafetyPanel() {
             <SmallStat label="cards in digest"  value={preview.cardsDelivered} />
             <SmallStat label="events in digest" value={preview.eventsDelivered} />
             <SmallStat label={`in cooldown (${preview.cooldownHours ?? '?'}h)`} value={preview.usersInCooldown} />
+            <SmallStat label="blocked by plan"  value={preview.usersBlockedByEntitlement} />
             <SmallStat label="suppressed / skipped" value={preview.suppressedOrSkipped} />
             <SmallStat label="failed"           value={preview.failed} />
             <SmallStat label="allowlist size"   value={preview.allowlist?.size} />

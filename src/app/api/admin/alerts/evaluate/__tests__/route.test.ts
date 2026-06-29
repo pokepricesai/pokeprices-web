@@ -20,7 +20,7 @@ vi.mock('@/lib/supabaseService', () => ({
 import { POST } from '../route'
 import { preferencesToRow, ALERT_PREFERENCE_DEFAULTS } from '@/lib/alerts/preferences'
 
-const KEYS = ['ALERTS_EVALUATOR_ENABLED'] as const
+const KEYS = ['ALERTS_EVALUATOR_ENABLED', 'ACCOUNT_PRO_USER_IDS'] as const
 let snap: Record<string, string | undefined>
 
 beforeEach(() => {
@@ -29,6 +29,11 @@ beforeEach(() => {
   for (const k of KEYS) delete process.env[k]
   fakeDB.reset()
   mockAdmin = async () => ({ ok: true, userId: 'admin', email: 'a@x', status: 200, error: '' })
+  // Block 5A-W-27 — evaluator now requires pro entitlement to
+  // produce events. Mark the test user ids as pro so the legacy
+  // tests (which expect events) keep passing. New entitlement-
+  // specific tests live in evaluator.test.ts.
+  process.env.ACCOUNT_PRO_USER_IDS = Array.from({ length: 50 }, (_, i) => `u${i}`).join(',')
 })
 afterEach(() => {
   for (const k of KEYS) {

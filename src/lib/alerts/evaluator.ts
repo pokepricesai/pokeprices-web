@@ -22,6 +22,7 @@ import {
   lookupOverride,
   type EffectiveCardAlertSettings,
 } from './watchlistOverrides'
+import { isInstantAlertEntitled } from '@/lib/account/serverEntitlements'
 
 // ─────────────────────────────────────────────────────────────────────
 // Tunables (constants for now; future block surfaces in admin UI)
@@ -108,6 +109,13 @@ export type EvaluationDiagnostics = {
    *  triggersFound — counted BEFORE the cooldown filter so an operator
    *  can see which rules are firing at all). */
   triggersByRule:                    Record<AlertRule, number>
+  /** Block 5A-W-27 — count of users whose `user_alert_preferences.enabled`
+   *  is true but who are NOT entitled to instant alerts (free plan).
+   *  These users have their watchlist/portfolio loaded but the
+   *  per-card rule evaluation is SKIPPED — no events are inserted.
+   *  Surfaced so the admin preview can show "X free users blocked
+   *  by plan" alongside the existing diagnostics. */
+  usersBlockedByEntitlement:         number
 }
 
 export type EvaluationResult = {
@@ -380,12 +388,32 @@ export async function evaluateAlerts(
   // 6. Evaluate.
   const proposed: ProposedAlertEvent[] = []
   let suppressed = 0
+  let usersBlockedByEntitlement = 0
   const triggersByRule: Record<AlertRule, number> = {
     price_move: 0, recent_sales: 0, psa10_change: 0,
     raw_change: 0, spread_change: 0, market_activity: 0,
   }
   for (const [userId, perUser] of Array.from(userCards.entries())) {
     const prefs = prefsByUser.get(userId)!
+    // Block 5A-W-27 — instant alerts are a paid feature placeholder.
+    // Free users (anyone not in ACCOUNT_PRO_USER_IDS today) skip the
+    // entire per-card rule loop so no alert_events get inserted on
+    // their behalf. Weekly digest portfolio + watchlist sections
+    // still render for them — those read card_trends + watchlist
+    // directly, not alert_events; only the digest's alert highlights
+    // section is empty for free users, which matches the brief's
+    // "instant alerts are paid".
+    //
+    // Legacy free users with `user_alert_preferences.instantAlertsEnabled=true`
+    // from before the UI gate are caught here: the prefs row says
+    // they want instant alerts, but the server refuses to create
+    // new events for them. We deliberately do NOT mutate the prefs
+    // row so the user's stored intent stays intact — if they later
+    // upgrade to pro, instant alerts resume.
+    if (!isInstantAlertEntitled(userId)) {
+      usersBlockedByEntitlement++
+      continue
+    }
     for (const card of Array.from(perUser.values())) {
       // Skip cards with no resolved bare numeric — they cannot fire
       // any market-based rule. They are already counted in
@@ -451,6 +479,7 @@ export async function evaluateAlerts(
       cardsWithInsufficientPriceHistory,
       cardsWithNoRecentSales,
       triggersByRule,
+      usersBlockedByEntitlement,
     },
   }
 }
@@ -868,6 +897,7 @@ function emptyResult(dryRun: boolean, asOfIso: string, usersWithDisabledPrefs = 
         price_move: 0, recent_sales: 0, psa10_change: 0,
         raw_change: 0, spread_change: 0, market_activity: 0,
       },
+      usersBlockedByEntitlement:         0,
     },
   }
 }

@@ -8,7 +8,7 @@
 //   * "card on both lists" deduplicates and reports source='both'
 //   * payload never contains user identifiers / emails
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { FakeDB } from '@/lib/email/__tests__/_fakeSupabase'
 
@@ -272,7 +272,26 @@ describe('evaluateCardForUser — rule firing', () => {
 const fakeDB = new FakeDB()
 const asOf   = new Date('2026-06-24T12:00:00Z')
 
-beforeEach(() => { fakeDB.reset() })
+// Block 5A-W-27 — instant alerts now require pro entitlement. The
+// existing evaluator tests use `u1`, `u2`, etc. as test user ids and
+// expect events to be generated. Pre-populate `ACCOUNT_PRO_USER_IDS`
+// so the entitlement check passes for all the test user ids the
+// fixtures use. A handful of new tests at the bottom of the file
+// explicitly override this env to exercise the FREE path.
+const TEST_PRO_USER_IDS = [
+  'u1','u2','u3','u4','u5','u6','u7','u8','u9','u10',
+  'user-A-uuid','user-B-uuid',
+].join(',')
+let envSnap: string | undefined
+beforeEach(() => {
+  fakeDB.reset()
+  envSnap = process.env.ACCOUNT_PRO_USER_IDS
+  process.env.ACCOUNT_PRO_USER_IDS = TEST_PRO_USER_IDS
+})
+afterEach(() => {
+  if (envSnap === undefined) delete process.env.ACCOUNT_PRO_USER_IDS
+  else process.env.ACCOUNT_PRO_USER_IDS = envSnap
+})
 
 function seedPrefs(userId: string, patch: Partial<typeof ALERT_PREFERENCE_DEFAULTS> = {}) {
   const prefs = applyPatch(ALERT_PREFERENCE_DEFAULTS, patch)
@@ -612,6 +631,7 @@ describe('toPublicEvaluationResult', () => {
       cardsWithMissingDisplayFields: 0, cardsWithInsufficientPriceHistory: 0,
       cardsWithNoRecentSales: 0,
       triggersByRule: { price_move: 0, recent_sales: 1, psa10_change: 0, raw_change: 2, spread_change: 0, market_activity: 0 },
+      usersBlockedByEntitlement: 0,
     },
   }
 
@@ -1060,5 +1080,73 @@ describe('evaluateAlerts — Block 5A-W-19 per-card overrides', () => {
     const otherCard  = r.proposedEvents.find(e => e.cardSlug === '9999999' && e.rule === 'recent_sales')
     expect(overridden).toBeUndefined()
     expect(otherCard).toBeDefined()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-27 — instant alert entitlement enforcement
+//
+// Default `beforeEach` above sets ACCOUNT_PRO_USER_IDS to include
+// the common test user ids. These tests deliberately scope the env
+// per-test to put specific users on the free path.
+// ─────────────────────────────────────────────────────────────────────
+
+describe('evaluateAlerts — Block 5A-W-27 entitlement gating', () => {
+  it('free user with instantAlertsEnabled=true is NOT evaluated; no events proposed', async () => {
+    // Override the per-test default: 'u1' is NOT pro.
+    process.env.ACCOUNT_PRO_USER_IDS = ''
+    seedPrefs('u1', { instantAlertsEnabled: true })
+    seedWatch('u1', '1450205')
+    seedPriceTwoPoints('1450205', 1000, 2000)  // +100% — would normally trigger
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    expect(r.proposedEvents).toEqual([])
+    expect(r.triggersInserted).toBe(0)
+    expect(r.diagnostics.usersBlockedByEntitlement).toBe(1)
+  })
+
+  it('legacy free user with instantAlertsEnabled=true does NOT get new events inserted on dryRun=false', async () => {
+    process.env.ACCOUNT_PRO_USER_IDS = ''
+    seedPrefs('u1', { instantAlertsEnabled: true })
+    seedWatch('u1', '1450205')
+    seedPriceTwoPoints('1450205', 1000, 2000)
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf, dryRun: false })
+    expect(r.triggersInserted).toBe(0)
+    expect(fakeDB.rows('alert_events')).toEqual([])
+  })
+
+  it('pro user (in ACCOUNT_PRO_USER_IDS) IS evaluated and events are proposed', async () => {
+    // Only 'u1' is pro in this test.
+    process.env.ACCOUNT_PRO_USER_IDS = 'u1'
+    seedPrefs('u1')
+    seedWatch('u1', '1450205')
+    seedPriceTwoPoints('1450205', 1000, 1200)  // +20%
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    expect(r.proposedEvents.length).toBeGreaterThan(0)
+    expect(r.diagnostics.usersBlockedByEntitlement).toBe(0)
+  })
+
+  it('mixed batch: pro user gets events, free user is skipped with counter', async () => {
+    process.env.ACCOUNT_PRO_USER_IDS = 'u1'
+    seedPrefs('u1')
+    seedWatch('u1', '1450205')
+    seedPriceTwoPoints('1450205', 1000, 1200)
+    seedPrefs('u2')
+    seedWatch('u2', '1450205')   // same card, same data
+    const r = await evaluateAlerts(asSupa(fakeDB), { asOf })
+    const u1Events = r.proposedEvents.filter(e => e.userId === 'u1')
+    const u2Events = r.proposedEvents.filter(e => e.userId === 'u2')
+    expect(u1Events.length).toBeGreaterThan(0)
+    expect(u2Events).toEqual([])
+    expect(r.diagnostics.usersBlockedByEntitlement).toBe(1)
+  })
+
+  it('user_alert_preferences row is NOT mutated when entitlement blocks the user', async () => {
+    process.env.ACCOUNT_PRO_USER_IDS = ''
+    seedPrefs('u1', { instantAlertsEnabled: true, enabled: true })
+    seedWatch('u1', '1450205')
+    seedPriceTwoPoints('1450205', 1000, 2000)
+    const before = JSON.stringify(fakeDB.rows('user_alert_preferences'))
+    await evaluateAlerts(asSupa(fakeDB), { asOf, dryRun: false })
+    expect(JSON.stringify(fakeDB.rows('user_alert_preferences'))).toBe(before)
   })
 })
