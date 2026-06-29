@@ -29,7 +29,10 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 export default function WatchlistAlertsSummaryPanel({ userId }: { userId: string }) {
   const [summary, setSummary] = useState<WatchlistAlertsSummary | null>(null)
   const [error,   setError]   = useState<string | null>(null)
-  const { plan } = useUserPlan(userId)
+  // Block 5A-W-25 — `planLoading` is true while the /api/account/plan
+  // fetch is in flight. The plan-note row hides until it settles so
+  // a pro user doesn't see "Free account · …" copy flash for a tick.
+  const { plan, loading: planLoading } = useUserPlan(userId)
   const limits   = getPlanLimits(plan)
 
   useEffect(() => {
@@ -123,10 +126,16 @@ export default function WatchlistAlertsSummaryPanel({ userId }: { userId: string
         <Stat label="Alerts off"         value={summary.alertsOff}      tone={summary.alertsOff > 0 ? 'warn' : 'muted'} />
         <Stat label="Alerts this week"   value={summary.recent7dCount}  tone={summary.recent7dCount > 0 ? 'primary' : 'muted'} />
       </div>
-      {plan === 'free' && (
+      {!planLoading && plan === 'free' && (
         <p style={planNoteStyle}>
           Free account · Watchlist up to {limits.watchlistItems} cards · {limits.customAlertOverrides} custom alert thresholds · Weekly overview email.
           {' '}<span style={{ color: 'var(--text-muted)' }}>Upgrade coming soon for unlimited cards and instant alerts.</span>
+        </p>
+      )}
+      {!planLoading && plan === 'pro' && (
+        <p style={planNoteStyle}>
+          <span style={proBadgeStyle}>Pro</span>
+          {' '}Unlimited watchlist, portfolio and custom alert thresholds · weekly overview AND instant alert emails.
         </p>
       )}
 
@@ -208,6 +217,17 @@ const planNoteStyle: React.CSSProperties = {
   fontFamily: "'Figtree', sans-serif",
   lineHeight: 1.5,
   margin: '12px 0 0',
+}
+const proBadgeStyle: React.CSSProperties = {
+  display: 'inline-block',
+  fontSize: 10, fontWeight: 900,
+  letterSpacing: 0.8, textTransform: 'uppercase',
+  padding: '2px 8px', borderRadius: 6,
+  background: 'rgba(26,95,173,0.10)',
+  color: 'var(--primary)',
+  border: '1px solid rgba(26,95,173,0.30)',
+  fontFamily: "'Figtree', sans-serif",
+  verticalAlign: 'middle',
 }
 const offBannerStyle: React.CSSProperties = {
   marginTop: 14,

@@ -6,6 +6,7 @@ import {
   UPGRADE_COPY,
   getUserPlan,
   getPlanLimits,
+  resolveUserPlan,
   canAddPortfolioItem,
   canAddWatchlistItem,
   canAddCustomAlertOverride,
@@ -154,5 +155,37 @@ describe('canUseWeeklyDigest', () => {
   })
   it('pro → allowed', () => {
     expect(canUseWeeklyDigest('pro').allowed).toBe(true)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Block 5A-W-25 — resolver priority (allowlist vs profile.plan)
+// ─────────────────────────────────────────────────────────────────────
+
+describe('resolveUserPlan — Block 5A-W-25', () => {
+  it('allowlistedAsPro=true → pro (regardless of profile)', () => {
+    expect(resolveUserPlan({ allowlistedAsPro: true })).toBe('pro')
+    expect(resolveUserPlan({ allowlistedAsPro: true, profile: null })).toBe('pro')
+    expect(resolveUserPlan({ allowlistedAsPro: true, profile: { plan: 'free' } })).toBe('pro')
+  })
+
+  it('allowlistedAsPro=false + profile.plan=pro → pro (future Stripe path)', () => {
+    expect(resolveUserPlan({ allowlistedAsPro: false, profile: { plan: 'pro' } })).toBe('pro')
+  })
+
+  it('allowlistedAsPro=false + no pro profile → free', () => {
+    expect(resolveUserPlan({ allowlistedAsPro: false, profile: null })).toBe('free')
+    expect(resolveUserPlan({ allowlistedAsPro: false, profile: undefined })).toBe('free')
+    expect(resolveUserPlan({ allowlistedAsPro: false, profile: {} })).toBe('free')
+    expect(resolveUserPlan({ allowlistedAsPro: false, profile: { plan: '' } })).toBe('free')
+  })
+
+  it('omitting allowlistedAsPro → defaults to false → resolves from profile only', () => {
+    expect(resolveUserPlan({ profile: { plan: 'pro' } })).toBe('pro')
+    expect(resolveUserPlan({ profile: null })).toBe('free')
+  })
+
+  it('priority: allowlist beats a profile.plan=free row', () => {
+    expect(resolveUserPlan({ allowlistedAsPro: true, profile: { plan: 'free' } })).toBe('pro')
   })
 })

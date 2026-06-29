@@ -75,14 +75,35 @@ export const PLAN_LIMITS: Record<UserPlan, PlanLimits> = {
  *   * add a `plan` column to `profiles` (or a `subscriptions` table)
  *   * pass `{ plan: row.plan }` to this helper from a server loader
  *
- * Until then, callers pass `null` and get 'free'. Pre-billing power
- * users on `pro` for design QA can call `getUserPlan({ plan: 'pro' })`
- * directly in dev only — never wire that to a UI control.
+ * Block 5A-W-25 adds a second pro path via the env allowlist (see
+ * `resolveUserPlan` below + `accountPlan.ts`). This narrower helper
+ * stays for callers that ONLY have a profile shape and no auth
+ * context — primarily the unit tests.
  */
 export function getUserPlan(profile: { plan?: string | null } | null | undefined): UserPlan {
   const raw = profile?.plan
   if (raw === 'pro') return 'pro'
   return 'free'
+}
+
+/**
+ * Block 5A-W-25 — canonical plan resolver used by the server route
+ * `/api/account/plan`. Plan resolution priority (per the brief):
+ *
+ *    1. `allowlistedAsPro === true`  → 'pro'  (env ACCOUNT_PRO_USER_IDS)
+ *    2. `profile.plan === 'pro'`     → 'pro'  (future Stripe column)
+ *    3. otherwise                    → 'free'
+ *
+ *  Pure on purpose — the env read happens in `accountPlan.ts` (server-
+ *  only) and the result is passed in here as a boolean. Keeps this
+ *  module browser-safe; the allowlist itself never reaches the bundle.
+ */
+export function resolveUserPlan(args: {
+  profile?:           { plan?: string | null } | null
+  allowlistedAsPro?:  boolean
+}): UserPlan {
+  if (args.allowlistedAsPro === true) return 'pro'
+  return getUserPlan(args.profile ?? null)
 }
 
 export function getPlanLimits(plan: UserPlan): PlanLimits {
