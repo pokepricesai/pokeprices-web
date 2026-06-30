@@ -66,6 +66,14 @@ const ALLOW = new Set([
   // Comment-only mention of the legacy field name; the file uses
   // affiliateWrapEbayUrl from the central engine.
   'src/components/InlineChat.tsx',
+
+  // Block 5A-W-33 — offline SEO/affiliate analyzer. References eBay
+  // hostnames only in (1) a header comment explaining what the file
+  // does and (2) test fixture strings used to verify the analyzer
+  // handles the real export's landing-page format. Neither path
+  // constructs or emits a real affiliate URL.
+  'src/lib/seo-analysis/ebayAnalysis.ts',
+  'src/lib/seo-analysis/__tests__/analyzers.test.ts',
 ])
 
 function relative(p) {

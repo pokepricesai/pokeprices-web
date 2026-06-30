@@ -41,6 +41,7 @@
     "supabase/functions",
     "pokeprices-chat-edge-function.ts",
     "scripts/verify-*.mjs",
+    "scripts/seo/analyze-search-opportunities.ts",
     "seo"
   ]
 }

@@ -12,3 +12,8 @@ coverage/
 .claude/
 response.html
 response2.html
+
+# Block 5A-W-33 — raw GSC / Bing / eBay export files for offline analysis.
+# Never committed. The analyzer reads them locally; only the generated
+# markdown / CSV reports under seo/reports/ are committed (manually).
+seo/exports/
