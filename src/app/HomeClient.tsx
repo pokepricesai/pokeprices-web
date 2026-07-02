@@ -7,6 +7,7 @@ import SearchBar from '@/components/SearchBar'
 import InlineChat from '@/components/InlineChat'
 import NewsletterSignup from '@/components/NewsletterSignup'
 import FAQ from '@/components/FAQ'
+import HomeQuickActions from '@/components/home/HomeQuickActions'
 import { getHomeFaqItems } from '@/lib/faqs'
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -57,27 +58,27 @@ type Insight = {
 
 // ── Featured tools ───────────────────────────────────────────────────────
 
+// Block 5A-W-40B — dropped the per-card emoji glyphs. The coloured
+// gradient block + bold title now carry the visual weight alone,
+// matching the premium/data-market feel from the W40 design brief.
 const FEATURED_TOOLS = [
   {
     title: 'Grading Calculator',
     blurb: 'PSA / CGC / BGS landed cost vs. graded uplift. Break-even at a glance.',
     href: '/dashboard/grading',
     accent: 'linear-gradient(135deg, #1a5fad 0%, #2874c8 100%)',
-    emoji: '🎯',
   },
   {
     title: 'Studio',
     blurb: 'One-click branded graphics from any card or set, for X, Insta and Discord.',
     href: '/studio',
     accent: 'linear-gradient(135deg, #1a5fad 0%, #7c3aed 100%)',
-    emoji: '🎨',
   },
   {
     title: 'Card Show Planner',
     blurb: 'UK & US Pokémon card shows, mapped and filtered. Plan your weekend.',
     href: '/dashboard/card-shows',
     accent: 'linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)',
-    emoji: '📍',
   },
 ]
 
@@ -185,11 +186,13 @@ const upcomingReleases = [
   { name: 'Journey Together 2',           date: 'Q4 2026',      confirmed: false },
 ]
 
+// Block 5A-W-40B — dropped the leading emoji glyphs. Feature-tile
+// headline + one-line description read as clean copy blocks now.
 const features = [
-  { icon: '📊', title: 'Real sold data',     desc: 'Prices from actual sold listings, not asking prices' },
-  { icon: '🎯', title: 'Grading insights',   desc: 'Is it worth grading? See the PSA 10 premium and gem rate' },
-  { icon: '📈', title: 'Market trends',      desc: 'Price movements, drawdowns and momentum for every card' },
-  { icon: '🔒', title: 'No data collection', desc: 'No login, no tracking, no email capture — ever' },
+  { title: 'Real sold data',     desc: 'Prices from actual sold listings, not asking prices' },
+  { title: 'Grading insights',   desc: 'Is it worth grading? See the PSA 10 premium and gem rate' },
+  { title: 'Market trends',      desc: 'Price movements, drawdowns and momentum for every card' },
+  { title: 'No data collection', desc: 'No login, no tracking, no email capture — ever' },
 ]
 
 // ── Main ──────────────────────────────────────────────────────────────────
@@ -254,16 +257,24 @@ export default function HomeClient() {
 
   return (
     <>
-      {/* ── HERO ── */}
+      {/* ── HERO ── Block 5A-W-40B compact rewrite:
+           * padding reduced (40px 24px 70px → 24px 24px 42px)
+           * logo downsized 110 → 84
+           * the yellow "latest set" hero pill removed (the Chaos
+             Rising banner further down still highlights the newest
+             release)
+           * InlineChat moved out of the hero into its own section
+             below the market strip
+           * plain-text quick-action grid replaces the AI chat block */}
       <section style={{
         background: 'linear-gradient(170deg, #1a5fad 0%, #3b8fe8 35%, #6ab0f5 60%, #9dcbfa 80%, var(--bg) 100%)',
-        padding: '40px 24px 70px', position: 'relative', overflow: 'hidden',
+        padding: '24px 24px 42px', position: 'relative', overflow: 'hidden',
       }}>
         <PokemonSilhouettes />
         <Sparkles />
         <div style={{ maxWidth: 760, margin: '0 auto', textAlign: 'center', position: 'relative', zIndex: 1 }}>
           <img src="/logo.png" alt="PokePrices" style={{
-            height: 110, margin: '0 auto 14px', display: 'block',
+            height: 84, margin: '0 auto 12px', display: 'block',
             filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.2))',
             animation: 'float 4s ease-in-out infinite',
           }} />
@@ -276,26 +287,6 @@ export default function HomeClient() {
                 letterSpacing: 0.3, backdropFilter: 'blur(4px)',
               }}>{pill}</span>
             ))}
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}>
-            <Link href="/set/Chaos%20Rising" style={{
-              display: 'inline-flex', alignItems: 'center', gap: 10,
-              background: 'var(--accent)', color: '#1a1a1a', textDecoration: 'none',
-              padding: '9px 16px 9px 12px', borderRadius: 24, fontWeight: 800,
-              fontSize: 13, fontFamily: "'Figtree', sans-serif",
-              boxShadow: '0 4px 14px rgba(255,203,5,0.35)',
-              transition: 'transform 0.15s, box-shadow 0.15s',
-            }}
-              onMouseEnter={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.transform = 'translateY(-1px)'; el.style.boxShadow = '0 6px 18px rgba(255,203,5,0.45)' }}
-              onMouseLeave={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.transform = ''; el.style.boxShadow = '0 4px 14px rgba(255,203,5,0.35)' }}
-            >
-              <span style={{
-                background: '#1a1a1a', color: 'var(--accent)', fontSize: 9, fontWeight: 900,
-                padding: '3px 7px', borderRadius: 4, letterSpacing: 1, textTransform: 'uppercase',
-              }}>New</span>
-              Explore Latest Set: Chaos Rising →
-            </Link>
           </div>
 
           <h1 style={{
@@ -313,36 +304,14 @@ export default function HomeClient() {
             <SearchBar placeholder='Search cards, sets, Pokémon… try "Charizard Base Set"' />
           </div>
 
-          <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, marginTop: 14, marginBottom: 22, fontFamily: "'Figtree', sans-serif" }}>
+          <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, marginTop: 14, marginBottom: 6, fontFamily: "'Figtree', sans-serif" }}>
             Updated nightly from real sold listings — no asking prices, no guesses
           </p>
 
-          {/* AI assistant — directly below search */}
-          <div style={{ maxWidth: 640, margin: '0 auto', textAlign: 'left' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: '#fff', fontFamily: "'Figtree', sans-serif" }}>
-                <span style={{ fontSize: 13 }}>✨</span>
-                <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.5 }}>Ask me anything</span>
-              </div>
-              <Link href="/ai-assistant" style={{
-                fontSize: 11, fontWeight: 800, color: 'rgba(255,255,255,0.85)', textDecoration: 'none',
-                textTransform: 'uppercase', letterSpacing: 1.5,
-              }}>
-                Open in full →
-              </Link>
-            </div>
-            <div style={{ position: 'relative' }}>
-              <div aria-hidden style={{
-                position: 'absolute', inset: -12, borderRadius: 24,
-                background: 'radial-gradient(ellipse at center, rgba(255,203,5,0.30), rgba(106,176,245,0.18) 55%, transparent 78%)',
-                filter: 'blur(18px)',
-                pointerEvents: 'none',
-              }} />
-              <div style={{ position: 'relative' }}>
-                <InlineChat />
-              </div>
-            </div>
-          </div>
+          {/* Block 5A-W-40B — clean, text-only quick actions. Auth-aware
+              (Sign up free vs My Dashboard). Sits where the AI chat used
+              to occupy prime hero real estate. */}
+          <HomeQuickActions />
         </div>
       </section>
 
@@ -386,9 +355,36 @@ export default function HomeClient() {
         </section>
       )}
 
+      {/* ── ASK THE AI MARKET ASSISTANT ── Block 5A-W-40B
+           InlineChat moved out of the hero into its own compact
+           section so the AI stays available without dominating the
+           homepage identity. Restrained header copy, no emoji. */}
+      <section style={{ padding: '32px 24px 4px', maxWidth: 960, margin: '0 auto' }}>
+        <div style={{
+          background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 18,
+          padding: '22px 24px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+            <h2 style={{ fontSize: 20, margin: 0, fontFamily: "'Outfit', sans-serif", color: 'var(--text)' }}>
+              Ask the AI market assistant
+            </h2>
+            <Link href="/ai-assistant" style={{
+              fontSize: 11, fontWeight: 800, color: 'var(--primary)', textDecoration: 'none',
+              textTransform: 'uppercase', letterSpacing: 1.5,
+            }}>
+              Open full AI assistant →
+            </Link>
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 14px', lineHeight: 1.55, fontFamily: "'Figtree', sans-serif" }}>
+            Ask about card values, PSA 10 prices, set trends, grading and market movement.
+          </p>
+          <InlineChat />
+        </div>
+      </section>
+
       {/* ── WEEKLY MARKET REPORT (pulse strip) ── */}
       {weeklyReport.length > 0 && (
-        <section style={{ padding: '32px 24px 12px', maxWidth: 960, margin: '0 auto' }}>
+        <section id="market-movers" style={{ padding: '32px 24px 12px', maxWidth: 960, margin: '0 auto', scrollMarginTop: 76 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
             <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, fontFamily: "'Figtree', sans-serif" }}>
               This week in the market
@@ -447,6 +443,43 @@ export default function HomeClient() {
         </section>
       )}
 
+      {/* ── BROWSE DISCOVERY ── Block 5A-W-40B
+           Four clean text-only cards that route visitors into the
+           four highest-value browse destinations. Sits above the
+           Featured Tools row because browsing is more important
+           than secondary tools. */}
+      <section style={{ padding: '36px 24px 8px', maxWidth: 1000, margin: '0 auto' }}>
+        <h2 style={{ fontSize: 22, margin: '0 0 14px', fontFamily: "'Outfit', sans-serif" }}>Start browsing</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+          {[
+            { title: 'Browse Cards & Sets',   desc: '40,000+ Pokémon cards across 156+ sets. Live raw and PSA 10 prices, grading data, and set completion tools.', href: '/browse'         },
+            { title: 'Browse Pokémon',        desc: "Every Pokémon species with all its cards, prices and grading history in one place.",                       href: '/pokemon'        },
+            { title: 'Follow Market Movers',  desc: 'This week’s top risers, fallers, most volatile and most-traded cards — volume-verified.',            href: '#market-movers'  },
+            { title: 'Read Market Insights',  desc: 'Grading guides, PSA 10 value gaps, chase-card analysis and market breakdowns.',                              href: '/insights'       },
+          ].map(card => (
+            <Link key={card.title} href={card.href} style={{
+              display: 'flex', flexDirection: 'column', textDecoration: 'none',
+              background: 'var(--card)', borderRadius: 16, border: '1px solid var(--border)',
+              padding: '20px 22px', transition: 'transform 0.15s, box-shadow 0.15s, border-color 0.15s',
+              fontFamily: "'Figtree', sans-serif",
+            }}
+              onMouseEnter={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.transform = 'translateY(-2px)'; el.style.boxShadow = '0 6px 20px rgba(0,0,0,0.06)'; el.style.borderColor = 'var(--primary)' }}
+              onMouseLeave={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.transform = ''; el.style.boxShadow = ''; el.style.borderColor = 'var(--border)' }}
+            >
+              <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--text)', margin: '0 0 6px', fontFamily: "'Outfit', sans-serif", lineHeight: 1.2 }}>
+                {card.title}
+              </h3>
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 12px', lineHeight: 1.55 }}>
+                {card.desc}
+              </p>
+              <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 'auto' }}>
+                Open →
+              </span>
+            </Link>
+          ))}
+        </div>
+      </section>
+
       {/* ── FEATURED TOOLS ── */}
       <section style={{ padding: '36px 24px 8px', maxWidth: 1000, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
@@ -469,7 +502,6 @@ export default function HomeClient() {
                 background: tool.accent, color: '#fff', padding: '24px 20px',
                 display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8, minHeight: 120,
               }}>
-                <div style={{ fontSize: 26 }}>{tool.emoji}</div>
                 <div style={{ fontSize: 20, fontWeight: 900, fontFamily: "'Outfit', sans-serif", lineHeight: 1.15, marginTop: 'auto' }}>
                   {tool.title}
                 </div>
@@ -486,56 +518,6 @@ export default function HomeClient() {
           ))}
         </div>
       </section>
-
-      {/* ── LATEST GUIDES ── */}
-      {latestInsights.length > 0 && (
-        <section style={{ padding: '36px 24px 8px', maxWidth: 1000, margin: '0 auto' }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
-            <h2 style={{ fontSize: 22, margin: 0, fontFamily: "'Outfit', sans-serif" }}>Latest guides</h2>
-            <Link href="/insights" style={{ fontSize: 12, fontWeight: 800, color: 'var(--primary)', textDecoration: 'none', textTransform: 'uppercase', letterSpacing: 1.5 }}>
-              All guides →
-            </Link>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
-            {latestInsights.map(insight => (
-              <Link key={insight.id} href={`/insights/${insight.slug}`} style={{
-                display: 'flex', flexDirection: 'column', textDecoration: 'none',
-                background: 'var(--card)', borderRadius: 16, border: '1px solid var(--border)',
-                overflow: 'hidden', transition: 'transform 0.15s, box-shadow 0.15s',
-              }}
-                onMouseEnter={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.transform = 'translateY(-2px)'; el.style.boxShadow = '0 6px 20px rgba(0,0,0,0.08)' }}
-                onMouseLeave={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.transform = ''; el.style.boxShadow = '' }}
-              >
-                {insight.image_url ? (
-                  <img src={insight.image_url} alt="" style={{ width: '100%', height: 140, objectFit: 'cover', display: 'block' }} />
-                ) : (
-                  <div style={{ width: '100%', height: 140, background: 'linear-gradient(135deg, #1a5fad 0%, #2874c8 100%)' }} />
-                )}
-                <div style={{ padding: '14px 18px 18px', flex: 1, display: 'flex', flexDirection: 'column', fontFamily: "'Figtree', sans-serif" }}>
-                  {insight.theme_label && (
-                    <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 6 }}>
-                      {insight.theme_label}
-                    </div>
-                  )}
-                  <h3 style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)', margin: '0 0 6px', lineHeight: 1.3, fontFamily: "'Outfit', sans-serif" }}>
-                    {insight.headline}
-                  </h3>
-                  {insight.intro && (
-                    <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.55, margin: '0 0 12px',
-                      display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                      {insight.intro}
-                    </p>
-                  )}
-                  <div style={{ marginTop: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>
-                    {formatInsightDate(insight.published_at)}
-                    {insight.read_time_mins ? ` · ${insight.read_time_mins} min read` : ''}
-                  </div>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
 
       {/* ── HIDDEN GEMS ── */}
       {hiddenGems.length > 0 && (
@@ -654,6 +636,58 @@ export default function HomeClient() {
         </div>
       </section>
 
+      {/* ── LATEST GUIDES ── Block 5A-W-40B moved from position 5 →
+           position 9 (between Just Released and Built Different) so
+           the browse-oriented sections stay at the top of the page. */}
+      {latestInsights.length > 0 && (
+        <section style={{ padding: '36px 24px 8px', maxWidth: 1000, margin: '0 auto' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+            <h2 style={{ fontSize: 22, margin: 0, fontFamily: "'Outfit', sans-serif" }}>Latest guides</h2>
+            <Link href="/insights" style={{ fontSize: 12, fontWeight: 800, color: 'var(--primary)', textDecoration: 'none', textTransform: 'uppercase', letterSpacing: 1.5 }}>
+              All guides →
+            </Link>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+            {latestInsights.map(insight => (
+              <Link key={insight.id} href={`/insights/${insight.slug}`} style={{
+                display: 'flex', flexDirection: 'column', textDecoration: 'none',
+                background: 'var(--card)', borderRadius: 16, border: '1px solid var(--border)',
+                overflow: 'hidden', transition: 'transform 0.15s, box-shadow 0.15s',
+              }}
+                onMouseEnter={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.transform = 'translateY(-2px)'; el.style.boxShadow = '0 6px 20px rgba(0,0,0,0.08)' }}
+                onMouseLeave={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.transform = ''; el.style.boxShadow = '' }}
+              >
+                {insight.image_url ? (
+                  <img src={insight.image_url} alt="" style={{ width: '100%', height: 140, objectFit: 'cover', display: 'block' }} />
+                ) : (
+                  <div style={{ width: '100%', height: 140, background: 'linear-gradient(135deg, #1a5fad 0%, #2874c8 100%)' }} />
+                )}
+                <div style={{ padding: '14px 18px 18px', flex: 1, display: 'flex', flexDirection: 'column', fontFamily: "'Figtree', sans-serif" }}>
+                  {insight.theme_label && (
+                    <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 6 }}>
+                      {insight.theme_label}
+                    </div>
+                  )}
+                  <h3 style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)', margin: '0 0 6px', lineHeight: 1.3, fontFamily: "'Outfit', sans-serif" }}>
+                    {insight.headline}
+                  </h3>
+                  {insight.intro && (
+                    <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.55, margin: '0 0 12px',
+                      display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      {insight.intro}
+                    </p>
+                  )}
+                  <div style={{ marginTop: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>
+                    {formatInsightDate(insight.published_at)}
+                    {insight.read_time_mins ? ` · ${insight.read_time_mins} min read` : ''}
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* ── BUILT DIFFERENT ── */}
       <section style={{ padding: '36px 24px 44px', maxWidth: 900, margin: '0 auto' }}>
         <h2 style={{ fontSize: 24, textAlign: 'center', margin: '0 0 6px', fontFamily: "'Outfit', sans-serif" }}>Built for collectors, not investors</h2>
@@ -661,7 +695,6 @@ export default function HomeClient() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
           {features.map((f, i) => (
             <div key={f.title} className={`card-hover animate-fade-in-up delay-${i + 1}`} style={{ background: 'var(--card)', borderRadius: 16, padding: '22px 18px', border: '1px solid var(--border)', textAlign: 'center' }}>
-              <div style={{ fontSize: 22, marginBottom: 8, color: 'var(--text-muted)' }}>{f.icon}</div>
               <h3 style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)', margin: '0 0 6px', fontFamily: "'Figtree', sans-serif" }}>{f.title}</h3>
               <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5, margin: 0, fontFamily: "'Figtree', sans-serif" }}>{f.desc}</p>
             </div>
@@ -693,7 +726,6 @@ export default function HomeClient() {
           background: 'linear-gradient(135deg, rgba(26,95,173,0.06), rgba(59,130,246,0.04))',
           border: '1px solid rgba(26,95,173,0.2)', borderRadius: 20, padding: '32px 28px', textAlign: 'center',
         }}>
-          <div style={{ fontSize: 32, marginBottom: 10 }}>📬</div>
           <h2 style={{ fontSize: 22, margin: '0 0 8px', fontFamily: "'Outfit', sans-serif", color: 'var(--text)' }}>
             Monthly collector digest
           </h2>
