@@ -6,6 +6,7 @@ import { notFound } from 'next/navigation'
 import CardPageClient from './CardPageClient'
 import RecentSalesSection from '@/components/recentSales/RecentSalesSection'
 import { loadRecentSalesGroupedForCardIfEnabled } from '@/lib/recentSales/cardQueries'
+import { isCardIndexable } from '@/lib/seo-indexability/cardIndexability'
 
 // ISR: regenerate every 24h. Prices refresh nightly, so this aligns with data cadence.
 // Dramatically reduces crawl-budget consumption across 40k+ card pages.
@@ -85,6 +86,25 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     description = `Track ${name}${num} from ${card.set_name}: raw, PSA 9 and PSA 10 prices, grading spreads, PSA population and recent sold listings. Price guide updated daily.`
   }
 
+  // Block 5A-W-35 — thin-card gate. Card rows with no market signal
+  // on any grade tier get robots: { index: false, follow: true } so
+  // Google stops evaluating them for the index, but users landing
+  // from direct links / referrers still see the page (and if a price
+  // ever appears, the card becomes indexable again on the next crawl
+  // — no 410-then-recover dance).
+  //
+  // Scope note: this gate is price-signal based on the 20 tier fields
+  // returned by get_card_detail_by_url_slug (raw_usd + PSA 1..10 +
+  // half-grades + gem-mint from other graders). It does NOT consult
+  // recent_sales — that path is only loaded below the metadata call
+  // and is not mirrored in the sitemap query. Route + sitemap read
+  // the same DB-level price signal.
+  //
+  // We chose noindex over notFound() because ~940 URLs would be
+  // affected in one deploy. A 404 mass-drop is harder to reverse and
+  // costs external referrers; noindex is the low-blast-radius option.
+  const indexable = isCardIndexable(card)
+
   return {
     title,
     description,
@@ -103,6 +123,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
       images: card.image_url ? [card.image_url] : [],
     },
     alternates: { canonical },
+    robots: indexable ? undefined : { index: false, follow: true },
   }
 }
 
