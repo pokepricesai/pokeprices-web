@@ -7,8 +7,7 @@ import SearchBar from '@/components/SearchBar'
 import InlineChat from '@/components/InlineChat'
 import NewsletterSignup from '@/components/NewsletterSignup'
 import FAQ from '@/components/FAQ'
-import HomeMarketTicker from '@/components/home/HomeMarketTicker'
-import HomeAccountRail from '@/components/home/HomeAccountRail'
+import HomeQuickActions from '@/components/home/HomeQuickActions'
 import { getHomeFaqItems } from '@/lib/faqs'
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -254,254 +253,195 @@ export default function HomeClient() {
   }, [])
 
   const sparklineData = marketIndex.slice(-30).map(r => r.total_raw_usd / 100)
-
-  // Block 5A-W-41A — derive ticker top-riser / top-faller cells from
-  // the already-loaded weekly report. Falls back to null when the
-  // report hasn't returned yet, which the ticker component handles.
-  const topRiserRow  = weeklyReport.find(r => r.category === 'top_riser')  ?? null
-  const topFallerRow = weeklyReport.find(r => r.category === 'top_faller') ?? null
-  const tickerTopRiser  = topRiserRow
-    ? { name: topRiserRow.card_name, pctLabel: topRiserRow.metric_label }
-    : null
-  const tickerTopFaller = topFallerRow
-    ? { name: topFallerRow.card_name, pctLabel: topFallerRow.metric_label }
-    : null
+  const marketUp = (totalMarket?.pct30d ?? 0) >= 0
 
   return (
     <>
-      {/* Block 5A-W-41A — full-width market status strip. Replaces the
-          old centred blue-gradient hero as the visual opening of the
-          homepage. Data comes from the same RPCs the homepage already
-          loads (market_index / get_market_total / get_weekly_report). */}
-      <HomeMarketTicker
-        marketValueCents={totalMarket?.value ?? null}
-        pct30d={totalMarket?.pct30d ?? null}
-        cardsTracked={totalMarket?.cardsTracked ?? null}
-        setsTracked={null}
-        latestSetName="Chaos Rising"
-        topRiser={tickerTopRiser}
-        topFaller={tickerTopFaller}
-      />
+      {/* ── HERO ── Block 5A-W-40B compact rewrite:
+           * padding reduced (40px 24px 70px → 24px 24px 42px)
+           * logo downsized 110 → 84
+           * the yellow "latest set" hero pill removed (the Chaos
+             Rising banner further down still highlights the newest
+             release)
+           * InlineChat moved out of the hero into its own section
+             below the market strip
+           * plain-text quick-action grid replaces the AI chat block */}
+      <section style={{
+        background: 'linear-gradient(170deg, #1a5fad 0%, #3b8fe8 35%, #6ab0f5 60%, #9dcbfa 80%, var(--bg) 100%)',
+        padding: '24px 24px 42px', position: 'relative', overflow: 'hidden',
+      }}>
+        <PokemonSilhouettes />
+        <Sparkles />
+        <div style={{ maxWidth: 760, margin: '0 auto', textAlign: 'center', position: 'relative', zIndex: 1 }}>
+          <img src="/logo.png" alt="PokePrices" style={{
+            height: 84, margin: '0 auto 12px', display: 'block',
+            filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.2))',
+            animation: 'float 4s ease-in-out infinite',
+          }} />
 
-      {/* ── DASHBOARD OPENING ── Block 5A-W-41A
-           Three-panel opening that breaks out of the classic hero
-           layout. Left rail: search + browse directory. Main
-           workspace: this week in the market. Right rail: AI + account.
-           Uses flex-wrap so the layout collapses to stacked panels on
-           narrow widths without needing new @media rules. */}
-      <section style={{ position: 'relative', overflow: 'hidden', background: 'var(--bg)' }}>
-        <div aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.35 }}>
-          <PokemonSilhouettes />
-          <Sparkles />
-        </div>
-        <div style={{
-          maxWidth: 1440, margin: '0 auto', padding: '20px 20px 28px',
-          position: 'relative', zIndex: 1,
-          display: 'flex', flexWrap: 'wrap', gap: 18,
-          alignItems: 'flex-start',
-        }}>
-          {/* ── LEFT RAIL: Search & Browse ── */}
-          <aside aria-label="Search and browse" style={{
-            flex:  '1 1 240px', minWidth: 240, maxWidth: 320,
-            background: 'var(--card)', border: '1px solid var(--border)',
-            borderRadius: 16, padding: '18px 20px',
-            fontFamily: "'Figtree', sans-serif",
-          }}>
-            <p style={{
-              margin: '0 0 6px', fontSize: 10, fontWeight: 800,
-              letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--text-muted)',
-            }}>PokePrices Market</p>
-            <h1 style={{
-              fontFamily: "'Outfit', sans-serif",
-              fontSize: 20, fontWeight: 800, color: 'var(--text)',
-              margin: '0 0 14px', lineHeight: 1.25, letterSpacing: -0.2,
-            }}>
-              The numbers behind every Pokémon card
-            </h1>
-
-            <SearchBar placeholder="Search cards, sets, Pokémon…" />
-
-            <p style={{
-              margin: '18px 0 8px', fontSize: 10, fontWeight: 800,
-              letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--text-muted)',
-            }}>Search & Browse</p>
-            <nav aria-label="Browse directory" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {[
-                { label: 'Cards & Sets',   href: '/browse'         },
-                { label: 'Pokémon Index',  href: '/pokemon'        },
-                { label: 'Market Movers',  href: '#market-movers'  },
-                { label: 'Insights',       href: '/insights'       },
-                { label: 'Tools',          href: '/tools'          },
-              ].map(item => (
-                <Link key={item.label} href={item.href} style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '9px 10px', borderRadius: 10,
-                  color: 'var(--text)', textDecoration: 'none',
-                  fontSize: 13.5, fontWeight: 700,
-                }}
-                  onMouseEnter={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.background = 'var(--bg-light)' }}
-                  onMouseLeave={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.background = 'transparent' }}
-                >
-                  <span>{item.label}</span>
-                  <span aria-hidden="true" style={{ color: 'var(--text-muted)', fontSize: 12 }}>→</span>
-                </Link>
-              ))}
-            </nav>
-
-            <div style={{
-              marginTop: 18, paddingTop: 14,
-              borderTop: '1px solid var(--border)',
-              display: 'flex', flexDirection: 'column', gap: 4,
-              fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.55,
-            }}>
-              <span>40,000+ cards</span>
-              <span>156+ sets</span>
-              <span>Updated nightly from sold listings</span>
-            </div>
-          </aside>
-
-          {/* ── MAIN WORKSPACE: This week in the market ── */}
-          <main style={{
-            flex: '3 1 480px', minWidth: 300,
-            display: 'flex', flexDirection: 'column', gap: 14,
-          }}>
-            {weeklyReport.length > 0 ? (
-              <section id="market-movers" style={{
-                background: 'var(--card)', border: '1px solid var(--border)',
-                borderRadius: 16, padding: '18px 20px',
-                scrollMarginTop: 76, fontFamily: "'Figtree', sans-serif",
-              }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
-                  <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>
-                    This week in the market
-                  </h2>
-                  {weeklyUpdated && (
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      Updated {weeklyUpdated}
-                    </span>
-                  )}
-                </div>
-                <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '0 0 14px' }}>
-                  Volume-verified signals from the market — min 3 confirmed sales
-                </p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
-                  {weeklyReport.map(row => {
-                    const { label, color } = categoryMeta(row.category)
-                    const priceUsd = row.current_price / 100
-                    return (
-                      <Link key={row.category} href={`/set/${encodeURIComponent(row.set_name)}/card/${row.card_url_slug || row.card_slug}`} style={{ textDecoration: 'none' }}>
-                        <div style={{
-                          background: 'var(--bg-light)', border: '1px solid var(--border)', borderRadius: 12,
-                          padding: '13px 15px', height: '100%', boxSizing: 'border-box',
-                          transition: 'transform 0.15s, box-shadow 0.15s', cursor: 'pointer',
-                        }}
-                          onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.transform = 'translateY(-2px)'; el.style.boxShadow = '0 6px 20px rgba(0,0,0,0.08)' }}
-                          onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.transform = ''; el.style.boxShadow = '' }}
-                        >
-                          <div style={{ fontSize: 11, fontWeight: 800, color, letterSpacing: 0.5, marginBottom: 7, textTransform: 'uppercase' }}>
-                            {label}
-                          </div>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', lineHeight: 1.3, marginBottom: 4,
-                            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                            {row.card_name}
-                          </div>
-                          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
-                            {row.set_name}
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>
-                                ${priceUsd >= 100 ? priceUsd.toFixed(0) : priceUsd.toFixed(2)}
-                              </span>
-                              <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px', letterSpacing: 0.5 }}>
-                                RAW
-                              </span>
-                            </div>
-                            <span style={{ fontSize: 11, color, fontWeight: 700, textAlign: 'right', maxWidth: 90 }}>
-                              {row.metric_label}
-                            </span>
-                          </div>
-                        </div>
-                      </Link>
-                    )
-                  })}
-                </div>
-              </section>
-            ) : (
-              // Placeholder id="market-movers" even when the report hasn't
-              // loaded yet — the ticker + left-rail deep-link both point
-              // here, and the anchor should always resolve.
-              <section id="market-movers" style={{
-                background: 'var(--card)', border: '1px solid var(--border)',
-                borderRadius: 16, padding: '18px 20px', scrollMarginTop: 76,
-                fontFamily: "'Figtree', sans-serif",
-              }}>
-                <h2 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 6px' }}>
-                  This week in the market
-                </h2>
-                <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0 }}>
-                  Loading volume-verified signals…
-                </p>
-              </section>
-            )}
-          </main>
-
-          {/* ── RIGHT RAIL: AI + Account ── */}
-          <div style={{
-            flex: '1 1 260px', minWidth: 260, maxWidth: 340,
-            display: 'flex', flexDirection: 'column', gap: 14,
-          }}>
-            {/* AI panel */}
-            <div style={{
-              background: 'var(--card)', border: '1px solid var(--border)',
-              borderRadius: 16, padding: '18px 20px', fontFamily: "'Figtree', sans-serif",
-            }}>
-              <p style={{
-                margin: '0 0 6px', fontSize: 10, fontWeight: 800,
-                letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--text-muted)',
-              }}>Assistant</p>
-              <h3 style={{
-                fontFamily: "'Outfit', sans-serif",
-                fontSize: 16, fontWeight: 800, color: 'var(--text)',
-                margin: '0 0 6px',
-              }}>Ask the market assistant</h3>
-              <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 12px', lineHeight: 1.55 }}>
-                Ask about card values, PSA 10 prices, set trends and grading.
-              </p>
-              <InlineChat />
-              <Link href="/ai-assistant" style={{
-                display: 'inline-block', marginTop: 10,
-                fontSize: 11, fontWeight: 800, color: 'var(--primary)',
-                textDecoration: 'none', textTransform: 'uppercase', letterSpacing: 1.5,
-              }}>
-                Open full assistant →
-              </Link>
-            </div>
-            {/* Auth-aware account panel */}
-            <HomeAccountRail />
-            {/* Tiny "30-day trend" mini card retains the sparkline that
-                used to sit in the removed market index banner. Only
-                renders when there's sparkline data to show. */}
-            {sparklineData.length >= 2 && (
-              <div style={{
-                background: 'var(--card)', border: '1px solid var(--border)',
-                borderRadius: 16, padding: '14px 18px',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                gap: 10, fontFamily: "'Figtree', sans-serif",
-              }}>
-                <div>
-                  <p style={{
-                    margin: '0 0 4px', fontSize: 10, fontWeight: 800,
-                    letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--text-muted)',
-                  }}>30-day trend</p>
-                  <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Raw market index</p>
-                </div>
-                <Sparkline data={sparklineData} color={(totalMarket?.pct30d ?? 0) >= 0 ? '#22c55e' : '#ef4444'} height={40} />
-              </div>
-            )}
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+            {['100% Free', 'No Login', 'No Data Collection'].map(pill => (
+              <span key={pill} style={{
+                background: 'rgba(255,255,255,0.15)', color: '#fff', fontSize: 11, fontWeight: 700,
+                padding: '4px 12px', borderRadius: 20, border: '1px solid rgba(255,255,255,0.2)',
+                letterSpacing: 0.3, backdropFilter: 'blur(4px)',
+              }}>{pill}</span>
+            ))}
           </div>
+
+          <h1 style={{
+            fontSize: 38, color: '#fff', margin: '0 0 10px', lineHeight: 1.15,
+            textShadow: '0 2px 10px rgba(0,0,0,0.15)', fontFamily: "'Outfit', sans-serif",
+          }}>
+            The numbers behind every<br /><span style={{ color: 'var(--accent)' }}>Pokémon</span> card
+          </h1>
+          <p style={{ color: 'rgba(255,255,255,0.9)', fontSize: 16, margin: '0 0 22px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif", fontWeight: 600 }}>
+            Live values · PSA 10 data · grading insights · 40,000+ cards · 156+ sets
+          </p>
+
+          {/* Primary CTA: search */}
+          <div style={{ maxWidth: 620, margin: '0 auto' }}>
+            <SearchBar placeholder='Search cards, sets, Pokémon… try "Charizard Base Set"' />
+          </div>
+
+          <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, marginTop: 14, marginBottom: 6, fontFamily: "'Figtree', sans-serif" }}>
+            Updated nightly from real sold listings — no asking prices, no guesses
+          </p>
+
+          {/* Block 5A-W-40B — clean, text-only quick actions. Auth-aware
+              (Sign up free vs My Dashboard). Sits where the AI chat used
+              to occupy prime hero real estate. */}
+          <HomeQuickActions />
         </div>
       </section>
+
+      {/* ── MARKET INDEX BANNER ── */}
+      {totalMarket && (
+        <section style={{ padding: '0 24px', maxWidth: 960, margin: '-28px auto 0', position: 'relative', zIndex: 10 }}>
+          <div style={{
+            background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 18,
+            boxShadow: '0 4px 24px rgba(26,95,173,0.10)', padding: '20px 28px',
+            display: 'grid', gridTemplateColumns: '1fr auto', gap: 24, alignItems: 'center',
+          }}>
+            <div>
+              <p style={{ color: 'var(--text-muted)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', margin: '0 0 6px', fontFamily: "'Figtree', sans-serif" }}>
+                Pokémon TCG Market Index
+              </p>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 34, fontWeight: 900, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", letterSpacing: -1 }}>
+                  {formatMarketTotal(totalMarket.value)}
+                </span>
+                {totalMarket.pct30d != null && (
+                  <span style={{
+                    fontSize: 13, fontWeight: 700,
+                    color: marketUp ? '#22c55e' : '#ef4444',
+                    background: marketUp ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+                    padding: '3px 10px', borderRadius: 20, fontFamily: "'Figtree', sans-serif",
+                  }}>
+                    {marketUp ? '▲' : '▼'} {Math.abs(totalMarket.pct30d).toFixed(1)}% 30d
+                  </span>
+                )}
+              </div>
+              <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: '4px 0 0', fontFamily: "'Figtree', sans-serif" }}>
+                Ungraded (raw) card values
+                {totalMarket.cardsTracked > 0 && ` · ${totalMarket.cardsTracked.toLocaleString()} cards tracked`}
+              </p>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+              <Sparkline data={sparklineData} color={marketUp ? '#22c55e' : '#ef4444'} height={48} />
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>30 day trend</span>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ── ASK THE AI MARKET ASSISTANT ── Block 5A-W-40B
+           InlineChat moved out of the hero into its own compact
+           section so the AI stays available without dominating the
+           homepage identity. Restrained header copy, no emoji. */}
+      <section style={{ padding: '32px 24px 4px', maxWidth: 960, margin: '0 auto' }}>
+        <div style={{
+          background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 18,
+          padding: '22px 24px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+            <h2 style={{ fontSize: 20, margin: 0, fontFamily: "'Outfit', sans-serif", color: 'var(--text)' }}>
+              Ask the AI market assistant
+            </h2>
+            <Link href="/ai-assistant" style={{
+              fontSize: 11, fontWeight: 800, color: 'var(--primary)', textDecoration: 'none',
+              textTransform: 'uppercase', letterSpacing: 1.5,
+            }}>
+              Open full AI assistant →
+            </Link>
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 14px', lineHeight: 1.55, fontFamily: "'Figtree', sans-serif" }}>
+            Ask about card values, PSA 10 prices, set trends, grading and market movement.
+          </p>
+          <InlineChat />
+        </div>
+      </section>
+
+      {/* ── WEEKLY MARKET REPORT (pulse strip) ── */}
+      {weeklyReport.length > 0 && (
+        <section id="market-movers" style={{ padding: '32px 24px 12px', maxWidth: 960, margin: '0 auto', scrollMarginTop: 76 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
+            <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, fontFamily: "'Figtree', sans-serif" }}>
+              This week in the market
+            </h2>
+            {weeklyUpdated && (
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+                Updated {weeklyUpdated}
+              </span>
+            )}
+          </div>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '0 0 14px', fontFamily: "'Figtree', sans-serif" }}>
+            Volume-verified signals from the market — min 3 confirmed sales
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+            {weeklyReport.map(row => {
+              const { label, color } = categoryMeta(row.category)
+              const priceUsd = row.current_price / 100
+              return (
+                <Link key={row.category} href={`/set/${encodeURIComponent(row.set_name)}/card/${row.card_url_slug || row.card_slug}`} style={{ textDecoration: 'none' }}>
+                  <div style={{
+                    background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14,
+                    padding: '14px 16px', height: '100%', boxSizing: 'border-box',
+                    transition: 'transform 0.15s, box-shadow 0.15s', cursor: 'pointer',
+                  }}
+                    onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.transform = 'translateY(-2px)'; el.style.boxShadow = '0 6px 20px rgba(0,0,0,0.08)' }}
+                    onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.transform = ''; el.style.boxShadow = '' }}
+                  >
+                    <div style={{ fontSize: 11, fontWeight: 800, color, letterSpacing: 0.5, marginBottom: 7, fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase' }}>
+                      {label}
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', lineHeight: 1.3, marginBottom: 4, fontFamily: "'Figtree', sans-serif",
+                      display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      {row.card_name}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, fontFamily: "'Figtree', sans-serif" }}>
+                      {row.set_name}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>
+                          ${priceUsd >= 100 ? priceUsd.toFixed(0) : priceUsd.toFixed(2)}
+                        </span>
+                        <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', background: 'var(--bg-light)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px', letterSpacing: 0.5, fontFamily: "'Figtree', sans-serif" }}>
+                          RAW
+                        </span>
+                      </div>
+                      <span style={{ fontSize: 11, color, fontWeight: 700, fontFamily: "'Figtree', sans-serif", textAlign: 'right', maxWidth: 90 }}>
+                        {row.metric_label}
+                      </span>
+                    </div>
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       {/* ── BROWSE DISCOVERY ── Block 5A-W-40B
            Four clean text-only cards that route visitors into the
