@@ -14,6 +14,11 @@ import {
 import { summarise } from '../timeSeries'
 import { summariseCoverage } from '../coverageAnalysis'
 import { summariseEbay } from '../ebayAnalysis'
+import {
+  computeCtr,
+  parseCtrString,
+  POSITION_COLUMN_CANDIDATES,
+} from '../rowParsing'
 
 // ── csvParse ────────────────────────────────────────────────────────
 
@@ -379,5 +384,130 @@ describe('summariseEbay', () => {
     ])
     expect(s.totalSalesNumeric).toBe(2.50)
     expect(s.totalEarningsNumeric).toBe(0.10)
+  })
+})
+
+// ── rowParsing — Block 5A-W-33B ────────────────────────────────────
+
+describe('parseCtrString', () => {
+  it('parses standard percentage notation', () => {
+    expect(parseCtrString('0.72%')).toBeCloseTo(0.0072, 6)
+    expect(parseCtrString('5.40%')).toBeCloseTo(0.054, 6)
+    expect(parseCtrString('41.44%')).toBeCloseTo(0.4144, 6)
+  })
+
+  it('parses raw decimal CTR (no percent sign)', () => {
+    expect(parseCtrString('0.0072')).toBeCloseTo(0.0072, 6)
+    expect(parseCtrString('0.054')).toBeCloseTo(0.054, 6)
+  })
+
+  it('treats unmarked values > 1 as already-percentages and re-scales them', () => {
+    // Defensive: real GSC exports sometimes ship "72" meaning 72%.
+    expect(parseCtrString('72')).toBeCloseTo(0.72, 6)
+    expect(parseCtrString('5.4')).toBeCloseTo(0.054, 6)
+  })
+
+  it('accepts locale comma decimals', () => {
+    expect(parseCtrString('0,72%')).toBeCloseTo(0.0072, 6)
+    expect(parseCtrString('0,0072')).toBeCloseTo(0.0072, 6)
+  })
+
+  it('strips whitespace around values', () => {
+    expect(parseCtrString('  0.72 %  ')).toBeCloseTo(0.0072, 6)
+  })
+
+  it('returns null on blank / undefined / unparseable input', () => {
+    expect(parseCtrString('')).toBeNull()
+    expect(parseCtrString(null)).toBeNull()
+    expect(parseCtrString(undefined)).toBeNull()
+    expect(parseCtrString('  ')).toBeNull()
+    expect(parseCtrString('not a number')).toBeNull()
+  })
+
+  it('rejects negative values', () => {
+    expect(parseCtrString('-0.5%')).toBeNull()
+  })
+})
+
+describe('computeCtr', () => {
+  it('prefers clicks / impressions over the CSV column when both are sensible', () => {
+    // The bug that prompted this helper: CSV said "25.00%", real value
+    // is 4/1580 = 0.00253. computeCtr must trust the computation.
+    expect(computeCtr(4, 1580, '25.00%')).toBeCloseTo(0.00253, 5)
+    expect(computeCtr(18, 2493, '72%')).toBeCloseTo(0.00722, 5)
+  })
+
+  it('falls back to the parsed CTR column when clicks are missing', () => {
+    expect(computeCtr(null, 1000, '5.4%')).toBeCloseTo(0.054, 6)
+    expect(computeCtr(undefined, 1000, '0.054')).toBeCloseTo(0.054, 6)
+  })
+
+  it('falls back to the parsed CTR column when impressions are missing', () => {
+    expect(computeCtr(20, null, '5.4%')).toBeCloseTo(0.054, 6)
+  })
+
+  it('returns 0 when impressions is 0 — never NaN or Infinity', () => {
+    const out = computeCtr(0, 0, '')
+    expect(Number.isFinite(out)).toBe(true)
+    expect(out).toBe(0)
+  })
+
+  it('returns 0 when impressions is 0 even if the CSV column is set', () => {
+    // No real CTR can exist with 0 impressions. Don't let the column lie.
+    const out = computeCtr(5, 0, '50%')
+    expect(out).toBe(0)
+  })
+
+  it('returns 0 when impressions is negative or NaN', () => {
+    expect(computeCtr(5, -10, '')).toBe(0)
+    expect(computeCtr(5, NaN, '')).toBe(0)
+  })
+
+  it('handles a blank CTR column with valid clicks + impressions', () => {
+    expect(computeCtr(18, 2493, '')).toBeCloseTo(0.00722, 5)
+  })
+
+  it('never returns NaN or Infinity for any combination', () => {
+    const cases: Array<[unknown, unknown, unknown]> = [
+      [NaN, 1000, '5%'],
+      [10, Infinity, '5%'],
+      [Infinity, 100, '5%'],
+      ['abc', 100, '5%'],
+      [null, null, null],
+    ]
+    for (const [c, i, f] of cases) {
+      const v = computeCtr(c as number, i as number, f)
+      expect(Number.isFinite(v)).toBe(true)
+    }
+  })
+})
+
+describe('POSITION_COLUMN_CANDIDATES', () => {
+  it('includes every variant the real exports use', () => {
+    // The bug that prompted this: Bing exports use "Avg. Position"
+    // (with a period). The original regex only matched "Position" or
+    // "Average position" exactly. Confirm the full list.
+    const required = [
+      'Position',
+      'Average position',
+      'Average Position',
+      'Avg. Position',
+      'Avg. position',
+      'Avg Position',
+      'Avg position',
+      'Avg. pos',
+      'Avg pos',
+    ]
+    for (const c of required) {
+      expect(POSITION_COLUMN_CANDIDATES).toContain(c)
+    }
+  })
+
+  it('exposes a usable shape (read-only string array)', () => {
+    expect(Array.isArray(POSITION_COLUMN_CANDIDATES)).toBe(true)
+    for (const c of POSITION_COLUMN_CANDIDATES) {
+      expect(typeof c).toBe('string')
+      expect(c.length).toBeGreaterThan(0)
+    }
   })
 })

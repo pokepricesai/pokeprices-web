@@ -27,6 +27,7 @@ import { findOpportunities, type RankingRow } from '../../src/lib/seo-analysis/c
 import { summarise, type DailyPoint } from '../../src/lib/seo-analysis/timeSeries.ts'
 import { summariseCoverage, type CoveragePoint } from '../../src/lib/seo-analysis/coverageAnalysis.ts'
 import { summariseEbay, type EbayRow } from '../../src/lib/seo-analysis/ebayAnalysis.ts'
+import { computeCtr, POSITION_COLUMN_CANDIDATES } from '../../src/lib/seo-analysis/rowParsing.ts'
 
 const REPO_ROOT   = resolve(import.meta.dirname ?? __dirname, '..', '..')
 const EXPORTS_DIR = join(REPO_ROOT, 'seo', 'exports')
@@ -155,31 +156,40 @@ function readMaybeRankingExports(): { queries: RankingRow[]; pages: RankingRow[]
     const header = Object.keys(rows[0]!)
     if (looksLikeGscQueryExport(f, header)) {
       for (const r of rows) {
-        const query = pickFirst(r, ['Query', 'Top queries', 'Top query'])
+        // Bing exports use "Keyword" as the query column; GSC uses
+        // "Query" or "Top queries". Accept all three.
+        const query = pickFirst(r, ['Query', 'Top queries', 'Top query', 'Keyword'])
+        const clicks      = toNum(pickFirst(r, ['Clicks']))
+        const impressions = toNum(pickFirst(r, ['Impressions']))
         queries.push({
           page:        null,
           query,
           pageType:    undefined,
           branded:     query ? isBrandedQuery(query) : false,
-          clicks:      toNum(pickFirst(r, ['Clicks'])),
-          impressions: toNum(pickFirst(r, ['Impressions'])),
-          ctr:         toNum(pickFirst(r, ['CTR'])),
-          avgPosition: toNum(pickFirst(r, ['Position', 'Average position'])),
+          clicks,
+          impressions,
+          // Block 5A-W-33B — compute CTR from clicks/impressions so
+          // unreliable CTR columns (GSC export ships "25.00%" for
+          // 4/1580 = 0.25%) can't break the opportunity filter.
+          ctr:         computeCtr(clicks, impressions, pickFirst(r, ['CTR'])),
+          avgPosition: toNum(pickFirst(r, POSITION_COLUMN_CANDIDATES)),
         })
       }
       found.push(f)
     } else if (looksLikeGscPageExport(f, header)) {
       for (const r of rows) {
         const page = pickFirst(r, ['Page', 'URL', 'Top pages', 'Landing Page'])
+        const clicks      = toNum(pickFirst(r, ['Clicks']))
+        const impressions = toNum(pickFirst(r, ['Impressions']))
         pages.push({
           page,
           query:       null,
           pageType:    classifyPage(page),
           branded:     false,
-          clicks:      toNum(pickFirst(r, ['Clicks'])),
-          impressions: toNum(pickFirst(r, ['Impressions'])),
-          ctr:         toNum(pickFirst(r, ['CTR'])),
-          avgPosition: toNum(pickFirst(r, ['Position', 'Average position'])),
+          clicks,
+          impressions,
+          ctr:         computeCtr(clicks, impressions, pickFirst(r, ['CTR'])),
+          avgPosition: toNum(pickFirst(r, POSITION_COLUMN_CANDIDATES)),
         })
       }
       found.push(f)
