@@ -185,8 +185,15 @@ export function buildSearchQuery(input: AffiliateBuildInput): string {
 
   function withNumberSuffix(rest: string): string {
     if (!num) return rest
-    if (name.includes(`#${num}`)) return rest
-    return `${rest} #${num}`.replace(/\s+/g, ' ').trim()
+    // Block 5A-W-39A — cards.card_name stores the name WITH a trailing
+    // `#NN` embedded (DB convention — see CLAUDE.md). Callers commonly
+    // pass card_number_display (e.g. "215/203") as cardNumber alongside
+    // that raw name (e.g. "Umbreon VMAX #215"), which used to produce
+    // duplicated tokens like `Umbreon VMAX #215 #215/203`. Strip any
+    // existing trailing `#NN[/NN]` before appending the current num so
+    // the query always carries exactly one number token.
+    const stripped = rest.replace(/\s*#[A-Za-z0-9]+(?:\/[A-Za-z0-9]+)?\s*$/, '').trim()
+    return `${stripped} #${num}`.replace(/\s+/g, ' ').trim()
   }
 
   function join(parts: (string | undefined)[]): string {

@@ -101,6 +101,88 @@ describe('buildSearchQuery', () => {
       .toBe('Pikachu #58 Base Set pokemon card')
   })
 
+  // Block 5A-W-39A — real bug from live URL sampling: cards.card_name
+  // contains `#NN` and callers pass `card_number_display` (e.g.
+  // "215/203") as cardNumber. The old logic emitted both tokens
+  // side-by-side. Fix strips the pre-existing suffix before appending.
+  describe('W39A number-suffix cleanup', () => {
+    it('replaces name trailing #NN with cardNumber when cardNumber is the display form', () => {
+      // Live before: "Umbreon VMAX #215 #215/203 Evolving Skies pokemon card"
+      expect(buildSearchQuery({
+        marketplace: 'uk', intent: 'raw',
+        cardName: 'Umbreon VMAX #215', cardNumber: '215/203', setName: 'Evolving Skies',
+      })).toBe('Umbreon VMAX #215/203 Evolving Skies pokemon card')
+    })
+    it('handles Pikachu Birthday 24/25 without duplicating', () => {
+      // Live before: "Pikachu Birthday #24 #24/25 Celebrations pokemon card"
+      expect(buildSearchQuery({
+        marketplace: 'uk', intent: 'raw',
+        cardName: 'Pikachu Birthday #24', cardNumber: '24/25', setName: 'Celebrations',
+      })).toBe('Pikachu Birthday #24/25 Celebrations pokemon card')
+    })
+    it('handles Jacinthe 122/88 without duplicating', () => {
+      // Live before: "Jacinthe #122 #122/88 Perfect Order pokemon card"
+      expect(buildSearchQuery({
+        marketplace: 'uk', intent: 'raw',
+        cardName: 'Jacinthe #122', cardNumber: '122/88', setName: 'Perfect Order',
+      })).toBe('Jacinthe #122/88 Perfect Order pokemon card')
+    })
+    it('preserves the SWSH-style number when both name and cardNumber agree', () => {
+      // Regression pin — was already correct; the fix must not change it.
+      expect(buildSearchQuery({
+        marketplace: 'uk', intent: 'raw',
+        cardName: 'Greninja [Gold Star] #SWSH144', cardNumber: 'SWSH144', setName: 'Celebrations',
+      })).toBe('Greninja [Gold Star] #SWSH144 Celebrations pokemon card')
+    })
+    it('appends #NN when name has no trailing number', () => {
+      expect(buildSearchQuery({
+        marketplace: 'uk', intent: 'raw',
+        cardName: 'Pikachu', cardNumber: '58', setName: 'Base Set',
+      })).toBe('Pikachu #58 Base Set pokemon card')
+    })
+    it('emits nothing extra when cardNumber is missing but name has trailing #NN', () => {
+      // Do not strip a legitimate trailing number when the caller
+      // didn't provide one — the name IS the number source in this case.
+      expect(buildSearchQuery({
+        marketplace: 'uk', intent: 'raw',
+        cardName: 'Pikachu #58', cardNumber: null, setName: 'Base Set',
+      })).toBe('Pikachu #58 Base Set pokemon card')
+    })
+    it('preserves bracketed variants like [Gold Star] or [Reverse Holo]', () => {
+      expect(buildSearchQuery({
+        marketplace: 'uk', intent: 'raw',
+        cardName: 'Charizard [Reverse Holo] #4', cardNumber: '4/102', setName: 'Base Set',
+      })).toBe('Charizard [Reverse Holo] #4/102 Base Set pokemon card')
+    })
+    it('psa10 intent gets the cleaned number in the query too', () => {
+      expect(buildSearchQuery({
+        marketplace: 'uk', intent: 'psa10',
+        cardName: 'Umbreon VMAX #215', cardNumber: '215/203', setName: 'Evolving Skies',
+      })).toBe('Umbreon VMAX #215/203 Evolving Skies PSA 10')
+    })
+    it('psa9 intent gets the cleaned number in the query too', () => {
+      expect(buildSearchQuery({
+        marketplace: 'uk', intent: 'psa9',
+        cardName: 'Pikachu Birthday #24', cardNumber: '24/25', setName: 'Celebrations',
+      })).toBe('Pikachu Birthday #24/25 Celebrations PSA 9')
+    })
+    it('sold_search with grade uses the cleaned number', () => {
+      expect(buildSearchQuery({
+        marketplace: 'uk', intent: 'sold_search',
+        cardName: 'Umbreon VMAX #215', cardNumber: '215/203', setName: 'Evolving Skies',
+        gradingCompany: 'PSA', grade: '10',
+      })).toBe('Umbreon VMAX #215/203 Evolving Skies PSA 10')
+    })
+    it('does not touch a trailing token that is not a #number', () => {
+      // A name that legitimately ends in a bracketed suffix must not
+      // have that suffix stripped by the number-cleanup regex.
+      expect(buildSearchQuery({
+        marketplace: 'uk', intent: 'raw',
+        cardName: 'Pikachu [Reverse Holo]', cardNumber: '58', setName: 'Base Set',
+      })).toBe('Pikachu [Reverse Holo] #58 Base Set pokemon card')
+    })
+  })
+
   it('strips control characters from the query', () => {
     const q = buildSearchQuery({ marketplace: 'uk', intent: 'raw', cardName: 'Pikachu\x00Bad', setName: 'Base Set' })
     expect(q).not.toMatch(/\x00/)
