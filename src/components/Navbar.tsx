@@ -48,15 +48,32 @@ type NavGroup = {
   footer?: { label: string; href: string }
 }
 
+// Block 5A-W-40A — text-only labels, browse-first priority.
+//   * Cards / Sets / Pokémon / Market are direct browse routes (were
+//     hidden under a "Prices" dropdown).
+//   * Tools stays as a dropdown group.
+//   * Insights + Ask AI are direct.
+//   * Community + Games move to the footer (see Footer.tsx) and to the
+//     mobile drawer's "More" section.
+//   * No emoji-led labels anywhere in this list — hard constraint from
+//     the W40 design brief.
+//
+// Route fallbacks (verified 2026-07-02):
+//   * /sets   route does NOT exist  → Sets links to /browse#sets so a
+//                                     future dedicated /sets route can
+//                                     be dropped in without touching
+//                                     the nav.
+//   * /market route does NOT exist  → Market links to the /#market-movers
+//                                     anchor. W40B adds the matching
+//                                     id on the homepage weekly-report
+//                                     section; until then the anchor
+//                                     resolves to the top of the
+//                                     homepage, which is safe.
 const NAV: NavGroup[] = [
-  {
-    label: 'Prices',
-    items: [
-      { label: 'Browse Cards & Sets', href: '/browse' },
-      { label: 'Browse Pokémon',      href: '/pokemon' },
-      { label: 'Visualisations',      href: '/visualisations', badge: 'New' },
-    ],
-  },
+  { label: 'Cards',    href: '/browse' },
+  { label: 'Sets',     href: '/browse#sets' },
+  { label: 'Pokémon',  href: '/pokemon' },
+  { label: 'Market',   href: '/#market-movers' },
   {
     label: 'Tools',
     href: '/tools',   // header itself is clickable on desktop — hover still opens the dropdown
@@ -65,6 +82,7 @@ const NAV: NavGroup[] = [
       { label: 'Grading Calculator', href: '/dashboard/grading' },
       { label: 'Trade Evaluator',    href: '/dealer' },
       { label: 'Studio',             href: '/studio' },
+      { label: 'Visualisations',     href: '/visualisations', badge: 'New' },
       // Gated (still clickable — tool pages handle login wall)
       { label: 'Quick Price Checker',href: '/dashboard/quick-price', gated: true },
       { label: 'Card Show Planner',  href: '/dashboard/card-shows',  gated: true },
@@ -75,16 +93,17 @@ const NAV: NavGroup[] = [
     footer: { label: 'View All Tools →', href: '/tools' },
   },
   { label: 'Insights', href: '/insights' },
-  {
-    label: 'Community',
-    items: [
-      { label: 'Content Creators',     href: '/creators' },
-      { label: 'Vendors & Dealers',    href: '/vendors' },
-      { label: 'Upcoming Card Shows',  href: '/card-shows' },
-      { label: 'Submit a Listing',     href: '/creators/submit' },
-    ],
-  },
-  { label: 'Games', href: '/games', badge: 'New' },
+  { label: 'Ask AI',   href: '/ai-assistant' },
+]
+
+// Demoted items — surfaced in the footer and in the mobile drawer's
+// "More" section, no longer in the top-level nav.
+const MOBILE_MORE_LINKS: NavItem[] = [
+  { label: 'Content Creators',    href: '/creators' },
+  { label: 'Vendors & Dealers',   href: '/vendors' },
+  { label: 'Upcoming Card Shows', href: '/card-shows' },
+  { label: 'Submit a Listing',    href: '/creators/submit' },
+  { label: 'Games',               href: '/games' },
 ]
 
 // ── Icons ───────────────────────────────────────────────────────────────────
@@ -483,30 +502,37 @@ export default function Navbar() {
         {showResults && allResults.length > 0 && <ResultsDropdown />}
       </div>
 
-      {/* Persistent AI assistant CTA — always visible in the top bar. */}
-      <Link href="/ai-assistant"
-        className="ai-cta"
-        style={{
-          display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0,
-          background: 'linear-gradient(135deg, #ffcb05, #ffae00)', color: '#1a5fad',
-          padding: '6px 12px', borderRadius: 18, textDecoration: 'none',
-          fontSize: 12, fontWeight: 800, fontFamily: "'Figtree', sans-serif",
-          boxShadow: '0 2px 8px rgba(255,203,5,0.30)', whiteSpace: 'nowrap',
-        }}
-      >
-        <span aria-hidden style={{ fontSize: 13, lineHeight: 1 }}>✨</span>
-        <span className="ai-cta-label">Ask me anything</span>
-      </Link>
+      {/* Block 5A-W-40A — the previous emoji-led yellow AI pill was
+          removed. The AI assistant now lives in the primary NAV as a
+          text-only Ask AI item alongside Insights. */}
 
       {/* Marketplace selector — only renders when 2+ marketplaces configured */}
       <div className="marketplace-selector-wrap" style={{ flexShrink: 0 }}>
         <MarketplaceSelector size="sm" ariaLabel="eBay marketplace" />
       </div>
 
-      {/* Auth area — Sign in + Sign up free when logged out; profile menu when logged in */}
+      {/* Auth area — Sign in + Sign up free when logged out; Dashboard link + profile menu when logged in */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }} className="auth-area">
         {isAuthed && user ? (
-          <div ref={profileRef} style={{ position: 'relative' }}
+          <>
+            {/* Block 5A-W-40A — Dashboard was previously only reachable
+                by clicking the avatar. Adding a direct text link makes
+                the destination discoverable and matches the browse-first
+                priority of the redesigned nav. */}
+            <Link href="/dashboard" className="dashboard-link"
+              style={{
+                display: 'inline-flex', alignItems: 'center',
+                color: '#fff', textDecoration: 'none',
+                fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
+                padding: '6px 10px', borderRadius: 8,
+                background: 'rgba(255,255,255,0.10)',
+                border: '1px solid rgba(255,255,255,0.15)',
+                whiteSpace: 'nowrap', flexShrink: 0,
+              }}
+            >
+              Dashboard
+            </Link>
+            <div ref={profileRef} style={{ position: 'relative' }}
             onMouseEnter={() => { if (closeTimerRef.current) clearTimeout(closeTimerRef.current); setProfileOpen(true) }}
             onMouseLeave={() => { if (closeTimerRef.current) clearTimeout(closeTimerRef.current); closeTimerRef.current = setTimeout(() => setProfileOpen(false), 160) }}
           >
@@ -574,6 +600,7 @@ export default function Navbar() {
               </div>
             )}
           </div>
+          </>
         ) : (
           <>
             <Link href="/dashboard/login" style={{
@@ -700,6 +727,30 @@ export default function Navbar() {
                 }}>Sign in</Link>
               </>
             )}
+          </div>
+
+          {/* Block 5A-W-40A — "More" section holds the items demoted
+              from the top-level nav (Creators, Vendors, Card Shows,
+              Submit a Listing, Games). Kept visible on mobile so
+              they're one tap away without cluttering the primary nav. */}
+          <div style={{ marginTop: 22, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.10)' }}>
+            <p style={{
+              color: 'rgba(255,255,255,0.4)', fontSize: 11, margin: '0 0 6px',
+              textTransform: 'uppercase', letterSpacing: 1.5, fontWeight: 700,
+              fontFamily: "'Figtree', sans-serif",
+            }}>More</p>
+            {MOBILE_MORE_LINKS.map(it => (
+              <Link key={it.label} href={it.href!} onClick={() => setMenuOpen(false)}
+                style={{
+                  display: 'block', color: 'rgba(255,255,255,0.85)', textDecoration: 'none',
+                  padding: '10px 0', fontSize: 13.5, fontWeight: 600,
+                  fontFamily: "'Figtree', sans-serif",
+                  borderBottom: '1px solid rgba(255,255,255,0.06)',
+                }}
+              >
+                {it.label}
+              </Link>
+            ))}
           </div>
 
           {/* Close affordance — covers the case where the user has scrolled

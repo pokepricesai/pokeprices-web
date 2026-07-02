@@ -12,12 +12,25 @@ const topSets = [
   'Destined Rivals',
 ]
 
-const productLinks = [
-  { label: 'Prices',    href: '/browse'    },
-  { label: 'Tools',     href: '/tools'     },
-  { label: 'Insights',  href: '/insights'  },
-  { label: 'Community', href: '/creators'  },
-  { label: 'Games',     href: '/games'     },
+// Block 5A-W-40A — top-level nav restructured to Cards / Sets /
+// Pokémon / Market / Tools / Insights / Ask AI. Community group +
+// Games moved out of the top nav and into the footer's own column
+// so they stay discoverable.
+const exploreLinks = [
+  { label: 'Cards',    href: '/browse'       },
+  { label: 'Sets',     href: '/browse#sets'  },
+  { label: 'Pokémon',  href: '/pokemon'      },
+  { label: 'Insights', href: '/insights'     },
+  { label: 'Tools',    href: '/tools'        },
+  { label: 'Ask AI',   href: '/ai-assistant' },
+]
+
+const communityLinks = [
+  { label: 'Content Creators',    href: '/creators'         },
+  { label: 'Vendors & Dealers',   href: '/vendors'          },
+  { label: 'Upcoming Card Shows', href: '/card-shows'       },
+  { label: 'Submit a Listing',    href: '/creators/submit'  },
+  { label: 'Games',               href: '/games'            },
 ]
 
 const companyLinks = [
@@ -50,8 +63,9 @@ export default function Footer() {
             </p>
           </div>
 
-          <FooterColumn title="Product" links={productLinks} />
-          <FooterColumn title="Company" links={companyLinks} />
+          <FooterColumn title="Explore"   links={exploreLinks}   />
+          <FooterColumn title="Community" links={communityLinks} />
+          <FooterColumn title="Company"   links={companyLinks}   />
 
           {/* Stay connected */}
           <div>
