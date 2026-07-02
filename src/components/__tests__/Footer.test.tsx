@@ -13,18 +13,27 @@ const FOOTER_SRC = readFileSync(
 
 describe('Footer — Block 5A-W-40A restructure', () => {
   it('has an Explore column with the primary browse targets', () => {
+    // W40A-FIX consolidated Cards + Sets into a single "Cards & Sets"
+    // link (both used to point at /browse). Market was removed from
+    // the Explore column too — no dedicated route or anchor yet.
     expect(FOOTER_SRC).toMatch(/const exploreLinks\s*=\s*\[[\s\S]*?\]/)
     for (const [label, href] of [
-      ['Cards',    '/browse'],
-      ['Sets',     '/browse#sets'],
-      ['Pokémon',  '/pokemon'],
-      ['Insights', '/insights'],
-      ['Tools',    '/tools'],
-      ['Ask AI',   '/ai-assistant'],
+      ['Cards & Sets', '/browse'      ],
+      ['Pokémon',      '/pokemon'     ],
+      ['Insights',     '/insights'    ],
+      ['Tools',        '/tools'       ],
+      ['Ask AI',       '/ai-assistant'],
     ]) {
       expect(FOOTER_SRC).toContain(`label: '${label}'`)
       expect(FOOTER_SRC).toContain(`href: '${href}'`)
     }
+  })
+
+  it('does not list separate Cards and Sets links (regression pin for W40A-FIX)', () => {
+    // "label: 'Cards & Sets'" is allowed; a standalone "label: 'Cards'"
+    // or "label: 'Sets'" is not.
+    expect(FOOTER_SRC).not.toMatch(/label:\s*'Cards'(?!\s*&)/)
+    expect(FOOTER_SRC).not.toMatch(/label:\s*'Sets'/)
   })
 
   it('has a Community column with the 5 demoted items', () => {

@@ -12,17 +12,17 @@ const topSets = [
   'Destined Rivals',
 ]
 
-// Block 5A-W-40A — top-level nav restructured to Cards / Sets /
-// Pokémon / Market / Tools / Insights / Ask AI. Community group +
-// Games moved out of the top nav and into the footer's own column
-// so they stay discoverable.
+// Block 5A-W-40A-FIX — mirrors the trimmed nav. Cards + Sets were
+// separate items pointing at the same /browse page, and Market linked
+// to a homepage anchor that doesn't exist yet. Both consolidated /
+// removed here so the footer stays truthful. Community group + Games
+// still live in the sibling Community column.
 const exploreLinks = [
-  { label: 'Cards',    href: '/browse'       },
-  { label: 'Sets',     href: '/browse#sets'  },
-  { label: 'Pokémon',  href: '/pokemon'      },
-  { label: 'Insights', href: '/insights'     },
-  { label: 'Tools',    href: '/tools'        },
-  { label: 'Ask AI',   href: '/ai-assistant' },
+  { label: 'Cards & Sets', href: '/browse'       },
+  { label: 'Pokémon',      href: '/pokemon'      },
+  { label: 'Insights',     href: '/insights'     },
+  { label: 'Tools',        href: '/tools'        },
+  { label: 'Ask AI',       href: '/ai-assistant' },
 ]
 
 const communityLinks = [

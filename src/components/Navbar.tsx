@@ -48,32 +48,28 @@ type NavGroup = {
   footer?: { label: string; href: string }
 }
 
-// Block 5A-W-40A — text-only labels, browse-first priority.
-//   * Cards / Sets / Pokémon / Market are direct browse routes (were
-//     hidden under a "Prices" dropdown).
-//   * Tools stays as a dropdown group.
-//   * Insights + Ask AI are direct.
-//   * Community + Games move to the footer (see Footer.tsx) and to the
-//     mobile drawer's "More" section.
-//   * No emoji-led labels anywhere in this list — hard constraint from
-//     the W40 design brief.
+// Block 5A-W-40A-FIX — trimmed to only labels with a real, working
+// destination.
 //
-// Route fallbacks (verified 2026-07-02):
-//   * /sets   route does NOT exist  → Sets links to /browse#sets so a
-//                                     future dedicated /sets route can
-//                                     be dropped in without touching
-//                                     the nav.
-//   * /market route does NOT exist  → Market links to the /#market-movers
-//                                     anchor. W40B adds the matching
-//                                     id on the homepage weekly-report
-//                                     section; until then the anchor
-//                                     resolves to the top of the
-//                                     homepage, which is safe.
+// History:
+//   * W40A split "Cards" and "Sets" into two top-level items, both
+//     pointing at /browse (Sets used the /browse#sets fallback since
+//     no dedicated /sets route exists yet). Two items resolving to the
+//     same page felt broken, so this fix consolidates them.
+//   * W40A also added a top-level "Market" item pointing at the
+//     /#market-movers anchor. The matching id doesn't exist on the
+//     homepage yet (deferred to W40B), so the link currently just
+//     lands at the top of the homepage. Removed for now — W40B can
+//     reintroduce Market once the anchor / dedicated route lands.
+//
+// Final W40A-FIX top level (5 items):
+//   Cards & Sets · Pokémon · Tools ▼ · Insights · Ask AI
+//
+// No emoji-led labels — the hard constraint from the W40 design
+// brief still applies to every item below.
 const NAV: NavGroup[] = [
-  { label: 'Cards',    href: '/browse' },
-  { label: 'Sets',     href: '/browse#sets' },
-  { label: 'Pokémon',  href: '/pokemon' },
-  { label: 'Market',   href: '/#market-movers' },
+  { label: 'Cards & Sets', href: '/browse'  },
+  { label: 'Pokémon',      href: '/pokemon' },
   {
     label: 'Tools',
     href: '/tools',   // header itself is clickable on desktop — hover still opens the dropdown

@@ -34,11 +34,16 @@ function extractNavBlock(): string {
   return NAVBAR_SRC.slice(start, end + 2)
 }
 
-describe('Navbar — Block 5A-W-40A top-level nav restructure', () => {
+describe('Navbar — Block 5A-W-40A-FIX consolidated top-level nav', () => {
   const navBlock = extractNavBlock()
 
-  it('lists all 7 required top-level items in priority order', () => {
-    const required = ['Cards', 'Sets', 'Pokémon', 'Market', 'Tools', 'Insights', 'Ask AI']
+  it('lists the 5 required top-level items in priority order', () => {
+    // W40A-FIX trimmed the nav from 7 to 5 items:
+    //   * "Cards" and "Sets" merged into "Cards & Sets" (both used
+    //     to point at /browse — no dedicated /sets route yet).
+    //   * "Market" removed until W40B adds the matching homepage
+    //     anchor or a dedicated /market route.
+    const required = ['Cards & Sets', 'Pokémon', 'Tools', 'Insights', 'Ask AI']
     let cursor = 0
     for (const label of required) {
       const idx = navBlock.indexOf(`label: '${label}'`, cursor)
@@ -47,17 +52,11 @@ describe('Navbar — Block 5A-W-40A top-level nav restructure', () => {
     }
   })
 
-  it('routes Cards to /browse', () => {
-    expect(navBlock).toMatch(/label:\s*'Cards',\s*href:\s*'\/browse'/)
-  })
-  it('routes Sets to /browse#sets (fallback — no dedicated /sets route yet)', () => {
-    expect(navBlock).toMatch(/label:\s*'Sets',\s*href:\s*'\/browse#sets'/)
+  it('routes Cards & Sets to /browse', () => {
+    expect(navBlock).toMatch(/label:\s*'Cards & Sets',\s*href:\s*'\/browse'/)
   })
   it('routes Pokémon to /pokemon', () => {
     expect(navBlock).toMatch(/label:\s*'Pokémon',\s*href:\s*'\/pokemon'/)
-  })
-  it('routes Market to the #market-movers anchor', () => {
-    expect(navBlock).toMatch(/label:\s*'Market',\s*href:\s*'\/#market-movers'/)
   })
   it('routes Insights to /insights', () => {
     expect(navBlock).toMatch(/label:\s*'Insights',\s*href:\s*'\/insights'/)
@@ -85,6 +84,21 @@ describe('Navbar — removed / demoted top-level items', () => {
   it('no top-level "Games" link', () => {
     // Games moved to footer + mobile "More".
     expect(navBlock).not.toMatch(/label:\s*'Games'/)
+  })
+
+  it('no separate top-level "Cards" item (merged into "Cards & Sets")', () => {
+    // W40A-FIX regression pin — the split Cards / Sets pair went away.
+    // "label: 'Cards & Sets'" is allowed; "label: 'Cards'" is not.
+    expect(navBlock).not.toMatch(/label:\s*'Cards'(?!\s*&)/)
+  })
+  it('no separate top-level "Sets" item (merged into "Cards & Sets")', () => {
+    expect(navBlock).not.toMatch(/label:\s*'Sets'/)
+  })
+  it('no top-level "Market" item (deferred until a real target exists)', () => {
+    // W40A pointed Market at /#market-movers before the anchor was
+    // built. W40A-FIX removed it. W40B may reintroduce it once the
+    // matching homepage anchor or a dedicated /market route lands.
+    expect(navBlock).not.toMatch(/label:\s*'Market'/)
   })
 })
 
