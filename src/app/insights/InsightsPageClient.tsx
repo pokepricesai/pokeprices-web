@@ -111,10 +111,10 @@ export default function InsightsPageClient() {
       {/* Header */}
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 34, margin: '0 0 8px', color: 'var(--text)', letterSpacing: -0.5 }}>
-          Insights
+          Pokémon Card Insights
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: 0, fontFamily: "'Figtree', sans-serif", lineHeight: 1.6 }}>
-          Short reads on grading, collecting, and the Pokémon TCG market.
+          Pokémon card market reports, price trends and grading analysis — built from real PSA 10 sales, raw-vs-graded spreads and set-level movement.
         </p>
       </div>
 

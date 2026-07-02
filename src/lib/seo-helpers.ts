@@ -68,3 +68,130 @@ export function getCardSeo(card: {
     ogDescription: description,
   }
 }
+
+// ─── Block 5A-W-34A — insights / set / pokemon copy helpers ────────
+//
+// Each helper is pure so we can pin the exact strings in unit tests.
+// The templates (`src/app/{insights,set/[slug],pokemon/[slug]}/page.tsx`)
+// import from here so a copy change is one edit + one test update.
+
+export const INSIGHTS_HUB_TITLE       = 'Pokémon Card Market Insights, Price Trends & Grading Reports | PokePrices'
+export const INSIGHTS_HUB_DESCRIPTION = 'Read Pokémon card market reports, price trends, grading insights and collecting analysis. Track movers, PSA 10 values, set trends and cards worth watching.'
+export const INSIGHTS_HUB_CANONICAL   = `${SITE}/insights`
+
+/** Compact OG variant — keeps under 90 chars for share previews. */
+export const INSIGHTS_HUB_OG_TITLE       = 'Pokémon Card Market Insights, Price Trends & Grading Reports'
+export const INSIGHTS_HUB_OG_DESCRIPTION = 'Pokémon card market reports, price trends and grading insights. Track movers, PSA 10 values and cards worth watching.'
+
+/**
+ * Fallback description used by the article template when the article
+ * has neither `seo_description`, `intro`, nor `excerpt`. Kept in one
+ * place so the wording matches the hub's positioning language.
+ */
+export function getInsightsArticleFallbackDescription(headline: string): string {
+  const safe = headline?.trim() || 'Pokémon card insight'
+  return `${safe} — Pokémon card market trends, price analysis and grading insights from PokePrices.`
+}
+
+// ── Set page ───────────────────────────────────────────────────────
+
+/** Long set-page title. Used when the composed title stays ≤ 60 chars. */
+function longSetTitle(setName: string): string {
+  return `${setName} Card List & Prices | Most Valuable Cards & PSA 10 Values`
+}
+/** Short set-page title. Used when the long variant would exceed 60 chars. */
+function shortSetTitle(setName: string): string {
+  return `${setName} Card List & Prices | PSA 10 Values`
+}
+
+export type SetSeo = {
+  title:       string
+  description: string
+  canonical:   string
+}
+
+/** SERP title budget. Google's mobile SERP typically truncates around
+ *  580px ≈ 70 chars for average glyphs; we allow a small buffer. */
+const SERP_TITLE_MAX = 72
+
+/**
+ * Build title / description / canonical for /set/{setName}.
+ *
+ * The long title variant matches the W34A brief; when it would blow
+ * past the SERP cut-off, we shrink to a short variant that still
+ * carries the "PSA 10 Values" anchor.
+ */
+export function getSetSeo(setName: string, slug?: string): SetSeo {
+  const safeName = setName?.trim() || 'Pokémon'
+  const long     = longSetTitle(safeName)
+  const title    = long.length <= SERP_TITLE_MAX ? long : shortSetTitle(safeName)
+  const description = `Browse ${safeName} Pokémon cards with raw and PSA 10 prices. See the most valuable cards, chase cards, grading opportunities and current set price trends.`
+  const canonical = `${SITE}/set/${slug ?? encodeURIComponent(safeName)}`
+  return { title, description, canonical }
+}
+
+// ── Pokémon species page ───────────────────────────────────────────
+
+export type PokemonSeoInput = {
+  /** Display name (capitalised species name, e.g. "Greninja"). */
+  name:  string
+  /** URL slug used in the canonical (e.g. "greninja"). */
+  slug:  string
+  /** Total distinct cards known for this species; null when unknown. */
+  totalCards?: number | null
+  /** Top card fact for the description tail; falsy → no top-card line. */
+  topCard?: {
+    cardName: string
+    setName:  string
+    priceLabel: string
+  } | null
+}
+
+export type PokemonSeo = {
+  title:       string
+  description: string
+  canonical:   string
+}
+
+/**
+ * Build title / description / canonical for /pokemon/{slug}.
+ *
+ * Title variants:
+ *   * When totalCards is a positive integer AND the composed length
+ *     stays ≤ 60 chars, we emit the count-anchored variant:
+ *       "{Name} Card Prices Across {N} Cards | Raw & PSA 10 Values"
+ *   * Otherwise the plain-benefit variant.
+ *   * If that's still too long (very long species names), fall back
+ *     to a compact variant that always fits.
+ */
+export function getPokemonSeo(input: PokemonSeoInput): PokemonSeo {
+  const safeName = input.name?.trim() || 'Pokémon'
+  const total    = typeof input.totalCards === 'number' && input.totalCards > 0
+    ? Math.floor(input.totalCards)
+    : null
+
+  const countTitle   = total !== null
+    ? `${safeName} Card Prices Across ${total} Cards | Raw & PSA 10 Values`
+    : null
+  const benefitTitle = `${safeName} Card Prices | Most Valuable ${safeName} Cards & PSA 10 Values`
+  const compactTitle = `${safeName} Card Prices — Raw & PSA 10 Values | PokePrices`
+
+  const title =
+    countTitle   && countTitle.length   <= SERP_TITLE_MAX ? countTitle   :
+    benefitTitle.length                 <= SERP_TITLE_MAX ? benefitTitle :
+    compactTitle
+
+  // Description: prefer the count-anchored lead when available.
+  const lead = total !== null
+    ? `View ${safeName} Pokémon card prices across ${total} cards.`
+    : `View ${safeName} Pokémon card prices across sets.`
+  const body = `Compare raw, PSA 9 and PSA 10 values, recent movement and the most valuable ${safeName} cards.`
+  const topTail = input.topCard
+    ? ` Top: ${input.topCard.cardName} from ${input.topCard.setName} at ${input.topCard.priceLabel}.`
+    : ''
+  let description = `${lead} ${body}${topTail}`
+  if (description.length > 300) description = description.slice(0, 297) + '…'
+
+  const canonical = `${SITE}/pokemon/${input.slug}`
+  return { title, description, canonical }
+}

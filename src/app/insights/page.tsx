@@ -1,25 +1,34 @@
 // app/insights/page.tsx
 import type { Metadata } from 'next'
 import InsightsPageClient from './InsightsPageClient'
+import {
+  INSIGHTS_HUB_CANONICAL,
+  INSIGHTS_HUB_DESCRIPTION,
+  INSIGHTS_HUB_OG_DESCRIPTION,
+  INSIGHTS_HUB_OG_TITLE,
+  INSIGHTS_HUB_TITLE,
+} from '@/lib/seo-helpers'
 
+// Block 5A-W-34A — hub metadata rewritten to target the queries the
+// GSC export shows people actually use: "pokemon card market trends",
+// "psa 10 values", "pokemon card price guide", "grading". Baseline
+// before this change: 1,917 impressions, 4 clicks, 0.21% CTR, pos 11.8.
 export const metadata: Metadata = {
-  title: 'Pokémon Card Guides (2026) — Grading, PSA 10 Values & Market Trends',
-  description: 'Practical Pokémon card guides — when to grade, PSA 10 value gaps, chase card analysis, market trends and price breakdowns. Real data, no hype.',
+  title:       INSIGHTS_HUB_TITLE,
+  description: INSIGHTS_HUB_DESCRIPTION,
   openGraph: {
-    title: 'Pokémon Card Guides (2026) — Grading, PSA 10 Values & Market Trends',
-    description: 'Practical Pokémon card guides — when to grade, PSA 10 value gaps, chase card analysis, market trends. Real data.',
-    url: 'https://www.pokeprices.io/insights',
-    siteName: 'PokePrices',
-    type: 'website',
+    title:       INSIGHTS_HUB_OG_TITLE,
+    description: INSIGHTS_HUB_OG_DESCRIPTION,
+    url:         INSIGHTS_HUB_CANONICAL,
+    siteName:    'PokePrices',
+    type:        'website',
   },
   twitter: {
-    card: 'summary',
-    title: 'Pokémon Card Guides (2026) — Grading, PSA 10 & Market Trends',
-    description: 'Practical Pokémon card guides — grading advice, PSA 10 value gaps, chase cards and trends.',
+    card:        'summary',
+    title:       INSIGHTS_HUB_OG_TITLE,
+    description: INSIGHTS_HUB_OG_DESCRIPTION,
   },
-  alternates: {
-    canonical: 'https://www.pokeprices.io/insights',
-  },
+  alternates: { canonical: INSIGHTS_HUB_CANONICAL },
 }
 
 export default function InsightsPage() {

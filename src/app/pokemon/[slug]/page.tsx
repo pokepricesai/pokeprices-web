@@ -17,6 +17,7 @@ import FAQ from '@/components/FAQ'
 import EbayLiveListings, { EbayInlineLink } from '@/components/EbayLiveListings'
 import { buildCardEbayQuery } from '@/lib/ebayAffiliate'
 import { getPokemonFaqItems } from '@/lib/faqs'
+import { getPokemonSeo } from '@/lib/seo-helpers'
 import SpeciesInteractiveSection from './SpeciesInteractiveSection'
 import DossierButton from './DossierButton'
 
@@ -176,11 +177,13 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   // cards in our DB — we still want a valid title (no 404 unless slug doesn't
   // exist at all in pokemon_species).
   if (!detail || !detail.species) {
-    const year = new Date().getFullYear()
+    // Block 5A-W-34A — even the no-data fallback now runs through
+    // getPokemonSeo so the wording matches the main variant.
+    const seoFallback = getPokemonSeo({ name, slug, totalCards: null })
     return {
-      title:       `${name} Pokémon Cards — Prices & Values (${year}) | PokePrices`,
-      description: `Browse every ${name} Pokémon TCG card with raw and PSA 10 prices, set checklists and grading data. Updated nightly.`,
-      alternates:  { canonical: `https://www.pokeprices.io/pokemon/${slug}` },
+      title:       seoFallback.title,
+      description: seoFallback.description,
+      alternates:  { canonical: seoFallback.canonical },
       robots:      { index: detail !== null, follow: true },
     }
   }
@@ -188,15 +191,24 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const sp = detail.species
   const topCard = detail.top_cards[0] ?? null
 
-  const title = `${name} Pokémon Cards — All Prices & Values | PokePrices`
-
-  // 150-160 char description with real data: count, top card, top price.
+  // Block 5A-W-34A — title/description via getPokemonSeo. Baseline
+  // for the highest-impression species page /pokemon/greninja before
+  // this change: 927 impressions, 4 clicks, 0.43% CTR, pos 10.8.
   const topPrice = topCard?.current_psa10 ?? topCard?.current_raw ?? null
-  const topBit = topCard
-    ? ` Top: ${topCard.card_name} from ${topCard.set_name} at ${fmtUsd(topPrice)}.`
-    : ''
-  let description = `Prices for all ${sp.total_cards} ${name} Pokémon cards.${topBit} Live raw + PSA 10 values, market trends, updated daily.`
-  if (description.length > 160) description = description.slice(0, 157) + '…'
+  const seo = getPokemonSeo({
+    name,
+    slug,
+    totalCards: sp.total_cards,
+    topCard: topCard
+      ? {
+          cardName:   topCard.card_name,
+          setName:    topCard.set_name,
+          priceLabel: fmtUsd(topPrice),
+        }
+      : null,
+  })
+  const title       = seo.title
+  const description = seo.description
 
   // OG image: use the most-valuable card's image as the share thumbnail.
   const ogImage = topCard?.image_url ?? null
@@ -204,11 +216,11 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   return {
     title,
     description,
-    alternates: { canonical: `https://www.pokeprices.io/pokemon/${slug}` },
+    alternates: { canonical: seo.canonical },
     openGraph: {
       title,
       description,
-      url: `https://www.pokeprices.io/pokemon/${slug}`,
+      url: seo.canonical,
       siteName: 'PokePrices',
       type: 'website',
       images: ogImage ? [{ url: ogImage, alt: topCard?.card_name ?? name }] : undefined,

@@ -4,6 +4,7 @@ import { cache } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { notFound } from 'next/navigation'
 import SetPageClient from './SetPageClient'
+import { getSetSeo } from '@/lib/seo-helpers'
 
 export const revalidate = 86400
 
@@ -49,10 +50,15 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   // a canonical for it.
   if (!(await setExists(setName))) notFound()
 
-  const year        = new Date().getFullYear()
-  const title       = `${setName} Card List & Price Guide (${year}) — Card Prices, PSA 10 Values | PokePrices`
-  const description = `${setName} card list with live raw and PSA 10 prices for every card. Price guide with grading spreads, chase cards and 30-day trends. Full ${setName} checklist updated daily.`
-  const canonical   = `https://www.pokeprices.io/set/${slug}`
+  // Block 5A-W-34A — title/description rewritten to match the queries
+  // GSC + Bing show people actually use for set pages: "{set} card
+  // list", "{set} card prices", "most valuable cards", "PSA 10
+  // values", "chase cards". Baseline before this change (Chaos
+  // Rising): 1,313 impressions / 6 clicks / 0.46% CTR / pos 10.8.
+  const seo = getSetSeo(setName, slug)
+  const title       = seo.title
+  const description = seo.description
+  const canonical   = seo.canonical
 
   return {
     title,

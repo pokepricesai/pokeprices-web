@@ -4,6 +4,7 @@ import { cache } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { notFound } from 'next/navigation'
 import InsightsArticleClient from './InsightsArticleClient'
+import { getInsightsArticleFallbackDescription } from '@/lib/seo-helpers'
 
 export const revalidate = 3600
 
@@ -54,10 +55,15 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   //   - seo_title / seo_description = explicit per-article overrides
   const headline = article.headline || article.title || 'Pokémon card insight'
   const title       = article.seo_title       || headline
+  // Block 5A-W-34A — article-specific fields (seo_description, intro,
+  // excerpt) still win; only the generic fallback is retuned to match
+  // the new hub positioning ("market trends, price analysis, grading
+  // insights") rather than the older "practical … collecting guide"
+  // phrasing.
   const description = article.seo_description
                    || article.intro
                    || article.excerpt
-                   || `${headline} — practical Pokémon card collecting guide from PokePrices.`
+                   || getInsightsArticleFallbackDescription(headline)
   const canonical = `https://www.pokeprices.io/insights/${slug}`
   const image = article.image_url || null
 
