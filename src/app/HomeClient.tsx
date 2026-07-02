@@ -7,7 +7,6 @@ import SearchBar from '@/components/SearchBar'
 import InlineChat from '@/components/InlineChat'
 import NewsletterSignup from '@/components/NewsletterSignup'
 import FAQ from '@/components/FAQ'
-import HomeQuickActions from '@/components/home/HomeQuickActions'
 import { getHomeFaqItems } from '@/lib/faqs'
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -252,133 +251,270 @@ export default function HomeClient() {
     return () => { cancelled = true }
   }, [])
 
+  // Block 5A-W-41A-RETRY — inline auth-aware CTA for the split-hero
+  // left column. Same Supabase session pattern the previous hero
+  // quick-action block used; kept inline rather than in a separate
+  // component to keep the retry diff small.
+  const [isAuthed, setIsAuthed] = useState(false)
+  useEffect(() => {
+    let live = true
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (live) setIsAuthed(!!session)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+      if (live) setIsAuthed(!!session)
+    })
+    return () => { live = false; subscription.unsubscribe() }
+  }, [])
+
   const sparklineData = marketIndex.slice(-30).map(r => r.total_raw_usd / 100)
   const marketUp = (totalMarket?.pct30d ?? 0) >= 0
 
   return (
     <>
-      {/* ── HERO ── Block 5A-W-40B compact rewrite:
-           * padding reduced (40px 24px 70px → 24px 24px 42px)
-           * logo downsized 110 → 84
-           * the yellow "latest set" hero pill removed (the Chaos
-             Rising banner further down still highlights the newest
-             release)
-           * InlineChat moved out of the hero into its own section
-             below the market strip
-           * plain-text quick-action grid replaces the AI chat block */}
+      {/* ── SPLIT HERO ── Block 5A-W-41A-RETRY
+           Two-column asymmetric hero replacing the classic centred
+           SaaS stack. Left column carries the brand + primary CTAs;
+           right column carries the AI panel and a small market pulse
+           card. At <1024 the columns stack into a natural mobile
+           order. No dashboard/terminal styling — this is still a
+           friendly, blue, Pokémon-flavoured homepage; the change is
+           layout, not visual identity. */}
       <section style={{
-        background: 'linear-gradient(170deg, #1a5fad 0%, #3b8fe8 35%, #6ab0f5 60%, #9dcbfa 80%, var(--bg) 100%)',
-        padding: '24px 24px 42px', position: 'relative', overflow: 'hidden',
+        background: 'linear-gradient(170deg, #1a5fad 0%, #3b8fe8 32%, #6ab0f5 58%, #b8dbfb 82%, var(--bg) 100%)',
+        padding: '28px 24px 44px', position: 'relative', overflow: 'hidden',
       }}>
+        {/* Scoped responsive rules for the split hero grid. Kept
+            inline in the client component so no new CSS module is
+            introduced. */}
+        <style dangerouslySetInnerHTML={{ __html: `
+          .pp-split-hero { display: flex; flex-direction: column; gap: 20px; }
+          .pp-split-hero-left, .pp-split-hero-right { min-width: 0; }
+          @media (min-width: 1024px) {
+            .pp-split-hero {
+              display: grid;
+              grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+              gap: 36px;
+              align-items: start;
+            }
+          }
+        ` }} />
         <PokemonSilhouettes />
         <Sparkles />
-        <div style={{ maxWidth: 760, margin: '0 auto', textAlign: 'center', position: 'relative', zIndex: 1 }}>
-          <img src="/logo.png" alt="PokePrices" style={{
-            height: 84, margin: '0 auto 12px', display: 'block',
-            filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.2))',
-            animation: 'float 4s ease-in-out infinite',
-          }} />
-
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-            {['100% Free', 'No Login', 'No Data Collection'].map(pill => (
-              <span key={pill} style={{
-                background: 'rgba(255,255,255,0.15)', color: '#fff', fontSize: 11, fontWeight: 700,
-                padding: '4px 12px', borderRadius: 20, border: '1px solid rgba(255,255,255,0.2)',
-                letterSpacing: 0.3, backdropFilter: 'blur(4px)',
-              }}>{pill}</span>
-            ))}
-          </div>
-
-          <h1 style={{
-            fontSize: 38, color: '#fff', margin: '0 0 10px', lineHeight: 1.15,
-            textShadow: '0 2px 10px rgba(0,0,0,0.15)', fontFamily: "'Outfit', sans-serif",
-          }}>
-            The numbers behind every<br /><span style={{ color: 'var(--accent)' }}>Pokémon</span> card
-          </h1>
-          <p style={{ color: 'rgba(255,255,255,0.9)', fontSize: 16, margin: '0 0 22px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif", fontWeight: 600 }}>
-            Live values · PSA 10 data · grading insights · 40,000+ cards · 156+ sets
-          </p>
-
-          {/* Primary CTA: search */}
-          <div style={{ maxWidth: 620, margin: '0 auto' }}>
-            <SearchBar placeholder='Search cards, sets, Pokémon… try "Charizard Base Set"' />
-          </div>
-
-          <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, marginTop: 14, marginBottom: 6, fontFamily: "'Figtree', sans-serif" }}>
-            Updated nightly from real sold listings — no asking prices, no guesses
-          </p>
-
-          {/* Block 5A-W-40B — clean, text-only quick actions. Auth-aware
-              (Sign up free vs My Dashboard). Sits where the AI chat used
-              to occupy prime hero real estate. */}
-          <HomeQuickActions />
-        </div>
-      </section>
-
-      {/* ── MARKET INDEX BANNER ── */}
-      {totalMarket && (
-        <section style={{ padding: '0 24px', maxWidth: 960, margin: '-28px auto 0', position: 'relative', zIndex: 10 }}>
-          <div style={{
-            background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 18,
-            boxShadow: '0 4px 24px rgba(26,95,173,0.10)', padding: '20px 28px',
-            display: 'grid', gridTemplateColumns: '1fr auto', gap: 24, alignItems: 'center',
-          }}>
-            <div>
-              <p style={{ color: 'var(--text-muted)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', margin: '0 0 6px', fontFamily: "'Figtree', sans-serif" }}>
-                Pokémon TCG Market Index
-              </p>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 34, fontWeight: 900, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", letterSpacing: -1 }}>
-                  {formatMarketTotal(totalMarket.value)}
-                </span>
-                {totalMarket.pct30d != null && (
-                  <span style={{
-                    fontSize: 13, fontWeight: 700,
-                    color: marketUp ? '#22c55e' : '#ef4444',
-                    background: marketUp ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
-                    padding: '3px 10px', borderRadius: 20, fontFamily: "'Figtree', sans-serif",
-                  }}>
-                    {marketUp ? '▲' : '▼'} {Math.abs(totalMarket.pct30d).toFixed(1)}% 30d
-                  </span>
-                )}
-              </div>
-              <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: '4px 0 0', fontFamily: "'Figtree', sans-serif" }}>
-                Ungraded (raw) card values
-                {totalMarket.cardsTracked > 0 && ` · ${totalMarket.cardsTracked.toLocaleString()} cards tracked`}
-              </p>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-              <Sparkline data={sparklineData} color={marketUp ? '#22c55e' : '#ef4444'} height={48} />
-              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>30 day trend</span>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* ── ASK THE AI MARKET ASSISTANT ── Block 5A-W-40B
-           InlineChat moved out of the hero into its own compact
-           section so the AI stays available without dominating the
-           homepage identity. Restrained header copy, no emoji. */}
-      <section style={{ padding: '32px 24px 4px', maxWidth: 960, margin: '0 auto' }}>
-        <div style={{
-          background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 18,
-          padding: '22px 24px',
+        <div className="pp-split-hero" style={{
+          maxWidth: 1200, margin: '0 auto',
+          position: 'relative', zIndex: 1,
         }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-            <h2 style={{ fontSize: 20, margin: 0, fontFamily: "'Outfit', sans-serif", color: 'var(--text)' }}>
-              Ask the AI market assistant
-            </h2>
-            <Link href="/ai-assistant" style={{
-              fontSize: 11, fontWeight: 800, color: 'var(--primary)', textDecoration: 'none',
-              textTransform: 'uppercase', letterSpacing: 1.5,
+          {/* ── LEFT COLUMN: brand, headline, search, actions ── */}
+          <div className="pp-split-hero-left">
+            <img src="/logo.png" alt="PokePrices" style={{
+              height: 68, width: 'auto', display: 'block', marginBottom: 12,
+              filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.2))',
+            }} />
+
+            <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+              {['100% Free', 'No Login', 'No Data Collection'].map(pill => (
+                <span key={pill} style={{
+                  background: 'rgba(255,255,255,0.15)', color: '#fff', fontSize: 11, fontWeight: 700,
+                  padding: '4px 12px', borderRadius: 20, border: '1px solid rgba(255,255,255,0.2)',
+                  letterSpacing: 0.3, backdropFilter: 'blur(4px)',
+                }}>{pill}</span>
+              ))}
+            </div>
+
+            {/* H1 is single-colour on purpose — Block 5A-W-41A-RETRY
+                dropped the yellow "Pokémon" accent split because it
+                read as a generic AI-template treatment. */}
+            <h1 style={{
+              fontSize: 42, color: '#fff', margin: '0 0 12px',
+              lineHeight: 1.12, letterSpacing: -0.5,
+              textShadow: '0 2px 10px rgba(0,0,0,0.15)',
+              fontFamily: "'Outfit', sans-serif", fontWeight: 800,
             }}>
-              Open full AI assistant →
-            </Link>
+              The numbers behind every Pokémon card
+            </h1>
+            <p style={{
+              color: 'rgba(255,255,255,0.9)', fontSize: 15, margin: '0 0 20px',
+              lineHeight: 1.55, fontFamily: "'Figtree', sans-serif", fontWeight: 600,
+            }}>
+              Live values · PSA 10 data · grading insights · 40,000+ cards · 156+ sets
+            </p>
+
+            <div style={{ maxWidth: 560, marginBottom: 10 }}>
+              <SearchBar placeholder='Search cards, sets, Pokémon… try "Charizard Base Set"' />
+            </div>
+            <p style={{
+              color: 'rgba(255,255,255,0.6)', fontSize: 11, margin: '0 0 16px',
+              fontFamily: "'Figtree', sans-serif",
+            }}>
+              Updated nightly from real sold listings — no asking prices, no guesses
+            </p>
+
+            {/* Browse links — quiet inline row so they don't compete
+                with the primary Search + Sign-up CTAs. */}
+            <nav aria-label="Browse" style={{
+              display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14,
+            }}>
+              {[
+                { label: 'Browse Cards & Sets', href: '/browse'        },
+                { label: 'Browse Pokémon',      href: '/pokemon'       },
+                { label: 'Market Movers',       href: '#market-movers' },
+                { label: 'Insights',            href: '/insights'      },
+              ].map(item => (
+                <Link key={item.label} href={item.href} style={{
+                  display: 'inline-flex', alignItems: 'center',
+                  padding: '7px 14px', borderRadius: 999,
+                  background: 'rgba(255,255,255,0.12)', color: '#fff',
+                  border: '1px solid rgba(255,255,255,0.22)',
+                  fontSize: 12.5, fontWeight: 700, letterSpacing: 0.2,
+                  textDecoration: 'none', backdropFilter: 'blur(4px)',
+                  fontFamily: "'Figtree', sans-serif",
+                }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(255,255,255,0.20)' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(255,255,255,0.12)' }}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
+
+            {/* Auth-aware CTA row. Signed-out visitors see the primary
+                Sign-up-free pill + Log-in text link + a single-line
+                strapline that lightly hints at the future personal
+                dashboard. Signed-in visitors see Dashboard/Watchlist/
+                Portfolio entry points. */}
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+              {isAuthed ? (
+                <>
+                  <Link href="/dashboard" style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    padding: '11px 20px', borderRadius: 999,
+                    background: 'var(--accent)', color: '#1a1a1a',
+                    border: '1px solid var(--accent)',
+                    fontSize: 14, fontWeight: 800, textDecoration: 'none',
+                    boxShadow: '0 4px 14px rgba(255,203,5,0.30)',
+                    fontFamily: "'Figtree', sans-serif",
+                  }}>My Dashboard</Link>
+                  <Link href="/dashboard/watchlist-alerts" style={{
+                    fontSize: 13, fontWeight: 700, color: '#fff',
+                    textDecoration: 'none', letterSpacing: 0.2,
+                    fontFamily: "'Figtree', sans-serif",
+                  }}>My Watchlist →</Link>
+                  <Link href="/dashboard/portfolio" style={{
+                    fontSize: 13, fontWeight: 700, color: '#fff',
+                    textDecoration: 'none', letterSpacing: 0.2,
+                    fontFamily: "'Figtree', sans-serif",
+                  }}>My Portfolio →</Link>
+                </>
+              ) : (
+                <>
+                  <Link href="/dashboard/login?mode=signup" style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    padding: '11px 20px', borderRadius: 999,
+                    background: 'var(--accent)', color: '#1a1a1a',
+                    border: '1px solid var(--accent)',
+                    fontSize: 14, fontWeight: 800, textDecoration: 'none',
+                    boxShadow: '0 4px 14px rgba(255,203,5,0.30)',
+                    fontFamily: "'Figtree', sans-serif",
+                  }}>Sign up free</Link>
+                  <Link href="/dashboard/login" style={{
+                    fontSize: 13, fontWeight: 700, color: '#fff',
+                    textDecoration: 'none', letterSpacing: 0.2,
+                    fontFamily: "'Figtree', sans-serif",
+                  }}>Log in →</Link>
+                  <span style={{
+                    fontSize: 11.5, color: 'rgba(255,255,255,0.70)', lineHeight: 1.4,
+                    fontFamily: "'Figtree', sans-serif", flexBasis: '100%',
+                  }}>
+                    Track cards, follow sets, build your own collector dashboard.
+                  </span>
+                </>
+              )}
+            </div>
           </div>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 14px', lineHeight: 1.55, fontFamily: "'Figtree', sans-serif" }}>
-            Ask about card values, PSA 10 prices, set trends, grading and market movement.
-          </p>
-          <InlineChat />
+
+          {/* ── RIGHT COLUMN: AI panel + Market pulse card ── */}
+          <div className="pp-split-hero-right" style={{
+            display: 'flex', flexDirection: 'column', gap: 14,
+          }}>
+            {/* AI panel — surfaces the assistant in the hero without
+                making it the identity of the site. InlineChat behaviour
+                is unchanged; only its container moved from a standalone
+                section below the hero into the right column here. */}
+            <div style={{
+              background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 18,
+              padding: '18px 20px', boxShadow: '0 4px 18px rgba(0,0,0,0.08)',
+              fontFamily: "'Figtree', sans-serif",
+            }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                <p style={{
+                  margin: 0, fontSize: 10, fontWeight: 800,
+                  letterSpacing: 1.5, textTransform: 'uppercase',
+                  color: 'var(--text-muted)',
+                }}>Assistant</p>
+                <Link href="/ai-assistant" style={{
+                  fontSize: 10.5, fontWeight: 800, color: 'var(--primary)',
+                  textDecoration: 'none', textTransform: 'uppercase', letterSpacing: 1.4,
+                }}>
+                  Open full assistant →
+                </Link>
+              </div>
+              <h2 style={{
+                fontSize: 18, margin: '0 0 6px',
+                fontFamily: "'Outfit', sans-serif", color: 'var(--text)', fontWeight: 800,
+              }}>
+                Ask the market assistant
+              </h2>
+              <p style={{
+                fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 12px', lineHeight: 1.55,
+              }}>
+                Ask about card values, PSA 10 prices, set trends and grading.
+              </p>
+              <InlineChat />
+            </div>
+
+            {/* Market pulse — small card, light styling on the hero.
+                Not a Bloomberg-style ticker; a friendly at-a-glance
+                summary of the same numbers that used to live in the
+                standalone market-index banner below the hero. */}
+            {totalMarket && (
+              <div style={{
+                background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 18,
+                padding: '16px 20px', boxShadow: '0 4px 18px rgba(0,0,0,0.06)',
+                fontFamily: "'Figtree', sans-serif",
+              }}>
+                <p style={{
+                  margin: '0 0 6px', fontSize: 10, fontWeight: 800,
+                  letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--text-muted)',
+                }}>Market pulse</p>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{
+                      fontSize: 28, fontWeight: 900, color: 'var(--text)', letterSpacing: -0.6,
+                    }}>{formatMarketTotal(totalMarket.value)}</span>
+                    {totalMarket.pct30d != null && (
+                      <span style={{
+                        fontSize: 12, fontWeight: 700,
+                        color: marketUp ? '#22c55e' : '#ef4444',
+                        background: marketUp ? 'rgba(34,197,94,0.10)' : 'rgba(239,68,68,0.10)',
+                        padding: '3px 9px', borderRadius: 20,
+                      }}>
+                        {marketUp ? '▲' : '▼'} {Math.abs(totalMarket.pct30d).toFixed(1)}% 30d
+                      </span>
+                    )}
+                  </div>
+                  {sparklineData.length >= 2 && (
+                    <Sparkline data={sparklineData} color={marketUp ? '#22c55e' : '#ef4444'} height={36} />
+                  )}
+                </div>
+                <p style={{
+                  color: 'var(--text-muted)', fontSize: 11.5, margin: '6px 0 0', lineHeight: 1.5,
+                }}>
+                  40,000+ cards · 156+ sets · updated nightly
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </section>
 
