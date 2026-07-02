@@ -9,6 +9,7 @@ import CardStructuredData from '@/components/CardStructuredData'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import CardQuickActions from '@/components/CardQuickActions'
 import EbayCardPriceActions from '@/components/affiliate/EbayCardPriceActions'
+import EbayCardPrimaryAction from '@/components/affiliate/EbayCardPrimaryAction'
 import FAQ from '@/components/FAQ'
 import { getCardFaqItems } from '@/lib/faqs'
 import { getSetAssets } from '@/lib/setAssets'
@@ -599,6 +600,17 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
           <div style={{ background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)', padding: '14px 16px', marginBottom: 14 }}>
             <SectionLabel>Current Prices (USD)</SectionLabel>
             <GradeLadder prices={gradeLadderPrices} mode={card.is_sealed ? 'sealed' : 'card'} />
+            {/* Block 5A-W-39B — one prominent marketplace-localised
+                "Find this card on eBay" CTA, sitting between the price
+                ladder and the compact grade-specific chips below. */}
+            <EbayCardPrimaryAction
+              cardName={card.card_name}
+              setName={card.set_name}
+              cardNumber={card.card_number_display ?? card.card_number ?? null}
+              cardSlug={(card.card_url_slug || card.card_slug || '').toString().replace(/^pc-/, '') || null}
+              setSlug={card.set_name}
+              isSealed={!!card.is_sealed}
+            />
             <EbayCardPriceActions
               cardName={card.card_name}
               setName={card.set_name}

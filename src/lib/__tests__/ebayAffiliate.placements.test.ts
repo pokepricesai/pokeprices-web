@@ -301,3 +301,100 @@ describe('Block 2D placements — buildAffiliateLink produces the documented URL
     expect(p.complete).toBe('1')
   })
 })
+
+// ── Block 5A-W-39B — card_primary placement pins ────────────────────
+//
+// The primary card-page CTA (EbayCardPrimaryAction) is a distinct
+// placement in EPN reporting. Its custom tracking id MUST include
+// `card_primary` and MUST differ from the compact grade-specific
+// price_raw / price_psa9 / price_psa10 placements even when
+// everything else (marketplace, intent, card slug) is identical.
+
+describe('Block 5A-W-39B — card_primary placement', () => {
+  const commonInput = {
+    marketplace: 'uk' as const,
+    intent:      'raw' as const,
+    cardName:    'Umbreon VMAX #215',
+    setName:     'Evolving Skies',
+    cardNumber:  '215/203',
+    cardSlug:    'umbreon-vmax-215',
+    pageType:    'card',
+  }
+
+  it('customTrackingId contains "card_primary" for the primary CTA', () => {
+    const primary = buildAffiliateLink({ ...commonInput, placement: 'card_primary' })
+    expect(primary.customTrackingId).toContain('card_primary')
+  })
+
+  it('customTrackingId is distinct from price_raw / price_psa9 / price_psa10', () => {
+    const primary   = buildAffiliateLink({ ...commonInput, placement: 'card_primary' })
+    const priceRaw  = buildAffiliateLink({ ...commonInput, placement: 'price_raw' })
+    const pricePsa9 = buildAffiliateLink({ ...commonInput, placement: 'price_psa9', intent: 'psa9' })
+    const pricePsa10= buildAffiliateLink({ ...commonInput, placement: 'price_psa10', intent: 'psa10' })
+    expect(primary.customTrackingId).not.toBe(priceRaw.customTrackingId)
+    expect(primary.customTrackingId).not.toBe(pricePsa9.customTrackingId)
+    expect(primary.customTrackingId).not.toBe(pricePsa10.customTrackingId)
+  })
+
+  it('customTrackingId is distinct from recent_sales_all', () => {
+    const primary = buildAffiliateLink({ ...commonInput, placement: 'card_primary' })
+    const recent  = buildAffiliateLink({ ...commonInput, placement: 'recent_sales_all' })
+    expect(primary.customTrackingId).not.toBe(recent.customTrackingId)
+    expect(primary.customTrackingId).toContain('card_primary')
+    expect(recent.customTrackingId).toContain('recent_sales_all')
+  })
+
+  it('produces the clean W39A-format query for the 5 canary cards on UK', () => {
+    const cases: Array<[string, string, string, string]> = [
+      ['Greninja [Gold Star] #SWSH144', 'SWSH144', 'Celebrations',   'Greninja [Gold Star] #SWSH144 Celebrations pokemon card'],
+      ['Umbreon VMAX #215',              '215/203', 'Evolving Skies', 'Umbreon VMAX #215/203 Evolving Skies pokemon card'],
+      ['Pikachu Birthday #24',           '24/25',   'Celebrations',   'Pikachu Birthday #24/25 Celebrations pokemon card'],
+      ['Giratina VSTAR #GG69',           'GG69',    'Crown Zenith',   'Giratina VSTAR #GG69 Crown Zenith pokemon card'],
+      ['Jacinthe #122',                  '122/88',  'Perfect Order',  'Jacinthe #122/88 Perfect Order pokemon card'],
+    ]
+    for (const [cardName, cardNumber, setName, expected] of cases) {
+      const built = buildAffiliateLink({
+        marketplace: 'uk', intent: 'raw',
+        cardName, cardNumber, setName,
+        placement: 'card_primary', pageType: 'card',
+      })
+      expect(built.searchQuery).toBe(expected)
+      // URL should also carry the correct _nkw.
+      expect(built.url).toBeTruthy()
+      const nkw = new URL(built.url!).searchParams.get('_nkw')
+      expect(nkw).toBe(expected)
+    }
+  })
+
+  it('emits raw-intent URL: no LH_Sold, ebay.co.uk host, correct campaign', () => {
+    const built = buildAffiliateLink({ ...commonInput, placement: 'card_primary' })
+    expect(built.url).toBeTruthy()
+    const p = parts(built.url!)
+    expect(p.host).toBe(UK_HOST)
+    expect(p.mkrid).toBe(UK_MKRID)
+    expect(p.siteid).toBe(UK_SITE)
+    expect(p.campid).toBe('TEST-UK')
+    expect(p.cat).toBe(CAT_SING)
+    expect(p.sold).toBeNull()
+    expect(p.pref).toBe('1')
+  })
+
+  it('US variant emits ebay.com host + correct US MKRID', () => {
+    const built = buildAffiliateLink({ ...commonInput, marketplace: 'us', placement: 'card_primary' })
+    expect(built.url).toBeTruthy()
+    const p = parts(built.url!)
+    expect(p.host).toBe(US_HOST)
+    expect(p.mkrid).toBe(US_MKRID)
+    expect(p.siteid).toBe(US_SITE)
+    expect(p.campid).toBe('TEST-US')
+    expect(p.pref).toBeNull()
+  })
+
+  it('URL preserves campaign/tracking parameters (mkevt, toolid, mkcid)', () => {
+    const built = buildAffiliateLink({ ...commonInput, placement: 'card_primary' })
+    const u = new URL(built.url!)
+    expect(u.searchParams.get('mkevt')).toBe('1')
+    expect(u.searchParams.get('toolid')).toBe('10001')
+    expect(u.searchParams.get('mkcid')).toBe('1')
+  })
+})
