@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import ComingSoonBadge from '@/components/ComingSoonBadge'
 
@@ -47,11 +47,18 @@ export default function DashboardNav({
   email?: string | null
 }) {
   const router = useRouter()
+  const pathname = usePathname()
 
   async function handleSignOut() {
     await supabase.auth.signOut()
     router.push('/')
   }
+
+  // Block 5A-W-42B — the "Back to Dashboard" link is shown on every
+  // dashboard sub-page and hidden on the /dashboard hub itself (where
+  // it would be a link to the current page). Purely a path check;
+  // usePathname returns no trailing slash, so "/dashboard" is exact.
+  const showBackLink = pathname !== '/dashboard'
 
   return (
     <div style={{
@@ -65,15 +72,23 @@ export default function DashboardNav({
     }}>
       {/* Header row: back link + email + sign out */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 10 }}>
-        <Link href="/dashboard" style={{
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-          fontSize: 12, fontWeight: 700, color: 'var(--text-muted)',
-          textDecoration: 'none', fontFamily: "'Figtree', sans-serif",
-          textTransform: 'uppercase', letterSpacing: 1.2,
-        }}>
-          <span>←</span>
-          Dashboard
-        </Link>
+        {showBackLink ? (
+          <Link href="/dashboard" aria-label="Back to Dashboard" style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '5px 10px', borderRadius: 8,
+            border: '1px solid var(--border)', background: 'transparent',
+            color: 'var(--text-muted)', fontSize: 11, fontWeight: 800,
+            fontFamily: "'Figtree', sans-serif", textDecoration: 'none',
+            textTransform: 'uppercase', letterSpacing: 1.2, whiteSpace: 'nowrap',
+          }}>
+            <span aria-hidden="true">←</span>
+            Back to Dashboard
+          </Link>
+        ) : (
+          /* Empty slot preserves the flex `space-between` so the
+             email + sign-out pair stays on the right of the header. */
+          <span aria-hidden="true" />
+        )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {email ? (
             <>
