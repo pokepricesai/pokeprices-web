@@ -57,18 +57,37 @@ describe('DashboardHubClient — W42A personal snapshot cards', () => {
     expect(SRC).toContain('kicker="Alerts"')
   })
 
-  it('reads the portfolio via get_portfolio_summary RPC + loadUserPortfolioIds (W42A-FIX2)', () => {
-    // Load path must match /dashboard/portfolio exactly: resolve ids
-    // via loadUserPortfolioIds (is_default → any-portfolio fallback),
-    // then call get_portfolio_summary(p_portfolio_id: pid) — the same
-    // RPC PortfolioDashboard consumes.
-    expect(SRC).toContain("import { loadUserPortfolioIds } from '@/lib/account/usage'")
-    expect(SRC).toContain('loadUserPortfolioIds(supabase, user.id)')
-    expect(SRC).toContain("supabase.rpc('get_portfolio_summary', { p_portfolio_id: pid })")
-    // Guard against a regression to the W42A-FIX direct SELECT on
-    // portfolio_items — production writes card_name_snapshot /
-    // set_name_snapshot, and selecting card_name / set_name 400s.
+  it('delegates portfolio loading to the shared loadPortfolioSummary helper (W42A-FIX4)', () => {
+    // Rather than reimplementing the load path inline the hub now calls
+    // into src/lib/account/portfolioSummary.ts, which mirrors
+    // PortfolioDashboard.loadPortfolio: primary-portfolio scope (.limit(1)),
+    // get_portfolio_summary RPC, dedupe by id, card_trends +
+    // daily_prices recompute, and display_currency preference. Same
+    // helper both surfaces call → totals cannot drift.
+    expect(SRC).toContain("import {")
+    expect(SRC).toContain('loadPortfolioSummary')
+    expect(SRC).toContain('formatPortfolioValue')
+    expect(SRC).toContain("from '@/lib/account/portfolioSummary'")
+    expect(SRC).toContain('loadPortfolioSummary(supabase, user.id)')
+    // Regression guards: the hub must not run its own local pipeline.
+    expect(SRC).not.toContain("supabase.rpc('get_portfolio_summary'")
     expect(SRC).not.toContain("from('portfolio_items')")
+    expect(SRC).not.toContain("from('portfolios')")
+    expect(SRC).not.toContain("from('card_trends')")
+    expect(SRC).not.toContain('new Map(rawItems.map')
+  })
+
+  it('threads the display currency from the helper through the render (W42A-FIX4)', () => {
+    // The portfolio value MUST use formatPortfolioValue with the
+    // currency the helper resolved from user_email_preferences, not a
+    // hardcoded $ formatter. Both the portfolio card and the movers
+    // row consume the same currency.
+    expect(SRC).toContain('currency:       summary.currency')
+    expect(SRC).toContain('formatPortfolioValue(portfolioSnap.totalCents, portfolioSnap.currency)')
+    expect(SRC).toContain("portfolioSnap?.currency ?? 'GBP'")
+    // Regression guards against the old hardcoded USD-only helper.
+    expect(SRC).not.toContain('function fmtUsd(')
+    expect(SRC).not.toMatch(/fmtUsd\s*\(/)
   })
 
   it('reads the watchlist via the existing get_watchlist_with_prices RPC (no new RPC)', () => {
@@ -90,27 +109,10 @@ describe('DashboardHubClient — W42A personal snapshot cards', () => {
   })
 })
 
-describe('DashboardHubClient — W42A-FIX3 portfolio dedupe + recompute parity', () => {
-  it('dedupes get_portfolio_summary items by id before summing (mirrors PortfolioDashboard.tsx:989-991)', () => {
-    // Without dedupe the RPC's cartesian LEFT JOIN to card_trends
-    // inflates both totalCents and itemCount. The portfolio page
-    // dedupes; the hub must too or the two surfaces disagree.
-    expect(SRC).toMatch(/new Map\(rawItems\.map\(i => \[i\.id, i\]\)\)/)
-    expect(SRC).toContain('dedupedById')
-  })
-
-  it('recomputes totalCents, itemCount and uniqueCards from deduped items only', () => {
-    // Same three aggregates the portfolio page computes at
-    // PortfolioDashboard.tsx:1187-1195. sum(position_value_cents),
-    // sum(quantity), count(distinct card_slug).
-    expect(SRC).toContain('dedupedById.reduce')
-    expect(SRC).toContain('i.quantity')
-    expect(SRC).toMatch(/new Set\([\s\S]*?dedupedById\.map[\s\S]*?card_slug/)
-  })
-
+describe('DashboardHubClient — W42A-FIX4 delegates to helper (no inline pipeline)', () => {
   it('threads itemCount and uniqueCards through the render (no raw items.length count)', () => {
     // Guard against a regression to `count: items.length` which is
-    // exactly the mismatch that read 50 instead of 35.
+    // exactly the mismatch that once read 50 instead of 35.
     expect(SRC).toContain('itemCount:')
     expect(SRC).toContain('uniqueCards:')
     expect(SRC).not.toMatch(/items\.length,\s*pct30dWeighted/)
@@ -118,11 +120,10 @@ describe('DashboardHubClient — W42A-FIX3 portfolio dedupe + recompute parity',
     expect(SRC).toMatch(/portfolioSnap\.itemCount[\s\S]*?portfolioSnap\.uniqueCards[\s\S]*?unique/)
   })
 
-  it('feeds the deduped items into the movers merge (no second inflated pass)', () => {
-    // The outer-scoped portfolioItems array must be populated from the
-    // deduped set, not the raw RPC output. Otherwise the movers section
-    // still sees cartesian duplicates.
-    expect(SRC).toContain('portfolioItems.push(...dedupedById)')
+  it('feeds the helper-returned items into the movers merge (no second query)', () => {
+    // Movers must consume summary.items — the deduped + recomputed
+    // items the helper returns — not a separate fetch that could drift.
+    expect(SRC).toContain('portfolioItems.push(...summary.items)')
   })
 })
 
@@ -175,11 +176,11 @@ describe('DashboardHubClient — W42A tools tile grid', () => {
 })
 
 describe('DashboardHubClient — W42A safety', () => {
-  it('only calls RPCs that /dashboard/portfolio and /dashboard/watchlist-alerts already use', () => {
-    // W42A-FIX2 added get_portfolio_summary — the RPC PortfolioDashboard
-    // consumes. Widen the allowlist to those two and guard against a
-    // brand-new RPC being introduced by a future edit.
-    const allowlist = new Set(['get_watchlist_with_prices', 'get_portfolio_summary'])
+  it('only calls RPCs that /dashboard/watchlist-alerts already uses (get_portfolio_summary now lives in the helper)', () => {
+    // W42A-FIX4 moved the get_portfolio_summary call into
+    // src/lib/account/portfolioSummary.ts. The hub itself is left
+    // with a single direct RPC — get_watchlist_with_prices.
+    const allowlist = new Set(['get_watchlist_with_prices'])
     const rpcMatches = SRC.match(/supabase\.rpc\(['"]([^'"]+)['"]/g) || []
     for (const m of rpcMatches) {
       const name = m.replace(/^supabase\.rpc\(['"]/, '').replace(/['"]$/, '')

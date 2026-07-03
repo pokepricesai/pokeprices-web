@@ -8,7 +8,12 @@ import ComingSoonBadge from '@/components/ComingSoonBadge'
 import DashboardNav from './DashboardNav'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge'
 import DashboardOnboardingChecklist from '@/components/dashboard/DashboardOnboardingChecklist'
-import { loadUserPortfolioIds } from '@/lib/account/usage'
+import {
+  loadPortfolioSummary,
+  formatPortfolioValue,
+  type PortfolioSummaryCurrency,
+  type PortfolioSummaryItem,
+} from '@/lib/account/portfolioSummary'
 
 // Block 5A-W-42A — dashboard hub upgraded from a bare tools directory
 // into a "My PokePrices" personal summary page. Existing tables /
@@ -31,6 +36,7 @@ interface PortfolioSnapshot {
   itemCount:       number       // sum of quantity across deduped items — matches PortfolioDashboard.item_count
   uniqueCards:     number       // count of distinct card_slug across deduped items — matches PortfolioDashboard.unique_cards
   pct30dWeighted:  number | null
+  currency:        PortfolioSummaryCurrency  // Block 5A-W-42A-FIX4 — display currency from user_email_preferences
 }
 
 interface WatchlistTopMover {
@@ -71,14 +77,11 @@ interface Mover {
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-// USD-style formatting to match the homepage market pulse card style.
-function fmtUsd(cents: number | null | undefined): string {
-  if (cents == null) return '—'
-  const v = cents / 100
-  if (v >= 10000) return `$${(v / 1000).toFixed(1)}k`
-  if (v >= 100)   return `$${v.toFixed(0)}`
-  return `$${v.toFixed(2)}`
-}
+// Currency-aware value formatting lives in
+// src/lib/account/portfolioSummary.ts::formatPortfolioValue and is
+// imported at the top of this file. Both the portfolio snapshot and
+// the movers row use it so the hub renders one currency, matching
+// the user's display_currency preference.
 
 function fmtPct(pct: number | null | undefined): { text: string; color: string } {
   if (pct == null) return { text: '—', color: 'var(--text-muted)' }
@@ -149,25 +152,15 @@ export default function DashboardHubClient() {
   }, [])
 
   // ── Load personal snapshot ────────────────────────────────────────────
-  // Block 5A-W-42A-FIX2 — data sources:
+  // Block 5A-W-42A-FIX4 — data sources:
   //
-  //   * PORTFOLIO — loaded via the SAME path /dashboard/portfolio uses:
-  //     resolve the user's portfolio ids using `loadUserPortfolioIds`
-  //     (is_default=true → any-portfolio fallback for legacy users),
-  //     then call the `get_portfolio_summary(p_portfolio_id)` RPC on
-  //     each. This matches PortfolioDashboard.tsx::loadPortfolio.
-  //
-  //     Why the RPC and not a direct SELECT on portfolio_items:
-  //     production writes the display fields as `card_name_snapshot` /
-  //     `set_name_snapshot` (NOT `card_name` / `set_name`). Block 5A-W-16B
-  //     hit the same footgun on the weekly digest — see weeklyDigest.ts
-  //     :1017-1029 — and W42A-FIX repeated it here. Selecting the
-  //     non-existent columns 400s the whole query and PostgREST returns
-  //     no rows, which the render treats as "empty portfolio". Going
-  //     through the RPC avoids the column-name coupling entirely.
-  //
-  //   * WATCHLIST      — get_watchlist_with_prices RPC (unchanged)
-  //   * ALERTS         — alert_events by user_id, last 30d (unchanged)
+  //   * PORTFOLIO  — loadPortfolioSummary() (shared helper). Fully
+  //                  mirrors PortfolioDashboard.loadPortfolio: primary
+  //                  is_default portfolio (limit 1), get_portfolio_summary
+  //                  RPC, dedupe by id, card_trends + daily_prices
+  //                  recompute, and display_currency preference.
+  //   * WATCHLIST  — get_watchlist_with_prices RPC (unchanged)
+  //   * ALERTS     — alert_events by user_id, last 30d (unchanged)
   //
   // Each query is wrapped so a failure in one section still lets the
   // others render.
@@ -177,71 +170,30 @@ export default function DashboardHubClient() {
 
     async function load() {
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-      const portfolioIds = await loadUserPortfolioIds(supabase, user.id)
-      if (!live) return
 
-      // Hoisted so the movers merge below can reuse the RPC result
+      // Hoisted so the movers merge below can reuse the summary items
       // without a second query.
-      const portfolioItems: any[] = []
+      const portfolioItems: PortfolioSummaryItem[] = []
 
       // ── Portfolio ────────────────────────────────────────────────────
+      // Block 5A-W-42A-FIX4 — single call to the shared summary helper
+      // which fully mirrors PortfolioDashboard.loadPortfolio (limit(1)
+      // scope, dedupe by id, card_trends + daily_prices recompute,
+      // display_currency preference). The hub therefore renders exactly
+      // the same value, item count, unique count and currency as
+      // /dashboard/portfolio — no independent approximation.
       try {
-        // Call get_portfolio_summary for each portfolio the user owns —
-        // usually one, occasionally many for legacy users. Merge the
-        // items arrays. Same RPC + shape /dashboard/portfolio consumes.
-        const rawItems: any[] = []
-        for (const pid of portfolioIds) {
-          const { data, error } = await supabase.rpc('get_portfolio_summary', { p_portfolio_id: pid })
-          if (error) continue
-          if (data && Array.isArray(data.items)) rawItems.push(...data.items)
-        }
+        const summary = await loadPortfolioSummary(supabase, user.id)
         if (!live) return
-
-        // Block 5A-W-42A-FIX3 — DEDUPE by id. get_portfolio_summary's
-        // LEFT JOIN to card_trends can produce cartesian rows when a
-        // (card_name, set_name) matches multiple trend rows. Same id
-        // repeats. /dashboard/portfolio does this exact same dedupe at
-        // PortfolioDashboard.tsx:989-991. Without it the hub counted
-        // duplicates as separate cards (50 vs the real 35) and summed
-        // duplicate position_value_cents (~$2.2k vs the real ~$1.1k).
-        const dedupedById = Array.from(
-          new Map(rawItems.map(i => [i.id, i])).values()
-        )
-        // Push into the outer-scoped array so the movers merge below
-        // reuses the same deduped set (previously it saw duplicates too).
-        portfolioItems.push(...dedupedById)
-
-        // Block 5A-W-42A-FIX3 — recompute headline aggregates from the
-        // deduped items, matching PortfolioDashboard.tsx:1187-1195.
-        //   * totalCents  = sum(position_value_cents)     across deduped
-        //   * itemCount   = sum(quantity)                 across deduped
-        //   * uniqueCards = count(distinct card_slug)     across deduped
-        // position_value_cents already accounts for manual override +
-        // quantity in PortfolioDashboard's write path. Fall back to
-        // manual_value_cents or current_value_cents only when position
-        // is missing (older / sealed rows).
-        let totalCents = 0
-        let wSum = 0
-        let vSum = 0
-        for (const it of dedupedById) {
-          const v = (it as any).position_value_cents
-            ?? (it as any).manual_value_cents
-            ?? (it as any).current_value_cents
-          if (typeof v === 'number' && v > 0) {
-            totalCents += v
-            const pct = (it as any).pct_30d
-            if (pct != null) { wSum += Number(pct) * v; vSum += v }
-          }
-        }
-        const itemCount = dedupedById.reduce(
-          (s: number, i: any) => s + (i.quantity || 0), 0,
-        )
-        const uniqueCards = new Set(
-          dedupedById.map((i: any) => i.card_slug).filter(Boolean),
-        ).size
-        const pct30dWeighted = vSum > 0 ? wSum / vSum : null
-        setPortfolioSnap({ totalCents, itemCount, uniqueCards, pct30dWeighted })
-      } catch { if (live) setPortfolioSnap({ totalCents: 0, itemCount: 0, uniqueCards: 0, pct30dWeighted: null }) }
+        portfolioItems.push(...summary.items)
+        setPortfolioSnap({
+          totalCents:     summary.totalCents,
+          itemCount:      summary.itemCount,
+          uniqueCards:    summary.uniqueCards,
+          pct30dWeighted: summary.pct30dWeighted,
+          currency:       summary.currency,
+        })
+      } catch { if (live) setPortfolioSnap({ totalCents: 0, itemCount: 0, uniqueCards: 0, pct30dWeighted: null, currency: 'GBP' }) }
 
       // ── Watchlist ────────────────────────────────────────────────────
       let wlItems: any[] = []
@@ -309,9 +261,9 @@ export default function DashboardHubClient() {
           if (!p?.card_slug) continue
           byCard.set(p.card_slug, {
             card_slug:     p.card_slug,
-            card_url_slug: null,
-            card_name:     p.card_name,
-            set_name:      p.set_name,
+            card_url_slug: p.card_url_slug ?? null,
+            card_name:     p.card_name ?? '',
+            set_name:      p.set_name  ?? '',
             current_cents: p.position_value_cents ?? p.current_value_cents ?? null,
             pct_7d:        p.pct_7d ?? null,
             pct_30d:       p.pct_30d ?? null,
@@ -547,7 +499,11 @@ export default function DashboardHubClient() {
             </>
           ) : (
             <>
-              <div style={bigNumberStyle}>{fmtUsd(portfolioSnap.totalCents)}</div>
+              {/* Block 5A-W-42A-FIX4 — currency-aware formatter that
+                  mirrors PortfolioDashboard's fmtBig. Respects the
+                  user's display_currency preference (GBP vs USD) so the
+                  hub matches whatever the portfolio page shows. */}
+              <div style={bigNumberStyle}>{formatPortfolioValue(portfolioSnap.totalCents, portfolioSnap.currency)}</div>
               <div style={secondaryLineStyle}>
                 {portfolioSnap.pct30dWeighted != null && (
                   <PctChip pct={portfolioSnap.pct30dWeighted} suffix="30d" />
@@ -688,7 +644,10 @@ export default function DashboardHubClient() {
                     </div>
                     <div style={{ textAlign: 'right', minWidth: 90 }}>
                       <div style={{ fontSize: 13, fontWeight: 800 }}>
-                        {fmtUsd(m.current_cents)}
+                        {/* Block 5A-W-42A-FIX4 — respect display_currency
+                            for mover prices too so the hub is internally
+                            consistent (portfolio card and movers agree). */}
+                        {formatPortfolioValue(m.current_cents, portfolioSnap?.currency ?? 'GBP')}
                       </div>
                       <div style={{ fontSize: 12, fontWeight: 800, color: p.color }}>
                         {p.text}{pct != null ? ` ${m.pct_30d != null ? '30d' : '7d'}` : ''}
