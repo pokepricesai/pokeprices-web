@@ -18,6 +18,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useUserPlan } from '@/lib/account/useUserPlan'
+import { loadPortfolioItemCount } from '@/lib/account/usage'
 import {
   buildAllSetState,
   buildDashboardChecklist,
@@ -101,7 +102,11 @@ export default function DashboardOnboardingChecklist({ userId }: Props) {
     setDataLoading(true)
     void (async () => {
       const [portfolioCount, watchlistCount, weekly, customCount, earlyAccess] = await Promise.all([
-        countRows('portfolio_items', userId),
+        // Block 5A-W-42A-FIX — portfolio_items lives behind portfolios
+        // for the user_id; the single-step `.eq('user_id', ...)` used to
+        // miss older rows where user_id was never populated. Reuse the
+        // proven two-step helper from src/lib/account/usage.ts.
+        loadPortfolioItemCount(supabase, userId).catch(() => null),
         countRows('watchlist',       userId),
         loadWeeklyEnabled(userId),
         countCustomOverrides(userId),
@@ -180,49 +185,39 @@ export default function DashboardOnboardingChecklist({ userId }: Props) {
   )
 }
 
-// ─── Block 5A-W-31 — all-set success card ────────────────────────────
-// Renders when every checklist item is complete. Pro users see Pro
-// entitlements + the "Pro account" chip; free users see the Free
-// benefits and a soft Pro early-access upgrade footer.
+// ─── Block 5A-W-42A-FIX — compact "all-set" account strip ────────────
+// Previously rendered a large bordered card with a heading, sub-copy,
+// a padded plan block (purple bg + coloured border), a bulleted grid
+// of entitlements, and — for free users — a large upgrade sub-panel.
+// It dominated the top of the hub for Pro users who had completed
+// onboarding and pushed the personal-snapshot cards well below the
+// fold.
+//
+// The strip below keeps the account tier visible without overwhelming
+// the hub: a single row with the plan chip, the plan heading, the
+// entitlements joined into a compact "·"-separated line, and — free
+// users only — a small inline upgrade link on the right. No purple
+// gradient, no bulleted grid, no giant success block.
 
 function AllSetCard({ state, plan }: { state: AllSetState; plan: UserPlan }) {
+  const isPro = plan === 'pro'
   return (
-    <div style={cardStyle}>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-        <h2 style={titleStyle}>{state.title}</h2>
-        {plan === 'pro' ? <ProAccountChip /> : <FreeAccountChip />}
+    <div style={stripCardStyle} aria-label="Account status">
+      <div style={stripLeftStyle}>
+        {isPro ? <ProAccountChip /> : <FreeAccountChip />}
+        <span style={stripHeadingStyle}>{state.planHeading}</span>
+        {state.planBullets.length > 0 && (
+          <span style={stripBulletsStyle}>{state.planBullets.join(' · ')}</span>
+        )}
       </div>
-      <p style={subStyle}>{state.description}</p>
-
-      <div style={planBlockStyle(plan === 'pro')}>
-        <div style={planHeadingStyle}>
-          <span
-            aria-hidden="true"
-            style={planCheckStyle}
-          >
-            ✓
-          </span>
-          {state.planHeading}
-        </div>
-        <ul style={bulletListStyle}>
-          {state.planBullets.map(b => (
-            <li key={b} style={bulletStyle}>{b}</li>
-          ))}
-        </ul>
-      </div>
-
-      {state.upgrade && (
-        <div style={upgradeStyle}>
-          <div style={upgradeHeadingStyle}>{state.upgrade.heading}</div>
-          <div style={upgradeDescStyle}>{state.upgrade.description}</div>
-          <Link
-            href={state.upgrade.ctaHref}
-            style={upgradeCtaStyle}
-            aria-label={state.upgrade.ctaLabel}
-          >
-            {state.upgrade.ctaLabel} →
-          </Link>
-        </div>
+      {!isPro && state.upgrade && (
+        <Link
+          href={state.upgrade.ctaHref}
+          style={stripUpgradeCtaStyle}
+          aria-label={state.upgrade.ctaLabel}
+        >
+          {state.upgrade.ctaLabel} →
+        </Link>
       )}
     </div>
   )
@@ -338,87 +333,48 @@ function ctaStyle(complete: boolean): React.CSSProperties {
   }
 }
 
-// ── Block 5A-W-31 — all-set card styles ─────────────────────────────
+// ── Block 5A-W-42A-FIX — compact account strip styles ──────────────
 
-function planBlockStyle(isPro: boolean): React.CSSProperties {
-  return {
-    padding: '12px 14px',
-    borderRadius: 12,
-    border: isPro ? '1px solid rgba(124,58,237,0.30)' : '1px solid var(--border)',
-    background: isPro ? 'rgba(124,58,237,0.06)' : 'rgba(34,197,94,0.06)',
-  }
-}
-const planHeadingStyle: React.CSSProperties = {
+const stripCardStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 8,
-  fontSize: 13,
-  fontWeight: 800,
-  color: 'var(--text)',
-  fontFamily: "'Figtree', sans-serif",
-  marginBottom: 8,
-}
-const planCheckStyle: React.CSSProperties = {
-  flex: '0 0 20px',
-  width: 20,
-  height: 20,
-  borderRadius: 10,
-  background: 'var(--green, #22c55e)',
-  color: '#fff',
-  fontWeight: 800,
-  fontSize: 12,
-  lineHeight: '20px',
-  textAlign: 'center',
-  fontFamily: "'Figtree', sans-serif",
-}
-const bulletListStyle: React.CSSProperties = {
-  listStyle: 'none',
-  padding: 0,
-  margin: 0,
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-  gap: 4,
-}
-const bulletStyle: React.CSSProperties = {
-  fontSize: 12.5,
-  color: 'var(--text)',
-  fontFamily: "'Figtree', sans-serif",
-  lineHeight: 1.55,
-  paddingLeft: 14,
-  position: 'relative',
-}
-const upgradeStyle: React.CSSProperties = {
-  marginTop: 12,
-  padding: '12px 14px',
+  justifyContent: 'space-between',
+  gap: 12,
+  flexWrap: 'wrap',
+  padding: '9px 14px',
+  marginBottom: 14,
   borderRadius: 12,
-  border: '1px solid rgba(26,95,173,0.25)',
-  background: 'linear-gradient(135deg, rgba(26,95,173,0.06), rgba(124,58,237,0.05))',
+  border: '1px solid var(--border)',
+  background: 'var(--bg-light)',
+  fontFamily: "'Figtree', sans-serif",
 }
-const upgradeHeadingStyle: React.CSSProperties = {
-  fontSize: 13,
+const stripLeftStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  flexWrap: 'wrap',
+  minWidth: 0,
+}
+const stripHeadingStyle: React.CSSProperties = {
+  fontSize: 12.5,
   fontWeight: 800,
   color: 'var(--text)',
-  fontFamily: "'Figtree', sans-serif",
-  marginBottom: 4,
 }
-const upgradeDescStyle: React.CSSProperties = {
+const stripBulletsStyle: React.CSSProperties = {
   fontSize: 12,
   color: 'var(--text-muted)',
-  fontFamily: "'Figtree', sans-serif",
-  marginBottom: 10,
-  lineHeight: 1.5,
+  lineHeight: 1.4,
 }
-const upgradeCtaStyle: React.CSSProperties = {
-  display: 'inline-block',
-  padding: '6px 12px',
-  borderRadius: 8,
-  fontSize: 12,
+const stripUpgradeCtaStyle: React.CSSProperties = {
+  fontSize: 11.5,
   fontWeight: 800,
-  fontFamily: "'Figtree', sans-serif",
-  background: 'var(--primary)',
-  color: '#fff',
-  border: '1px solid var(--primary)',
+  color: 'var(--primary)',
   textDecoration: 'none',
+  padding: '4px 10px',
+  borderRadius: 999,
+  border: '1px solid var(--border)',
+  background: 'var(--card)',
+  whiteSpace: 'nowrap',
 }
 const proChipStyle: React.CSSProperties = {
   fontSize: 10,

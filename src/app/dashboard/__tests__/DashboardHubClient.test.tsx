@@ -57,9 +57,21 @@ describe('DashboardHubClient — W42A personal snapshot cards', () => {
     expect(SRC).toContain('kicker="Alerts"')
   })
 
-  it('reads portfolio_items filtered by user_id for the portfolio snapshot', () => {
-    expect(SRC).toMatch(/from\(['"]portfolio_items['"]\)/)
-    expect(SRC).toMatch(/\.eq\(['"]user_id['"], user\.id\)/)
+  it('reads portfolio_items via the two-step portfolios→portfolio_id pattern (W42A-FIX)', () => {
+    // The proven pattern from src/lib/account/usage.ts. The hub used to
+    // query portfolio_items directly by user_id, which missed older
+    // rows where user_id was never populated. Guard against a
+    // regression to that direct query.
+    expect(SRC).toMatch(/from\(['"]portfolios['"]\)/)
+    expect(SRC).toMatch(/\.in\(['"]portfolio_id['"], portfolioIds\)/)
+    // The portfolio_items reads must use the .in('portfolio_id', ...)
+    // form. Scan each portfolio_items block for a same-chain user_id
+    // filter — those would mean the two-step pattern was skipped.
+    const pfItemsBlocks = SRC.split(/from\(['"]portfolio_items['"]\)/).slice(1)
+    for (const chain of pfItemsBlocks) {
+      const nextDot = chain.slice(0, chain.indexOf('await') === -1 ? chain.length : chain.indexOf('await'))
+      expect(nextDot).not.toMatch(/\.eq\(['"]user_id['"]/)
+    }
   })
 
   it('reads the watchlist via the existing get_watchlist_with_prices RPC (no new RPC)', () => {
@@ -70,6 +82,14 @@ describe('DashboardHubClient — W42A personal snapshot cards', () => {
     expect(SRC).toContain('Add cards to your portfolio to track value here.')
     expect(SRC).toContain('Watch a card to catch price moves.')
     expect(SRC).toContain('Set alert rules to be notified when prices move.')
+  })
+
+  it('degrades gracefully when items exist but total value is 0 (W42A-FIX)', () => {
+    // A "Value updating…" branch must fire when totalCents is 0 but
+    // count > 0, rather than falling through to the empty-state copy
+    // and telling a user with cards to "Add cards to your portfolio".
+    expect(SRC).toContain('portfolioSnap.totalCents === 0')
+    expect(SRC).toContain('Value updating…')
   })
 })
 

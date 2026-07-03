@@ -148,25 +148,53 @@ export default function DashboardHubClient() {
 
   // ── Load personal snapshot ────────────────────────────────────────────
   // Block 5A-W-42A — reads only from existing tables:
-  //   * portfolio_items         (direct SELECT, filtered by user_id)
-  //   * get_watchlist_with_prices RPC (prices + 7d/30d moves)
-  //   * alert_events            (production feed; replaces the previous
-  //                              buggy count on the legacy user_alerts
-  //                              table which has no writer)
+  //   * portfolios + portfolio_items   (two-step: user's portfolio ids
+  //                                     via portfolios.user_id, then
+  //                                     items filtered by portfolio_id.
+  //                                     Block 5A-W-42A-FIX: the earlier
+  //                                     direct `.eq('user_id', ...)` on
+  //                                     portfolio_items missed older rows
+  //                                     where user_id was never populated,
+  //                                     which showed the empty state to
+  //                                     users who genuinely had cards. The
+  //                                     proven pattern from
+  //                                     src/lib/account/usage.ts is used
+  //                                     everywhere else in the app.)
+  //   * get_watchlist_with_prices RPC  (prices + 7d/30d moves)
+  //   * alert_events                   (production feed; replaces the
+  //                                     previous buggy count on the legacy
+  //                                     user_alerts table which has no
+  //                                     writer)
   // Each query is wrapped so a failure in one section still lets the
   // others render.
   useEffect(() => {
     if (!user) return
     let live = true
 
+    // Block 5A-W-42A-FIX — resolve every portfolio the user owns first.
+    // Reused by both the snapshot query and the movers merge below so
+    // the same ownership pattern applies uniformly.
+    async function loadUserPortfolioIds(): Promise<string[]> {
+      try {
+        const { data, error } = await supabase.from('portfolios')
+          .select('id').eq('user_id', user.id)
+        if (error || !Array.isArray(data)) return []
+        return (data as Array<{ id: string }>).map(p => p.id).filter(Boolean)
+      } catch { return [] }
+    }
+
     async function load() {
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+      const portfolioIds = await loadUserPortfolioIds()
+      if (!live) return
 
       // ── Portfolio ────────────────────────────────────────────────────
       try {
-        const { data: pfItems } = await supabase.from('portfolio_items')
-          .select('id, card_slug, card_name, set_name, position_value_cents, current_value_cents, manual_value_cents, pct_7d, pct_30d, holding_type')
-          .eq('user_id', user.id)
+        const { data: pfItems } = portfolioIds.length === 0
+          ? { data: [] as any[] }
+          : await supabase.from('portfolio_items')
+            .select('id, card_slug, card_name, set_name, position_value_cents, current_value_cents, manual_value_cents, pct_7d, pct_30d, holding_type')
+            .in('portfolio_id', portfolioIds)
         if (!live) return
         const items = pfItems || []
         // position_value_cents already accounts for manual override +
@@ -246,9 +274,11 @@ export default function DashboardHubClient() {
       //   sort by |pct_30d| (fallback pct_7d), top 5. Watchlist rows
       //   win the dedupe because they carry card_url_slug.
       try {
-        const { data: pfMoversRaw } = await supabase.from('portfolio_items')
-          .select('card_slug, card_name, set_name, position_value_cents, pct_7d, pct_30d')
-          .eq('user_id', user.id)
+        const { data: pfMoversRaw } = portfolioIds.length === 0
+          ? { data: [] as any[] }
+          : await supabase.from('portfolio_items')
+            .select('card_slug, card_name, set_name, position_value_cents, pct_7d, pct_30d')
+            .in('portfolio_id', portfolioIds)
         if (!live) return
         const byCard = new Map<string, Mover>()
         for (const p of pfMoversRaw || []) {
@@ -473,6 +503,21 @@ export default function DashboardHubClient() {
             <p style={emptyCopyStyle}>
               Add cards to your portfolio to track value here.
             </p>
+          ) : portfolioSnap.totalCents === 0 ? (
+            // Block 5A-W-42A-FIX — items exist but no value data yet.
+            // Show item count with a "value updating" note rather than
+            // rendering a misleading "$0.00" or the empty-state copy.
+            <>
+              <div style={bigNumberStyle}>
+                {portfolioSnap.count}{' '}
+                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)' }}>
+                  card{portfolioSnap.count === 1 ? '' : 's'}
+                </span>
+              </div>
+              <div style={secondaryLineStyle}>
+                <span style={{ color: 'var(--text-muted)' }}>Value updating…</span>
+              </div>
+            </>
           ) : (
             <>
               <div style={bigNumberStyle}>{fmtUsd(portfolioSnap.totalCents)}</div>
