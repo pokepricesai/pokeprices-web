@@ -57,21 +57,18 @@ describe('DashboardHubClient — W42A personal snapshot cards', () => {
     expect(SRC).toContain('kicker="Alerts"')
   })
 
-  it('reads portfolio_items via the two-step portfolios→portfolio_id pattern (W42A-FIX)', () => {
-    // The proven pattern from src/lib/account/usage.ts. The hub used to
-    // query portfolio_items directly by user_id, which missed older
-    // rows where user_id was never populated. Guard against a
-    // regression to that direct query.
-    expect(SRC).toMatch(/from\(['"]portfolios['"]\)/)
-    expect(SRC).toMatch(/\.in\(['"]portfolio_id['"], portfolioIds\)/)
-    // The portfolio_items reads must use the .in('portfolio_id', ...)
-    // form. Scan each portfolio_items block for a same-chain user_id
-    // filter — those would mean the two-step pattern was skipped.
-    const pfItemsBlocks = SRC.split(/from\(['"]portfolio_items['"]\)/).slice(1)
-    for (const chain of pfItemsBlocks) {
-      const nextDot = chain.slice(0, chain.indexOf('await') === -1 ? chain.length : chain.indexOf('await'))
-      expect(nextDot).not.toMatch(/\.eq\(['"]user_id['"]/)
-    }
+  it('reads the portfolio via get_portfolio_summary RPC + loadUserPortfolioIds (W42A-FIX2)', () => {
+    // Load path must match /dashboard/portfolio exactly: resolve ids
+    // via loadUserPortfolioIds (is_default → any-portfolio fallback),
+    // then call get_portfolio_summary(p_portfolio_id: pid) — the same
+    // RPC PortfolioDashboard consumes.
+    expect(SRC).toContain("import { loadUserPortfolioIds } from '@/lib/account/usage'")
+    expect(SRC).toContain('loadUserPortfolioIds(supabase, user.id)')
+    expect(SRC).toContain("supabase.rpc('get_portfolio_summary', { p_portfolio_id: pid })")
+    // Guard against a regression to the W42A-FIX direct SELECT on
+    // portfolio_items — production writes card_name_snapshot /
+    // set_name_snapshot, and selecting card_name / set_name 400s.
+    expect(SRC).not.toContain("from('portfolio_items')")
   })
 
   it('reads the watchlist via the existing get_watchlist_with_prices RPC (no new RPC)', () => {
@@ -142,11 +139,15 @@ describe('DashboardHubClient — W42A tools tile grid', () => {
 })
 
 describe('DashboardHubClient — W42A safety', () => {
-  it('does not introduce any new supabase.rpc(...) call beyond the existing get_watchlist_with_prices', () => {
-    // Guard against accidentally spawning a new RPC in the retry.
+  it('only calls RPCs that /dashboard/portfolio and /dashboard/watchlist-alerts already use', () => {
+    // W42A-FIX2 added get_portfolio_summary — the RPC PortfolioDashboard
+    // consumes. Widen the allowlist to those two and guard against a
+    // brand-new RPC being introduced by a future edit.
+    const allowlist = new Set(['get_watchlist_with_prices', 'get_portfolio_summary'])
     const rpcMatches = SRC.match(/supabase\.rpc\(['"]([^'"]+)['"]/g) || []
     for (const m of rpcMatches) {
-      expect(m).toMatch(/supabase\.rpc\(['"]get_watchlist_with_prices['"]/)
+      const name = m.replace(/^supabase\.rpc\(['"]/, '').replace(/['"]$/, '')
+      expect(allowlist.has(name), `unexpected supabase.rpc('${name}') — extend the allowlist deliberately`).toBe(true)
     }
   })
 

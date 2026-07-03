@@ -8,6 +8,7 @@ import ComingSoonBadge from '@/components/ComingSoonBadge'
 import DashboardNav from './DashboardNav'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge'
 import DashboardOnboardingChecklist from '@/components/dashboard/DashboardOnboardingChecklist'
+import { loadUserPortfolioIds } from '@/lib/account/usage'
 
 // Block 5A-W-42A — dashboard hub upgraded from a bare tools directory
 // into a "My PokePrices" personal summary page. Existing tables /
@@ -147,56 +148,53 @@ export default function DashboardHubClient() {
   }, [])
 
   // ── Load personal snapshot ────────────────────────────────────────────
-  // Block 5A-W-42A — reads only from existing tables:
-  //   * portfolios + portfolio_items   (two-step: user's portfolio ids
-  //                                     via portfolios.user_id, then
-  //                                     items filtered by portfolio_id.
-  //                                     Block 5A-W-42A-FIX: the earlier
-  //                                     direct `.eq('user_id', ...)` on
-  //                                     portfolio_items missed older rows
-  //                                     where user_id was never populated,
-  //                                     which showed the empty state to
-  //                                     users who genuinely had cards. The
-  //                                     proven pattern from
-  //                                     src/lib/account/usage.ts is used
-  //                                     everywhere else in the app.)
-  //   * get_watchlist_with_prices RPC  (prices + 7d/30d moves)
-  //   * alert_events                   (production feed; replaces the
-  //                                     previous buggy count on the legacy
-  //                                     user_alerts table which has no
-  //                                     writer)
+  // Block 5A-W-42A-FIX2 — data sources:
+  //
+  //   * PORTFOLIO — loaded via the SAME path /dashboard/portfolio uses:
+  //     resolve the user's portfolio ids using `loadUserPortfolioIds`
+  //     (is_default=true → any-portfolio fallback for legacy users),
+  //     then call the `get_portfolio_summary(p_portfolio_id)` RPC on
+  //     each. This matches PortfolioDashboard.tsx::loadPortfolio.
+  //
+  //     Why the RPC and not a direct SELECT on portfolio_items:
+  //     production writes the display fields as `card_name_snapshot` /
+  //     `set_name_snapshot` (NOT `card_name` / `set_name`). Block 5A-W-16B
+  //     hit the same footgun on the weekly digest — see weeklyDigest.ts
+  //     :1017-1029 — and W42A-FIX repeated it here. Selecting the
+  //     non-existent columns 400s the whole query and PostgREST returns
+  //     no rows, which the render treats as "empty portfolio". Going
+  //     through the RPC avoids the column-name coupling entirely.
+  //
+  //   * WATCHLIST      — get_watchlist_with_prices RPC (unchanged)
+  //   * ALERTS         — alert_events by user_id, last 30d (unchanged)
+  //
   // Each query is wrapped so a failure in one section still lets the
   // others render.
   useEffect(() => {
     if (!user) return
     let live = true
 
-    // Block 5A-W-42A-FIX — resolve every portfolio the user owns first.
-    // Reused by both the snapshot query and the movers merge below so
-    // the same ownership pattern applies uniformly.
-    async function loadUserPortfolioIds(): Promise<string[]> {
-      try {
-        const { data, error } = await supabase.from('portfolios')
-          .select('id').eq('user_id', user.id)
-        if (error || !Array.isArray(data)) return []
-        return (data as Array<{ id: string }>).map(p => p.id).filter(Boolean)
-      } catch { return [] }
-    }
-
     async function load() {
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-      const portfolioIds = await loadUserPortfolioIds()
+      const portfolioIds = await loadUserPortfolioIds(supabase, user.id)
       if (!live) return
+
+      // Hoisted so the movers merge below can reuse the RPC result
+      // without a second query.
+      const portfolioItems: any[] = []
 
       // ── Portfolio ────────────────────────────────────────────────────
       try {
-        const { data: pfItems } = portfolioIds.length === 0
-          ? { data: [] as any[] }
-          : await supabase.from('portfolio_items')
-            .select('id, card_slug, card_name, set_name, position_value_cents, current_value_cents, manual_value_cents, pct_7d, pct_30d, holding_type')
-            .in('portfolio_id', portfolioIds)
+        // Call get_portfolio_summary for each portfolio the user owns —
+        // usually one, occasionally many for legacy users. Merge the
+        // items arrays. Same RPC + shape /dashboard/portfolio consumes.
+        for (const pid of portfolioIds) {
+          const { data, error } = await supabase.rpc('get_portfolio_summary', { p_portfolio_id: pid })
+          if (error) continue
+          if (data && Array.isArray(data.items)) portfolioItems.push(...data.items)
+        }
         if (!live) return
-        const items = pfItems || []
+        const items = portfolioItems
         // position_value_cents already accounts for manual override +
         // quantity in PortfolioDashboard's write path. Fall back to
         // manual_value_cents or current_value_cents only if position is
@@ -273,21 +271,21 @@ export default function DashboardHubClient() {
       // ── Movers: merge portfolio + watchlist, dedupe by card_slug, ──
       //   sort by |pct_30d| (fallback pct_7d), top 5. Watchlist rows
       //   win the dedupe because they carry card_url_slug.
+      //
+      //   Block 5A-W-42A-FIX2 — reuses the portfolioItems already
+      //   loaded via get_portfolio_summary above. Previously a second
+      //   direct SELECT was issued here with the wrong non-snapshot
+      //   column names and silently returned []; movers stayed empty.
       try {
-        const { data: pfMoversRaw } = portfolioIds.length === 0
-          ? { data: [] as any[] }
-          : await supabase.from('portfolio_items')
-            .select('card_slug, card_name, set_name, position_value_cents, pct_7d, pct_30d')
-            .in('portfolio_id', portfolioIds)
-        if (!live) return
         const byCard = new Map<string, Mover>()
-        for (const p of pfMoversRaw || []) {
+        for (const p of portfolioItems) {
+          if (!p?.card_slug) continue
           byCard.set(p.card_slug, {
             card_slug:     p.card_slug,
             card_url_slug: null,
             card_name:     p.card_name,
             set_name:      p.set_name,
-            current_cents: p.position_value_cents ?? null,
+            current_cents: p.position_value_cents ?? p.current_value_cents ?? null,
             pct_7d:        p.pct_7d ?? null,
             pct_30d:       p.pct_30d ?? null,
           })
