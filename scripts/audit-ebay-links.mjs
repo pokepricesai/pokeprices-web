@@ -76,14 +76,23 @@ const ALLOW = new Set([
   'src/lib/seo-analysis/__tests__/analyzers.test.ts',
 
   // Block 5A-W-43A — Potential eBay deals dashboard section reads the
-  // daily_deals.item_web_url column and routes it through the central
-  // affiliateWrapEbayUrl helper for the CTA. Same policy as
-  // InlineChat.tsx: allowed to reference the raw column name because
-  // every user-facing URL passes through the engine.
+  // daily_deals.item_web_url column and routes it through an
+  // affiliate helper for the CTA. Same policy as InlineChat.tsx:
+  // allowed to reference the raw column name because every user-
+  // facing URL passes through an audited helper.
   'src/lib/dashboard/potentialDeals.ts',
   'src/lib/dashboard/__tests__/potentialDeals.test.ts',
   'src/components/dashboard/PotentialDealsSection.tsx',
   'src/components/dashboard/__tests__/PotentialDealsSection.test.tsx',
+
+  // Block 5A-W-43B — Daily-deals CTA deep-link builder. Constructs
+  // affiliate-wrapped /itm/<id> URLs using campaign IDs read from the
+  // central marketplace registry (src/lib/marketplaces.ts). Does NOT
+  // modify the W39 engine; it is a narrow, deal-specific consumer
+  // that exists because the engine deliberately collapses /itm/
+  // URLs into affiliate search results.
+  'src/lib/dashboard/affiliateDealLink.ts',
+  'src/lib/dashboard/__tests__/affiliateDealLink.test.ts',
 ])
 
 function relative(p) {

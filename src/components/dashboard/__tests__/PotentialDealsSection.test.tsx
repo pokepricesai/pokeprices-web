@@ -1,8 +1,7 @@
-// Block 5A-W-43A — invariants for the dashboard's Potential eBay
-// Deals section. Source-read tests pin the cautious copy, forbidden
-// language regressions, affiliate wrapping path, and empty-state
-// handling. Two direct utility tests cover the pure marketplace
-// helpers.
+// Block 5A-W-43A / 5A-W-43B — invariants for the dashboard's
+// Potential eBay Deals section. Source-read tests pin the cautious
+// copy, forbidden-language guards, deep-link CTA path, Pro gating,
+// tabs + pagination structure, and empty-state handling.
 //
 // The component transitively imports @/lib/supabase which builds a
 // browser client at module load time. Stub it before the top-level
@@ -16,7 +15,7 @@ vi.mock('@/lib/supabase', () => ({
   supabase: {
     from: () => ({
       select: () => ({
-        eq:  () => ({ gte: () => ({ gte: () => ({ order: () => ({ limit: () => Promise.resolve({ data: [], error: null }) }) }) }) }),
+        eq: () => ({ then: (cb: any) => Promise.resolve({ data: [], error: null }).then(cb) }),
       }),
     }),
     rpc: () => Promise.resolve({ data: null, error: null }),
@@ -28,23 +27,27 @@ vi.mock('@/lib/supabase', () => ({
   CHAT_ENDPOINT: 'https://stub.example.com/functions/v1/chat',
 }))
 
-import { marketplaceLabel, marketplaceMode } from '../PotentialDealsSection'
+import { marketplaceLabel, marketplaceMode, DEALS_PAGE_SIZE } from '../PotentialDealsSection'
 
 const SRC = readFileSync(join(__dirname, '..', 'PotentialDealsSection.tsx'), 'utf8')
+
+// ── Cautious copy ─────────────────────────────────────────────────
 
 describe('PotentialDealsSection — cautious copy', () => {
   it('renders the required heading, sub-copy and disclaimer verbatim', () => {
     expect(SRC).toContain('Potential eBay deals')
-    expect(SRC).toContain('Cards listed below recent market price. Check condition and seller before buying.')
-    expect(SRC).toContain('Prices and availability can change quickly. Always check the listing before buying. Updated daily.')
+    expect(SRC).toContain('Listings below recent market data. Check condition and seller before buying.')
+    expect(SRC).toContain('Prices and availability can change quickly. Always check the listing before buying.')
   })
 
-  it('shows the required empty-state copy', () => {
+  it('shows the required empty-state copy for both tabs', () => {
+    expect(SRC).toContain('No watchlist deals found today.')
+    expect(SRC).toContain('No best deals found today.')
     expect(SRC).toContain('No potential deals found today.')
   })
 
-  it('CTA label is "Check on eBay"', () => {
-    expect(SRC).toContain('Check on eBay')
+  it('CTA label is "Check listing on eBay"', () => {
+    expect(SRC).toContain('Check listing on eBay')
   })
 
   it('never uses forbidden marketing language', () => {
@@ -53,8 +56,6 @@ describe('PotentialDealsSection — cautious copy', () => {
       'profit',
       'easy money',
       'sure thing', 'sure-thing',
-      // "flip" catches "flip that card" style copy but not React's flip
-      // animation etc. Ensure no whole-word matches at least.
       'to flip', 'quick flip', 'flip for',
       'arbitrage',
     ]) {
@@ -63,62 +64,136 @@ describe('PotentialDealsSection — cautious copy', () => {
   })
 })
 
-describe('PotentialDealsSection — affiliate wrapping', () => {
-  it('imports affiliateWrapEbayUrl from the central engine (never builds URLs locally)', () => {
-    expect(SRC).toContain("import { affiliateWrapEbayUrl } from '@/lib/ebayAffiliate'")
-    expect(SRC).toContain('affiliateWrapEbayUrl(deal.item_web_url')
+// ── Deep-link affiliate wrapping ───────────────────────────────────
+
+describe('PotentialDealsSection — deep-link affiliate CTA', () => {
+  it('imports buildDealDeepLink (not affiliateWrapEbayUrl) for the row CTA', () => {
+    expect(SRC).toContain("import { buildDealDeepLink } from '@/lib/dashboard/affiliateDealLink'")
+    expect(SRC).toContain('buildDealDeepLink({')
+    // Regression guard against slipping back to the search-collapse
+    // helper that was breaking the "most links do not work" report.
+    expect(SRC).not.toContain('affiliateWrapEbayUrl')
+  })
+
+  it('passes ebay_item_id + item_web_url + customId through to the deep-link builder', () => {
+    expect(SRC).toContain('itemWebUrl:  deal.item_web_url')
+    expect(SRC).toContain('ebayItemId:  deal.ebay_item_id')
+    expect(SRC).toMatch(/customId:\s+`pp:dashboard-deals:/)
   })
 
   it('never assigns deal.item_web_url directly to an href', () => {
-    // If item_web_url leaks straight into an href attribute, the audit
-    // script would still catch it — but pin the invariant here so a
-    // reviewer can see the intent.
     expect(SRC).not.toMatch(/href=\{deal\.item_web_url\}/)
     expect(SRC).not.toMatch(/href=\{`\$\{deal\.item_web_url\}/)
   })
 
-  it('threads a placement + source component into the wrapper for analytics', () => {
-    expect(SRC).toContain("placement:       'dashboard_potential_deals'")
-    expect(SRC).toContain("sourceComponent: 'PotentialDealsSection'")
-  })
-
-  it('fails closed when the affiliate wrapper returns null (renders no CTA anchor)', () => {
-    // The `!affiliateUrl` branch renders the fallback text instead of
-    // a broken/unhrefed link.
+  it('fails closed when the deep-link builder returns null (renders "eBay listing" instead)', () => {
     expect(SRC).toMatch(/affiliateUrl \? \(/)
     expect(SRC).toContain('eBay listing')
   })
 
-  it('external links carry the safe rel set (noopener sponsored nofollow) and target=_blank', () => {
+  it('external anchors carry safe rel + target attributes', () => {
     expect(SRC).toContain('target="_blank"')
     expect(SRC).toContain('rel="noopener sponsored nofollow"')
   })
 })
 
-describe('PotentialDealsSection — data source + gating', () => {
-  it('reads deals via the shared loader (no direct daily_deals SELECT here)', () => {
-    expect(SRC).toContain("import {\n  loadPotentialDeals,")
-    expect(SRC).toContain('loadPotentialDeals(supabase, { limit: 5 })')
-    expect(SRC).not.toContain("from('daily_deals')")
+// ── Pro gating ────────────────────────────────────────────────────
+
+describe('PotentialDealsSection — Pro gating', () => {
+  it('reads the user plan via useUserPlan and blocks free users', () => {
+    expect(SRC).toContain("import { useUserPlan } from '@/lib/account/useUserPlan'")
+    expect(SRC).toContain('const { plan, loading: planLoading } = useUserPlan(userId ?? null)')
+    // The plan-loading branch renders a skeleton, and only the "pro"
+    // branch continues to the main render.
+    expect(SRC).toMatch(/if \(planLoading\)/)
+    expect(SRC).toMatch(/if \(plan !== 'pro'\)/)
   })
 
-  it('is not gated on Pro (no plan / entitlement imports)', () => {
-    expect(SRC).not.toContain('useUserPlan')
-    expect(SRC).not.toContain('entitlements')
-    expect(SRC).not.toContain('canAddPortfolioItem')
+  it('renders a LockedForFree card with the required upgrade copy + CTA for free users', () => {
+    expect(SRC).toContain('Pro members can view potential eBay listings priced below recent market data.')
+    expect(SRC).toContain('Upgrade to Pro')
+    expect(SRC).toContain('href="/dashboard/settings"')
   })
 
-  it('handles loading, empty and populated states without a hollow section', () => {
-    // Loading: skeleton.
-    expect(SRC).toContain('className="skeleton"')
-    // Empty branch renders the "No potential deals" copy.
-    expect(SRC).toMatch(/deals\.length === 0/)
-    // Populated branch renders a <ul> with DealRow children.
-    expect(SRC).toContain('<DealRow')
+  it('does not fetch or render deal rows when the user is not Pro', () => {
+    // The Watchlist / Best data fetches are inside effects gated on
+    // `plan === 'pro'`. Pin that guard so a future refactor cannot
+    // start firing daily_deals reads for free users.
+    expect(SRC).toContain("if (plan !== 'pro' || !userId)")
   })
 })
 
+// ── Tabs + pagination ─────────────────────────────────────────────
+
+describe('PotentialDealsSection — tabs + pagination', () => {
+  it('renders Watchlist deals + Best deals tabs', () => {
+    expect(SRC).toContain('label="Watchlist deals"')
+    expect(SRC).toContain('label="Best deals"')
+    expect(SRC).toContain('role="tablist"')
+  })
+
+  it('defaults to Watchlist when the user has watched cards, Best otherwise', () => {
+    expect(SRC).toContain("setTab(slugs.length > 0 ? 'watchlist' : 'best')")
+  })
+
+  it('resets pagination to page 1 whenever the tab or watchlist set changes', () => {
+    // The load effect explicitly setPage(1) each time it fires.
+    expect(SRC).toContain('setPage(1)')
+    // And the load effect is keyed on tab + watchlistSlugs.
+    expect(SRC).toMatch(/\[tab, watchlistSlugs\]/)
+  })
+
+  it('threads the watchlist card_slugs filter into loadPotentialDeals for the Watchlist tab', () => {
+    expect(SRC).toContain("import {\n  loadPotentialDeals,\n  loadWatchlistSlugs,")
+    expect(SRC).toContain("tab === 'watchlist' ? watchlistSlugs : null")
+    expect(SRC).toContain('cardSlugFilter: filter')
+  })
+
+  it('paginates client-side with a fixed page size', () => {
+    // Page size constant is exported (see the DEALS_PAGE_SIZE import
+    // below) and used by both the slice and the totalPages calc.
+    expect(SRC).toContain('export const DEALS_PAGE_SIZE = 5')
+    expect(SRC).toContain('deals.length / DEALS_PAGE_SIZE')
+    expect(SRC).toContain('deals.slice(pageStart, pageStart + DEALS_PAGE_SIZE)')
+  })
+
+  it('hides the pager when there is only one page', () => {
+    expect(SRC).toContain('const showPager = totalPages > 1')
+    expect(SRC).toMatch(/\{showPager && \(/)
+  })
+
+  it('clamps the current page against a shrinking result set (safePage math)', () => {
+    expect(SRC).toContain('const safePage = Math.min(page, totalPages)')
+    expect(SRC).toMatch(/setPage\(p => Math\.max\(1, p - 1\)\)/)
+    expect(SRC).toMatch(/setPage\(p => Math\.min\(totalPages, p \+ 1\)\)/)
+  })
+
+  it('caps the DB fetch at DEALS_MAX_FETCH to keep the round trip cheap', () => {
+    expect(SRC).toContain('DEALS_MAX_FETCH = 30')
+    expect(SRC).toContain('limit: DEALS_MAX_FETCH')
+  })
+})
+
+// ── Empty state cross-tab links ───────────────────────────────────
+
+describe('PotentialDealsSection — empty-state cross-tab affordance', () => {
+  it('offers a link to Best deals when Watchlist deals is empty', () => {
+    expect(SRC).toContain('View Best deals →')
+  })
+
+  it('offers a link to Watchlist deals when Best is empty AND the user has a watchlist', () => {
+    expect(SRC).toContain('View Watchlist deals →')
+    expect(SRC).toContain('hasWatchlist')
+  })
+})
+
+// ── Utility helpers ───────────────────────────────────────────────
+
 describe('PotentialDealsSection — utility helpers', () => {
+  it('exports DEALS_PAGE_SIZE = 5', () => {
+    expect(DEALS_PAGE_SIZE).toBe(5)
+  })
+
   it('maps eBay marketplace codes to friendly labels', () => {
     expect(marketplaceLabel('EBAY_GB')).toBe('ebay.co.uk')
     expect(marketplaceLabel('EBAY_US')).toBe('ebay.com')

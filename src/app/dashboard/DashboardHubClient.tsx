@@ -676,11 +676,12 @@ export default function DashboardHubClient() {
         )}
       </section>
 
-      {/* ── Potential eBay deals (Block 5A-W-43A) ────────────────────
+      {/* ── Potential eBay deals (Block 5A-W-43A / 5A-W-43B) ──────────
            Sits below Market Movement so the user's own state (portfolio
            / watchlist / alerts / movers) stays higher in the visual
-           hierarchy than an eBay browse surface. Not gated on Pro. */}
-      <PotentialDealsSection />
+           hierarchy than an eBay browse surface. Gated on Pro from
+           W43B onwards — free users see a locked preview card. */}
+      <PotentialDealsSection userId={user?.id ?? null} />
 
       {/* ── Tools tile grid (existing, cleaned up) ───────────────────── */}
       <h2 style={{

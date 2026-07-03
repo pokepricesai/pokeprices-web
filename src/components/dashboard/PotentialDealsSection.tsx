@@ -2,41 +2,52 @@
 
 // src/components/dashboard/PotentialDealsSection.tsx
 //
-// Block 5A-W-43A — dashboard hub section listing potential eBay
-// deals sourced from the shared `daily_deals` table.
+// Block 5A-W-43A / 5A-W-43B — dashboard hub section listing potential
+// eBay deals sourced from the shared `daily_deals` table.
 //
-// Copy is deliberately cautious per the W43 audit brief:
-//   * Heading:     "Potential eBay deals"
-//   * Sub-copy:    "Cards listed below recent market price. Check
-//                   condition and seller before buying."
-//   * Disclaimer:  "Prices and availability can change quickly.
-//                   Always check the listing before buying. Updated
-//                   daily."
-//   * Empty state: "No potential deals found today."
-//   * CTA:         "Check on eBay"
+// This is a PRO feature. Free users see a locked preview card with
+// an "Upgrade to Pro" link routing to /dashboard/settings where the
+// existing plan panel (AccountPlanBadge full mode) is rendered.
 //
-// Explicitly avoids the banned copy set enforced by
-// PotentialDealsSection.test.tsx (see the "cautious copy" describe
-// block for the exact allow/deny list).
+// Copy is deliberately cautious — see the "cautious copy" describe
+// block in PotentialDealsSection.test.tsx for the exact allow/deny
+// list of marketing verbs the section must avoid.
 //
-// CTA safety: every user-facing eBay URL is routed through the
-// central affiliateWrapEbayUrl (W39 / Block 2C). A raw item URL is
-// never assigned to an href directly. When the wrapper returns null
-// (missing campaign ID / unrecognised URL) the row still renders,
-// with the CTA replaced by a small "eBay listing" text hint — the
-// listing data is still informative, just not clickable.
+// Two tabs — Watchlist deals and Best deals — with independent
+// client-side pagination (page size 5).
 //
-// Not gated on Pro — free for everyone.
+// CTA safety: every user-facing eBay URL is routed through the local
+// deep-link builder buildDealDeepLink (src/lib/dashboard/affiliateDealLink.ts)
+// which reads campaign IDs from the central marketplaces registry and
+// appends the standard EPN affiliate parameters to the /itm/<id> URL.
+// A raw item URL is never assigned to an href directly.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import { affiliateWrapEbayUrl } from '@/lib/ebayAffiliate'
+import { useUserPlan } from '@/lib/account/useUserPlan'
 import {
   loadPotentialDeals,
+  loadWatchlistSlugs,
   type PotentialDeal,
 } from '@/lib/dashboard/potentialDeals'
+import { buildDealDeepLink } from '@/lib/dashboard/affiliateDealLink'
 
-// ── Helpers ─────────────────────────────────────────────────────────
+// ── Constants ──────────────────────────────────────────────────────
+
+export const DEALS_PAGE_SIZE = 5
+const DEALS_MAX_FETCH = 30
+type TabId = 'watchlist' | 'best'
+
+// ── Types ──────────────────────────────────────────────────────────
+
+type Props = {
+  /** Signed-in user id. Null while the session is still loading —
+   *  the section renders a loading skeleton until it settles. */
+  userId: string | null | undefined
+}
+
+// ── Helpers ────────────────────────────────────────────────────────
 
 function formatMoney(cents: number | null | undefined, currency: string | null | undefined): string {
   if (cents == null || cents <= 0) return '—'
@@ -47,7 +58,6 @@ function formatMoney(cents: number | null | undefined, currency: string | null |
 }
 
 function formatFairValue(cents: number | null | undefined): string {
-  // fair_value_cents is USD cents everywhere (detect_deals.py normalises).
   if (cents == null || cents <= 0) return '—'
   const v = cents / 100
   if (v >= 1000) return `$${(v / 1000).toFixed(1)}k`
@@ -71,7 +81,7 @@ function formatFeedback(score: number | null | undefined): string {
   return score.toLocaleString('en-GB')
 }
 
-// ── Styles ──────────────────────────────────────────────────────────
+// ── Styles ─────────────────────────────────────────────────────────
 
 const sectionWrapStyle: React.CSSProperties = {
   marginBottom: 24, fontFamily: "'Figtree', sans-serif",
@@ -142,6 +152,43 @@ const noCtaStyle: React.CSSProperties = {
   fontSize: 11, color: 'var(--text-muted)',
   fontStyle: 'italic', whiteSpace: 'nowrap',
 }
+const tabsRowStyle: React.CSSProperties = {
+  display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap',
+}
+function tabButtonStyle(active: boolean): React.CSSProperties {
+  return {
+    padding: '5px 12px', borderRadius: 999,
+    border: active ? '1px solid var(--primary)' : '1px solid var(--border)',
+    background: active ? 'rgba(26,95,173,0.10)' : 'transparent',
+    color: active ? 'var(--primary)' : 'var(--text-muted)',
+    fontSize: 12, fontWeight: 800, cursor: 'pointer',
+    fontFamily: "'Figtree', sans-serif",
+  }
+}
+const pagerRowStyle: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+  gap: 10, marginTop: 10, flexWrap: 'wrap',
+}
+function pagerBtnStyle(disabled: boolean): React.CSSProperties {
+  return {
+    padding: '5px 12px', borderRadius: 8,
+    border: '1px solid var(--border)', background: 'var(--bg-light)',
+    color: disabled ? 'var(--text-muted)' : 'var(--text)',
+    fontSize: 12, fontWeight: 700, opacity: disabled ? 0.5 : 1,
+    cursor: disabled ? 'not-allowed' : 'pointer', fontFamily: "'Figtree', sans-serif",
+  }
+}
+const lockedPanelStyle: React.CSSProperties = {
+  background: 'linear-gradient(135deg, rgba(124,58,237,0.06), rgba(26,95,173,0.05))',
+  border: '1px solid rgba(124,58,237,0.25)', borderRadius: 14,
+  padding: '18px 20px',
+}
+const lockedCtaStyle: React.CSSProperties = {
+  display: 'inline-block', marginTop: 10,
+  padding: '7px 14px', borderRadius: 999,
+  background: 'var(--primary)', color: '#fff',
+  fontSize: 12, fontWeight: 800, textDecoration: 'none',
+}
 
 // ── Section pieces ─────────────────────────────────────────────────
 
@@ -153,7 +200,7 @@ function SectionHeader() {
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Updated daily</span>
       </div>
       <p style={subCopyStyle}>
-        Cards listed below recent market price. Check condition and seller before buying.
+        Listings below recent market data. Check condition and seller before buying.
       </p>
     </>
   )
@@ -162,23 +209,54 @@ function SectionHeader() {
 function Disclaimer() {
   return (
     <p style={disclaimerStyle}>
-      Prices and availability can change quickly. Always check the listing before buying. Updated daily.
+      Prices and availability can change quickly. Always check the listing before buying.
     </p>
   )
 }
 
+function LockedForFree() {
+  return (
+    <section aria-label="Potential eBay deals" style={sectionWrapStyle}>
+      <div style={headerRowStyle}>
+        <h2 style={h2Style}>Potential eBay deals</h2>
+      </div>
+      <div style={lockedPanelStyle}>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--text)', lineHeight: 1.55 }}>
+          Pro members can view potential eBay listings priced below recent market data.
+        </p>
+        <Link
+          href="/dashboard/settings"
+          aria-label="Upgrade to Pro"
+          style={lockedCtaStyle}
+        >
+          Upgrade to Pro
+        </Link>
+      </div>
+    </section>
+  )
+}
+
+function TabButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button" onClick={onClick} aria-pressed={active}
+      style={tabButtonStyle(active)}
+    >
+      {label}
+    </button>
+  )
+}
+
 function DealRow({ deal }: { deal: PotentialDeal }) {
-  // Route the CTA through the central affiliate helper. Never assign
-  // deal.item_web_url to an href directly.
-  const wrapped = deal.item_web_url
-    ? affiliateWrapEbayUrl(deal.item_web_url, {
-        placement:       'dashboard_potential_deals',
-        pageType:        'dashboard',
-        sourceComponent: 'PotentialDealsSection',
-        cardSlug:        deal.card_slug,
-      })
-    : null
-  const affiliateUrl = wrapped?.url ?? null
+  // Route the CTA through the local deep-link builder — it appends
+  // affiliate parameters directly to the /itm/<id> URL rather than
+  // collapsing to a search result. Never assign deal.item_web_url
+  // to an href directly.
+  const affiliateUrl = useMemo(() => buildDealDeepLink({
+    itemWebUrl:  deal.item_web_url,
+    ebayItemId:  deal.ebay_item_id,
+    customId:    `pp:dashboard-deals:${marketplaceMode(deal.marketplace) ?? 'uk'}:${deal.card_slug ?? '_'}`,
+  }), [deal.item_web_url, deal.ebay_item_id, deal.marketplace, deal.card_slug])
 
   const cardName = (deal.card_name || 'Card').replace(/\s*#\d+.*$/, '').trim() || 'Card'
   const setName  = deal.set_name || ''
@@ -215,13 +293,12 @@ function DealRow({ deal }: { deal: PotentialDeal }) {
           href={affiliateUrl}
           target="_blank" rel="noopener sponsored nofollow"
           style={ctaStyle}
-          aria-label={`Check on ${marketplace}`}
+          aria-label={`Check listing on ${marketplace}`}
         >
-          Check on eBay
+          Check listing on eBay
           <span aria-hidden>→</span>
         </a>
       ) : (
-        // Fail-closed: no CTA when the wrapper can't produce a URL.
         <span style={noCtaStyle}>eBay listing</span>
       )}
     </li>
@@ -230,46 +307,145 @@ function DealRow({ deal }: { deal: PotentialDeal }) {
 
 // ── Main component ─────────────────────────────────────────────────
 
-export default function PotentialDealsSection() {
-  const [deals, setDeals] = useState<PotentialDeal[] | null>(null)
+export default function PotentialDealsSection({ userId }: Props) {
+  const { plan, loading: planLoading } = useUserPlan(userId ?? null)
 
+  const [watchlistSlugs, setWatchlistSlugs] = useState<string[] | null>(null)
+  const [tab,        setTab]        = useState<TabId | null>(null)
+  const [deals,      setDeals]      = useState<PotentialDeal[] | null>(null)
+  const [dealsLoading, setDealsLoading] = useState(false)
+  const [page,       setPage]       = useState(1)
+
+  // ── Load the user's watchlist card_slugs once we know they're Pro.
+  //    Free users skip this entirely — the section renders locked.
   useEffect(() => {
+    if (planLoading) return
+    if (plan !== 'pro' || !userId) { setWatchlistSlugs([]); return }
     let live = true
-    loadPotentialDeals(supabase, { limit: 5 })
-      .then(rows => { if (live) setDeals(rows) })
-      .catch(() => { if (live) setDeals([]) })
+    loadWatchlistSlugs(supabase, userId).then(slugs => {
+      if (!live) return
+      setWatchlistSlugs(slugs)
+      // Default tab: Watchlist when the user has watched cards,
+      // otherwise Best (matches the brief).
+      setTab(slugs.length > 0 ? 'watchlist' : 'best')
+    })
     return () => { live = false }
-  }, [])
+  }, [plan, planLoading, userId])
 
-  if (deals === null) {
+  // ── Load deals whenever the tab or watchlist set changes.
+  useEffect(() => {
+    if (tab == null || watchlistSlugs == null) return
+    let live = true
+    setDealsLoading(true)
+    setDeals(null)
+    setPage(1)
+    const filter = tab === 'watchlist' ? watchlistSlugs : null
+    loadPotentialDeals(supabase, { limit: DEALS_MAX_FETCH, cardSlugFilter: filter })
+      .then(rows => { if (!live) return; setDeals(rows); setDealsLoading(false) })
+      .catch(() => { if (!live) return; setDeals([]); setDealsLoading(false) })
+    return () => { live = false }
+  }, [tab, watchlistSlugs])
+
+  if (planLoading) {
     return (
       <section aria-label="Potential eBay deals" style={sectionWrapStyle}>
-        <SectionHeader />
+        <div style={headerRowStyle}><h2 style={h2Style}>Potential eBay deals</h2></div>
         <div className="skeleton" style={{ height: 60, borderRadius: 14 }} />
       </section>
     )
   }
 
-  if (deals.length === 0) {
-    return (
-      <section aria-label="Potential eBay deals" style={sectionWrapStyle}>
-        <SectionHeader />
-        <div style={emptyBoxStyle}>
-          <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55 }}>
-            No potential deals found today.
-          </p>
-          <Disclaimer />
-        </div>
-      </section>
-    )
+  if (plan !== 'pro') {
+    return <LockedForFree />
   }
+
+  // Pro path — main render.
+  const totalPages = deals ? Math.max(1, Math.ceil(deals.length / DEALS_PAGE_SIZE)) : 1
+  const safePage = Math.min(page, totalPages)
+  const pageStart = (safePage - 1) * DEALS_PAGE_SIZE
+  const pageDeals = deals ? deals.slice(pageStart, pageStart + DEALS_PAGE_SIZE) : []
+  const showPager = totalPages > 1
+
+  const hasWatchlist = (watchlistSlugs?.length ?? 0) > 0
 
   return (
     <section aria-label="Potential eBay deals" style={sectionWrapStyle}>
       <SectionHeader />
-      <ul style={listWrapStyle}>
-        {deals.map((d, i) => <DealRow key={String(d.ebay_item_id ?? d.item_web_url ?? i)} deal={d} />)}
-      </ul>
+
+      <div role="tablist" aria-label="Deal filter" style={tabsRowStyle}>
+        <TabButton label="Watchlist deals" active={tab === 'watchlist'} onClick={() => setTab('watchlist')} />
+        <TabButton label="Best deals"      active={tab === 'best'}      onClick={() => setTab('best')} />
+      </div>
+
+      {dealsLoading || deals === null ? (
+        <div className="skeleton" style={{ height: 60, borderRadius: 14 }} />
+      ) : deals.length === 0 ? (
+        <div style={emptyBoxStyle}>
+          {tab === 'watchlist' ? (
+            <>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                No watchlist deals found today.
+              </p>
+              <button
+                type="button" onClick={() => setTab('best')}
+                aria-label="View Best deals"
+                style={{ ...tabButtonStyle(false), marginTop: 10 }}
+              >
+                View Best deals →
+              </button>
+            </>
+          ) : hasWatchlist ? (
+            <>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                No best deals found today.
+              </p>
+              <button
+                type="button" onClick={() => setTab('watchlist')}
+                aria-label="View Watchlist deals"
+                style={{ ...tabButtonStyle(false), marginTop: 10 }}
+              >
+                View Watchlist deals →
+              </button>
+            </>
+          ) : (
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55 }}>
+              No potential deals found today.
+            </p>
+          )}
+        </div>
+      ) : (
+        <>
+          <ul style={listWrapStyle}>
+            {pageDeals.map((d, i) => <DealRow key={String(d.ebay_item_id ?? d.item_web_url ?? i)} deal={d} />)}
+          </ul>
+          {showPager && (
+            <div style={pagerRowStyle} aria-label="Deal pagination">
+              <button
+                type="button"
+                disabled={safePage <= 1}
+                aria-label="Previous page"
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                style={pagerBtnStyle(safePage <= 1)}
+              >
+                ← Previous
+              </button>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                Page {safePage} of {totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={safePage >= totalPages}
+                aria-label="Next page"
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                style={pagerBtnStyle(safePage >= totalPages)}
+              >
+                Next →
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
       <Disclaimer />
     </section>
   )

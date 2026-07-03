@@ -175,15 +175,16 @@ describe('DashboardHubClient — W42A tools tile grid', () => {
   })
 })
 
-describe('DashboardHubClient — W43A potential eBay deals mount', () => {
-  it('imports and mounts PotentialDealsSection', () => {
+describe('DashboardHubClient — W43A / W43B potential eBay deals mount', () => {
+  it('imports and mounts PotentialDealsSection with the signed-in user id', () => {
     expect(SRC).toContain("import PotentialDealsSection from '@/components/dashboard/PotentialDealsSection'")
-    expect(SRC).toContain('<PotentialDealsSection />')
+    // W43B threads the user id through so the section can gate on Pro.
+    expect(SRC).toMatch(/<PotentialDealsSection\s+userId=\{user\?\.id \?\? null\}\s*\/>/)
   })
 
   it('mounts the section below "Market movement for you" and above the tools grid', () => {
     const moversIdx = SRC.indexOf('aria-label="Market movement for you"')
-    const dealsIdx  = SRC.indexOf('<PotentialDealsSection />')
+    const dealsIdx  = SRC.indexOf('<PotentialDealsSection')
     const toolsIdx  = SRC.indexOf('>Tools<')
     expect(moversIdx).toBeGreaterThan(-1)
     expect(dealsIdx).toBeGreaterThan(-1)
@@ -194,7 +195,7 @@ describe('DashboardHubClient — W43A potential eBay deals mount', () => {
 
   it('does not mount PotentialDealsSection above the portfolio / watchlist / alerts snapshot', () => {
     const snapshotIdx = SRC.indexOf('aria-label="Personal snapshot"')
-    const dealsIdx    = SRC.indexOf('<PotentialDealsSection />')
+    const dealsIdx    = SRC.indexOf('<PotentialDealsSection')
     expect(snapshotIdx).toBeGreaterThan(-1)
     expect(dealsIdx).toBeGreaterThan(-1)
     expect(snapshotIdx).toBeLessThan(dealsIdx)
