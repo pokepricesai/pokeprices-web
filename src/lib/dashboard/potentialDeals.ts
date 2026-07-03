@@ -1,7 +1,7 @@
 // src/lib/dashboard/potentialDeals.ts
 //
-// Block 5A-W-43A / 5A-W-43B — read-only loader for the dashboard's
-// "Potential eBay deals" Pro section.
+// Block 5A-W-43A / 5A-W-43B / 5A-W-43C — read-only loader for the
+// dashboard's "Potential eBay deals" Pro section.
 //
 // Reads from the shared `daily_deals` table (populated nightly by the
 // sister scraper repo's detect_deals.py; producer deletes rows older
@@ -10,12 +10,26 @@
 //
 //   * confidence          = 'high'   (drops the producer's 'medium' floor)
 //   * seller_feedback_score >= 100   (raises the producer's 50 floor)
+//   * discount_pct        in [15, 30] — W43C (see below)
 //   * detected_at within the last 48h (covers "today's run + yesterday"
 //                                     across timezones)
 //   * item_web_url + ebay_item_id   both non-null — required for the
 //                                     CTA to be a valid deep link
 //   * card_name + set_name          exclude any row mentioning TOPPS
 //                                     (case-insensitive)
+//   * card_name + set_name + condition   defensive JS post-filter
+//                                     against the JUNK_TERMS list
+//                                     (fan art / custom / replica /
+//                                     reprint / etc. — W43C)
+//   * marketplace + URL domain     must agree (defensive; the CTA
+//                                     builder also cross-checks so
+//                                     bad rows never emit a link).
+//
+// W43C — DISCOUNT RANGE
+//   Listings more than ~30% below market are heavily correlated with
+//   sold / wrong-card / fan-art / fake matches. The narrow 15–30%
+//   window is what human reviewers would consider "plausible eBay
+//   deal" territory. The producer already enforces ≥15% at ingest.
 //
 // Optional: `cardSlugFilter` — restricts results to the caller's own
 // watchlist. Empty array is treated as "no results" (matches Postgres
@@ -63,6 +77,60 @@ export const POTENTIAL_DEALS_COLUMNS =
 const DEFAULT_LIMIT       = 30
 const MIN_ITEM_ID_LENGTH  = 6
 
+/** W43C — realistic discount window. Outside this band a row is either
+ *  (a) a straightforward market drop that our data isn't seeing (< 15%
+ *  is already dropped by the producer) or (b) heavily correlated with
+ *  fan art / wrong card / sold listing (> 30%). */
+export const MIN_DISCOUNT_PCT = 15
+export const MAX_DISCOUNT_PCT = 30
+
+/** W43C — junk-term list checked against every row's card_name +
+ *  set_name + condition (case-insensitive). Some entries duplicate
+ *  the DB-side TOPPS filter — kept for defence in depth if the DB
+ *  filter is ever loosened. */
+export const JUNK_TERMS: readonly string[] = [
+  'topps',
+  'fan art',
+  'custom',
+  'proxy',
+  'replica',
+  'reprint',
+  'metal card',
+  'gold plated',
+  'handmade',
+  'extended art',
+  'artwork',
+  'sticker',
+  'coin',
+  'jumbo',
+  'oversized',
+  'empty',
+  'no cards',
+  'case only',
+  'box only',
+  'pick your card',
+  'u pick',
+]
+
+/** W43C — normalise a daily_deals.marketplace value to the eBay item
+ *  URL host we expect. Anything unrecognised returns null and the row
+ *  is dropped (CTA cannot be built safely). */
+function expectedHostFor(marketplace: string | null | undefined): string | null {
+  if (marketplace === 'EBAY_GB') return 'www.ebay.co.uk'
+  if (marketplace === 'EBAY_US') return 'www.ebay.com'
+  return null
+}
+
+/** W43C — true when the row's card_name / set_name / condition contain
+ *  any junk term. Case-insensitive substring match. */
+export function isJunkRow(row: PotentialDeal, terms: readonly string[] = JUNK_TERMS): boolean {
+  const blob = `${row.card_name ?? ''} ${row.set_name ?? ''} ${row.condition ?? ''}`.toLowerCase()
+  for (const t of terms) {
+    if (blob.includes(t)) return true
+  }
+  return false
+}
+
 export type LoadPotentialDealsOptions = {
   /** Max rows returned after dedupe. Default 30 (client paginates
    *  in-memory). Also drives the DB-side over-fetch. */
@@ -106,9 +174,15 @@ export async function loadPotentialDeals(
       .eq('confidence', 'high')
       .gte('seller_feedback_score', 100)
       .gte('detected_at', cutoff)
+      // W43C — discount window. The producer already enforces >=15%
+      // at ingest; the upper bound drops rows that are almost always
+      // sold / wrong-card / fan art / fake in practice.
+      .gte('discount_pct', MIN_DISCOUNT_PCT)
+      .lte('discount_pct', MAX_DISCOUNT_PCT)
       // TOPPS exclusion (case-insensitive) — no listing_title column
       // exists on daily_deals so this is the strongest filter we can
-      // apply at the DB layer.
+      // apply at the DB layer. Additional junk terms are filtered
+      // defensively in JS below via JUNK_TERMS.
       .not('card_name', 'ilike', '%topps%')
       .not('set_name',  'ilike', '%topps%')
       // Require both fields the CTA needs to build a deep link.
@@ -129,19 +203,42 @@ export async function loadPotentialDeals(
     // that out.
     const rows = data as unknown as PotentialDeal[]
 
-    // Dedupe by ebay_item_id (fallback to item_web_url) so the same
-    // listing detected twice renders once.
+    // Dedupe by ebay_item_id (fallback to item_web_url) + defensive
+    // quality gate. Each guard has a matching DB-side filter above;
+    // the JS mirror keeps the CTA path safe if the schema drifts or a
+    // race exposes a stale row.
     const seen = new Set<string>()
     const deduped: PotentialDeal[] = []
     for (const row of rows) {
-      // Require both an id AND a URL to be present. The DB filter
-      // already enforces this but a defensive JS check keeps the
-      // CTA path safe if the schema drifts.
+      // W43B — require both an id AND a URL to be present.
       if (row.ebay_item_id == null || !row.item_web_url) continue
-      // ebay_item_id must be at least 6 digits — matches the deep-link
-      // helper's parser.
+
+      // W43B — ebay_item_id must be at least 6 digits (matches the
+      // deep-link helper's parser).
       const idStr = String(row.ebay_item_id)
       if (!/^\d{6,}$/.test(idStr)) continue
+
+      // W43C — discount clamp. DB does the same but a defensive JS
+      // check catches any decimal drift on the boundary.
+      if (typeof row.discount_pct !== 'number') continue
+      if (row.discount_pct < MIN_DISCOUNT_PCT || row.discount_pct > MAX_DISCOUNT_PCT) continue
+
+      // W43C — junk term filter over card_name / set_name / condition.
+      if (isJunkRow(row)) continue
+
+      // W43C — marketplace ↔ item URL host must agree. A row that
+      // claims marketplace=EBAY_GB but carries an ebay.com URL is a
+      // data bug; the CTA builder would still block it but we drop
+      // it here so it never counts against the visible window.
+      const expected = expectedHostFor(row.marketplace)
+      if (expected) {
+        let host: string | null = null
+        try { host = new URL(row.item_web_url).hostname.toLowerCase() } catch { host = null }
+        if (host !== expected) continue
+      } else {
+        // Unrecognised marketplace value — cannot build a safe CTA.
+        continue
+      }
 
       const key = idStr || String(row.item_web_url ?? '')
       if (!key || seen.has(key)) continue

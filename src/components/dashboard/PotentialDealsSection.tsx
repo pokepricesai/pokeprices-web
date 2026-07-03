@@ -65,8 +65,11 @@ function formatFairValue(cents: number | null | undefined): string {
 }
 
 function marketplaceLabel(mp: string | null | undefined): string {
-  if (mp === 'EBAY_GB') return 'ebay.co.uk'
-  if (mp === 'EBAY_US') return 'ebay.com'
+  // W43C — collector-facing labels ("eBay UK" / "eBay US") rather than
+  // raw domains. The affiliate CTA still deep-links to the correct
+  // domain via buildDealDeepLink's marketplaceHint check.
+  if (mp === 'EBAY_GB') return 'eBay UK'
+  if (mp === 'EBAY_US') return 'eBay US'
   return 'eBay'
 }
 
@@ -200,7 +203,7 @@ function SectionHeader() {
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Updated daily</span>
       </div>
       <p style={subCopyStyle}>
-        Listings below recent market data. Check condition and seller before buying.
+        Listings 15–30% below recent market data. Check condition and seller before buying.
       </p>
     </>
   )
@@ -253,9 +256,13 @@ function DealRow({ deal }: { deal: PotentialDeal }) {
   // collapsing to a search result. Never assign deal.item_web_url
   // to an href directly.
   const affiliateUrl = useMemo(() => buildDealDeepLink({
-    itemWebUrl:  deal.item_web_url,
-    ebayItemId:  deal.ebay_item_id,
-    customId:    `pp:dashboard-deals:${marketplaceMode(deal.marketplace) ?? 'uk'}:${deal.card_slug ?? '_'}`,
+    itemWebUrl:      deal.item_web_url,
+    ebayItemId:      deal.ebay_item_id,
+    // W43C — marketplace hint cross-checks the URL host so a UK
+    // listing URL never gets wrapped with a US campaign or vice
+    // versa. The loader also drops mismatched rows before render.
+    marketplaceHint: deal.marketplace,
+    customId:        `pp:dashboard-deals:${marketplaceMode(deal.marketplace) ?? 'uk'}:${deal.card_slug ?? '_'}`,
   }), [deal.item_web_url, deal.ebay_item_id, deal.marketplace, deal.card_slug])
 
   const cardName = (deal.card_name || 'Card').replace(/\s*#\d+.*$/, '').trim() || 'Card'
@@ -285,8 +292,11 @@ function DealRow({ deal }: { deal: PotentialDeal }) {
         </div>
       </div>
       <div style={priceColStyle}>
+        {/* W43C — listing price uses native currency (£ for UK, $ for
+            US). Reference market value is labelled USD explicitly so
+            collectors don't confuse it with the listing price. */}
         <div style={totalCostStyle}>{formatMoney(deal.total_cost_cents, deal.currency)}</div>
-        <div style={fairValueStyle}>vs {formatFairValue(deal.fair_value_cents)}</div>
+        <div style={fairValueStyle}>Market ref: {formatFairValue(deal.fair_value_cents)} USD</div>
       </div>
       {affiliateUrl ? (
         <a

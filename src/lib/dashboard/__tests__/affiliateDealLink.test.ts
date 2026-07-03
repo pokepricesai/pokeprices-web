@@ -151,4 +151,37 @@ describe('buildDealDeepLink', () => {
       itemWebUrl: 'https://www.ebay.co.uk/itm/123456789012',
     })).toBeNull()
   })
+
+  // ── W43C marketplaceHint cross-check ───────────────────────────
+
+  it('accepts a marketplaceHint that agrees with the URL host', () => {
+    expect(buildDealDeepLink({
+      itemWebUrl:      'https://www.ebay.co.uk/itm/123456789012',
+      marketplaceHint: 'EBAY_GB',
+    })).not.toBeNull()
+    expect(buildDealDeepLink({
+      itemWebUrl:      'https://www.ebay.com/itm/999888777',
+      marketplaceHint: 'EBAY_US',
+    })).not.toBeNull()
+  })
+
+  it('returns null when marketplaceHint disagrees with the URL host', () => {
+    // UK hint + US URL — dropped.
+    expect(buildDealDeepLink({
+      itemWebUrl:      'https://www.ebay.com/itm/999888777',
+      marketplaceHint: 'EBAY_GB',
+    })).toBeNull()
+    // US hint + UK URL — dropped.
+    expect(buildDealDeepLink({
+      itemWebUrl:      'https://www.ebay.co.uk/itm/123456789012',
+      marketplaceHint: 'EBAY_US',
+    })).toBeNull()
+  })
+
+  it('returns null when marketplaceHint is an unrecognised value', () => {
+    expect(buildDealDeepLink({
+      itemWebUrl:      'https://www.ebay.co.uk/itm/123456789012',
+      marketplaceHint: 'EBAY_XX',
+    })).toBeNull()
+  })
 })

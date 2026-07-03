@@ -13,7 +13,11 @@ import {
   loadPotentialDeals,
   loadWatchlistSlugs,
   computeDealsCutoff,
+  isJunkRow,
   POTENTIAL_DEALS_COLUMNS,
+  MIN_DISCOUNT_PCT,
+  MAX_DISCOUNT_PCT,
+  JUNK_TERMS,
   type PotentialDeal,
 } from '../potentialDeals'
 
@@ -33,6 +37,7 @@ function makeDealsStub(rows: PotentialDeal[] | null, error: unknown = null) {
     select(cols: string) { this._last.select = cols; return this },
     eq(col: string, val: unknown)  { this._last.filters.push(['eq', col, val]);  return this },
     gte(col: string, val: unknown) { this._last.filters.push(['gte', col, val]); return this },
+    lte(col: string, val: unknown) { this._last.filters.push(['lte', col, val]); return this },
     not(col: string, op: string, val: unknown) {
       this._last.notFilters.push([col, op, val]); return this
     },
@@ -56,8 +61,9 @@ const baseRow: PotentialDeal = {
   marketplace:           'EBAY_GB',
   total_cost_cents:      10_000,
   currency:              'GBP',
-  fair_value_cents:      18_000,
-  discount_pct:          44.4,
+  fair_value_cents:      12_500,
+  // In-range discount (15 <= x <= 30) so the row survives the W43C clamp.
+  discount_pct:          20,
   confidence:            'high',
   seller_feedback_score: 500,
   item_web_url:          'https://www.ebay.co.uk/itm/123456789012',
@@ -95,8 +101,8 @@ describe('loadPotentialDeals — behavioural', () => {
 
   it('excludes rows with missing ebay_item_id even if URL is present (defensive)', async () => {
     const rows = [
-      { ...baseRow, ebay_item_id: null,             discount_pct: 50 }, // dropped
-      { ...baseRow, ebay_item_id: '123456789012',   discount_pct: 40 }, // kept
+      { ...baseRow, ebay_item_id: null,             discount_pct: 22 }, // dropped
+      { ...baseRow, ebay_item_id: '123456789012',   discount_pct: 20 }, // kept
     ]
     const { client } = makeDealsStub(rows)
     const out = await loadPotentialDeals(client)
@@ -106,8 +112,8 @@ describe('loadPotentialDeals — behavioural', () => {
 
   it('excludes rows with missing item_web_url', async () => {
     const rows = [
-      { ...baseRow, item_web_url: null, discount_pct: 50, ebay_item_id: '111111111' }, // dropped
-      { ...baseRow,                     discount_pct: 40, ebay_item_id: '222222222' }, // kept
+      { ...baseRow, item_web_url: null, discount_pct: 22, ebay_item_id: '111111111' }, // dropped
+      { ...baseRow,                     discount_pct: 20, ebay_item_id: '222222222' }, // kept
     ]
     const { client } = makeDealsStub(rows)
     const out = await loadPotentialDeals(client)
@@ -117,8 +123,8 @@ describe('loadPotentialDeals — behavioural', () => {
 
   it('excludes rows with malformed ebay_item_id (< 6 digits)', async () => {
     const rows = [
-      { ...baseRow, ebay_item_id: '12345',          discount_pct: 50 }, // dropped
-      { ...baseRow, ebay_item_id: '123456789012',   discount_pct: 40 }, // kept
+      { ...baseRow, ebay_item_id: '12345',          discount_pct: 22 }, // dropped
+      { ...baseRow, ebay_item_id: '123456789012',   discount_pct: 20 }, // kept
     ]
     const { client } = makeDealsStub(rows)
     const out = await loadPotentialDeals(client)
@@ -127,9 +133,9 @@ describe('loadPotentialDeals — behavioural', () => {
 
   it('dedupes by ebay_item_id', async () => {
     const rows = [
-      { ...baseRow, ebay_item_id: '123456789012', discount_pct: 44 },
-      { ...baseRow, ebay_item_id: '123456789012', discount_pct: 43 }, // dup
-      { ...baseRow, ebay_item_id: '999888777666', discount_pct: 30 },
+      { ...baseRow, ebay_item_id: '123456789012', discount_pct: 25 },
+      { ...baseRow, ebay_item_id: '123456789012', discount_pct: 24 }, // dup
+      { ...baseRow, ebay_item_id: '999888777666', discount_pct: 20 },
     ]
     const { client } = makeDealsStub(rows)
     const out = await loadPotentialDeals(client)
@@ -138,8 +144,11 @@ describe('loadPotentialDeals — behavioural', () => {
   })
 
   it('caps the visible window at the requested limit', async () => {
+    // Rows within the discount clamp only (15..30).
     const rows = Array.from({ length: 60 }, (_, i) => ({
-      ...baseRow, ebay_item_id: `12345678901${i}`, discount_pct: 60 - i,
+      ...baseRow,
+      ebay_item_id: `12345678901${i}`,
+      discount_pct: 15 + (i % 16),
     }))
     const { client } = makeDealsStub(rows)
     const out = await loadPotentialDeals(client, { limit: 5 })
@@ -151,10 +160,12 @@ describe('loadPotentialDeals — behavioural', () => {
     await loadPotentialDeals(client, { limit: 30 })
     expect(chain._last.table).toBe('daily_deals')
     expect(chain._last.select).toBe(POTENTIAL_DEALS_COLUMNS)
-    // Positive filters
+    // Positive filters — W43C added the discount clamp.
     expect(chain._last.filters).toEqual(expect.arrayContaining([
       ['eq',  'confidence',            'high'],
       ['gte', 'seller_feedback_score', 100],
+      ['gte', 'discount_pct',          MIN_DISCOUNT_PCT],
+      ['lte', 'discount_pct',          MAX_DISCOUNT_PCT],
     ]))
     // Negative filters — TOPPS exclusion + item id/URL presence
     expect(chain._last.notFilters).toEqual(expect.arrayContaining([
@@ -167,6 +178,82 @@ describe('loadPotentialDeals — behavioural', () => {
     expect(chain._last.order).toEqual({ col: 'discount_pct', ascending: false })
     // Over-fetch is limit * 2
     expect(chain._last.limit).toBe(60)
+  })
+
+  // ── W43C new behavioural tests ──────────────────────────────────
+
+  it('drops rows below the discount floor (< 15%)', async () => {
+    const rows = [
+      { ...baseRow, ebay_item_id: '111111111111', discount_pct: 10 }, // dropped
+      { ...baseRow, ebay_item_id: '222222222222', discount_pct: 15 }, // kept (boundary)
+      { ...baseRow, ebay_item_id: '333333333333', discount_pct: 14.9 }, // dropped
+    ]
+    const { client } = makeDealsStub(rows)
+    const out = await loadPotentialDeals(client)
+    expect(out.map(r => r.ebay_item_id)).toEqual(['222222222222'])
+  })
+
+  it('drops rows above the discount ceiling (> 30%)', async () => {
+    const rows = [
+      { ...baseRow, ebay_item_id: '444444444444', discount_pct: 70 }, // dropped (suspicious)
+      { ...baseRow, ebay_item_id: '555555555555', discount_pct: 30 }, // kept (boundary)
+      { ...baseRow, ebay_item_id: '666666666666', discount_pct: 30.1 }, // dropped
+    ]
+    const { client } = makeDealsStub(rows)
+    const out = await loadPotentialDeals(client)
+    expect(out.map(r => r.ebay_item_id)).toEqual(['555555555555'])
+  })
+
+  it('drops rows whose card_name / set_name / condition contain a junk term', async () => {
+    const rows = [
+      { ...baseRow, ebay_item_id: '111111111111', card_name: 'Fan art Charizard',    discount_pct: 25 }, // dropped
+      { ...baseRow, ebay_item_id: '222222222222', set_name:  'Custom Base Set',      discount_pct: 24 }, // dropped
+      { ...baseRow, ebay_item_id: '333333333333', condition: 'PSA 10 (Proxy print)', discount_pct: 23 }, // dropped
+      { ...baseRow, ebay_item_id: '444444444444',                                    discount_pct: 22 }, // kept
+    ]
+    const { client } = makeDealsStub(rows)
+    const out = await loadPotentialDeals(client)
+    expect(out.map(r => r.ebay_item_id)).toEqual(['444444444444'])
+  })
+
+  it('drops rows with an unrecognised marketplace value', async () => {
+    const rows = [
+      { ...baseRow, ebay_item_id: '111111111111', marketplace: 'EBAY_XX' }, // dropped
+      { ...baseRow, ebay_item_id: '222222222222', marketplace: null       }, // dropped
+      { ...baseRow, ebay_item_id: '333333333333', marketplace: 'EBAY_GB', item_web_url: 'https://www.ebay.co.uk/itm/333333333333' }, // kept
+    ]
+    const { client } = makeDealsStub(rows)
+    const out = await loadPotentialDeals(client)
+    expect(out.map(r => r.ebay_item_id)).toEqual(['333333333333'])
+  })
+
+  it('drops rows where the marketplace and item_web_url domain disagree', async () => {
+    const rows = [
+      // Claims UK but URL is .com — dropped.
+      { ...baseRow, ebay_item_id: '111111111111', marketplace: 'EBAY_GB', item_web_url: 'https://www.ebay.com/itm/111111111111' },
+      // Claims US but URL is .co.uk — dropped.
+      { ...baseRow, ebay_item_id: '222222222222', marketplace: 'EBAY_US', item_web_url: 'https://www.ebay.co.uk/itm/222222222222' },
+      // Aligned — kept.
+      { ...baseRow, ebay_item_id: '333333333333', marketplace: 'EBAY_US', item_web_url: 'https://www.ebay.com/itm/333333333333' },
+    ]
+    const { client } = makeDealsStub(rows)
+    const out = await loadPotentialDeals(client)
+    expect(out.map(r => r.ebay_item_id)).toEqual(['333333333333'])
+  })
+})
+
+describe('isJunkRow — pure', () => {
+  it('detects every documented junk term case-insensitively across card_name / set_name / condition', () => {
+    for (const term of JUNK_TERMS) {
+      const upperCased = term.toUpperCase()
+      expect(isJunkRow({ ...baseRow, card_name: `Charizard ${upperCased} variant` })).toBe(true)
+      expect(isJunkRow({ ...baseRow, set_name:  `Set ${upperCased} edition`      })).toBe(true)
+      expect(isJunkRow({ ...baseRow, condition: `PSA 10 · ${upperCased}`         })).toBe(true)
+    }
+  })
+
+  it('returns false for a clean row', () => {
+    expect(isJunkRow({ ...baseRow, card_name: 'Charizard', set_name: 'Base Set', condition: 'Raw' })).toBe(false)
   })
 })
 
@@ -253,6 +340,33 @@ describe('loadPotentialDeals — source invariants', () => {
   it('applies confidence = high and seller_feedback_score >= 100', () => {
     expect(SRC).toContain(".eq('confidence', 'high')")
     expect(SRC).toContain(".gte('seller_feedback_score', 100)")
+  })
+
+  it('applies the W43C discount clamp [15, 30] at the DB layer', () => {
+    expect(SRC).toContain('MIN_DISCOUNT_PCT = 15')
+    expect(SRC).toContain('MAX_DISCOUNT_PCT = 30')
+    expect(SRC).toContain(".gte('discount_pct', MIN_DISCOUNT_PCT)")
+    expect(SRC).toContain(".lte('discount_pct', MAX_DISCOUNT_PCT)")
+  })
+
+  it('exposes JUNK_TERMS covering every documented fake / fan-art token', () => {
+    for (const t of [
+      'topps', 'fan art', 'custom', 'proxy', 'replica', 'reprint',
+      'metal card', 'gold plated', 'handmade', 'extended art', 'artwork',
+      'sticker', 'coin', 'jumbo', 'oversized', 'empty', 'no cards',
+      'case only', 'box only', 'pick your card', 'u pick',
+    ]) {
+      expect(JUNK_TERMS).toContain(t)
+    }
+  })
+
+  it('post-filters rows via isJunkRow before rendering', () => {
+    expect(SRC).toContain('if (isJunkRow(row)) continue')
+  })
+
+  it('post-filters rows whose marketplace ↔ URL host disagree', () => {
+    expect(SRC).toContain('expectedHostFor')
+    expect(SRC).toContain('if (host !== expected) continue')
   })
 
   it('excludes TOPPS rows via case-insensitive ilike on card_name and set_name', () => {

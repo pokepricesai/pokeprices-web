@@ -81,6 +81,11 @@ export type BuildDealDeepLinkInput = {
   /** Optional customid segment for the EPN report. Sanitised to the
    *  same character set the central engine uses. */
   customId?:   string | null
+  /** W43C — daily_deals.marketplace hint (e.g. 'EBAY_GB' / 'EBAY_US').
+   *  When supplied AND the URL's parsed marketplace disagrees, we
+   *  return null so a UK listing URL never gets wrapped with a US
+   *  campaign or vice versa. Unrecognised values also fail closed. */
+  marketplaceHint?: 'EBAY_GB' | 'EBAY_US' | string | null
 }
 
 /**
@@ -102,6 +107,19 @@ export function buildDealDeepLink(input: BuildDealDeepLinkInput): string | null 
   if (input.ebayItemId != null) {
     const providedId = String(input.ebayItemId).trim()
     if (providedId && providedId !== parsed.itemId) return null
+  }
+
+  // W43C — marketplace/domain cross-check. If the caller supplied a
+  // marketplace hint from the daily_deals row and it disagrees with
+  // the URL's parsed marketplace, fail closed. Unrecognised values
+  // also fail closed so a stray marketplace code can't wrap under
+  // the wrong campaign.
+  if (input.marketplaceHint != null) {
+    const hintMp: MarketplaceCode | null =
+      input.marketplaceHint === 'EBAY_GB' ? 'UK'
+      : input.marketplaceHint === 'EBAY_US' ? 'US'
+      : null
+    if (!hintMp || hintMp !== parsed.marketplace) return null
   }
 
   const campid = readCampaignId(parsed.marketplace)

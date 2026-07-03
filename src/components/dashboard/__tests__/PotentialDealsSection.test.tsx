@@ -36,8 +36,16 @@ const SRC = readFileSync(join(__dirname, '..', 'PotentialDealsSection.tsx'), 'ut
 describe('PotentialDealsSection — cautious copy', () => {
   it('renders the required heading, sub-copy and disclaimer verbatim', () => {
     expect(SRC).toContain('Potential eBay deals')
-    expect(SRC).toContain('Listings below recent market data. Check condition and seller before buying.')
+    // W43C — sub-copy names the [15, 30] discount window explicitly.
+    expect(SRC).toContain('Listings 15–30% below recent market data. Check condition and seller before buying.')
     expect(SRC).toContain('Prices and availability can change quickly. Always check the listing before buying.')
+  })
+
+  it('labels the reference market value as USD explicitly (W43C)', () => {
+    // The reference value column reads "Market ref: $X.XX USD" so
+    // collectors don't confuse it with the native-currency listing price.
+    expect(SRC).toContain('Market ref: ')
+    expect(SRC).toContain(' USD')
   })
 
   it('shows the required empty-state copy for both tabs', () => {
@@ -75,9 +83,12 @@ describe('PotentialDealsSection — deep-link affiliate CTA', () => {
     expect(SRC).not.toContain('affiliateWrapEbayUrl')
   })
 
-  it('passes ebay_item_id + item_web_url + customId through to the deep-link builder', () => {
-    expect(SRC).toContain('itemWebUrl:  deal.item_web_url')
-    expect(SRC).toContain('ebayItemId:  deal.ebay_item_id')
+  it('passes ebay_item_id + item_web_url + marketplaceHint + customId through to the deep-link builder', () => {
+    expect(SRC).toContain('itemWebUrl:      deal.item_web_url')
+    expect(SRC).toContain('ebayItemId:      deal.ebay_item_id')
+    // W43C — marketplaceHint enforces UK URL ↔ UK campaign / US URL ↔
+    // US campaign at the CTA layer. Loader also drops mismatches.
+    expect(SRC).toContain('marketplaceHint: deal.marketplace')
     expect(SRC).toMatch(/customId:\s+`pp:dashboard-deals:/)
   })
 
@@ -194,9 +205,9 @@ describe('PotentialDealsSection — utility helpers', () => {
     expect(DEALS_PAGE_SIZE).toBe(5)
   })
 
-  it('maps eBay marketplace codes to friendly labels', () => {
-    expect(marketplaceLabel('EBAY_GB')).toBe('ebay.co.uk')
-    expect(marketplaceLabel('EBAY_US')).toBe('ebay.com')
+  it('maps eBay marketplace codes to collector-facing labels (W43C)', () => {
+    expect(marketplaceLabel('EBAY_GB')).toBe('eBay UK')
+    expect(marketplaceLabel('EBAY_US')).toBe('eBay US')
     expect(marketplaceLabel('unknown')).toBe('eBay')
     expect(marketplaceLabel(null)).toBe('eBay')
   })
