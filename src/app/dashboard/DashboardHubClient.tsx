@@ -8,6 +8,7 @@ import ComingSoonBadge from '@/components/ComingSoonBadge'
 import DashboardNav from './DashboardNav'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge'
 import DashboardOnboardingChecklist from '@/components/dashboard/DashboardOnboardingChecklist'
+import PotentialDealsSection from '@/components/dashboard/PotentialDealsSection'
 import {
   loadPortfolioSummary,
   formatPortfolioValue,
@@ -674,6 +675,12 @@ export default function DashboardHubClient() {
           </div>
         )}
       </section>
+
+      {/* ── Potential eBay deals (Block 5A-W-43A) ────────────────────
+           Sits below Market Movement so the user's own state (portfolio
+           / watchlist / alerts / movers) stays higher in the visual
+           hierarchy than an eBay browse surface. Not gated on Pro. */}
+      <PotentialDealsSection />
 
       {/* ── Tools tile grid (existing, cleaned up) ───────────────────── */}
       <h2 style={{

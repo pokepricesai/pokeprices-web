@@ -175,6 +175,32 @@ describe('DashboardHubClient — W42A tools tile grid', () => {
   })
 })
 
+describe('DashboardHubClient — W43A potential eBay deals mount', () => {
+  it('imports and mounts PotentialDealsSection', () => {
+    expect(SRC).toContain("import PotentialDealsSection from '@/components/dashboard/PotentialDealsSection'")
+    expect(SRC).toContain('<PotentialDealsSection />')
+  })
+
+  it('mounts the section below "Market movement for you" and above the tools grid', () => {
+    const moversIdx = SRC.indexOf('aria-label="Market movement for you"')
+    const dealsIdx  = SRC.indexOf('<PotentialDealsSection />')
+    const toolsIdx  = SRC.indexOf('>Tools<')
+    expect(moversIdx).toBeGreaterThan(-1)
+    expect(dealsIdx).toBeGreaterThan(-1)
+    expect(toolsIdx).toBeGreaterThan(-1)
+    expect(moversIdx).toBeLessThan(dealsIdx)
+    expect(dealsIdx).toBeLessThan(toolsIdx)
+  })
+
+  it('does not mount PotentialDealsSection above the portfolio / watchlist / alerts snapshot', () => {
+    const snapshotIdx = SRC.indexOf('aria-label="Personal snapshot"')
+    const dealsIdx    = SRC.indexOf('<PotentialDealsSection />')
+    expect(snapshotIdx).toBeGreaterThan(-1)
+    expect(dealsIdx).toBeGreaterThan(-1)
+    expect(snapshotIdx).toBeLessThan(dealsIdx)
+  })
+})
+
 describe('DashboardHubClient — W42A safety', () => {
   it('only calls RPCs that /dashboard/watchlist-alerts already uses (get_portfolio_summary now lives in the helper)', () => {
     // W42A-FIX4 moved the get_portfolio_summary call into

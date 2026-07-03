@@ -74,6 +74,16 @@ const ALLOW = new Set([
   // constructs or emits a real affiliate URL.
   'src/lib/seo-analysis/ebayAnalysis.ts',
   'src/lib/seo-analysis/__tests__/analyzers.test.ts',
+
+  // Block 5A-W-43A — Potential eBay deals dashboard section reads the
+  // daily_deals.item_web_url column and routes it through the central
+  // affiliateWrapEbayUrl helper for the CTA. Same policy as
+  // InlineChat.tsx: allowed to reference the raw column name because
+  // every user-facing URL passes through the engine.
+  'src/lib/dashboard/potentialDeals.ts',
+  'src/lib/dashboard/__tests__/potentialDeals.test.ts',
+  'src/components/dashboard/PotentialDealsSection.tsx',
+  'src/components/dashboard/__tests__/PotentialDealsSection.test.tsx',
 ])
 
 function relative(p) {
