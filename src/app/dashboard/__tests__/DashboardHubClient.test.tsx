@@ -83,10 +83,46 @@ describe('DashboardHubClient — W42A personal snapshot cards', () => {
 
   it('degrades gracefully when items exist but total value is 0 (W42A-FIX)', () => {
     // A "Value updating…" branch must fire when totalCents is 0 but
-    // count > 0, rather than falling through to the empty-state copy
+    // itemCount > 0, rather than falling through to the empty-state copy
     // and telling a user with cards to "Add cards to your portfolio".
     expect(SRC).toContain('portfolioSnap.totalCents === 0')
     expect(SRC).toContain('Value updating…')
+  })
+})
+
+describe('DashboardHubClient — W42A-FIX3 portfolio dedupe + recompute parity', () => {
+  it('dedupes get_portfolio_summary items by id before summing (mirrors PortfolioDashboard.tsx:989-991)', () => {
+    // Without dedupe the RPC's cartesian LEFT JOIN to card_trends
+    // inflates both totalCents and itemCount. The portfolio page
+    // dedupes; the hub must too or the two surfaces disagree.
+    expect(SRC).toMatch(/new Map\(rawItems\.map\(i => \[i\.id, i\]\)\)/)
+    expect(SRC).toContain('dedupedById')
+  })
+
+  it('recomputes totalCents, itemCount and uniqueCards from deduped items only', () => {
+    // Same three aggregates the portfolio page computes at
+    // PortfolioDashboard.tsx:1187-1195. sum(position_value_cents),
+    // sum(quantity), count(distinct card_slug).
+    expect(SRC).toContain('dedupedById.reduce')
+    expect(SRC).toContain('i.quantity')
+    expect(SRC).toMatch(/new Set\([\s\S]*?dedupedById\.map[\s\S]*?card_slug/)
+  })
+
+  it('threads itemCount and uniqueCards through the render (no raw items.length count)', () => {
+    // Guard against a regression to `count: items.length` which is
+    // exactly the mismatch that read 50 instead of 35.
+    expect(SRC).toContain('itemCount:')
+    expect(SRC).toContain('uniqueCards:')
+    expect(SRC).not.toMatch(/items\.length,\s*pct30dWeighted/)
+    // The rendered secondary line must show both counts.
+    expect(SRC).toMatch(/portfolioSnap\.itemCount[\s\S]*?portfolioSnap\.uniqueCards[\s\S]*?unique/)
+  })
+
+  it('feeds the deduped items into the movers merge (no second inflated pass)', () => {
+    // The outer-scoped portfolioItems array must be populated from the
+    // deduped set, not the raw RPC output. Otherwise the movers section
+    // still sees cartesian duplicates.
+    expect(SRC).toContain('portfolioItems.push(...dedupedById)')
   })
 })
 

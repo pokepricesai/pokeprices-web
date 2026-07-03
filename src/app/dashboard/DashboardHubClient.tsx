@@ -28,7 +28,8 @@ import { loadUserPortfolioIds } from '@/lib/account/usage'
 
 interface PortfolioSnapshot {
   totalCents:      number
-  count:           number
+  itemCount:       number       // sum of quantity across deduped items — matches PortfolioDashboard.item_count
+  uniqueCards:     number       // count of distinct card_slug across deduped items — matches PortfolioDashboard.unique_cards
   pct30dWeighted:  number | null
 }
 
@@ -188,21 +189,41 @@ export default function DashboardHubClient() {
         // Call get_portfolio_summary for each portfolio the user owns —
         // usually one, occasionally many for legacy users. Merge the
         // items arrays. Same RPC + shape /dashboard/portfolio consumes.
+        const rawItems: any[] = []
         for (const pid of portfolioIds) {
           const { data, error } = await supabase.rpc('get_portfolio_summary', { p_portfolio_id: pid })
           if (error) continue
-          if (data && Array.isArray(data.items)) portfolioItems.push(...data.items)
+          if (data && Array.isArray(data.items)) rawItems.push(...data.items)
         }
         if (!live) return
-        const items = portfolioItems
+
+        // Block 5A-W-42A-FIX3 — DEDUPE by id. get_portfolio_summary's
+        // LEFT JOIN to card_trends can produce cartesian rows when a
+        // (card_name, set_name) matches multiple trend rows. Same id
+        // repeats. /dashboard/portfolio does this exact same dedupe at
+        // PortfolioDashboard.tsx:989-991. Without it the hub counted
+        // duplicates as separate cards (50 vs the real 35) and summed
+        // duplicate position_value_cents (~$2.2k vs the real ~$1.1k).
+        const dedupedById = Array.from(
+          new Map(rawItems.map(i => [i.id, i])).values()
+        )
+        // Push into the outer-scoped array so the movers merge below
+        // reuses the same deduped set (previously it saw duplicates too).
+        portfolioItems.push(...dedupedById)
+
+        // Block 5A-W-42A-FIX3 — recompute headline aggregates from the
+        // deduped items, matching PortfolioDashboard.tsx:1187-1195.
+        //   * totalCents  = sum(position_value_cents)     across deduped
+        //   * itemCount   = sum(quantity)                 across deduped
+        //   * uniqueCards = count(distinct card_slug)     across deduped
         // position_value_cents already accounts for manual override +
         // quantity in PortfolioDashboard's write path. Fall back to
-        // manual_value_cents or current_value_cents only if position is
-        // missing (older rows).
+        // manual_value_cents or current_value_cents only when position
+        // is missing (older / sealed rows).
         let totalCents = 0
         let wSum = 0
         let vSum = 0
-        for (const it of items) {
+        for (const it of dedupedById) {
           const v = (it as any).position_value_cents
             ?? (it as any).manual_value_cents
             ?? (it as any).current_value_cents
@@ -212,9 +233,15 @@ export default function DashboardHubClient() {
             if (pct != null) { wSum += Number(pct) * v; vSum += v }
           }
         }
+        const itemCount = dedupedById.reduce(
+          (s: number, i: any) => s + (i.quantity || 0), 0,
+        )
+        const uniqueCards = new Set(
+          dedupedById.map((i: any) => i.card_slug).filter(Boolean),
+        ).size
         const pct30dWeighted = vSum > 0 ? wSum / vSum : null
-        setPortfolioSnap({ totalCents, count: items.length, pct30dWeighted })
-      } catch { if (live) setPortfolioSnap({ totalCents: 0, count: 0, pct30dWeighted: null }) }
+        setPortfolioSnap({ totalCents, itemCount, uniqueCards, pct30dWeighted })
+      } catch { if (live) setPortfolioSnap({ totalCents: 0, itemCount: 0, uniqueCards: 0, pct30dWeighted: null }) }
 
       // ── Watchlist ────────────────────────────────────────────────────
       let wlItems: any[] = []
@@ -339,7 +366,7 @@ export default function DashboardHubClient() {
       title: 'Portfolio',
       desc: 'Track what you own — collection value, P&L, grading insights.',
       href: '/dashboard/portfolio',
-      count: portfolioSnap?.count ?? null,
+      count: portfolioSnap?.itemCount ?? null,
       countLabel: 'cards',
       colour: '#3b82f6',
     },
@@ -415,12 +442,12 @@ export default function DashboardHubClient() {
 
   // ── Derived render props for the snapshot cards ───────────────────────
 
-  const portfolioIsEmpty = portfolioSnap != null && portfolioSnap.count === 0
+  const portfolioIsEmpty = portfolioSnap != null && portfolioSnap.itemCount === 0
   const watchlistIsEmpty = watchSnap     != null && watchSnap.count     === 0
   const alertsIsEmpty    = alertsSnap    != null && alertsSnap.count30d === 0
 
   const hasAnyPersonalCards =
-    (portfolioSnap?.count ?? 0) > 0 || (watchSnap?.count ?? 0) > 0
+    (portfolioSnap?.itemCount ?? 0) > 0 || (watchSnap?.count ?? 0) > 0
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '20px 16px 32px' }}>
@@ -507,13 +534,15 @@ export default function DashboardHubClient() {
             // rendering a misleading "$0.00" or the empty-state copy.
             <>
               <div style={bigNumberStyle}>
-                {portfolioSnap.count}{' '}
+                {portfolioSnap.itemCount}{' '}
                 <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)' }}>
-                  card{portfolioSnap.count === 1 ? '' : 's'}
+                  card{portfolioSnap.itemCount === 1 ? '' : 's'}
                 </span>
               </div>
               <div style={secondaryLineStyle}>
-                <span style={{ color: 'var(--text-muted)' }}>Value updating…</span>
+                <span style={{ color: 'var(--text-muted)' }}>
+                  {portfolioSnap.uniqueCards} unique · Value updating…
+                </span>
               </div>
             </>
           ) : (
@@ -523,8 +552,13 @@ export default function DashboardHubClient() {
                 {portfolioSnap.pct30dWeighted != null && (
                   <PctChip pct={portfolioSnap.pct30dWeighted} suffix="30d" />
                 )}
+                {/* Block 5A-W-42A-FIX3 — show both counts explicitly so
+                    "cards" here matches "Total cards" on the portfolio
+                    page and "unique" matches "Unique cards". Removes the
+                    ambiguity that made 50 vs 35 read as a plain "cards"
+                    count. */}
                 <span style={{ marginLeft: portfolioSnap.pct30dWeighted != null ? 10 : 0 }}>
-                  {portfolioSnap.count} card{portfolioSnap.count === 1 ? '' : 's'}
+                  {portfolioSnap.itemCount} card{portfolioSnap.itemCount === 1 ? '' : 's'} · {portfolioSnap.uniqueCards} unique
                 </span>
               </div>
             </>
