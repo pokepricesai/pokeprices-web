@@ -64,6 +64,12 @@ export interface PotentialDeal {
   condition:             string | null
   detected_at:           string | null
   ebay_item_id:          string | number | null
+  // W43E — enriched from ebay_listings when a fresh matching row
+  // exists. Optional so unit tests that construct daily_deals-only
+  // fixtures don't have to boilerplate these into every row.
+  title?:                string | null
+  scraped_at?:           string | null
+  buying_option?:        string | null
 }
 
 /** Columns the loader selects from `daily_deals`. Kept as a constant
@@ -73,6 +79,16 @@ export const POTENTIAL_DEALS_COLUMNS =
   'card_slug, card_name, set_name, marketplace, total_cost_cents, currency, ' +
   'fair_value_cents, discount_pct, confidence, seller_feedback_score, ' +
   'item_web_url, item_image_url, condition, detected_at, ebay_item_id'
+
+/** W43E — columns pulled from `ebay_listings` for enrichment. Every
+ *  candidate deal is joined against ebay_listings by ebay_item_id so
+ *  we can drop stale/sold candidates (via scraped_at) and swap in
+ *  the fresher URL / title / buying_option. */
+export const EBAY_LISTINGS_ENRICH_COLUMNS =
+  'ebay_item_id, marketplace, title, buying_option, item_web_url, ' +
+  'item_image_url, scraped_at, listed_date, match_confidence, ' +
+  'seller_feedback_score, seller_feedback_pct, seller_country, ' +
+  'currency, total_cost_cents, price_cents, shipping_cents, condition'
 
 const DEFAULT_LIMIT       = 30
 const MIN_ITEM_ID_LENGTH  = 6
@@ -151,6 +167,50 @@ export function computeDealsCutoff(nowMs: number = Date.now()): string {
   return new Date(nowMs - 48 * 60 * 60 * 1000).toISOString().slice(0, 10)
 }
 
+/** W43E — how far back an ebay_listings row can have been scraped
+ *  and still count as "seen recently". 36 hours covers the daily
+ *  scraper cadence + one buffer window for timezone / cron drift.
+ *  We do NOT claim listings are active — the brief calls this a
+ *  "seen recently" proxy and the disclaimer says as much. */
+export function computeListingsCutoff(nowMs: number = Date.now()): string {
+  return new Date(nowMs - 36 * 60 * 60 * 1000).toISOString()
+}
+
+/** W43E — reusable "does this free-text field contain any junk term?"
+ *  check. Shared by isJunkRow (daily_deals fields) and the title-junk
+ *  post-filter (ebay_listings.title). */
+export function containsJunkTerm(
+  text: string | null | undefined,
+  terms: readonly string[] = JUNK_TERMS,
+): boolean {
+  if (!text) return false
+  const t = text.toLowerCase()
+  for (const term of terms) {
+    if (t.includes(term)) return true
+  }
+  return false
+}
+
+type EbayListingRow = {
+  ebay_item_id:          string | number | null
+  marketplace:           string | null
+  title:                 string | null
+  buying_option:         string | null
+  item_web_url:          string | null
+  item_image_url:        string | null
+  scraped_at:            string | null
+  listed_date:           string | null
+  match_confidence:      string | null
+  seller_feedback_score: number | null
+  seller_feedback_pct:   number | null
+  seller_country:        string | null
+  currency:              string | null
+  total_cost_cents:      number | null
+  price_cents:           number | null
+  shipping_cents:        number | null
+  condition:             string | null
+}
+
 export async function loadPotentialDeals(
   supa: SupabaseClient,
   opts?: LoadPotentialDealsOptions,
@@ -162,30 +222,23 @@ export async function loadPotentialDeals(
   // render the "No watchlist deals" empty state.
   if (cardSlugFilter && cardSlugFilter.length === 0) return []
 
-  const cutoff = computeDealsCutoff()
+  const dealsCutoff = computeDealsCutoff()
 
   try {
-    // Chain the base filters that every path uses.
-    // Note: PostgREST's builder is thenable + immutable-in-shape; the
-    // `let` reassignments keep the type inference happy.
+    // ── Step A: daily_deals candidates ─────────────────────────────
+    // Same filters as W43C — discount clamp, TOPPS/junk, item id/URL
+    // presence, marketplace/host agreement. Over-fetch × 2 so Step B's
+    // ebay_listings join has room to drop stale rows.
     let q: any = supa
       .from('daily_deals')
       .select(POTENTIAL_DEALS_COLUMNS)
       .eq('confidence', 'high')
       .gte('seller_feedback_score', 100)
-      .gte('detected_at', cutoff)
-      // W43C — discount window. The producer already enforces >=15%
-      // at ingest; the upper bound drops rows that are almost always
-      // sold / wrong-card / fan art / fake in practice.
+      .gte('detected_at', dealsCutoff)
       .gte('discount_pct', MIN_DISCOUNT_PCT)
       .lte('discount_pct', MAX_DISCOUNT_PCT)
-      // TOPPS exclusion (case-insensitive) — no listing_title column
-      // exists on daily_deals so this is the strongest filter we can
-      // apply at the DB layer. Additional junk terms are filtered
-      // defensively in JS below via JUNK_TERMS.
       .not('card_name', 'ilike', '%topps%')
       .not('set_name',  'ilike', '%topps%')
-      // Require both fields the CTA needs to build a deep link.
       .not('ebay_item_id', 'is', null)
       .not('item_web_url', 'is', null)
 
@@ -195,58 +248,131 @@ export async function loadPotentialDeals(
 
     q = q.order('discount_pct', { ascending: false }).limit(limit * 2)
 
-    const { data, error } = await q
-    if (error || !Array.isArray(data)) return []
+    const { data: dealsData, error: dealsError } = await q
+    if (dealsError || !Array.isArray(dealsData)) return []
 
-    // Cast via `unknown` — PostgREST narrows .select(string) to
-    // GenericStringError[] on the error branch; we've already ruled
-    // that out.
-    const rows = data as unknown as PotentialDeal[]
+    const dealRows = dealsData as unknown as PotentialDeal[]
 
-    // Dedupe by ebay_item_id (fallback to item_web_url) + defensive
-    // quality gate. Each guard has a matching DB-side filter above;
-    // the JS mirror keeps the CTA path safe if the schema drifts or a
-    // race exposes a stale row.
-    const seen = new Set<string>()
-    const deduped: PotentialDeal[] = []
-    for (const row of rows) {
-      // W43B — require both an id AND a URL to be present.
+    // Filter candidates in JS. Same defensive checks as W43C. Keep
+    // first occurrence per ebay_item_id so we can join by id in Step B.
+    const candidates = new Map<string, PotentialDeal>()
+    for (const row of dealRows) {
       if (row.ebay_item_id == null || !row.item_web_url) continue
-
-      // W43B — ebay_item_id must be at least 6 digits (matches the
-      // deep-link helper's parser).
       const idStr = String(row.ebay_item_id)
       if (!/^\d{6,}$/.test(idStr)) continue
-
-      // W43C — discount clamp. DB does the same but a defensive JS
-      // check catches any decimal drift on the boundary.
       if (typeof row.discount_pct !== 'number') continue
       if (row.discount_pct < MIN_DISCOUNT_PCT || row.discount_pct > MAX_DISCOUNT_PCT) continue
-
-      // W43C — junk term filter over card_name / set_name / condition.
       if (isJunkRow(row)) continue
-
-      // W43C — marketplace ↔ item URL host must agree. A row that
-      // claims marketplace=EBAY_GB but carries an ebay.com URL is a
-      // data bug; the CTA builder would still block it but we drop
-      // it here so it never counts against the visible window.
       const expected = expectedHostFor(row.marketplace)
-      if (expected) {
-        let host: string | null = null
-        try { host = new URL(row.item_web_url).hostname.toLowerCase() } catch { host = null }
+      if (!expected) continue
+      try {
+        const host = new URL(row.item_web_url).hostname.toLowerCase()
         if (host !== expected) continue
-      } else {
-        // Unrecognised marketplace value — cannot build a safe CTA.
-        continue
-      }
-
-      const key = idStr || String(row.item_web_url ?? '')
-      if (!key || seen.has(key)) continue
-      seen.add(key)
-      deduped.push(row)
-      if (deduped.length >= limit) break
+      } catch { continue }
+      if (candidates.has(idStr)) continue
+      candidates.set(idStr, row)
     }
-    return deduped
+    if (candidates.size === 0) return []
+
+    // ── Step B: ebay_listings enrichment ────────────────────────────
+    // W43E — join candidates against ebay_listings by ebay_item_id.
+    // Requires match_confidence=high, buying_option=FIXED_PRICE,
+    // seller_feedback_score ≥ 100, item_web_url non-null, AND
+    // scraped_at within the last 36 hours ("seen recently" proxy).
+    const listingsCutoff = computeListingsCutoff()
+    const candidateIds = Array.from(candidates.keys())
+    const { data: listingsData } = await supa
+      .from('ebay_listings')
+      .select(EBAY_LISTINGS_ENRICH_COLUMNS)
+      .in('ebay_item_id', candidateIds)
+      .eq('match_confidence', 'high')
+      .eq('buying_option',    'FIXED_PRICE')
+      .gte('seller_feedback_score', 100)
+      .gte('scraped_at', listingsCutoff)
+      .not('item_web_url', 'is', null)
+
+    const listings = Array.isArray(listingsData)
+      ? (listingsData as unknown as EbayListingRow[])
+      : []
+    if (listings.length === 0) return []
+
+    // Group listings by ebay_item_id — the same item can appear on
+    // multiple marketplaces so we may have several entries per id.
+    const listingsById = new Map<string, EbayListingRow[]>()
+    for (const l of listings) {
+      if (l.ebay_item_id == null) continue
+      const idStr = String(l.ebay_item_id)
+      const arr = listingsById.get(idStr) ?? []
+      arr.push(l)
+      listingsById.set(idStr, arr)
+    }
+
+    // Enrich each candidate. Prefer a listing whose marketplace
+    // matches the deal's; fall back to whichever is available. Drop
+    // candidates with no fresh listing at all — that's the closest
+    // proxy we have to "listing is still there".
+    const enriched: PotentialDeal[] = []
+    const seenByIdMarket = new Set<string>()
+    // Array.from() so ES5-target iteration works (matches how
+    // PortfolioDashboard.tsx handles map iteration in this codebase).
+    for (const [idStr, deal] of Array.from(candidates.entries())) {
+      const available = listingsById.get(idStr) ?? []
+      if (available.length === 0) continue
+
+      const match =
+        available.find(l => l.marketplace === deal.marketplace) ?? available[0]
+
+      // W43E — title junk filter (fan art / custom / topps / …).
+      if (containsJunkTerm(match.title)) continue
+
+      // Prefer the fresher ebay_listings values for the CTA path.
+      const finalMarketplace = match.marketplace ?? deal.marketplace
+      const finalUrl         = match.item_web_url ?? deal.item_web_url
+
+      // Marketplace ↔ URL host must agree on the FINAL values used
+      // for the CTA (the deep-link builder also cross-checks; this
+      // filter keeps the visible window clean).
+      const expected = expectedHostFor(finalMarketplace)
+      if (!expected) continue
+      try {
+        const host = new URL(finalUrl ?? '').hostname.toLowerCase()
+        if (host !== expected) continue
+      } catch { continue }
+
+      // Dedupe by (ebay_item_id, marketplace) — same item across UK
+      // and US is fine to show separately (different domain, campaign,
+      // and often different price), but the same pair should only
+      // render once per page.
+      const key = `${idStr}::${finalMarketplace}`
+      if (seenByIdMarket.has(key)) continue
+      seenByIdMarket.add(key)
+
+      enriched.push({
+        // Deal calculation stays sourced from daily_deals.
+        card_slug:             deal.card_slug,
+        card_name:             deal.card_name,
+        set_name:              deal.set_name,
+        fair_value_cents:      deal.fair_value_cents,
+        discount_pct:          deal.discount_pct,
+        confidence:            deal.confidence,
+        detected_at:           deal.detected_at,
+        ebay_item_id:          deal.ebay_item_id,
+        // Listing-state fields prefer ebay_listings (fresher).
+        marketplace:           finalMarketplace,
+        item_web_url:          finalUrl,
+        item_image_url:        match.item_image_url ?? deal.item_image_url,
+        condition:             match.condition      ?? deal.condition,
+        currency:              match.currency       ?? deal.currency,
+        total_cost_cents:      match.total_cost_cents ?? deal.total_cost_cents,
+        seller_feedback_score: match.seller_feedback_score ?? deal.seller_feedback_score,
+        // Fields only present via ebay_listings.
+        title:                 match.title ?? null,
+        scraped_at:            match.scraped_at ?? null,
+        buying_option:         match.buying_option ?? null,
+      })
+      if (enriched.length >= limit) break
+    }
+    return enriched
   } catch {
     return []
   }

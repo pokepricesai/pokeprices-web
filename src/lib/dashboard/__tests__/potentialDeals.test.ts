@@ -13,8 +13,11 @@ import {
   loadPotentialDeals,
   loadWatchlistSlugs,
   computeDealsCutoff,
+  computeListingsCutoff,
+  containsJunkTerm,
   isJunkRow,
   POTENTIAL_DEALS_COLUMNS,
+  EBAY_LISTINGS_ENRICH_COLUMNS,
   MIN_DISCOUNT_PCT,
   MAX_DISCOUNT_PCT,
   JUNK_TERMS,
@@ -23,32 +26,93 @@ import {
 
 const SRC = readFileSync(join(__dirname, '..', 'potentialDeals.ts'), 'utf8')
 
-// ── Chain stub for daily_deals ─────────────────────────────────────
+// ── Chain stub for daily_deals + ebay_listings ─────────────────────
 
 type StubResult<T> = { data: T[] | null; error: unknown }
 
-function makeDealsStub(rows: PotentialDeal[] | null, error: unknown = null) {
+type TableCall = {
+  table:      string
+  select:     string
+  order:      any
+  limit:      number
+  filters:    any[]
+  notFilters: any[]
+  ins:        any[]
+}
+
+function emptyCall(): TableCall {
+  return { table: '', select: '', order: null, limit: 0, filters: [], notFilters: [], ins: [] }
+}
+
+/** W43E — construct an ebay_listings row that will "match" a given
+ *  daily_deals row. Useful when a test only cares about the deal
+ *  side but the loader now needs a matching listing to enrich. */
+function makeMatchingListing(deal: PotentialDeal, over: Partial<any> = {}): any {
+  return {
+    ebay_item_id:          deal.ebay_item_id,
+    marketplace:           deal.marketplace,
+    title:                 deal.card_name ?? 'Charizard',
+    buying_option:         'FIXED_PRICE',
+    item_web_url:          deal.item_web_url,
+    item_image_url:        deal.item_image_url,
+    scraped_at:            '2026-07-03T12:00:00.000Z',
+    listed_date:           null,
+    match_confidence:      'high',
+    seller_feedback_score: deal.seller_feedback_score,
+    seller_feedback_pct:   null,
+    seller_country:        null,
+    currency:              deal.currency,
+    total_cost_cents:      deal.total_cost_cents,
+    price_cents:           null,
+    shipping_cents:        null,
+    condition:             deal.condition,
+    ...over,
+  }
+}
+
+type MakeDealsStubOpts = {
+  listingsRows?: any[] | null
+  error?:        unknown
+}
+
+function makeDealsStub(
+  dealsRows: PotentialDeal[] | null,
+  opts: MakeDealsStubOpts = {},
+) {
+  const listingsProvided = opts.listingsRows !== undefined
+  const err = opts.error ?? null
   const chain: any = {
-    _last: {
-      table: '', select: '', order: null as any, limit: 0,
-      filters: [] as any[], notFilters: [] as any[], ins: [] as any[],
-    },
-    from(table: string) { this._last.table = table; return this },
-    select(cols: string) { this._last.select = cols; return this },
-    eq(col: string, val: unknown)  { this._last.filters.push(['eq', col, val]);  return this },
-    gte(col: string, val: unknown) { this._last.filters.push(['gte', col, val]); return this },
-    lte(col: string, val: unknown) { this._last.filters.push(['lte', col, val]); return this },
-    not(col: string, op: string, val: unknown) {
-      this._last.notFilters.push([col, op, val]); return this
-    },
-    in(col: string, vals: unknown[]) { this._last.ins.push([col, vals]); return this },
-    order(col: string, opts?: { ascending?: boolean }) {
-      this._last.order = { col, ascending: opts?.ascending ?? true }
-      return this
-    },
-    limit(n: number) { this._last.limit = n; return this },
-    then(resolve: (r: StubResult<PotentialDeal>) => unknown) {
-      return Promise.resolve({ data: rows, error }).then(resolve)
+    _last:         emptyCall(),  // daily_deals call (back-compat)
+    _listingsCall: emptyCall(),
+    from(table: string) {
+      const call = table === 'daily_deals'
+        ? chain._last
+        : table === 'ebay_listings'
+          ? chain._listingsCall
+          : emptyCall()
+      call.table = table
+      const rows = table === 'daily_deals'
+        ? dealsRows
+        : table === 'ebay_listings'
+          ? (listingsProvided ? opts.listingsRows : (dealsRows ?? []).map(d => makeMatchingListing(d)))
+          : null
+      const inner: any = {
+        select(cols: string) { call.select = cols; return inner },
+        eq(col: string, val: unknown)  { call.filters.push(['eq', col, val]);  return inner },
+        gte(col: string, val: unknown) { call.filters.push(['gte', col, val]); return inner },
+        lte(col: string, val: unknown) { call.filters.push(['lte', col, val]); return inner },
+        not(col: string, op: string, val: unknown) { call.notFilters.push([col, op, val]); return inner },
+        in(col: string, vals: unknown[]) { call.ins.push([col, vals]); return inner },
+        order(col: string, opts?: { ascending?: boolean }) {
+          call.order = { col, ascending: opts?.ascending ?? true }
+          return inner
+        },
+        limit(n: number) { call.limit = n; return inner },
+        then(resolve: (r: StubResult<any>) => unknown) {
+          return Promise.resolve({ data: rows, error: err }).then(resolve)
+        },
+      }
+      return inner
     },
   }
   return { chain, client: chain as any }
@@ -82,7 +146,7 @@ describe('loadPotentialDeals — behavioural', () => {
   })
 
   it('returns [] when the client returns an error', async () => {
-    const { client } = makeDealsStub(null, { message: 'boom' })
+    const { client } = makeDealsStub(null, { error: { message: 'boom' } })
     expect(await loadPotentialDeals(client)).toEqual([])
   })
 
@@ -257,6 +321,132 @@ describe('isJunkRow — pure', () => {
   })
 })
 
+describe('containsJunkTerm — pure', () => {
+  it('is case-insensitive', () => {
+    expect(containsJunkTerm('CHARIZARD TOPPS variant')).toBe(true)
+    expect(containsJunkTerm('Fan Art foil')).toBe(true)
+  })
+
+  it('returns false for null / empty / clean strings', () => {
+    expect(containsJunkTerm(null)).toBe(false)
+    expect(containsJunkTerm(undefined)).toBe(false)
+    expect(containsJunkTerm('')).toBe(false)
+    expect(containsJunkTerm('Charizard Base Set PSA 10')).toBe(false)
+  })
+})
+
+// ── W43E — ebay_listings enrichment ───────────────────────────────
+
+describe('loadPotentialDeals — W43E ebay_listings enrichment', () => {
+  it('queries ebay_listings with the pinned filter set after fetching daily_deals candidates', async () => {
+    const { client, chain } = makeDealsStub([baseRow])
+    await loadPotentialDeals(client)
+    expect(chain._listingsCall.table).toBe('ebay_listings')
+    expect(chain._listingsCall.select).toBe(EBAY_LISTINGS_ENRICH_COLUMNS)
+    expect(chain._listingsCall.filters).toEqual(expect.arrayContaining([
+      ['eq',  'match_confidence',      'high'],
+      ['eq',  'buying_option',         'FIXED_PRICE'],
+      ['gte', 'seller_feedback_score', 100],
+    ]))
+    const scrapedFilter = chain._listingsCall.filters.find((f: any[]) => f[0] === 'gte' && f[1] === 'scraped_at')
+    expect(scrapedFilter).toBeDefined()
+    expect(typeof scrapedFilter[2]).toBe('string')
+    expect(chain._listingsCall.notFilters).toEqual(expect.arrayContaining([
+      ['item_web_url', 'is', null],
+    ]))
+    // Joined by ebay_item_id — passes the candidate IDs from Step A.
+    expect(chain._listingsCall.ins.length).toBeGreaterThan(0)
+    const idIn = chain._listingsCall.ins.find((i: any[]) => i[0] === 'ebay_item_id')
+    expect(idIn).toBeDefined()
+    expect(idIn[1]).toContain('123456789012')
+  })
+
+  it('drops candidates when ebay_listings returns no matching fresh row', async () => {
+    // dealsRows has a valid candidate but listingsRows explicitly []
+    const { client } = makeDealsStub([baseRow], { listingsRows: [] })
+    const out = await loadPotentialDeals(client)
+    expect(out).toEqual([])
+  })
+
+  it('drops candidates whose matching ebay_listings.title contains a junk term (fan art / topps / etc.)', async () => {
+    const deals = [
+      { ...baseRow, ebay_item_id: '111111111111', card_name: 'Charizard' },
+    ]
+    const listings = [
+      makeMatchingListing(deals[0], { title: 'TOPPS Charizard fan art custom' }),
+    ]
+    const { client } = makeDealsStub(deals, { listingsRows: listings })
+    const out = await loadPotentialDeals(client)
+    expect(out).toEqual([])
+  })
+
+  it('prefers the ebay_listings.item_web_url over daily_deals.item_web_url in the returned row', async () => {
+    const deals = [
+      { ...baseRow, ebay_item_id: '222222222222', item_web_url: 'https://www.ebay.co.uk/itm/222222222222' },
+    ]
+    const listings = [
+      makeMatchingListing(deals[0], {
+        item_web_url: 'https://www.ebay.co.uk/itm/222222222222?stale=1',
+      }),
+    ]
+    const { client } = makeDealsStub(deals, { listingsRows: listings })
+    const out = await loadPotentialDeals(client)
+    expect(out).toHaveLength(1)
+    expect(out[0].item_web_url).toBe('https://www.ebay.co.uk/itm/222222222222?stale=1')
+  })
+
+  it('surfaces title, scraped_at, buying_option on the enriched output', async () => {
+    const deals = [{ ...baseRow, ebay_item_id: '333333333333' }]
+    const listings = [
+      makeMatchingListing(deals[0], {
+        title:         'Charizard Base Set PSA 10',
+        scraped_at:    '2026-07-03T10:00:00.000Z',
+        buying_option: 'FIXED_PRICE',
+      }),
+    ]
+    const { client } = makeDealsStub(deals, { listingsRows: listings })
+    const out = await loadPotentialDeals(client)
+    expect(out).toHaveLength(1)
+    expect(out[0].title).toBe('Charizard Base Set PSA 10')
+    expect(out[0].scraped_at).toBe('2026-07-03T10:00:00.000Z')
+    expect(out[0].buying_option).toBe('FIXED_PRICE')
+  })
+
+  it('keeps daily_deals as the source of truth for fair_value_cents and discount_pct', async () => {
+    const deals = [{ ...baseRow, ebay_item_id: '444444444444', fair_value_cents: 18_000, discount_pct: 22 }]
+    const listings = [
+      makeMatchingListing(deals[0], {
+        // Even if ebay_listings had different values, the loader must
+        // ignore them for the fair-value / discount fields.
+        total_cost_cents: 999_999_999,
+      }),
+    ]
+    const { client } = makeDealsStub(deals, { listingsRows: listings })
+    const out = await loadPotentialDeals(client)
+    expect(out).toHaveLength(1)
+    expect(out[0].fair_value_cents).toBe(18_000)
+    expect(out[0].discount_pct).toBe(22)
+  })
+
+  it('dedupes by (ebay_item_id, marketplace) — same item on both UK and US shows once per marketplace', async () => {
+    const deals = [{ ...baseRow, ebay_item_id: '555555555555', marketplace: 'EBAY_GB' }]
+    // Two ebay_listings rows for the same item — one UK, one US.
+    const listings = [
+      makeMatchingListing(deals[0], { marketplace: 'EBAY_GB' }),
+      makeMatchingListing(deals[0], {
+        marketplace:  'EBAY_US',
+        item_web_url: 'https://www.ebay.com/itm/555555555555',
+      }),
+    ]
+    const { client } = makeDealsStub(deals, { listingsRows: listings })
+    const out = await loadPotentialDeals(client)
+    // Loader prefers the listing whose marketplace matches the deal
+    // — so only one row is emitted per candidate.
+    expect(out).toHaveLength(1)
+    expect(out[0].marketplace).toBe('EBAY_GB')
+  })
+})
+
 // ── loadWatchlistSlugs — behavioural ───────────────────────────────
 
 function makeWatchlistStub(rows: Array<{ card_slug: string | null }> | null, error: unknown = null) {
@@ -369,6 +559,38 @@ describe('loadPotentialDeals — source invariants', () => {
     expect(SRC).toContain('if (host !== expected) continue')
   })
 
+  it('W43E — reads ebay_listings for enrichment with the required filter set', () => {
+    expect(SRC).toContain("from('ebay_listings')")
+    expect(SRC).toContain('.select(EBAY_LISTINGS_ENRICH_COLUMNS)')
+    expect(SRC).toContain(".in('ebay_item_id', candidateIds)")
+    expect(SRC).toContain(".eq('match_confidence', 'high')")
+    expect(SRC).toContain(".eq('buying_option',    'FIXED_PRICE')")
+    expect(SRC).toContain(".gte('seller_feedback_score', 100)")
+    expect(SRC).toContain(".gte('scraped_at', listingsCutoff)")
+    expect(SRC).toContain(".not('item_web_url', 'is', null)")
+  })
+
+  it('W43E — applies the containsJunkTerm filter against ebay_listings.title', () => {
+    expect(SRC).toContain('if (containsJunkTerm(match.title)) continue')
+  })
+
+  it('W43E — prefers ebay_listings item_web_url + marketplace for the enriched row', () => {
+    expect(SRC).toContain('const finalMarketplace = match.marketplace ?? deal.marketplace')
+    expect(SRC).toContain('const finalUrl         = match.item_web_url ?? deal.item_web_url')
+  })
+
+  it('W43E — dedupes enriched rows by (ebay_item_id, marketplace) so a listing renders once per marketplace', () => {
+    expect(SRC).toContain('`${idStr}::${finalMarketplace}`')
+    expect(SRC).toContain('seenByIdMarket')
+  })
+
+  it('W43E — scraped_at cutoff is 36 hours back and returned as a full ISO timestamp', () => {
+    expect(SRC).toContain('36 * 60 * 60 * 1000')
+    // 36h helper returns full ISO (not date-only) so PostgREST compares
+    // as timestamp, matching how ebay_listings.scraped_at is stored.
+    expect(SRC).toMatch(/computeListingsCutoff[\s\S]*?\.toISOString\(\)\s*$/m)
+  })
+
   it('excludes TOPPS rows via case-insensitive ilike on card_name and set_name', () => {
     expect(SRC).toContain(".not('card_name', 'ilike', '%topps%')")
     expect(SRC).toContain(".not('set_name',  'ilike', '%topps%')")
@@ -380,7 +602,9 @@ describe('loadPotentialDeals — source invariants', () => {
   })
 
   it('applies a 48-hour detected_at cutoff', () => {
-    expect(SRC).toContain(".gte('detected_at', cutoff)")
+    // W43E — the cutoff variable was renamed to `dealsCutoff` when
+    // the second (ebay_listings) cutoff was introduced.
+    expect(SRC).toContain(".gte('detected_at', dealsCutoff)")
     expect(SRC).toContain('48 * 60 * 60 * 1000')
   })
 
@@ -401,5 +625,13 @@ describe('loadPotentialDeals — source invariants', () => {
   it('fails closed — never throws, always returns an array', () => {
     expect(SRC).toContain('} catch {')
     expect(SRC).toMatch(/if \(error \|\| !Array\.isArray\(data\)\) return \[\]/)
+  })
+})
+
+describe('computeListingsCutoff — pure', () => {
+  it('returns an ISO timestamp 36 hours before the provided time', () => {
+    const now = Date.parse('2026-07-03T12:00:00Z')
+    // 36h before 12:00Z on Jul 3 = 00:00Z on Jul 2
+    expect(computeListingsCutoff(now)).toBe('2026-07-02T00:00:00.000Z')
   })
 })

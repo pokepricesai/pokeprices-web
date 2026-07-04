@@ -13,6 +13,21 @@
 // block in PotentialDealsSection.test.tsx for the exact allow/deny
 // list of marketing verbs the section must avoid.
 //
+// ─── Block 5A-W-43E — LIVE ROWS RE-ENABLED WITH ENRICHMENT ────
+// User confirmed that ebay_listings does carry the fields we need
+// (title, scraped_at, buying_option, fresh item_web_url) even though
+// daily_deals does not. The loader now runs a two-step pipeline:
+//
+//   Step A  — pull candidate deal rows from daily_deals
+//   Step B  — enrich each candidate with the matching ebay_listings
+//             row (join by ebay_item_id, filter by match_confidence,
+//             buying_option = FIXED_PRICE, scraped_at recent, feedback,
+//             non-null item_web_url) and drop candidates whose fresh
+//             listing has a junk-term title or a broken domain/URL.
+//
+// The "coming soon" gate from W43D is removed — Pro users see live
+// deals again, but only after the enriched validation above.
+//
 // Two tabs — Watchlist deals and Best deals — with independent
 // client-side pagination (page size 5).
 //
@@ -205,6 +220,9 @@ function SectionHeader() {
       <p style={subCopyStyle}>
         Listings 15–30% below recent market data. Check condition and seller before buying.
       </p>
+      <p style={{ ...subCopyStyle, marginTop: -6, marginBottom: 12, fontSize: 11.5 }}>
+        Market reference shown in USD.
+      </p>
     </>
   )
 }
@@ -212,7 +230,7 @@ function SectionHeader() {
 function Disclaimer() {
   return (
     <p style={disclaimerStyle}>
-      Prices and availability can change quickly. Always check the listing before buying.
+      Prices and availability can change quickly. Listings were seen recently, but always check eBay before buying.
     </p>
   )
 }
@@ -292,10 +310,14 @@ function DealRow({ deal }: { deal: PotentialDeal }) {
         </div>
       </div>
       <div style={priceColStyle}>
-        {/* W43C — listing price uses native currency (£ for UK, $ for
-            US). Reference market value is labelled USD explicitly so
-            collectors don't confuse it with the listing price. */}
-        <div style={totalCostStyle}>{formatMoney(deal.total_cost_cents, deal.currency)}</div>
+        {/* W43C/E — listing price uses native currency (£ for UK,
+            $ for US) and the currency code is spelled out so the
+            mix with the USD-only reference is unambiguous. Reference
+            market value is USD-only per the brief. */}
+        <div style={totalCostStyle}>
+          Listed: {formatMoney(deal.total_cost_cents, deal.currency)}
+          {deal.currency ? ` ${deal.currency}` : ''}
+        </div>
         <div style={fairValueStyle}>Market ref: {formatFairValue(deal.fair_value_cents)} USD</div>
       </div>
       {affiliateUrl ? (
@@ -369,7 +391,7 @@ export default function PotentialDealsSection({ userId }: Props) {
     return <LockedForFree />
   }
 
-  // Pro path — main render.
+  // Pro path — live rows with ebay_listings enrichment (W43E).
   const totalPages = deals ? Math.max(1, Math.ceil(deals.length / DEALS_PAGE_SIZE)) : 1
   const safePage = Math.min(page, totalPages)
   const pageStart = (safePage - 1) * DEALS_PAGE_SIZE

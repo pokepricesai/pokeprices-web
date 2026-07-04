@@ -38,14 +38,23 @@ describe('PotentialDealsSection — cautious copy', () => {
     expect(SRC).toContain('Potential eBay deals')
     // W43C — sub-copy names the [15, 30] discount window explicitly.
     expect(SRC).toContain('Listings 15–30% below recent market data. Check condition and seller before buying.')
-    expect(SRC).toContain('Prices and availability can change quickly. Always check the listing before buying.')
+    // W43E — small USD-reference note near the sub-copy.
+    expect(SRC).toContain('Market reference shown in USD.')
+    // W43E — disclaimer refines the "seen recently" language.
+    expect(SRC).toContain('Prices and availability can change quickly. Listings were seen recently, but always check eBay before buying.')
   })
 
-  it('labels the reference market value as USD explicitly (W43C)', () => {
+  it('labels the reference market value as USD explicitly (W43C/E)', () => {
     // The reference value column reads "Market ref: $X.XX USD" so
     // collectors don't confuse it with the native-currency listing price.
     expect(SRC).toContain('Market ref: ')
     expect(SRC).toContain(' USD')
+  })
+
+  it('labels the listing price with "Listed:" and the ISO currency code (W43E)', () => {
+    expect(SRC).toContain('Listed: ')
+    // Currency code (e.g. GBP / USD) appears after the formatted amount.
+    expect(SRC).toContain('${deal.currency}')
   })
 
   it('shows the required empty-state copy for both tabs', () => {
@@ -134,6 +143,29 @@ describe('PotentialDealsSection — Pro gating', () => {
   })
 })
 
+// ── Block 5A-W-43E — LIVE ROWS RE-ENABLED ─────────────────────────
+//
+// The W43D "coming soon" gate is removed. Pro users see live deals
+// again, now backed by the two-step loader that joins daily_deals
+// candidates against fresh ebay_listings rows (see potentialDeals.ts).
+
+describe('PotentialDealsSection — W43E live rows re-enabled', () => {
+  it('does not carry the W43D SHOW_LIVE_DEALS gate anywhere in the source', () => {
+    expect(SRC).not.toContain('SHOW_LIVE_DEALS')
+  })
+
+  it('does not carry the W43D ComingSoonForPro component anywhere in the source', () => {
+    expect(SRC).not.toContain('ComingSoonForPro')
+    expect(SRC).not.toContain('Manage Pro settings')
+  })
+
+  it('Pro branch calls loadPotentialDeals inside the data effect (not gated on any coming-soon flag)', () => {
+    // The effect that fetches deals must fire on tab/watchlist changes
+    // without an extra gate.
+    expect(SRC).toContain('loadPotentialDeals(supabase, { limit: DEALS_MAX_FETCH, cardSlugFilter: filter })')
+  })
+})
+
 // ── Tabs + pagination ─────────────────────────────────────────────
 
 describe('PotentialDealsSection — tabs + pagination', () => {
@@ -150,8 +182,9 @@ describe('PotentialDealsSection — tabs + pagination', () => {
   it('resets pagination to page 1 whenever the tab or watchlist set changes', () => {
     // The load effect explicitly setPage(1) each time it fires.
     expect(SRC).toContain('setPage(1)')
-    // And the load effect is keyed on tab + watchlistSlugs.
-    expect(SRC).toMatch(/\[tab, watchlistSlugs\]/)
+    // And the load effect is keyed on tab + watchlistSlugs (W43D
+    // additionally threads SHOW_LIVE_DEALS through the dep array).
+    expect(SRC).toMatch(/\[tab, watchlistSlugs(?:, SHOW_LIVE_DEALS)?\]/)
   })
 
   it('threads the watchlist card_slugs filter into loadPotentialDeals for the Watchlist tab', () => {
