@@ -47,13 +47,26 @@ describe('DashboardHubClient — W42A alert count bug fix', () => {
 })
 
 describe('DashboardHubClient — W42A personal snapshot cards', () => {
-  it('renders a personal snapshot section aria-label', () => {
-    expect(SRC).toContain('aria-label="Personal snapshot"')
+  it('renders a "Today at a glance" section aria-label (W44A rename)', () => {
+    // W44A — the aria-label was "Personal snapshot" pre-rename.
+    expect(SRC).toContain('aria-label="Today at a glance"')
+    expect(SRC).not.toContain('aria-label="Personal snapshot"')
   })
 
-  it('carries the three snapshot kickers: Portfolio, Watchlist, Alerts', () => {
+  it('renders a visible "Today at a glance" heading above the section (W44A)', () => {
+    expect(SRC).toMatch(/<h2[\s\S]*?Today at a glance[\s\S]*?<\/h2>/)
+    // Heading must sit above the aria-labelled section.
+    const headingIdx = SRC.search(/Today at a glance[\s\S]*?<\/h2>/)
+    const sectionIdx = SRC.indexOf('aria-label="Today at a glance"')
+    expect(headingIdx).toBeGreaterThan(-1)
+    expect(sectionIdx).toBeGreaterThan(-1)
+    expect(headingIdx).toBeLessThan(sectionIdx)
+  })
+
+  it('carries the four snapshot kickers: Portfolio, Watchlist, Validated listings, Alerts (W44A)', () => {
     expect(SRC).toContain('kicker="Portfolio"')
     expect(SRC).toContain('kicker="Watchlist"')
+    expect(SRC).toContain('kicker="Validated listings"')
     expect(SRC).toContain('kicker="Alerts"')
   })
 
@@ -193,12 +206,56 @@ describe('DashboardHubClient — W43A / W43B potential eBay deals mount', () => 
     expect(dealsIdx).toBeLessThan(toolsIdx)
   })
 
-  it('does not mount PotentialDealsSection above the portfolio / watchlist / alerts snapshot', () => {
-    const snapshotIdx = SRC.indexOf('aria-label="Personal snapshot"')
+  it('does not mount PotentialDealsSection above the Today at a glance snapshot (W44A rename)', () => {
+    const snapshotIdx = SRC.indexOf('aria-label="Today at a glance"')
     const dealsIdx    = SRC.indexOf('<PotentialDealsSection')
     expect(snapshotIdx).toBeGreaterThan(-1)
     expect(dealsIdx).toBeGreaterThan(-1)
     expect(snapshotIdx).toBeLessThan(dealsIdx)
+  })
+})
+
+// ── W44A — Today at a glance + Validated listings tile ────────────
+
+describe('DashboardHubClient — W44A Today at a glance + validated tile', () => {
+  it('imports the shared loadPotentialDeals loader and useUserPlan hook', () => {
+    // The 4th tile reuses the exact same loader as PotentialDealsSection
+    // so the count and the section stay in sync (no fake numbers).
+    expect(SRC).toContain("import { loadPotentialDeals } from '@/lib/dashboard/potentialDeals'")
+    expect(SRC).toContain("import { useUserPlan } from '@/lib/account/useUserPlan'")
+  })
+
+  it('only fetches the validated-listings count for Pro users', () => {
+    // The Pro-only fetch effect must guard on both userPlan === 'pro'
+    // AND planLoading so a free user never triggers the extra query.
+    expect(SRC).toMatch(/if \(userPlan !== 'pro'\) \{ setValidatedSnap\(\{ count: 0 \}\); return \}/)
+    expect(SRC).toContain('loadPotentialDeals(supabase, { limit: 30, cardSlugFilter: null })')
+  })
+
+  it('validated-listings tile CTA hash-links to #potential-deals for Pro (or upgrade for free)', () => {
+    expect(SRC).toContain("'/dashboard#potential-deals'")
+    expect(SRC).toContain("'/dashboard/settings'")
+    expect(SRC).toContain('View listings →')
+    expect(SRC).toContain('Upgrade to Pro →')
+  })
+
+  it('shows honest empty / loading / Pro-upsell copy — no fake numbers', () => {
+    // Empty state, Pro upsell, and loading skeleton must all be
+    // present. No hard-coded numeric placeholder for the count.
+    expect(SRC).toContain('No validated listings right now.')
+    expect(SRC).toContain('Pro members can view validated eBay listings.')
+    // Loading path uses the existing SnapshotLoading skeleton.
+    expect(SRC).toMatch(/validatedSnap == null[\s\S]*?<SnapshotLoading/)
+  })
+
+  it('validated-listings tile sits between Watchlist and Alerts (before PotentialDealsSection)', () => {
+    const wlKickerIdx  = SRC.indexOf('kicker="Watchlist"')
+    const vlKickerIdx  = SRC.indexOf('kicker="Validated listings"')
+    const alKickerIdx  = SRC.indexOf('kicker="Alerts"')
+    const dealsIdx     = SRC.indexOf('<PotentialDealsSection')
+    expect(wlKickerIdx).toBeLessThan(vlKickerIdx)
+    expect(vlKickerIdx).toBeLessThan(alKickerIdx)
+    expect(alKickerIdx).toBeLessThan(dealsIdx)
   })
 })
 

@@ -15,6 +15,8 @@ import {
   type PortfolioSummaryCurrency,
   type PortfolioSummaryItem,
 } from '@/lib/account/portfolioSummary'
+import { loadPotentialDeals } from '@/lib/dashboard/potentialDeals'
+import { useUserPlan } from '@/lib/account/useUserPlan'
 
 // Block 5A-W-42A — dashboard hub upgraded from a bare tools directory
 // into a "My PokePrices" personal summary page. Existing tables /
@@ -64,6 +66,13 @@ interface AlertRow {
 interface AlertsSnapshot {
   recent:    AlertRow[]
   count30d:  number
+}
+
+// Block 5A-W-44A — 4th snapshot tile. Only loaded for Pro users
+// (matches PotentialDealsSection's own gate); free users get a Pro
+// prompt instead of a fake count.
+interface ValidatedListingsSnapshot {
+  count: number
 }
 
 interface Mover {
@@ -123,6 +132,12 @@ export default function DashboardHubClient() {
   const [watchSnap,     setWatchSnap]     = useState<WatchlistSnapshot | null>(null)
   const [alertsSnap,    setAlertsSnap]    = useState<AlertsSnapshot | null>(null)
   const [movers,        setMovers]        = useState<Mover[]>([])
+  // Block 5A-W-44A — validated eBay listings snapshot (4th tile).
+  // Null while loading; { count: 0 } is the honest "none right now"
+  // state. Only populated for Pro users.
+  const [validatedSnap, setValidatedSnap] = useState<ValidatedListingsSnapshot | null>(null)
+
+  const { plan: userPlan, loading: planLoading } = useUserPlan(user?.id ?? null)
 
   const [avatarPokemonId, setAvatarPokemonId] = useState<number | null>(null)
   const [pickerOpen,       setPickerOpen]      = useState(false)
@@ -297,6 +312,22 @@ export default function DashboardHubClient() {
     return () => { live = false }
   }, [user])
 
+  // ── Block 5A-W-44A — validated eBay listings tile ─────────────────
+  // Separate effect so it re-runs when the plan settles from 'free'
+  // (initial) → 'pro'. Uses the SAME loader as PotentialDealsSection
+  // so the tile count matches the section (loader is a pure read).
+  // Free users skip the fetch entirely; the tile renders a Pro
+  // upsell prompt instead of a fake number.
+  useEffect(() => {
+    if (!user || planLoading) return
+    if (userPlan !== 'pro') { setValidatedSnap({ count: 0 }); return }
+    let live = true
+    loadPotentialDeals(supabase, { limit: 30, cardSlugFilter: null })
+      .then(deals => { if (live) setValidatedSnap({ count: deals.length }) })
+      .catch(()  => { if (live) setValidatedSnap({ count: 0 }) })
+    return () => { live = false }
+  }, [user, userPlan, planLoading])
+
   if (loading) {
     return (
       <div style={{ maxWidth: 960, margin: '0 auto', padding: '40px 24px' }}>
@@ -398,6 +429,7 @@ export default function DashboardHubClient() {
   const portfolioIsEmpty = portfolioSnap != null && portfolioSnap.itemCount === 0
   const watchlistIsEmpty = watchSnap     != null && watchSnap.count     === 0
   const alertsIsEmpty    = alertsSnap    != null && alertsSnap.count30d === 0
+  const validatedIsEmpty = validatedSnap != null && validatedSnap.count === 0
 
   const hasAnyPersonalCards =
     (portfolioSnap?.itemCount ?? 0) > 0 || (watchSnap?.count ?? 0) > 0
@@ -460,11 +492,20 @@ export default function DashboardHubClient() {
           users. */}
       {user?.id && <DashboardOnboardingChecklist userId={user.id} />}
 
-      {/* ── Personal snapshot row (Block 5A-W-42A) ─────────────────── */}
+      {/* ── Today at a glance (Block 5A-W-44A) ────────────────────────
+           Was "Personal snapshot" (W42A) — renamed to make the return-
+           visit purpose explicit, and gained a fourth tile for the
+           Pro-gated validated eBay listings surface below. */}
+      <h2 style={{
+        fontFamily: "'Outfit', sans-serif", fontSize: 18, margin: '0 0 10px',
+        color: 'var(--text)',
+      }}>
+        Today at a glance
+      </h2>
       <section
-        aria-label="Personal snapshot"
+        aria-label="Today at a glance"
         style={{
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
           gap: 14, marginBottom: 20,
         }}
       >
@@ -556,6 +597,42 @@ export default function DashboardHubClient() {
               ) : (
                 <div style={secondaryLineStyle}>Price data updating…</div>
               )}
+            </>
+          )}
+        </SnapshotCard>
+
+        {/* Validated listings snapshot (Block 5A-W-44A) — Pro-gated
+             mirror of the count rendered by PotentialDealsSection below.
+             The CTA hash-links to #potential-deals so a click scrolls
+             the section into view; the section itself lives further
+             down the page and stays the source of truth. */}
+        <SnapshotCard
+          kicker="Validated listings"
+          accent="#22c55e"
+          href={userPlan === 'pro' ? '/dashboard#potential-deals' : '/dashboard/settings'}
+          openLabel={userPlan === 'pro' ? 'View listings →' : 'Upgrade to Pro →'}
+        >
+          {planLoading || (userPlan === 'pro' && validatedSnap == null) ? (
+            <SnapshotLoading />
+          ) : userPlan !== 'pro' ? (
+            <p style={emptyCopyStyle}>
+              Pro members can view validated eBay listings.
+            </p>
+          ) : validatedIsEmpty ? (
+            <p style={emptyCopyStyle}>
+              No validated listings right now.
+            </p>
+          ) : (
+            <>
+              <div style={bigNumberStyle}>
+                {validatedSnap.count}{' '}
+                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)' }}>
+                  listing{validatedSnap.count === 1 ? '' : 's'}
+                </span>
+              </div>
+              <div style={secondaryLineStyle}>
+                <span style={{ color: 'var(--text-muted)' }}>Verified against recent market data</span>
+              </div>
             </>
           )}
         </SnapshotCard>

@@ -262,7 +262,7 @@ function Disclaimer() {
 
 function LockedForFree() {
   return (
-    <section aria-label="Potential eBay deals" style={sectionWrapStyle}>
+    <section id="potential-deals" aria-label="Potential eBay deals" style={sectionWrapStyle}>
       <div style={headerRowStyle}>
         <h2 style={h2Style}>Potential eBay deals</h2>
       </div>
@@ -443,7 +443,7 @@ export default function PotentialDealsSection({ userId }: Props) {
   const hasWatchlist = (watchlistSlugs?.length ?? 0) > 0
 
   return (
-    <section aria-label="Potential eBay deals" style={sectionWrapStyle}>
+    <section id="potential-deals" aria-label="Potential eBay deals" style={sectionWrapStyle}>
       <SectionHeader />
 
       <div role="tablist" aria-label="Deal filter" style={tabsRowStyle}>

@@ -100,6 +100,19 @@ describe('PotentialDealsSection — cautious copy', () => {
   })
 })
 
+// ── W44A — anchor id for dashboard hub tile hash-link ─────────────
+
+describe('PotentialDealsSection — W44A anchor id', () => {
+  it('carries id="potential-deals" on the outer section (both Pro and free branches)', () => {
+    // W44A — the dashboard hub's Validated listings tile hash-links
+    // to #potential-deals. Both the Pro-authenticated section render
+    // AND the LockedForFree render must expose the anchor so the
+    // scroll target exists regardless of plan.
+    const matches = SRC.match(/<section[^>]*id="potential-deals"/g) || []
+    expect(matches.length).toBeGreaterThanOrEqual(2)
+  })
+})
+
 // ── W43G — tab rename + display safety ────────────────────────────
 
 describe('PotentialDealsSection — W43G tab rename + display safety', () => {
