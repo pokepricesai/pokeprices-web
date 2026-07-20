@@ -40,8 +40,15 @@ describe('PotentialDealsSection — cautious copy', () => {
     expect(SRC).toContain('Listings 15–30% below recent market data. Check condition and seller before buying.')
     // W43E — small USD-reference note near the sub-copy.
     expect(SRC).toContain('Market reference shown in USD.')
-    // W43E — disclaimer refines the "seen recently" language.
-    expect(SRC).toContain('Prices and availability can change quickly. Listings were seen recently, but always check eBay before buying.')
+    // W43F — disclaimer no longer claims listings are "recently seen"
+    // (the ebay_listings freshness window is 7 days, not 36h, so the
+    // wording is softened to "checked against recent eBay data").
+    expect(SRC).toContain('Prices and availability can change quickly. Listings are checked against recent eBay data, but always check eBay before buying.')
+    // Regression guards — must never claim the listing is definitely
+    // still available or active. 'guaranteed' is already covered by
+    // the forbidden-word list below; these two are novel.
+    expect(SRC.toLowerCase()).not.toContain('still available')
+    expect(SRC.toLowerCase()).not.toContain('currently active')
   })
 
   it('labels the reference market value as USD explicitly (W43C/E)', () => {

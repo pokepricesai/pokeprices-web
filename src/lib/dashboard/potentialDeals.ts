@@ -167,13 +167,16 @@ export function computeDealsCutoff(nowMs: number = Date.now()): string {
   return new Date(nowMs - 48 * 60 * 60 * 1000).toISOString().slice(0, 10)
 }
 
-/** W43E — how far back an ebay_listings row can have been scraped
- *  and still count as "seen recently". 36 hours covers the daily
- *  scraper cadence + one buffer window for timezone / cron drift.
- *  We do NOT claim listings are active — the brief calls this a
- *  "seen recently" proxy and the disclaimer says as much. */
+/** W43F — how far back an ebay_listings row can have been scraped
+ *  and still count as "recently checked". 7 days matches the actual
+ *  per-item cadence of the ebay_listings scraper. W43E's original
+ *  36-hour window was aspirational and dropped 100% of otherwise-valid
+ *  candidates (see the W43F diagnostic run against live data — the
+ *  freshest matching listing for a given item was ~3 days old).
+ *  We do NOT claim listings are active — the disclaimer says as much.
+ *  Months-stale rows are still excluded. */
 export function computeListingsCutoff(nowMs: number = Date.now()): string {
-  return new Date(nowMs - 36 * 60 * 60 * 1000).toISOString()
+  return new Date(nowMs - 7 * 24 * 60 * 60 * 1000).toISOString()
 }
 
 /** W43E — reusable "does this free-text field contain any junk term?"
@@ -278,7 +281,8 @@ export async function loadPotentialDeals(
     // W43E — join candidates against ebay_listings by ebay_item_id.
     // Requires match_confidence=high, buying_option=FIXED_PRICE,
     // seller_feedback_score ≥ 100, item_web_url non-null, AND
-    // scraped_at within the last 36 hours ("seen recently" proxy).
+    // scraped_at within the last 7 days (W43F — matches the actual
+    // per-item scrape cadence of the ebay_listings pipeline).
     const listingsCutoff = computeListingsCutoff()
     const candidateIds = Array.from(candidates.keys())
     const { data: listingsData } = await supa

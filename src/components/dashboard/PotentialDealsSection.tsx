@@ -230,7 +230,7 @@ function SectionHeader() {
 function Disclaimer() {
   return (
     <p style={disclaimerStyle}>
-      Prices and availability can change quickly. Listings were seen recently, but always check eBay before buying.
+      Prices and availability can change quickly. Listings are checked against recent eBay data, but always check eBay before buying.
     </p>
   )
 }

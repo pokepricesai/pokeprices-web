@@ -351,6 +351,14 @@ describe('loadPotentialDeals — W43E ebay_listings enrichment', () => {
     const scrapedFilter = chain._listingsCall.filters.find((f: any[]) => f[0] === 'gte' && f[1] === 'scraped_at')
     expect(scrapedFilter).toBeDefined()
     expect(typeof scrapedFilter[2]).toBe('string')
+    // W43F — the scraped_at cutoff value passed to the DB is ~7 days
+    // in the past (small tolerance for test-execution latency).
+    const cutoffMs   = Date.parse(scrapedFilter[2])
+    const ageMs      = Date.now() - cutoffMs
+    const sevenDays  = 7 * 24 * 60 * 60 * 1000
+    const toleranceMs = 60_000
+    expect(ageMs).toBeGreaterThan(sevenDays - toleranceMs)
+    expect(ageMs).toBeLessThan(sevenDays + toleranceMs)
     expect(chain._listingsCall.notFilters).toEqual(expect.arrayContaining([
       ['item_web_url', 'is', null],
     ]))
@@ -584,10 +592,17 @@ describe('loadPotentialDeals — source invariants', () => {
     expect(SRC).toContain('seenByIdMarket')
   })
 
-  it('W43E — scraped_at cutoff is 36 hours back and returned as a full ISO timestamp', () => {
-    expect(SRC).toContain('36 * 60 * 60 * 1000')
-    // 36h helper returns full ISO (not date-only) so PostgREST compares
-    // as timestamp, matching how ebay_listings.scraped_at is stored.
+  it('W43F — scraped_at cutoff is 7 days back and returned as a full ISO timestamp', () => {
+    // W43F loosened the cutoff from 36h (W43E) to 7 days after the
+    // diagnostic showed the ebay_listings scraper actually revisits
+    // items on a weekly cadence — 36h dropped 100% of otherwise-valid
+    // candidates.
+    expect(SRC).toContain('7 * 24 * 60 * 60 * 1000')
+    // W43E's 36-hour claim must not linger anywhere in the loader.
+    expect(SRC).not.toContain('36 * 60 * 60 * 1000')
+    // The helper still returns full ISO (not date-only) so PostgREST
+    // compares as timestamp, matching how ebay_listings.scraped_at
+    // is stored.
     expect(SRC).toMatch(/computeListingsCutoff[\s\S]*?\.toISOString\(\)\s*$/m)
   })
 
@@ -629,9 +644,15 @@ describe('loadPotentialDeals — source invariants', () => {
 })
 
 describe('computeListingsCutoff — pure', () => {
-  it('returns an ISO timestamp 36 hours before the provided time', () => {
-    const now = Date.parse('2026-07-03T12:00:00Z')
-    // 36h before 12:00Z on Jul 3 = 00:00Z on Jul 2
-    expect(computeListingsCutoff(now)).toBe('2026-07-02T00:00:00.000Z')
+  it('returns an ISO timestamp 7 days / 168 hours before the provided time (W43F)', () => {
+    const now = Date.parse('2026-07-10T12:00:00Z')
+    // 7d before 12:00Z on Jul 10 = 12:00Z on Jul 3
+    expect(computeListingsCutoff(now)).toBe('2026-07-03T12:00:00.000Z')
+  })
+
+  it('handles month boundaries correctly', () => {
+    const now = Date.parse('2026-07-04T09:30:00Z')
+    // 7d before 09:30Z on Jul 4 = 09:30Z on Jun 27
+    expect(computeListingsCutoff(now)).toBe('2026-06-27T09:30:00.000Z')
   })
 })
