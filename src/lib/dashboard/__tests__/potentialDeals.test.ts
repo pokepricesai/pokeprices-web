@@ -16,10 +16,13 @@ import {
   computeListingsCutoff,
   containsJunkTerm,
   isJunkRow,
+  toUsdCents,
+  isDiscountCoherent,
   POTENTIAL_DEALS_COLUMNS,
   EBAY_LISTINGS_ENRICH_COLUMNS,
   MIN_DISCOUNT_PCT,
   MAX_DISCOUNT_PCT,
+  SCRAPER_USD_TO_GBP,
   JUNK_TERMS,
   type PotentialDeal,
 } from '../potentialDeals'
@@ -118,19 +121,24 @@ function makeDealsStub(
   return { chain, client: chain as any }
 }
 
+/** W43G — coherent baseRow: USD-native with total_cost / fair_value /
+ *  discount_pct that all agree. 10_000 / 12_500 = 0.80 → 20% discount,
+ *  matching the recorded discount_pct=20. Tests that override
+ *  discount_pct within [15, 30] stay within the loader's 15pp coherence
+ *  tolerance (see isDiscountCoherent). */
 const baseRow: PotentialDeal = {
   card_slug:             'charizard-base',
   card_name:             'Charizard',
   set_name:              'Base Set',
-  marketplace:           'EBAY_GB',
+  marketplace:           'EBAY_US',
   total_cost_cents:      10_000,
-  currency:              'GBP',
+  currency:              'USD',
   fair_value_cents:      12_500,
   // In-range discount (15 <= x <= 30) so the row survives the W43C clamp.
   discount_pct:          20,
   confidence:            'high',
   seller_feedback_score: 500,
-  item_web_url:          'https://www.ebay.co.uk/itm/123456789012',
+  item_web_url:          'https://www.ebay.com/itm/123456789012',
   item_image_url:        'https://i.ebayimg.com/img/x.jpg',
   condition:             'Raw',
   detected_at:           '2026-07-03',
@@ -388,19 +396,25 @@ describe('loadPotentialDeals — W43E ebay_listings enrichment', () => {
     expect(out).toEqual([])
   })
 
-  it('prefers the ebay_listings.item_web_url over daily_deals.item_web_url in the returned row', async () => {
+  it('W43G — keeps daily_deals.item_web_url even when ebay_listings offers a different URL', async () => {
+    // W43G REVERSES W43E's behaviour: the loader must not swap in
+    // ebay_listings.item_web_url. The daily_deals URL was captured at
+    // the exact moment the discount was computed, so preserving it
+    // keeps the deep-link CTA on the same listing basis as the claim.
     const deals = [
-      { ...baseRow, ebay_item_id: '222222222222', item_web_url: 'https://www.ebay.co.uk/itm/222222222222' },
+      { ...baseRow, ebay_item_id: '222222222222',
+        marketplace: 'EBAY_US',
+        item_web_url: 'https://www.ebay.com/itm/222222222222' },
     ]
     const listings = [
       makeMatchingListing(deals[0], {
-        item_web_url: 'https://www.ebay.co.uk/itm/222222222222?stale=1',
+        item_web_url: 'https://www.ebay.com/itm/222222222222?fresher=1',
       }),
     ]
     const { client } = makeDealsStub(deals, { listingsRows: listings })
     const out = await loadPotentialDeals(client)
     expect(out).toHaveLength(1)
-    expect(out[0].item_web_url).toBe('https://www.ebay.co.uk/itm/222222222222?stale=1')
+    expect(out[0].item_web_url).toBe('https://www.ebay.com/itm/222222222222')
   })
 
   it('surfaces title, scraped_at, buying_option on the enriched output', async () => {
@@ -421,11 +435,20 @@ describe('loadPotentialDeals — W43E ebay_listings enrichment', () => {
   })
 
   it('keeps daily_deals as the source of truth for fair_value_cents and discount_pct', async () => {
-    const deals = [{ ...baseRow, ebay_item_id: '444444444444', fair_value_cents: 18_000, discount_pct: 22 }]
+    // Coherent trio: total 14_040 USD / fair 18_000 USD = ratio 0.78 → 22% discount.
+    const deals = [{
+      ...baseRow,
+      ebay_item_id:     '444444444444',
+      fair_value_cents: 18_000,
+      total_cost_cents: 14_040,
+      currency:         'USD',
+      discount_pct:     22,
+    }]
     const listings = [
       makeMatchingListing(deals[0], {
         // Even if ebay_listings had different values, the loader must
-        // ignore them for the fair-value / discount fields.
+        // ignore them for the fair-value / discount fields (W43G — and
+        // now also for price / currency / marketplace / URL).
         total_cost_cents: 999_999_999,
       }),
     ]
@@ -436,8 +459,17 @@ describe('loadPotentialDeals — W43E ebay_listings enrichment', () => {
     expect(out[0].discount_pct).toBe(22)
   })
 
-  it('dedupes by (ebay_item_id, marketplace) — same item on both UK and US shows once per marketplace', async () => {
-    const deals = [{ ...baseRow, ebay_item_id: '555555555555', marketplace: 'EBAY_GB' }]
+  it('W43G — only enriches with a same-marketplace ebay_listings row; extras in other marketplaces are ignored', async () => {
+    const deals = [{
+      ...baseRow,
+      ebay_item_id: '555555555555',
+      marketplace:  'EBAY_GB',
+      // baseRow currency=USD leaves the coherence math intact
+      // (10000 USD / 12500 USD = 20% discount) even though the
+      // marketplace is UK; the loader does not enforce currency ↔
+      // marketplace coupling, only URL/host and coherence.
+      item_web_url: 'https://www.ebay.co.uk/itm/555555555555',
+    }]
     // Two ebay_listings rows for the same item — one UK, one US.
     const listings = [
       makeMatchingListing(deals[0], { marketplace: 'EBAY_GB' }),
@@ -448,9 +480,71 @@ describe('loadPotentialDeals — W43E ebay_listings enrichment', () => {
     ]
     const { client } = makeDealsStub(deals, { listingsRows: listings })
     const out = await loadPotentialDeals(client)
-    // Loader prefers the listing whose marketplace matches the deal
-    // — so only one row is emitted per candidate.
+    // Same-marketplace requirement: only the UK listing validates
+    // the UK deal, and the row emits marketplace=EBAY_GB from
+    // daily_deals (source of truth) rather than the ebay_listings side.
     expect(out).toHaveLength(1)
+    expect(out[0].marketplace).toBe('EBAY_GB')
+  })
+
+  it('W43G — drops candidates whose only ebay_listings match is a different marketplace', async () => {
+    const deals = [{
+      ...baseRow,
+      ebay_item_id: '666666666666',
+      marketplace:  'EBAY_US',
+      item_web_url: 'https://www.ebay.com/itm/666666666666',
+    }]
+    // Only a UK listing is fresh — no US match — so the loader must
+    // drop this candidate rather than substitute a wrong-marketplace row.
+    const listings = [
+      makeMatchingListing(deals[0], {
+        marketplace:  'EBAY_GB',
+        item_web_url: 'https://www.ebay.co.uk/itm/666666666666',
+      }),
+    ]
+    const { client } = makeDealsStub(deals, { listingsRows: listings })
+    const out = await loadPotentialDeals(client)
+    expect(out).toEqual([])
+  })
+
+  it('W43G — coherence guard drops a row whose displayed values do not re-derive to discount_pct (Typhlosion-shape)', async () => {
+    // Mirror of the live report: GBP total_cost that, once converted
+    // to USD, sits ABOVE the USD market ref — so a "15% below" claim
+    // is not truthful. Coherence guard's ratio check catches this.
+    const deals = [{
+      ...baseRow,
+      ebay_item_id:     '777777777777',
+      marketplace:      'EBAY_GB',
+      item_web_url:     'https://www.ebay.co.uk/itm/777777777777',
+      currency:         'GBP',
+      total_cost_cents: 20_106, // £201.06 → ≈ $254.51 USD
+      fair_value_cents: 24_249, // $242.49 USD market ref
+      discount_pct:     15.1,
+    }]
+    const listings = [makeMatchingListing(deals[0], { marketplace: 'EBAY_GB' })]
+    const { client } = makeDealsStub(deals, { listingsRows: listings })
+    const out = await loadPotentialDeals(client)
+    expect(out).toEqual([])
+  })
+
+  it('W43G — keeps a GBP row whose USD conversion IS below the market ref', async () => {
+    // £158.00 → ≈ $200 USD, market ref $242.49 → ≈ 17.5% below.
+    const deals = [{
+      ...baseRow,
+      ebay_item_id:     '888888888888',
+      marketplace:      'EBAY_GB',
+      item_web_url:     'https://www.ebay.co.uk/itm/888888888888',
+      currency:         'GBP',
+      total_cost_cents: 15_800,
+      fair_value_cents: 24_249,
+      discount_pct:     17.5,
+    }]
+    const listings = [makeMatchingListing(deals[0], { marketplace: 'EBAY_GB' })]
+    const { client } = makeDealsStub(deals, { listingsRows: listings })
+    const out = await loadPotentialDeals(client)
+    expect(out).toHaveLength(1)
+    expect(out[0].currency).toBe('GBP')
+    expect(out[0].total_cost_cents).toBe(15_800)
     expect(out[0].marketplace).toBe('EBAY_GB')
   })
 })
@@ -582,9 +676,34 @@ describe('loadPotentialDeals — source invariants', () => {
     expect(SRC).toContain('if (containsJunkTerm(match.title)) continue')
   })
 
-  it('W43E — prefers ebay_listings item_web_url + marketplace for the enriched row', () => {
-    expect(SRC).toContain('const finalMarketplace = match.marketplace ?? deal.marketplace')
-    expect(SRC).toContain('const finalUrl         = match.item_web_url ?? deal.item_web_url')
+  it('W43G — keeps daily_deals as source of truth for marketplace + item_web_url + price + currency', () => {
+    // W43G REPLACED W43E's ebay_listings-preferred model — the field
+    // that feeds the discount claim must all come from daily_deals so
+    // the displayed listing price and the recorded discount_pct never
+    // sit on different currency bases.
+    expect(SRC).toContain('const finalMarketplace = deal.marketplace')
+    expect(SRC).toContain('const finalUrl         = deal.item_web_url')
+    expect(SRC).toContain('currency:              deal.currency')
+    expect(SRC).toContain('total_cost_cents:      deal.total_cost_cents')
+    // Regression guard against W43E's substitution pattern coming back.
+    expect(SRC).not.toContain('match.marketplace ?? deal.marketplace')
+    expect(SRC).not.toContain('match.item_web_url ?? deal.item_web_url')
+    expect(SRC).not.toContain('match.currency       ?? deal.currency')
+    expect(SRC).not.toContain('match.total_cost_cents ?? deal.total_cost_cents')
+  })
+
+  it('W43G — requires a same-marketplace ebay_listings match; no any-marketplace fallback', () => {
+    // Old W43E line `.find(...) ?? available[0]` must be gone.
+    expect(SRC).toContain('available.find(l => l.marketplace === deal.marketplace)')
+    expect(SRC).not.toContain('?? available[0]')
+    // And the loader must bail out when no same-marketplace match exists.
+    expect(SRC).toMatch(/if \(!match\) continue/)
+  })
+
+  it('W43G — calls the coherence guard against daily_deals values before enriching', () => {
+    expect(SRC).toContain('isDiscountCoherent(')
+    // Must be called with deal-side (daily_deals) values, not match-side.
+    expect(SRC).toMatch(/isDiscountCoherent\(\s*deal\.total_cost_cents,\s*deal\.currency,\s*deal\.fair_value_cents,\s*deal\.discount_pct/)
   })
 
   it('W43E — dedupes enriched rows by (ebay_item_id, marketplace) so a listing renders once per marketplace', () => {
@@ -654,5 +773,73 @@ describe('computeListingsCutoff — pure', () => {
     const now = Date.parse('2026-07-04T09:30:00Z')
     // 7d before 09:30Z on Jul 4 = 09:30Z on Jun 27
     expect(computeListingsCutoff(now)).toBe('2026-06-27T09:30:00.000Z')
+  })
+})
+
+// ── W43G — pure conversion + coherence helpers ─────────────────────
+
+describe('toUsdCents — pure (W43G)', () => {
+  it('converts GBP cents to USD cents using the scraper rate (0.79)', () => {
+    // Uses the SAME rate as detect_deals.py::convert_to_usd_cents.
+    expect(toUsdCents(20_106, 'GBP')).toBe(Math.round(20_106 / SCRAPER_USD_TO_GBP))
+  })
+
+  it('passes USD cents through unchanged', () => {
+    expect(toUsdCents(10_000, 'USD')).toBe(10_000)
+  })
+
+  it('treats unknown currency as USD (pass-through)', () => {
+    expect(toUsdCents(10_000, null)).toBe(10_000)
+    expect(toUsdCents(10_000, undefined)).toBe(10_000)
+    expect(toUsdCents(10_000, 'EUR')).toBe(10_000)
+  })
+
+  it('returns null for null or negative input', () => {
+    expect(toUsdCents(null, 'GBP')).toBeNull()
+    expect(toUsdCents(undefined, 'USD')).toBeNull()
+    expect(toUsdCents(-5, 'USD')).toBeNull()
+  })
+})
+
+describe('isDiscountCoherent — pure (W43G)', () => {
+  it('accepts a scraper-shaped USD row (20% below market)', () => {
+    expect(isDiscountCoherent(10_000, 'USD', 12_500, 20)).toBe(true)
+  })
+
+  it('accepts a GBP row whose USD conversion is within the [0.30, 0.85] ratio window', () => {
+    // £158.00 → ≈ $200 USD, market ref $242.49 → ratio 0.825 → 17.5% below.
+    expect(isDiscountCoherent(15_800, 'GBP', 24_249, 17.5)).toBe(true)
+  })
+
+  it('REJECTS the live Typhlosion-shape row (GBP price above USD market ref)', () => {
+    // £201.06 → ≈ $254.51 USD, market ref $242.49 → ratio 1.05 → fails ratio check.
+    expect(isDiscountCoherent(20_106, 'GBP', 24_249, 15.1)).toBe(false)
+  })
+
+  it('REJECTS a row whose recomputed ratio is above 0.85 (not actually below market)', () => {
+    // 12_000 USD / 12_500 USD = 0.96 → outside [0.30, 0.85].
+    expect(isDiscountCoherent(12_000, 'USD', 12_500, 15)).toBe(false)
+  })
+
+  it('REJECTS a row whose recomputed ratio is below 0.30 (suspicious wrong-card match)', () => {
+    // 2_000 USD / 12_500 USD = 0.16 → outside [0.30, 0.85].
+    expect(isDiscountCoherent(2_000, 'USD', 12_500, 84)).toBe(false)
+  })
+
+  it('REJECTS when stored discount_pct is further from recomputed than tolerance', () => {
+    // Recomputed = 20%; stored = 40%; tolerance 15pp → 20pp delta → reject.
+    expect(isDiscountCoherent(10_000, 'USD', 12_500, 40)).toBe(false)
+  })
+
+  it('honours an explicit tolerance override', () => {
+    // Same numbers as above but tolerance=25 → accept.
+    expect(isDiscountCoherent(10_000, 'USD', 12_500, 40, 25)).toBe(true)
+  })
+
+  it('returns false on nullish / non-positive inputs', () => {
+    expect(isDiscountCoherent(null, 'USD', 12_500, 20)).toBe(false)
+    expect(isDiscountCoherent(10_000, 'USD', null, 20)).toBe(false)
+    expect(isDiscountCoherent(10_000, 'USD', 12_500, null)).toBe(false)
+    expect(isDiscountCoherent(10_000, 'USD', 0, 20)).toBe(false)
   })
 })

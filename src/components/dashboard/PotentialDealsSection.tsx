@@ -28,6 +28,29 @@
 // The "coming soon" gate from W43D is removed — Pro users see live
 // deals again, but only after the enriched validation above.
 //
+// ─── Block 5A-W-43G — CURRENCY / SOURCE-OF-TRUTH SAFETY ────────
+// A live report showed a GBP listing displayed as "15% below" a USD
+// market reference, where the numbers did not add up. Root cause:
+// W43E's enrichment could substitute an ebay_listings row from the
+// WRONG marketplace (e.g. a fresher UK row for a US-basis deal),
+// swapping in a native-currency price whose comparison basis no
+// longer matched the recorded discount_pct.
+//
+// W43G fixes this at three layers:
+//   * loader — same-marketplace ebay_listings match required, and
+//              daily_deals stays source of truth for every field
+//              that feeds the discount claim (price, currency,
+//              marketplace, item_web_url).
+//   * loader — coherence guard drops any row whose displayed values
+//              do not re-derive to the recorded discount_pct.
+//   * display — the green "X% below" chip is gated on the same
+//              coherence check, plus GBP rows show an approximate
+//              USD equivalent so the collector can eyeball the math.
+//
+// Copy: the "Best deals" tab was renamed to "Validated listings" —
+// we are surfacing validated rows from our own scrape, NOT a
+// best-on-all-of-eBay ranking.
+//
 // Two tabs — Watchlist deals and Best deals — with independent
 // client-side pagination (page size 5).
 //
@@ -44,6 +67,8 @@ import { useUserPlan } from '@/lib/account/useUserPlan'
 import {
   loadPotentialDeals,
   loadWatchlistSlugs,
+  toUsdCents,
+  isDiscountCoherent,
   type PotentialDeal,
 } from '@/lib/dashboard/potentialDeals'
 import { buildDealDeepLink } from '@/lib/dashboard/affiliateDealLink'
@@ -218,7 +243,7 @@ function SectionHeader() {
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Updated daily</span>
       </div>
       <p style={subCopyStyle}>
-        Listings 15–30% below recent market data. Check condition and seller before buying.
+        Validated eBay listings from our latest market scan. Check condition, currency and seller before buying.
       </p>
       <p style={{ ...subCopyStyle, marginTop: -6, marginBottom: 12, fontSize: 11.5 }}>
         Market reference shown in USD.
@@ -230,7 +255,7 @@ function SectionHeader() {
 function Disclaimer() {
   return (
     <p style={disclaimerStyle}>
-      Prices and availability can change quickly. Listings are checked against recent eBay data, but always check eBay before buying.
+      Prices and availability can change quickly. Always check the listing on eBay before buying.
     </p>
   )
 }
@@ -288,6 +313,18 @@ function DealRow({ deal }: { deal: PotentialDeal }) {
   const feedback = formatFeedback(deal.seller_feedback_score)
   const marketplace = marketplaceLabel(deal.marketplace)
 
+  // W43G — UI-side safety net. The loader already drops incoherent
+  // rows, but re-check here so a future data drift can never surface
+  // a green "X% below" badge whose numbers do not add up.
+  const chipSafe = isDiscountCoherent(
+    deal.total_cost_cents, deal.currency,
+    deal.fair_value_cents, deal.discount_pct,
+  )
+  // W43G — approximate USD for GBP rows so the collector can see the
+  // basis of the discount claim next to the native listing price.
+  const approxUsdCents =
+    deal.currency === 'GBP' ? toUsdCents(deal.total_cost_cents, 'GBP') : null
+
   return (
     <li style={rowStyle}>
       {deal.item_image_url ? (
@@ -302,7 +339,7 @@ function DealRow({ deal }: { deal: PotentialDeal }) {
           {deal.condition ? <><span> · </span><span>{deal.condition}</span></> : null}
         </div>
         <div style={{ ...metaStyle, marginTop: 4, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {typeof deal.discount_pct === 'number' && (
+          {typeof deal.discount_pct === 'number' && chipSafe && (
             <span style={discountChipStyle}>{deal.discount_pct.toFixed(0)}% below</span>
           )}
           <span>{marketplace}</span>
@@ -318,6 +355,11 @@ function DealRow({ deal }: { deal: PotentialDeal }) {
           Listed: {formatMoney(deal.total_cost_cents, deal.currency)}
           {deal.currency ? ` ${deal.currency}` : ''}
         </div>
+        {approxUsdCents != null && (
+          <div style={fairValueStyle}>
+            Approx {formatFairValue(approxUsdCents)} USD
+          </div>
+        )}
         <div style={fairValueStyle}>Market ref: {formatFairValue(deal.fair_value_cents)} USD</div>
       </div>
       {affiliateUrl ? (
@@ -405,8 +447,11 @@ export default function PotentialDealsSection({ userId }: Props) {
       <SectionHeader />
 
       <div role="tablist" aria-label="Deal filter" style={tabsRowStyle}>
-        <TabButton label="Watchlist deals" active={tab === 'watchlist'} onClick={() => setTab('watchlist')} />
-        <TabButton label="Best deals"      active={tab === 'best'}      onClick={() => setTab('best')} />
+        <TabButton label="Watchlist deals"    active={tab === 'watchlist'} onClick={() => setTab('watchlist')} />
+        {/* W43G — was "Best deals". Renamed because this section
+            surfaces validated rows from our own scrape, not a
+            best-on-all-of-eBay ranking. */}
+        <TabButton label="Validated listings" active={tab === 'best'}      onClick={() => setTab('best')} />
       </div>
 
       {dealsLoading || deals === null ? (
@@ -416,20 +461,20 @@ export default function PotentialDealsSection({ userId }: Props) {
           {tab === 'watchlist' ? (
             <>
               <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55 }}>
-                No watchlist deals found today.
+                No validated listings on your watchlist right now.
               </p>
               <button
                 type="button" onClick={() => setTab('best')}
-                aria-label="View Best deals"
+                aria-label="View validated listings"
                 style={{ ...tabButtonStyle(false), marginTop: 10 }}
               >
-                View Best deals →
+                View validated listings →
               </button>
             </>
           ) : hasWatchlist ? (
             <>
               <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55 }}>
-                No best deals found today.
+                No validated listings found right now.
               </p>
               <button
                 type="button" onClick={() => setTab('watchlist')}
@@ -441,7 +486,7 @@ export default function PotentialDealsSection({ userId }: Props) {
             </>
           ) : (
             <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55 }}>
-              No potential deals found today.
+              No validated listings found right now.
             </p>
           )}
         </div>

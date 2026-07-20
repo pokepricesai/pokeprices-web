@@ -100,6 +100,62 @@ const MIN_ITEM_ID_LENGTH  = 6
 export const MIN_DISCOUNT_PCT = 15
 export const MAX_DISCOUNT_PCT = 30
 
+/** W43G — GBP→USD conversion factor. Mirrors the scraper's
+ *  `detect_deals.py::USD_TO_GBP = 0.79` so the display-time coherence
+ *  check reproduces the same math the scraper used at ingest.
+ *  IMPORTANT: convert GBP cents → USD cents by DIVIDING by this value
+ *  (matches `convert_to_usd_cents` in the scraper). */
+export const SCRAPER_USD_TO_GBP = 0.79
+
+/** W43G — convert a native-currency cents value to USD cents using the
+ *  same rule as the scraper. Only GBP is handled (the only non-USD
+ *  currency the scraper writes into daily_deals). Anything else is
+ *  passed through unchanged. Returns null for null/negative input. */
+export function toUsdCents(
+  cents:    number | null | undefined,
+  currency: string | null | undefined,
+): number | null {
+  if (cents == null || cents < 0) return null
+  if (currency === 'GBP')          return Math.round(cents / SCRAPER_USD_TO_GBP)
+  return cents
+}
+
+/** W43G — coherence check. Given a daily_deals row's total_cost_cents /
+ *  currency / fair_value_cents / discount_pct, does the USD-basis math
+ *  reproduce a ratio inside the scraper's ingest window ([0.30, 0.85])?
+ *  If the recorded discount_pct claims "below market" but the numbers
+ *  now imply "at or above market", the row is inconsistent and must
+ *  not render a green "X% below" badge.
+ *
+ *  The RATIO window is the primary guard (it catches the exact bug
+ *  pattern from W43F/G — a GBP price displayed against a USD market
+ *  ref that, after conversion, is actually AT or ABOVE market). The
+ *  tolerance check is a secondary paranoia guard; it defaults to 15pp
+ *  so scraper cadence drift on the USD/GBP rate does not eat every
+ *  row, but a Typhlosion-shaped bug (delta ≈ 20pp) still fails it. */
+export function isDiscountCoherent(
+  totalCostCents:  number | null | undefined,
+  currency:        string | null | undefined,
+  fairValueCents:  number | null | undefined,
+  discountPct:     number | null | undefined,
+  tolerancePct:    number = 15,
+): boolean {
+  if (
+    typeof discountPct    !== 'number' ||
+    typeof fairValueCents !== 'number' || fairValueCents <= 0
+  ) return false
+  const usd = toUsdCents(totalCostCents, currency)
+  if (usd == null || usd <= 0) return false
+  const computedRatio    = usd / fairValueCents
+  const computedDiscount = (1 - computedRatio) * 100
+  // Ratio must sit inside the scraper's ingest window (0.30..0.85).
+  // A ratio > 0.85 means the row is not actually "below market" any
+  // more, whatever discount_pct claims.
+  if (computedRatio < 0.30 || computedRatio > 0.85)                   return false
+  if (Math.abs(computedDiscount - discountPct) > tolerancePct)        return false
+  return true
+}
+
 /** W43C — junk-term list checked against every row's card_name +
  *  set_name + condition (case-insensitive). Some entries duplicate
  *  the DB-side TOPPS filter — kept for defence in depth if the DB
@@ -311,10 +367,19 @@ export async function loadPotentialDeals(
       listingsById.set(idStr, arr)
     }
 
-    // Enrich each candidate. Prefer a listing whose marketplace
-    // matches the deal's; fall back to whichever is available. Drop
-    // candidates with no fresh listing at all — that's the closest
-    // proxy we have to "listing is still there".
+    // W43G — enrich each candidate but preserve daily_deals as the
+    // source of truth for every field that goes into the discount
+    // claim (price, currency, marketplace, item_web_url,
+    // fair_value_cents, discount_pct). ebay_listings only supplies
+    // title / scraped_at / buying_option — fields that describe the
+    // listing but don't affect the deal math.
+    //
+    // W43G REQUIRES a same-marketplace ebay_listings match. W43E's
+    // "any-marketplace fallback" caused GBP-listing rows to render
+    // under a USD-basis discount claim (the enriched output swapped
+    // in a UK ebay_listings row when only the US daily_deals row
+    // had computed the discount, leaving the displayed price and
+    // discount_pct on different currency bases).
     const enriched: PotentialDeal[] = []
     const seenByIdMarket = new Set<string>()
     // Array.from() so ES5-target iteration works (matches how
@@ -323,19 +388,29 @@ export async function loadPotentialDeals(
       const available = listingsById.get(idStr) ?? []
       if (available.length === 0) continue
 
-      const match =
-        available.find(l => l.marketplace === deal.marketplace) ?? available[0]
+      // W43G — same-marketplace only. No fallback to available[0]:
+      // a UK listing cannot validate a US-basis discount claim
+      // (or vice versa).
+      const match = available.find(l => l.marketplace === deal.marketplace)
+      if (!match) continue
 
       // W43E — title junk filter (fan art / custom / topps / …).
       if (containsJunkTerm(match.title)) continue
 
-      // Prefer the fresher ebay_listings values for the CTA path.
-      const finalMarketplace = match.marketplace ?? deal.marketplace
-      const finalUrl         = match.item_web_url ?? deal.item_web_url
+      // W43G — coherence guard. Re-compute the discount from
+      // daily_deals values using the scraper's own math; if the
+      // recorded discount_pct no longer matches (stale rate,
+      // corrupted row, currency drift), drop the candidate rather
+      // than render a misleading badge.
+      if (!isDiscountCoherent(
+        deal.total_cost_cents, deal.currency,
+        deal.fair_value_cents, deal.discount_pct,
+      )) continue
 
-      // Marketplace ↔ URL host must agree on the FINAL values used
-      // for the CTA (the deep-link builder also cross-checks; this
-      // filter keeps the visible window clean).
+      // Marketplace ↔ URL host must agree on the daily_deals values
+      // (which are now the display source of truth).
+      const finalMarketplace = deal.marketplace
+      const finalUrl         = deal.item_web_url
       const expected = expectedHostFor(finalMarketplace)
       if (!expected) continue
       try {
@@ -343,16 +418,18 @@ export async function loadPotentialDeals(
         if (host !== expected) continue
       } catch { continue }
 
-      // Dedupe by (ebay_item_id, marketplace) — same item across UK
-      // and US is fine to show separately (different domain, campaign,
-      // and often different price), but the same pair should only
-      // render once per page.
+      // Dedupe by (ebay_item_id, marketplace). The same item across
+      // UK and US would be two separate daily_deals rows anyway;
+      // this guards against duplicate daily_deals entries for the
+      // same (id, marketplace) pair.
       const key = `${idStr}::${finalMarketplace}`
       if (seenByIdMarket.has(key)) continue
       seenByIdMarket.add(key)
 
       enriched.push({
-        // Deal calculation stays sourced from daily_deals.
+        // W43G — every field that feeds the discount claim comes
+        // from daily_deals. No cross-currency / cross-marketplace
+        // substitution.
         card_slug:             deal.card_slug,
         card_name:             deal.card_name,
         set_name:              deal.set_name,
@@ -361,14 +438,14 @@ export async function loadPotentialDeals(
         confidence:            deal.confidence,
         detected_at:           deal.detected_at,
         ebay_item_id:          deal.ebay_item_id,
-        // Listing-state fields prefer ebay_listings (fresher).
         marketplace:           finalMarketplace,
         item_web_url:          finalUrl,
-        item_image_url:        match.item_image_url ?? deal.item_image_url,
-        condition:             match.condition      ?? deal.condition,
-        currency:              match.currency       ?? deal.currency,
-        total_cost_cents:      match.total_cost_cents ?? deal.total_cost_cents,
-        seller_feedback_score: match.seller_feedback_score ?? deal.seller_feedback_score,
+        currency:              deal.currency,
+        total_cost_cents:      deal.total_cost_cents,
+        // Only visual / low-risk fields fall back to ebay_listings.
+        item_image_url:        deal.item_image_url ?? match.item_image_url,
+        condition:             deal.condition      ?? match.condition,
+        seller_feedback_score: deal.seller_feedback_score ?? match.seller_feedback_score,
         // Fields only present via ebay_listings.
         title:                 match.title ?? null,
         scraped_at:            match.scraped_at ?? null,

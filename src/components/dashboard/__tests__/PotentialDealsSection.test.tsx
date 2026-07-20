@@ -35,20 +35,26 @@ const SRC = readFileSync(join(__dirname, '..', 'PotentialDealsSection.tsx'), 'ut
 
 describe('PotentialDealsSection — cautious copy', () => {
   it('renders the required heading, sub-copy and disclaimer verbatim', () => {
+    // W43G — heading stays; sub-copy + disclaimer were rewritten to
+    // name currency as a thing the collector should check, and the
+    // disclaimer stops implying "seen recently" (W43F wording).
     expect(SRC).toContain('Potential eBay deals')
-    // W43C — sub-copy names the [15, 30] discount window explicitly.
-    expect(SRC).toContain('Listings 15–30% below recent market data. Check condition and seller before buying.')
+    expect(SRC).toContain('Validated eBay listings from our latest market scan. Check condition, currency and seller before buying.')
     // W43E — small USD-reference note near the sub-copy.
     expect(SRC).toContain('Market reference shown in USD.')
-    // W43F — disclaimer no longer claims listings are "recently seen"
-    // (the ebay_listings freshness window is 7 days, not 36h, so the
-    // wording is softened to "checked against recent eBay data").
-    expect(SRC).toContain('Prices and availability can change quickly. Listings are checked against recent eBay data, but always check eBay before buying.')
+    expect(SRC).toContain('Prices and availability can change quickly. Always check the listing on eBay before buying.')
     // Regression guards — must never claim the listing is definitely
-    // still available or active. 'guaranteed' is already covered by
-    // the forbidden-word list below; these two are novel.
+    // still available or active, or that these are the best deals on
+    // all of eBay. 'guaranteed' is already in the forbidden-word list
+    // below; these are novel W43G guards.
     expect(SRC.toLowerCase()).not.toContain('still available')
     expect(SRC.toLowerCase()).not.toContain('currently active')
+    expect(SRC.toLowerCase()).not.toContain('best deals on ebay')
+    expect(SRC.toLowerCase()).not.toContain('cheapest on ebay')
+    // W43G — the old W43C/W43F copy strings must not linger.
+    expect(SRC).not.toContain('Listings 15–30% below recent market data.')
+    expect(SRC).not.toContain('Listings were seen recently')
+    expect(SRC).not.toContain('Listings are checked against recent eBay data')
   })
 
   it('labels the reference market value as USD explicitly (W43C/E)', () => {
@@ -64,10 +70,16 @@ describe('PotentialDealsSection — cautious copy', () => {
     expect(SRC).toContain('${deal.currency}')
   })
 
-  it('shows the required empty-state copy for both tabs', () => {
-    expect(SRC).toContain('No watchlist deals found today.')
-    expect(SRC).toContain('No best deals found today.')
-    expect(SRC).toContain('No potential deals found today.')
+  it('shows the required empty-state copy for both tabs (W43G)', () => {
+    // W43G — "deals" language is retained on the Watchlist tab where
+    // it still describes the tab, but the primary (validated) tab
+    // uses "validated listings".
+    expect(SRC).toContain('No validated listings on your watchlist right now.')
+    expect(SRC).toContain('No validated listings found right now.')
+    // The old "Best deals" empty-state strings must be gone.
+    expect(SRC).not.toContain('No watchlist deals found today.')
+    expect(SRC).not.toContain('No best deals found today.')
+    expect(SRC).not.toContain('No potential deals found today.')
   })
 
   it('CTA label is "Check listing on eBay"', () => {
@@ -85,6 +97,42 @@ describe('PotentialDealsSection — cautious copy', () => {
     ]) {
       expect(SRC.toLowerCase()).not.toContain(banned)
     }
+  })
+})
+
+// ── W43G — tab rename + display safety ────────────────────────────
+
+describe('PotentialDealsSection — W43G tab rename + display safety', () => {
+  it('renames the "Best deals" tab to "Validated listings"', () => {
+    expect(SRC).toContain('label="Validated listings"')
+    // The old label must be gone from any user-visible TabButton.
+    expect(SRC).not.toContain('label="Best deals"')
+  })
+
+  it('cross-tab CTAs use the new "validated listings" wording', () => {
+    expect(SRC).toContain('View validated listings →')
+    // The old CTA copy must not survive.
+    expect(SRC).not.toContain('View Best deals →')
+  })
+
+  it('imports the W43G safety helpers from potentialDeals', () => {
+    expect(SRC).toContain('toUsdCents')
+    expect(SRC).toContain('isDiscountCoherent')
+  })
+
+  it('gates the green discount chip on isDiscountCoherent (UI safety net)', () => {
+    // The chip render must be guarded by the coherence check so a
+    // future data drift can never surface an unverified "X% below"
+    // badge.
+    expect(SRC).toContain('const chipSafe = isDiscountCoherent(')
+    expect(SRC).toMatch(/typeof deal\.discount_pct === 'number' && chipSafe/)
+  })
+
+  it('shows an approximate USD conversion under GBP listing prices', () => {
+    // For a GBP row, the price column shows "Approx $X.XX USD" so the
+    // collector can eyeball the deal claim against the USD market ref.
+    expect(SRC).toContain("deal.currency === 'GBP' ? toUsdCents(deal.total_cost_cents, 'GBP')")
+    expect(SRC).toContain('Approx ')
   })
 })
 
@@ -176,9 +224,11 @@ describe('PotentialDealsSection — W43E live rows re-enabled', () => {
 // ── Tabs + pagination ─────────────────────────────────────────────
 
 describe('PotentialDealsSection — tabs + pagination', () => {
-  it('renders Watchlist deals + Best deals tabs', () => {
+  it('renders Watchlist deals + Validated listings tabs (W43G)', () => {
     expect(SRC).toContain('label="Watchlist deals"')
-    expect(SRC).toContain('label="Best deals"')
+    // W43G — renamed from "Best deals". See the tab-rename describe
+    // block above for the corresponding regression guard.
+    expect(SRC).toContain('label="Validated listings"')
     expect(SRC).toContain('role="tablist"')
   })
 
@@ -228,11 +278,12 @@ describe('PotentialDealsSection — tabs + pagination', () => {
 // ── Empty state cross-tab links ───────────────────────────────────
 
 describe('PotentialDealsSection — empty-state cross-tab affordance', () => {
-  it('offers a link to Best deals when Watchlist deals is empty', () => {
-    expect(SRC).toContain('View Best deals →')
+  it('offers a link to Validated listings when Watchlist deals is empty (W43G)', () => {
+    // W43G — was "View Best deals →".
+    expect(SRC).toContain('View validated listings →')
   })
 
-  it('offers a link to Watchlist deals when Best is empty AND the user has a watchlist', () => {
+  it('offers a link to Watchlist deals when the validated tab is empty AND the user has a watchlist', () => {
     expect(SRC).toContain('View Watchlist deals →')
     expect(SRC).toContain('hasWatchlist')
   })
