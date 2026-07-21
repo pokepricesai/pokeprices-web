@@ -299,17 +299,28 @@ export default function WatchlistClient({ embedded = false }: { embedded?: boole
           {[1, 2, 3].map(i => <div key={i} className="skeleton" style={{ height: 78, borderRadius: 12 }} />)}
         </div>
       ) : items.length === 0 ? (
+        // Block 5A-W-44B — plain-text empty state (no decorative emoji)
+        // with the brief's copy and a "Browse cards" primary CTA to
+        // the public browse surface. The existing modal-trigger stays
+        // as a secondary action.
         <div style={{ background: 'var(--card)', border: '2px dashed var(--border)', borderRadius: 20, padding: '60px 24px', textAlign: 'center' }}>
-          <div style={{ fontSize: 48, marginBottom: 14 }}>👁</div>
-          <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, margin: '0 0 8px', color: 'var(--text)' }}>Build your watchlist</h2>
+          <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, margin: '0 0 8px', color: 'var(--text)' }}>Your watchlist is empty</h2>
           <p style={{ fontSize: 14, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 24px', maxWidth: 420, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6 }}>
-            Track cards you don&apos;t own yet. See current value, 7d/30d movement and PSA premium at a glance.
+            Add cards to track price movement and future alerts.
           </p>
-          <button onClick={() => setShowAdd(true)} style={{
-            padding: '12px 28px', borderRadius: 12, border: 'none',
-            background: 'var(--primary)', color: '#fff',
-            fontSize: 15, fontWeight: 700, fontFamily: "'Figtree', sans-serif", cursor: 'pointer',
-          }}>+ Watch a card</button>
+          <div style={{ display: 'inline-flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <Link href="/browse" style={{
+              display: 'inline-block', padding: '12px 28px', borderRadius: 12,
+              background: 'var(--primary)', color: '#fff',
+              fontSize: 15, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
+              textDecoration: 'none',
+            }}>Browse cards</Link>
+            <button onClick={() => setShowAdd(true)} style={{
+              padding: '12px 20px', borderRadius: 12, border: '1px solid var(--border)',
+              background: 'transparent', color: 'var(--text)',
+              fontSize: 15, fontWeight: 700, fontFamily: "'Figtree', sans-serif", cursor: 'pointer',
+            }}>+ Watch a card</button>
+          </div>
         </div>
       ) : (
         <>
@@ -366,7 +377,19 @@ export default function WatchlistClient({ embedded = false }: { embedded?: boole
                   <Link href={cardUrl} style={{ flexShrink: 0 }}>
                     {item.image_url
                       ? <img src={item.image_url} alt={item.card_name} style={{ width: 42, height: 58, objectFit: 'contain', borderRadius: 4 }} loading="lazy" />
-                      : <div style={{ width: 42, height: 58, background: 'var(--bg-light)', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>🃏</div>}
+                      : (
+                        /* Block 5A-W-44B — plain text placeholder (no
+                           emoji glyph) matching the eBay/Card style
+                           used in PotentialDealsSection thumbnails. */
+                        <div aria-hidden style={{
+                          width: 42, height: 58, background: 'var(--bg-light)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 4, display: 'flex', alignItems: 'center',
+                          justifyContent: 'center', fontSize: 10, fontWeight: 800,
+                          color: 'var(--text-muted)',
+                          fontFamily: "'Figtree', sans-serif",
+                        }}>Card</div>
+                      )}
                   </Link>
 
                   <div style={{ flex: 1, minWidth: 140 }}>

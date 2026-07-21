@@ -14,12 +14,16 @@
 // AlertPreferencesCard on the same page.
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import {
   summariseWatchlistAlerts,
+  pickBiggestMover,
   type WatchlistAlertsSummary,
   type WatchlistOverrideRowLite,
   type AlertEventLite,
+  type BiggestMover,
+  type WatchlistPricedRowLite,
 } from './summaryStats'
 import { getPlanLimits } from '@/lib/account/entitlements'
 import { useUserPlan } from '@/lib/account/useUserPlan'
@@ -34,6 +38,11 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 export default function WatchlistAlertsSummaryPanel({ userId }: { userId: string }) {
   const [summary, setSummary] = useState<WatchlistAlertsSummary | null>(null)
   const [error,   setError]   = useState<string | null>(null)
+  // Block 5A-W-44B — biggest mover across the user's watchlist.
+  // null while loading OR when the watchlist is empty / has no
+  // priced rows. The panel simply omits the chip when null; no
+  // fake placeholder ever renders.
+  const [biggestMover, setBiggestMover] = useState<BiggestMover | null>(null)
   // Block 5A-W-25 — `planLoading` is true while the /api/account/plan
   // fetch is in flight. The plan-note row hides until it settles so
   // a pro user doesn't see "Free account · …" copy flash for a tick.
@@ -101,6 +110,25 @@ export default function WatchlistAlertsSummaryPanel({ userId }: { userId: string
     return () => { live = false }
   }, [userId])
 
+  // Block 5A-W-44B — biggest mover fetch. Separate effect so a failure
+  // here never blocks the counter panel from settling. Uses the SAME
+  // RPC WatchlistClient calls one level down; the extra round trip
+  // is worth the honest surface (vs no mover shown), and both paths
+  // still call get_watchlist_with_prices — no new RPC introduced.
+  useEffect(() => {
+    if (!userId) return
+    let live = true
+    void (async () => {
+      try {
+        const { data, error } = await supabase.rpc('get_watchlist_with_prices', { p_user_id: userId })
+        if (!live) return
+        if (error || !Array.isArray(data)) { setBiggestMover(null); return }
+        setBiggestMover(pickBiggestMover(data as WatchlistPricedRowLite[]))
+      } catch { if (live) setBiggestMover(null) }
+    })()
+    return () => { live = false }
+  }, [userId])
+
   if (!summary) {
     return (
       <div style={panelStyle}>
@@ -131,6 +159,10 @@ export default function WatchlistAlertsSummaryPanel({ userId }: { userId: string
         <Stat label="Alerts off"         value={summary.alertsOff}      tone={summary.alertsOff > 0 ? 'warn' : 'muted'} />
         <Stat label="Alerts this week"   value={summary.recent7dCount}  tone={summary.recent7dCount > 0 ? 'primary' : 'muted'} />
       </div>
+      {/* Block 5A-W-44B — biggest mover chip. Only renders when we
+          have a signed mover — no fake placeholder for empty watchlist
+          or a watchlist with no price data yet. */}
+      {biggestMover && <BiggestMoverChip mover={biggestMover} />}
       {/* Block 5A-W-26 — canonical plan badge. Replaces the inline
           plan-note paragraph from 5A-W-25 with the shared component
           so the wording stays in sync across the dashboard. */}
@@ -165,6 +197,31 @@ export default function WatchlistAlertsSummaryPanel({ userId }: { userId: string
           Some summary data didn&apos;t load. Numbers above may be partial. <span style={{ color: 'var(--text-muted)' }}>({error})</span>
         </div>
       )}
+    </div>
+  )
+}
+
+function BiggestMoverChip({ mover }: { mover: BiggestMover }) {
+  const up      = mover.pct > 0
+  const color   = up ? '#22c55e' : mover.pct < 0 ? '#ef4444' : 'var(--text-muted)'
+  const bg      = up ? 'rgba(34,197,94,0.10)' : mover.pct < 0 ? 'rgba(239,68,68,0.10)' : 'var(--bg-light)'
+  const arrow   = up ? '▲' : mover.pct < 0 ? '▼' : ''
+  const cardUrl = `/set/${encodeURIComponent(mover.set_name)}/card/${mover.card_url_slug || mover.card_slug}`
+  return (
+    <div style={moverRowStyle} aria-label="Biggest mover on your watchlist">
+      <span style={moverKickerStyle}>Biggest mover</span>
+      <Link href={cardUrl} style={moverLinkStyle}>
+        <span style={{ fontWeight: 700 }}>{mover.card_name}</span>
+        <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>{mover.set_name}</span>
+      </Link>
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        fontSize: 12, fontWeight: 800, color, background: bg,
+        padding: '3px 10px', borderRadius: 999, marginLeft: 8,
+      }}>
+        {arrow ? <span aria-hidden>{arrow}</span> : null}
+        {Math.abs(mover.pct).toFixed(1)}% {mover.window}
+      </span>
     </div>
   )
 }
@@ -242,4 +299,22 @@ const warnStyle: React.CSSProperties = {
   fontSize: 11,
   color: '#92400e',
   fontFamily: "'Figtree', sans-serif",
+}
+// Block 5A-W-44B — biggest-mover row.
+const moverRowStyle: React.CSSProperties = {
+  marginTop: 14,
+  padding: '10px 14px',
+  borderRadius: 12,
+  background: 'var(--bg-light)',
+  border: '1px solid var(--border)',
+  fontFamily: "'Figtree', sans-serif",
+  fontSize: 12.5, color: 'var(--text)',
+  display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+}
+const moverKickerStyle: React.CSSProperties = {
+  fontSize: 10, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase',
+  color: 'var(--text-muted)',
+}
+const moverLinkStyle: React.CSSProperties = {
+  color: 'var(--text)', textDecoration: 'none',
 }

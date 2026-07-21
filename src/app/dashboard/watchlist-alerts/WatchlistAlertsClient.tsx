@@ -49,11 +49,14 @@ export default function WatchlistAlertsClient() {
       <DashboardNav current="watchlist" email={user?.email ?? undefined} />
 
       <div style={{ marginBottom: 20 }}>
+        {/* Block 5A-W-44B — softer heading + sub-copy. Old wording read
+            like a settings page; the new line frames the page as a
+            daily-check destination. */}
         <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 26, margin: '0 0 4px', color: 'var(--text)' }}>
-          Watchlist &amp; Alerts
+          Watchlist &amp; alerts
         </h1>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, lineHeight: 1.5 }}>
-          The cards you&apos;re watching plus the alerts that fire on them. Update what you watch and how loud the alerts are, in one place.
+          Track cards you care about and spot recent movement.
         </p>
       </div>
 

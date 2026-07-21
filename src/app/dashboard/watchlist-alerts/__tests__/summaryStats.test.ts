@@ -4,7 +4,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   summariseWatchlistAlerts,
+  pickBiggestMover,
   type WatchlistOverrideRowLite,
+  type WatchlistPricedRowLite,
 } from '../summaryStats'
 
 function over(over: Partial<WatchlistOverrideRowLite>): WatchlistOverrideRowLite {
@@ -111,5 +113,106 @@ describe('summariseWatchlistAlerts', () => {
       masterEnabled: false,
     })
     expect(s.masterEnabled).toBe(false)
+  })
+})
+
+// ── Block 5A-W-44B — biggest-mover picker ────────────────────────
+
+function row(over: Partial<WatchlistPricedRowLite>): WatchlistPricedRowLite {
+  return {
+    card_slug:     'slug',
+    card_name:     'Card',
+    set_name:      'Set',
+    card_url_slug: null,
+    pct_7d:        null,
+    pct_30d:       null,
+    ...over,
+  }
+}
+
+describe('pickBiggestMover — pure (W44B)', () => {
+  it('returns null for empty / null / undefined input', () => {
+    expect(pickBiggestMover([])).toBeNull()
+    expect(pickBiggestMover(null)).toBeNull()
+    expect(pickBiggestMover(undefined)).toBeNull()
+  })
+
+  it('returns null when no row has a usable pct_7d or pct_30d', () => {
+    expect(pickBiggestMover([
+      row({ card_slug: 'a', pct_7d: null, pct_30d: null }),
+      row({ card_slug: 'b', pct_7d: null, pct_30d: null }),
+    ])).toBeNull()
+  })
+
+  it('prefers pct_30d over pct_7d row-by-row', () => {
+    const out = pickBiggestMover([
+      row({ card_slug: 'a', pct_7d: 40, pct_30d: 5 }),  // pct=5 (30d wins)
+      row({ card_slug: 'b', pct_7d: null, pct_30d: 3 }),
+    ])
+    expect(out?.card_slug).toBe('a')
+    expect(out?.pct).toBe(5)
+    expect(out?.window).toBe('30d')
+  })
+
+  it('falls back to pct_7d when pct_30d is null', () => {
+    const out = pickBiggestMover([
+      row({ card_slug: 'a', pct_7d: 15, pct_30d: null }),
+      row({ card_slug: 'b', pct_7d: 2,  pct_30d: null }),
+    ])
+    expect(out?.card_slug).toBe('a')
+    expect(out?.pct).toBe(15)
+    expect(out?.window).toBe('7d')
+  })
+
+  it('picks by ABSOLUTE value (a big drop beats a smaller rise)', () => {
+    const out = pickBiggestMover([
+      row({ card_slug: 'a', pct_30d:  10 }),
+      row({ card_slug: 'b', pct_30d: -25 }),
+    ])
+    expect(out?.card_slug).toBe('b')
+    expect(out?.pct).toBe(-25)
+  })
+
+  it('preserves the sign of the winning pct so the caller can render colour + arrow', () => {
+    const up   = pickBiggestMover([row({ card_slug: 'a', pct_30d:  17.4 })])
+    const down = pickBiggestMover([row({ card_slug: 'a', pct_30d: -17.4 })])
+    expect(up?.pct).toBeGreaterThan(0)
+    expect(down?.pct).toBeLessThan(0)
+  })
+
+  it('carries card_name / set_name / card_url_slug through so the callable link matches the watchlist row', () => {
+    const out = pickBiggestMover([
+      row({
+        card_slug:     'charizard-base',
+        card_name:     'Charizard',
+        set_name:      'Base Set',
+        card_url_slug: 'charizard-base-set',
+        pct_30d:       22.2,
+      }),
+    ])
+    expect(out).toEqual({
+      card_name:     'Charizard',
+      set_name:      'Base Set',
+      card_slug:     'charizard-base',
+      card_url_slug: 'charizard-base-set',
+      pct:           22.2,
+      window:        '30d',
+    })
+  })
+
+  it('ties resolve to the first row (deterministic)', () => {
+    const out = pickBiggestMover([
+      row({ card_slug: 'a', pct_30d: 20 }),
+      row({ card_slug: 'b', pct_30d: 20 }),
+    ])
+    expect(out?.card_slug).toBe('a')
+  })
+
+  it('skips rows with NaN pct without throwing', () => {
+    const out = pickBiggestMover([
+      row({ card_slug: 'a', pct_30d: Number.NaN, pct_7d: null }),
+      row({ card_slug: 'b', pct_30d: 8 }),
+    ])
+    expect(out?.card_slug).toBe('b')
   })
 })

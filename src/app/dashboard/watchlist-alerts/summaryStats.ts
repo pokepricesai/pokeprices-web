@@ -41,6 +41,70 @@ export type WatchlistAlertsSummary = {
   masterEnabled:   boolean
 }
 
+// Block 5A-W-44B — biggest-mover surface for the summary panel.
+// Pure so the pick logic can be unit-tested; the panel does the
+// Supabase read separately and passes the rows into this helper.
+
+/** Minimal shape needed to pick a top mover — a subset of the
+ *  `get_watchlist_with_prices` RPC's row shape. */
+export type WatchlistPricedRowLite = {
+  card_slug:      string
+  card_name:      string
+  set_name:       string
+  card_url_slug:  string | null
+  pct_7d:         number | null
+  pct_30d:        number | null
+}
+
+/** What the summary panel renders for the biggest-mover chip. */
+export type BiggestMover = {
+  card_name:      string
+  set_name:       string
+  card_slug:      string
+  card_url_slug:  string | null
+  /** Signed percentage — direction preserved so callers can render
+   *  the colour + arrow. Prefer 30d when both are present. */
+  pct:            number
+  /** Which window the pct came from — for the "30d" / "7d" suffix. */
+  window:         '30d' | '7d'
+}
+
+/** Pure: pick the biggest absolute mover across the watchlist rows.
+ *  Prefer pct_30d; fall back to pct_7d row-by-row. Ties are broken
+ *  by index (first row wins). Returns null when no row has a usable
+ *  pct in either window. */
+export function pickBiggestMover(
+  rows: ReadonlyArray<WatchlistPricedRowLite> | null | undefined,
+): BiggestMover | null {
+  if (!rows || rows.length === 0) return null
+  let best: BiggestMover | null = null
+  let bestAbs = -1
+  for (const r of rows) {
+    let pct: number | null = null
+    let window: '30d' | '7d' = '30d'
+    if (r.pct_30d != null && !Number.isNaN(Number(r.pct_30d))) {
+      pct = Number(r.pct_30d)
+    } else if (r.pct_7d != null && !Number.isNaN(Number(r.pct_7d))) {
+      pct = Number(r.pct_7d)
+      window = '7d'
+    }
+    if (pct == null) continue
+    const abs = Math.abs(pct)
+    if (abs > bestAbs) {
+      bestAbs = abs
+      best = {
+        card_name:     r.card_name,
+        set_name:      r.set_name,
+        card_slug:     r.card_slug,
+        card_url_slug: r.card_url_slug,
+        pct,
+        window,
+      }
+    }
+  }
+  return best
+}
+
 /** Pure: given the page's loaded data, return the five visible
  *  counters. Bucket logic per card:
  *    * override row exists AND enabled=false → alertsOff
