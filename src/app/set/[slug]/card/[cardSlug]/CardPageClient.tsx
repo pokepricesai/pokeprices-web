@@ -275,9 +275,27 @@ function VolumePill({ label }: { label: string }) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-export default function CardPageClient({ setName, cardUrlSlug }: { setName: string; cardUrlSlug: string }) {
+// Block 5A-W-46C (with W46C-FIX1) — CardPageClient now accepts:
+//   * initialTrendData: the trend RPC row the server page pre-fetched
+//     for the Quick Facts panel. When present, the client SKIPS the
+//     duplicate get_card_trends_detail call. The chart / hero banner
+//     bind to the same `trend` state either way.
+//   * quickFactsSlot: a server-rendered ReactNode dropped in AFTER the
+//     H1 hero section and BEFORE the price-history chart. Being a
+//     server-rendered node passed as a prop, it ships in initial HTML
+//     even though the enclosing component is a client component.
+export type CardPageClientProps = {
+  setName:     string
+  cardUrlSlug: string
+  initialTrendData?: unknown
+  quickFactsSlot?:   React.ReactNode
+}
+
+export default function CardPageClient({
+  setName, cardUrlSlug, initialTrendData, quickFactsSlot,
+}: CardPageClientProps) {
   const [card,         setCard]         = useState<any>(null)
-  const [trend,        setTrend]        = useState<any>(null)
+  const [trend,        setTrend]        = useState<any>(initialTrendData ?? null)
   const [metrics,      setMetrics]      = useState<any>(null)
   const [priceHistory, setPriceHistory] = useState<any[]>([])
   const [insight,      setInsight]      = useState<string | null>(null)
@@ -296,8 +314,16 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
 
       const slug = cardData.card_slug
 
+      // W46C-FIX1 — skip get_card_trends_detail when the server page
+      // already handed us a trend row. This is the whole "one RPC call
+      // per page load" guarantee: with a server-fetched trend, the
+      // client makes 4 parallel calls; without one, 5 (unchanged).
+      const trendPromise = initialTrendData !== undefined
+        ? Promise.resolve({ data: null })
+        : supabase.rpc('get_card_trends_detail', { slug })
+
       const [trendRes, metricsRes, histRes, insightRes, volRes] = await Promise.all([
-        supabase.rpc('get_card_trends_detail', { slug }),
+        trendPromise,
         supabase.rpc('get_card_metrics', { card_slug: cardData.card_slug }),
         supabase.rpc('get_card_price_history', { slug }),
         supabase.rpc('get_card_insight', { slug }),
@@ -643,6 +669,13 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
           )}
         </div>
       </div>
+
+      {/* W46C-FIX1 — server-rendered "Quick price facts" slot lands
+          here, after the H1 hero (image + title + set + price ladder +
+          trend chips) and before the detailed client-side chart. The
+          slot is null on non-indexable pages so we don't pad thin
+          cards with an empty panel. */}
+      {quickFactsSlot}
 
       {/* Price History Chart */}
       {priceHistory.length > 1 && (

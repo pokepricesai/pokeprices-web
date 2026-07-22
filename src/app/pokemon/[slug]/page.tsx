@@ -20,6 +20,8 @@ import { getPokemonFaqItems } from '@/lib/faqs'
 import { getPokemonSeo } from '@/lib/seo-helpers'
 import SpeciesInteractiveSection from './SpeciesInteractiveSection'
 import DossierButton from './DossierButton'
+// Block 5A-W-46C — server-rendered "card prices at a glance" summary.
+import PokemonPriceSummary from '@/components/seo/PokemonPriceSummary'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -416,6 +418,41 @@ export default async function PokemonSpeciesPage({
           {subtitle}
         </p>
       </header>
+
+      {/* Block 5A-W-46C — server-rendered "card prices at a glance"
+          summary. Rendered from real species data; the component
+          returns null when < 2 usable facts are available, so
+          Pokémon with sparse data don't show a hollow block. */}
+      <PokemonPriceSummary
+        species={sp ? { name: sp.name, total_cards: sp.total_cards } : null}
+        topCards={topCards.map(c => ({
+          card_name:     c.card_name,
+          set_name:      c.set_name,
+          card_url_slug: c.card_url_slug ?? null,
+          current_raw:   c.current_raw ?? null,
+          current_psa10: c.current_psa10 ?? null,
+        }))}
+        risers={risers.map(c => ({
+          card_name:     c.card_name,
+          set_name:      c.set_name,
+          card_url_slug: c.card_url_slug ?? null,
+          raw_pct_30d:   c.raw_pct_30d ?? null,
+        }))}
+        fallers={fallers.map(c => ({
+          card_name:     c.card_name,
+          set_name:      c.set_name,
+          card_url_slug: c.card_url_slug ?? null,
+          raw_pct_30d:   c.raw_pct_30d ?? null,
+        }))}
+        bySet={bySet.map(b => ({ set_name: b.set_name }))}
+        allCards={cards.map(c => ({
+          card_name:     c.card_name,
+          set_name:      c.set_name,
+          card_url_slug: c.card_url_slug ?? null,
+          current_raw:   c.current_raw ?? null,
+          current_psa10: c.current_psa10 ?? null,
+        }))}
+      />
 
       {/* Pokédex hero — moved to TOP. Keeps type badges, base stats, flavor,
           plus the prominent dossier export button (was lost in the rewrite). */}

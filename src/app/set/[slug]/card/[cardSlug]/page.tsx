@@ -23,6 +23,10 @@ import { isCardIndexable } from '@/lib/seo-indexability/cardIndexability'
 //     CardPageClient was already removed to avoid duplicate schema;
 //     do NOT re-add it here or there.
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
+// Block 5A-W-46C — server-rendered Quick Facts panel + trend fetch.
+// Reuses the existing get_card_trends_detail RPC (no new RPC). Rendered
+// only when the card is indexable per the W35 gate.
+import CardPriceQuickFacts from '@/components/seo/CardPriceQuickFacts'
 
 // ISR: regenerate every 24h. Prices refresh nightly, so this aligns with data cadence.
 // Dramatically reduces crawl-budget consumption across 40k+ card pages.
@@ -42,6 +46,34 @@ const getCard = cache(async (setName: string, cardSlug: string) => {
     p_card_url_slug: cardSlug,
   })
   return data
+})
+
+// Block 5A-W-46C (with W46C-FIX1) — server-side trend fetch. Returns
+// a DISCRIMINATED result so the render layer can distinguish:
+//   * server succeeded (with data or with a legitimate empty row) →
+//     pass the data / null as initialTrendData; the client SKIPS its
+//     duplicate get_card_trends_detail call.
+//   * server failed (RPC error or exception) → pass `undefined` as
+//     initialTrendData; the client falls back to ONE
+//     get_card_trends_detail call so a transient server error never
+//     permanently suppresses the chart / hero banner trend chips.
+type TrendRow = { raw_pct_7d?: number | null; raw_pct_30d?: number | null; updated_at?: string | null }
+type TrendResult =
+  | { ok: true;  data: TrendRow | null }
+  | { ok: false }
+
+const getTrend = cache(async (bareCardSlug: string | null | undefined): Promise<TrendResult> => {
+  // No slug isn't an error — a card with a missing bare slug has
+  // no trend by definition. Treat as success + null so the client
+  // does NOT unnecessarily retry.
+  if (!bareCardSlug) return { ok: true, data: null }
+  try {
+    const { data, error } = await supabaseServer.rpc('get_card_trends_detail', { slug: bareCardSlug })
+    if (error) return { ok: false }
+    return { ok: true, data: (data ?? null) as TrendRow | null }
+  } catch {
+    return { ok: false }
+  }
 })
 
 function fmt(cents: number): string {
@@ -149,6 +181,25 @@ export default async function CardPage({ params }: { params: Promise<{ slug: str
   const card = await getCard(setName, cardSlug)
   if (!card) notFound()
 
+  // Block 5A-W-46C — the Quick Facts panel is server-rendered ONLY on
+  // pages the W35 gate deems indexable (isCardIndexable). Thin cards
+  // stay unadorned; we do not manufacture content on pages Google
+  // has decided to skip.
+  const indexable = isCardIndexable(card)
+  // W46C-FIX1 — call getTrend only on indexable pages. On non-indexable
+  // pages the client falls back to its own fetch just like before.
+  const trendResult: TrendResult = indexable
+    ? await getTrend(card.card_slug)
+    : { ok: true, data: null }
+  // W46C-FIX1 — `undefined` on server error signals the client to make
+  // one fallback RPC call. Success (including a legitimate null row)
+  // is passed through so the client SKIPS its duplicate call.
+  const initialTrendData: TrendRow | null | undefined = trendResult.ok
+    ? trendResult.data
+    : undefined
+  const trendForPanel: TrendRow | null = trendResult.ok ? trendResult.data : null
+  const setHref = `/set/${encodeURIComponent(String(card.set_name ?? ''))}`
+
   // Recent verified sales — grouped by grade. Fail-closed: the loader
   // returns an empty group set when RECENT_SALES_FREE_PREVIEW_ENABLED
   // is not the literal "true", so the DB is not consulted while the
@@ -184,7 +235,29 @@ export default async function CardPage({ params }: { params: Promise<{ slug: str
         { name: card.set_name,  url: `/set/${encodeURIComponent(card.set_name)}` },
         { name: card.card_name },
       ]} />
-      <CardPageClient setName={setName} cardUrlSlug={cardSlug} />
+      {/* Block 5A-W-46C (with W46C-FIX1) — the "Quick price facts"
+          panel is passed as a server-rendered slot INTO CardPageClient.
+          CardPageClient drops it in AFTER its H1 hero and BEFORE the
+          detailed price-history chart. Being a server-rendered node
+          passed as a prop, the panel arrives in the initial HTML
+          (client boundary handles hydration, not rendering).
+
+          When the card is not W35-indexable, the slot is null so we
+          do not add empty content to thin pages. */}
+      <CardPageClient
+        setName={setName}
+        cardUrlSlug={cardSlug}
+        initialTrendData={initialTrendData}
+        quickFactsSlot={indexable ? (
+          <CardPriceQuickFacts
+            card={card}
+            trend={trendForPanel}
+            setHref={setHref}
+            pokemonHref={null}
+            pokemonName={null}
+          />
+        ) : null}
+      />
       <RecentSalesSection data={recentSalesData} card={recentSalesCard} />
     </>
   )
