@@ -7,6 +7,22 @@ import CardPageClient from './CardPageClient'
 import RecentSalesSection from '@/components/recentSales/RecentSalesSection'
 import { loadRecentSalesGroupedForCardIfEnabled } from '@/lib/recentSales/cardQueries'
 import { isCardIndexable } from '@/lib/seo-indexability/cardIndexability'
+// Block 5A-W-46B (with W46B-FIX1) — server-emit BreadcrumbSchema only.
+//   * BreadcrumbSchema moved up from CardPageClient (which fetched
+//     `card` via useEffect and therefore shipped an empty initial HTML
+//     — no BreadcrumbList visible to the first-pass crawl). Rendering
+//     here guarantees the BreadcrumbList appears in the server-rendered
+//     HTML that Google + Bing index against.
+//   * CardStructuredData (WebPage + Dataset graph) is INTENTIONALLY
+//     NOT server-rendered here. Server-rendering it would materially
+//     increase the Dataset-schema blast radius from ~0 to ~29k
+//     individual card pages. A single card price snapshot has not
+//     been established as a genuine Dataset under our intended schema
+//     model, so the Dataset emission is deferred to a dedicated
+//     structured-data review block. The client-side render in
+//     CardPageClient was already removed to avoid duplicate schema;
+//     do NOT re-add it here or there.
+import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 // ISR: regenerate every 24h. Prices refresh nightly, so this aligns with data cadence.
 // Dramatically reduces crawl-budget consumption across 40k+ card pages.
@@ -153,6 +169,21 @@ export default async function CardPage({ params }: { params: Promise<{ slug: str
 
   return (
     <>
+      {/* Block 5A-W-46B (with W46B-FIX1) — server-emitted BreadcrumbList.
+          Uses the `card` row we already fetched, so Google's first crawl
+          sees the BreadcrumbList in initial HTML rather than a shell
+          that hydrates it later.
+
+          NOTE — the CardStructuredData helper (WebPage + Dataset graph)
+          is deliberately NOT rendered here. Server-rendering it would
+          push Dataset markup onto ~29k card pages in a single deploy;
+          that scope belongs to a dedicated structured-data review block,
+          not to this SEO integrity pass. */}
+      <BreadcrumbSchema items={[
+        { name: 'Sets',         url: '/browse' },
+        { name: card.set_name,  url: `/set/${encodeURIComponent(card.set_name)}` },
+        { name: card.card_name },
+      ]} />
       <CardPageClient setName={setName} cardUrlSlug={cardSlug} />
       <RecentSalesSection data={recentSalesData} card={recentSalesCard} />
     </>

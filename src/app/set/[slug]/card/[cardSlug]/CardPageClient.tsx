@@ -5,8 +5,10 @@ import { supabase, formatPct } from '@/lib/supabase'
 import InlineChat from '@/components/InlineChat'
 import PriceChart, { type ChartSeries } from '@/components/PriceChart'
 import GradeLadder, { type GradePrices } from '@/components/GradeLadder'
-import CardStructuredData from '@/components/CardStructuredData'
-import BreadcrumbSchema from '@/components/BreadcrumbSchema'
+// Block 5A-W-46B — CardStructuredData + BreadcrumbSchema moved to the
+// server component (page.tsx) so they appear in initial HTML. Do NOT
+// re-import here; a duplicate BreadcrumbList in the same page would
+// confuse Google's rich-result parser and could invalidate both.
 import CardQuickActions from '@/components/CardQuickActions'
 import EbayCardPriceActions from '@/components/affiliate/EbayCardPriceActions'
 import EbayCardPrimaryAction from '@/components/affiliate/EbayCardPrimaryAction'
@@ -529,12 +531,9 @@ export default function CardPageClient({ setName, cardUrlSlug }: { setName: stri
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '36px 24px' }}>
-      <CardStructuredData card={card} />
-      <BreadcrumbSchema items={[
-        { name: 'Sets', url: '/browse' },
-        { name: card.set_name, url: `/set/${encodeURIComponent(card.set_name)}` },
-        { name: card.card_name },
-      ]} />
+      {/* Block 5A-W-46B — CardStructuredData + BreadcrumbSchema now
+          emitted by the parent server component (page.tsx) so they
+          appear in the first-crawl HTML. Do NOT re-emit here. */}
 
       {/* Breadcrumb */}
       <div style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>

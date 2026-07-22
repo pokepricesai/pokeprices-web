@@ -5,6 +5,13 @@ import { createClient } from '@supabase/supabase-js'
 import { notFound } from 'next/navigation'
 import SetPageClient from './SetPageClient'
 import { getSetSeo } from '@/lib/seo-helpers'
+// Block 5A-W-46B — server-side breadcrumb emitter. SetPageClient used
+// to emit BreadcrumbSchema, but it fetches its card list via useEffect
+// so the initial HTML shipped no breadcrumb JSON-LD. SetStructuredData
+// stays in the client for now because it needs the card list; a later
+// block should lift that fetch into the server so the CollectionPage +
+// Dataset schema also arrive in initial HTML.
+import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 export const revalidate = 86400
 
@@ -79,5 +86,16 @@ export default async function SetPage({ params }: { params: Promise<{ slug: stri
   const { slug } = await params
   const setName = decodeURIComponent(slug)
   if (!(await setExists(setName))) notFound()
-  return <SetPageClient slug={slug} />
+  return (
+    <>
+      {/* Block 5A-W-46B — server-emitted BreadcrumbList so the schema
+          is present in initial HTML. `SetPageClient` no longer emits
+          this to avoid a duplicate BreadcrumbList node. */}
+      <BreadcrumbSchema items={[
+        { name: 'Sets', url: '/browse' },
+        { name: setName },
+      ]} />
+      <SetPageClient slug={slug} />
+    </>
+  )
 }
