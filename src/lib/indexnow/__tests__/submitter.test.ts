@@ -295,4 +295,60 @@ describe('buildPayload', () => {
     expect(p.keyLocation).toBe('https://www.pokeprices.io/K.txt')
     expect(p.urlList).toEqual(['https://www.pokeprices.io/a'])
   })
+
+  it('W46D — payload always includes host + key + keyLocation + urlList (no field omitted)', () => {
+    const p = buildPayload(['https://www.pokeprices.io/a'], { key: 'K', keyLocation: 'https://www.pokeprices.io/K.txt' })
+    // JSON.stringify surfaces every own property; the four required
+    // IndexNow fields must all be present.
+    const keys = Object.keys(p).sort()
+    expect(keys).toEqual(['host', 'key', 'keyLocation', 'urlList'])
+  })
+
+  it('W46D — keyLocation must be an https URL on the canonical host (no bare-apex, no http)', () => {
+    const p = buildPayload(['https://www.pokeprices.io/a'], {
+      key: 'K',
+      keyLocation: `https://${CANONICAL_HOST}/K.txt`,
+    })
+    expect(p.keyLocation.startsWith(`https://${CANONICAL_HOST}/`)).toBe(true)
+    expect(p.keyLocation.endsWith('.txt')).toBe(true)
+  })
+
+  it('W46D — accepts a one-URL payload (single-URL verification test path)', () => {
+    const p = buildPayload(['https://www.pokeprices.io/insights'], {
+      key: 'K', keyLocation: `https://${CANONICAL_HOST}/K.txt`,
+    })
+    expect(p.urlList).toEqual(['https://www.pokeprices.io/insights'])
+    expect(p.urlList.length).toBe(1)
+  })
+})
+
+describe('classifyStatus + shouldRetry — W46D 202/403 semantics', () => {
+  it('W46D — 202 is classified as `accepted` (pending, NOT an error)', () => {
+    // Bing's IndexNow returns 202 Accepted while key validation is
+    // still in-flight. That's a "pending, do not retry, check back
+    // later" state — not a failure.
+    expect(classifyStatus(202)).toBe('accepted')
+    expect(shouldRetry(classifyStatus(202))).toBe(false)
+  })
+
+  it('W46D — 403 is classified as `forbidden` (verification failed)', () => {
+    // The SiteVerificationNotCompleted rejection lands here. It is
+    // NEVER a success and MUST NOT be treated as propagation
+    // completion.
+    expect(classifyStatus(403)).toBe('forbidden')
+  })
+
+  it('W46D — 403 is NOT retried (client error class)', () => {
+    // Retrying a 403 wastes API budget and does not change Bing's
+    // verification state. The bounded-retry policy correctly skips it.
+    expect(shouldRetry(classifyStatus(403))).toBe(false)
+  })
+
+  it('W46D — 200 remains the only "success and safe to batch" status', () => {
+    // Regression pin so a future refactor cannot silently reclassify
+    // 202 or 403 as `ok`.
+    expect(classifyStatus(200)).toBe('ok')
+    expect(classifyStatus(202)).not.toBe('ok')
+    expect(classifyStatus(403)).not.toBe('ok')
+  })
 })

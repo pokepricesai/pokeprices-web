@@ -37,15 +37,63 @@ const supabaseServer = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-// Shared fetch — generateMetadata and the page handler de-dupe to one
-// query via React.cache. Returning null here means "no row" cleanly,
-// so the caller can notFound() rather than rendering a soft-404 page.
-const getCard = cache(async (setName: string, cardSlug: string) => {
-  const { data } = await supabaseServer.rpc('get_card_detail_by_url_slug', {
-    p_set_name: setName,
-    p_card_url_slug: cardSlug,
-  })
-  return data
+// Block 5A-W-46D (with W46D-FIX1) — DISCRIMINATED card loader.
+// generateMetadata() and the page handler both call getCard() with the
+// same (setName, cardSlug); React.cache() de-dupes them into ONE
+// backend RPC per request. The result distinguishes three outcomes so
+// a transient RPC failure never gets converted into a permanent 404:
+//
+//   * status: 'ok'         — real card row is available
+//   * status: 'not-found'  — the query succeeded but no row matched
+//                            (the caller calls notFound() → 404)
+//   * status: 'error'      — the RPC returned an error OR the fetch
+//                            threw. The caller MUST NOT call
+//                            notFound(); render CardPageClient with
+//                            initialCardData=undefined so the client
+//                            fallback fires exactly once. Metadata
+//                            should be a safe fallback with
+//                            robots noindex,follow so a transient
+//                            failure never leaks a fake title / prices.
+//
+// The pre-FIX1 loader collapsed 'not-found' and 'error' into a single
+// null return, so a temporary Supabase blip during metadata could 404
+// a real card permanently for that ISR window. Never null-conflate
+// again — both branches should be deliberate.
+export type CardRow = {
+  card_slug:            string
+  card_url_slug?:       string | null
+  card_name:            string
+  set_name:             string
+  card_number?:         string | number | null
+  card_number_display?: string | null
+  set_printed_total?:   number | null
+  image_url?:           string | null
+  raw_usd?:             number | null
+  psa9_usd?:            number | null
+  psa10_usd?:           number | null
+  is_sealed?:           boolean | null
+  // Every other tier field the RPC returns — kept as a permissive
+  // index signature so the pure indexability helper can inspect them.
+  [key: string]: unknown
+}
+
+export type GetCardResult =
+  | { status: 'ok';        card: CardRow }
+  | { status: 'not-found' }
+  | { status: 'error' }
+
+const getCard = cache(async (setName: string, cardSlug: string): Promise<GetCardResult> => {
+  try {
+    const { data, error } = await supabaseServer.rpc('get_card_detail_by_url_slug', {
+      p_set_name: setName,
+      p_card_url_slug: cardSlug,
+    })
+    if (error) return { status: 'error' }
+    if (!data) return { status: 'not-found' }
+    return { status: 'ok', card: data as CardRow }
+  } catch {
+    return { status: 'error' }
+  }
 })
 
 // Block 5A-W-46C (with W46C-FIX1) — server-side trend fetch. Returns
@@ -85,12 +133,30 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const { slug, cardSlug } = await params
   const setName = decodeURIComponent(slug)
 
-  const card = await getCard(setName, cardSlug)
+  const result = await getCard(setName, cardSlug)
 
-  // Soft-404 fix: prior version returned { title: 'Card Not Found' } and
-  // 200 OK, letting Google index a half-empty page for any URL slug.
-  // Now we throw a true 404.
-  if (!card) notFound()
+  // W46D-FIX1 — genuine "no row" ⇒ true 404. The old behaviour returned
+  // a "Card Not Found" 200 OK, letting Google index a half-empty page.
+  if (result.status === 'not-found') notFound()
+
+  // W46D-FIX1 — RPC error / exception ⇒ SAFE FALLBACK metadata. Do NOT
+  // call notFound(): that would cache a 404 in the ISR bucket and mask
+  // a transient failure. Do NOT invent a card title or prices. Emit
+  // robots noindex,follow so this failed-render slot never enters the
+  // search index, but the canonical stays on the same route so the
+  // next successful revalidation restores full metadata cleanly.
+  if (result.status === 'error') {
+    const canonical = `https://www.pokeprices.io/set/${slug}/card/${cardSlug}`
+    return {
+      title:       'Pokémon Card Price Guide — PokePrices',
+      description: 'Track raw, PSA 9 and PSA 10 Pokémon card prices, grading data and recent sales.',
+      alternates:  { canonical },
+      robots:      { index: false, follow: true },
+    }
+  }
+
+  // result.status === 'ok' ⇒ full metadata using the real card row.
+  const card = result.card
 
   // Strip trailing " #NN" from card_name (DB stores "Pikachu #55")
   // Regex handles "Pikachu #55", "Pikachu [1st Edition] #55", and trailing suffixes
@@ -178,45 +244,65 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 export default async function CardPage({ params }: { params: Promise<{ slug: string; cardSlug: string }> }) {
   const { slug, cardSlug } = await params
   const setName = decodeURIComponent(slug)
-  const card = await getCard(setName, cardSlug)
-  if (!card) notFound()
+  const result = await getCard(setName, cardSlug)
+
+  // W46D-FIX1 — genuine not-found ⇒ 404. RPC error ⇒ fall through to
+  // rendering CardPageClient with initialCardData=undefined so the
+  // client fallback fetch fires exactly once. We deliberately do NOT
+  // call notFound() on the error branch: masking a Supabase blip as
+  // a 404 would cause Google to drop a valid card URL.
+  if (result.status === 'not-found') notFound()
+
+  const card: CardRow | null = result.status === 'ok' ? result.card : null
 
   // Block 5A-W-46C — the Quick Facts panel is server-rendered ONLY on
   // pages the W35 gate deems indexable (isCardIndexable). Thin cards
   // stay unadorned; we do not manufacture content on pages Google
   // has decided to skip.
-  const indexable = isCardIndexable(card)
-  // W46C-FIX1 — call getTrend only on indexable pages. On non-indexable
-  // pages the client falls back to its own fetch just like before.
-  const trendResult: TrendResult = indexable
-    ? await getTrend(card.card_slug)
+  //
+  // W46D-FIX1 — on the error branch (card === null) we cannot run the
+  // indexability gate or the trend fetch. The Quick Facts panel is
+  // suppressed entirely; the client renders its full page after the
+  // fallback RPC succeeds.
+  const indexable = card ? isCardIndexable(card) : false
+  const trendResult: TrendResult = card && indexable
+    ? await getTrend(String(card.card_slug ?? ''))
     : { ok: true, data: null }
   // W46C-FIX1 — `undefined` on server error signals the client to make
   // one fallback RPC call. Success (including a legitimate null row)
   // is passed through so the client SKIPS its duplicate call.
-  const initialTrendData: TrendRow | null | undefined = trendResult.ok
-    ? trendResult.data
-    : undefined
+  //
+  // W46D-FIX1 — when the card server fetch itself failed, force
+  // initialTrendData=undefined so the client's fallback covers both
+  // card AND trend RPCs consistently.
+  const initialTrendData: TrendRow | null | undefined =
+    card == null ? undefined :
+    trendResult.ok ? trendResult.data : undefined
   const trendForPanel: TrendRow | null = trendResult.ok ? trendResult.data : null
-  const setHref = `/set/${encodeURIComponent(String(card.set_name ?? ''))}`
+  const setHref = card ? `/set/${encodeURIComponent(String(card.set_name ?? ''))}` : null
 
   // Recent verified sales — grouped by grade. Fail-closed: the loader
   // returns an empty group set when RECENT_SALES_FREE_PREVIEW_ENABLED
   // is not the literal "true", so the DB is not consulted while the
   // flag is off. The section renders nothing when total is zero.
-  const recentSalesData = await loadRecentSalesGroupedForCardIfEnabled(card.card_slug)
+  //
+  // W46D-FIX1 — skip this loader on the error branch; the client
+  // fallback will re-render the whole page after it has real data.
+  const recentSalesData = card
+    ? await loadRecentSalesGroupedForCardIfEnabled(String(card.card_slug ?? ''))
+    : null
 
   // Grade-aware affiliate link in the recent-sales section needs the
   // card's display metadata. Mirrors the shape EbayCardPriceActions
   // uses higher up the page; strips the pc- prefix from card_slug to
   // match the existing convention.
-  const recentSalesCard = {
+  const recentSalesCard = card ? {
     cardName:   String(card.card_name ?? ''),
     setName:    String(card.set_name ?? ''),
     cardNumber: (card.card_number_display ?? card.card_number ?? null) as string | null,
     cardSlug:   String(card.card_slug ?? '').replace(/^pc-/, '') || null,
     isSealed:   !!card.is_sealed,
-  }
+  } : null
 
   return (
     <>
@@ -225,30 +311,36 @@ export default async function CardPage({ params }: { params: Promise<{ slug: str
           sees the BreadcrumbList in initial HTML rather than a shell
           that hydrates it later.
 
-          NOTE — the CardStructuredData helper (WebPage + Dataset graph)
-          is deliberately NOT rendered here. Server-rendering it would
-          push Dataset markup onto ~29k card pages in a single deploy;
-          that scope belongs to a dedicated structured-data review block,
-          not to this SEO integrity pass. */}
-      <BreadcrumbSchema items={[
-        { name: 'Sets',         url: '/browse' },
-        { name: card.set_name,  url: `/set/${encodeURIComponent(card.set_name)}` },
-        { name: card.card_name },
-      ]} />
-      {/* Block 5A-W-46C (with W46C-FIX1) — the "Quick price facts"
-          panel is passed as a server-rendered slot INTO CardPageClient.
-          CardPageClient drops it in AFTER its H1 hero and BEFORE the
-          detailed price-history chart. Being a server-rendered node
-          passed as a prop, the panel arrives in the initial HTML
-          (client boundary handles hydration, not rendering).
+          W46D-FIX1 — on the error branch we cannot build an accurate
+          breadcrumb (no verified set_name / card_name), so we omit it.
+          The client fallback will render the full page including
+          any dynamic UI once the card row is available. */}
+      {card && (
+        <BreadcrumbSchema items={[
+          { name: 'Sets',         url: '/browse' },
+          { name: card.set_name,  url: `/set/${encodeURIComponent(card.set_name)}` },
+          { name: card.card_name },
+        ]} />
+      )}
+      {/* Block 5A-W-46C (with W46C-FIX1 + W46D + W46D-FIX1) — the
+          "Quick price facts" panel is passed as a server-rendered
+          slot INTO CardPageClient. CardPageClient drops it in AFTER
+          its H1 hero and BEFORE the detailed price-history chart.
+          Being a server-rendered node passed as a prop, the panel
+          arrives in the initial HTML on the success path.
 
           When the card is not W35-indexable, the slot is null so we
-          do not add empty content to thin pages. */}
+          do not add empty content to thin pages.
+
+          W46D-FIX1 — when the server card fetch itself failed, we
+          pass initialCardData=undefined and a null slot; the client
+          then handles the fallback fetch + render. */}
       <CardPageClient
         setName={setName}
         cardUrlSlug={cardSlug}
+        initialCardData={card ?? undefined}
         initialTrendData={initialTrendData}
-        quickFactsSlot={indexable ? (
+        quickFactsSlot={card && indexable ? (
           <CardPriceQuickFacts
             card={card}
             trend={trendForPanel}
@@ -258,7 +350,9 @@ export default async function CardPage({ params }: { params: Promise<{ slug: str
           />
         ) : null}
       />
-      <RecentSalesSection data={recentSalesData} card={recentSalesCard} />
+      {recentSalesCard && (
+        <RecentSalesSection data={recentSalesData} card={recentSalesCard} />
+      )}
     </>
   )
 }

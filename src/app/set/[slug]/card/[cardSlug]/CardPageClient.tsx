@@ -275,49 +275,81 @@ function VolumePill({ label }: { label: string }) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-// Block 5A-W-46C (with W46C-FIX1) — CardPageClient now accepts:
-//   * initialTrendData: the trend RPC row the server page pre-fetched
-//     for the Quick Facts panel. When present, the client SKIPS the
-//     duplicate get_card_trends_detail call. The chart / hero banner
-//     bind to the same `trend` state either way.
-//   * quickFactsSlot: a server-rendered ReactNode dropped in AFTER the
-//     H1 hero section and BEFORE the price-history chart. Being a
-//     server-rendered node passed as a prop, it ships in initial HTML
-//     even though the enclosing component is a client component.
+// Block 5A-W-46C / W46C-FIX1 / W46D — CardPageClient props:
+//   * initialCardData (W46D): the card row page.tsx already fetched
+//     via getCard(). When supplied, the card state initialises from
+//     this value AND the loading skeleton is bypassed. The client
+//     SKIPS its duplicate get_card_detail_by_url_slug call so the
+//     H1 + Quick Facts appear in initial HTML rather than after
+//     hydration. `undefined` (or explicit null) preserves the pre-
+//     W46D behaviour: render the loading skeleton and fetch the
+//     card from the client — a safe fallback for any error path.
+//   * initialTrendData (W46C-FIX1): the trend RPC row the server
+//     page pre-fetched for the Quick Facts panel. When present, the
+//     client SKIPS the duplicate get_card_trends_detail call.
+//   * quickFactsSlot: a server-rendered ReactNode dropped in AFTER
+//     the H1 hero section and BEFORE the price-history chart.
 export type CardPageClientProps = {
   setName:     string
   cardUrlSlug: string
+  initialCardData?:  unknown
   initialTrendData?: unknown
   quickFactsSlot?:   React.ReactNode
 }
 
 export default function CardPageClient({
-  setName, cardUrlSlug, initialTrendData, quickFactsSlot,
+  setName, cardUrlSlug, initialCardData, initialTrendData, quickFactsSlot,
 }: CardPageClientProps) {
-  const [card,         setCard]         = useState<any>(null)
+  // W46D — treat any value !== undefined as "server supplied data".
+  // A legitimate null from the server means "no card row exists" but
+  // page.tsx handles that via notFound(); we only get here with a
+  // real card, so null-here can be treated the same as undefined
+  // (fall back to a client fetch). We use `undefined` as the "did
+  // the server hand us anything?" marker so a future null becomes a
+  // conscious change rather than an accidental one.
+  const serverProvidedCard = initialCardData !== undefined && initialCardData !== null
+  const [card,         setCard]         = useState<any>(serverProvidedCard ? initialCardData : null)
   const [trend,        setTrend]        = useState<any>(initialTrendData ?? null)
   const [metrics,      setMetrics]      = useState<any>(null)
   const [priceHistory, setPriceHistory] = useState<any[]>([])
   const [insight,      setInsight]      = useState<string | null>(null)
   const [psaPop,       setPsaPop]       = useState<any | null>(null)
   const [volumeLabel,  setVolumeLabel]  = useState<string | null>(null)
-  const [loading,      setLoading]      = useState(true)
+  // W46D — skip the loading skeleton when the server supplied the card.
+  // The visible hero (image + H1 + set name + hero banner + prices +
+  // trend chips) is present in the initial HTML. Metrics / price
+  // history / insight / volume / PSA population arrive in a follow-up
+  // client fetch below, but their consumers render conditionally so
+  // the page stays complete without them.
+  const [loading,      setLoading]      = useState(!serverProvidedCard)
 
   useEffect(() => {
     async function loadCard() {
-      const { data: cardData } = await supabase.rpc('get_card_detail_by_url_slug', {
-        p_set_name: setName,
-        p_card_url_slug: cardUrlSlug,
-      })
-      if (!cardData) { setLoading(false); return }
-      setCard(cardData)
+      // W46D — if the server handed us a card row, skip the duplicate
+      // get_card_detail_by_url_slug RPC entirely. We still need the
+      // *supplementary* RPCs (metrics, price history, insight, volume,
+      // PSA population, and maybe trend) but the card-detail call is
+      // the biggest / most-cached one, and getting rid of it is the
+      // point of this block.
+      let cardData: any = null
+      if (serverProvidedCard) {
+        cardData = initialCardData
+      } else {
+        const { data } = await supabase.rpc('get_card_detail_by_url_slug', {
+          p_set_name: setName,
+          p_card_url_slug: cardUrlSlug,
+        })
+        cardData = data
+        if (!cardData) { setLoading(false); return }
+        setCard(cardData)
+      }
 
       const slug = cardData.card_slug
 
       // W46C-FIX1 — skip get_card_trends_detail when the server page
       // already handed us a trend row. This is the whole "one RPC call
-      // per page load" guarantee: with a server-fetched trend, the
-      // client makes 4 parallel calls; without one, 5 (unchanged).
+      // per page load" guarantee: with server-fetched card + trend,
+      // the client makes 4 parallel calls; without either, 5.
       const trendPromise = initialTrendData !== undefined
         ? Promise.resolve({ data: null })
         : supabase.rpc('get_card_trends_detail', { slug })
