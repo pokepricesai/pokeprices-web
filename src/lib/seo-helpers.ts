@@ -136,6 +136,29 @@ export function getSetSeo(setName: string, slug?: string): SetSeo {
 }
 
 // ── Pokémon species page ───────────────────────────────────────────
+//
+// Block 5A-W-46E-Lite-FIX1 — authoritative Pokémon display-name
+// extractor. The Supabase RPC returns species.name in slug form
+// ("mr-mime", "farfetchd", "ho-oh") which loses punctuation. PokeAPI's
+// pokemon-species endpoint returns a `names[]` array with the
+// official English display name, correctly punctuated for every
+// variant (e.g. "Mr. Mime", "Farfetch’d", "Ho-Oh", "Nidoran♀",
+// "Type: Null", "Mime Jr."). This pure helper extracts that string
+// so the page can pass it into getPokemonSeo() and use it for the
+// visible H1 without hard-coding a per-species name table.
+
+/** Extract the official English display name from a PokeAPI
+ *  pokemon-species response. Returns null when the input is missing
+ *  or malformed so callers can fall back to their slug-derived name. */
+export function pokeApiEnglishDisplayName(
+  speciesData: { names?: readonly { language?: { name?: string } | null; name?: string }[] | null } | null | undefined,
+): string | null {
+  if (!speciesData || !Array.isArray(speciesData.names)) return null
+  const en = speciesData.names.find(n => n?.language?.name === 'en')
+  const name = typeof en?.name === 'string' ? en.name.trim() : ''
+  return name || null
+}
+
 
 export type PokemonSeoInput = {
   /** Display name (capitalised species name, e.g. "Greninja"). */

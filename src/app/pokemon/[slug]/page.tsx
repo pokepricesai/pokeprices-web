@@ -9,6 +9,7 @@
 // island at the bottom of the page so most of the layout stays static.
 
 import type { Metadata } from 'next'
+import { cache } from 'react'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
@@ -17,7 +18,7 @@ import FAQ from '@/components/FAQ'
 import EbayLiveListings, { EbayInlineLink } from '@/components/EbayLiveListings'
 import { buildCardEbayQuery } from '@/lib/ebayAffiliate'
 import { getPokemonFaqItems } from '@/lib/faqs'
-import { getPokemonSeo } from '@/lib/seo-helpers'
+import { getPokemonSeo, pokeApiEnglishDisplayName } from '@/lib/seo-helpers'
 import SpeciesInteractiveSection from './SpeciesInteractiveSection'
 import DossierButton from './DossierButton'
 // Block 5A-W-46C — server-rendered "card prices at a glance" summary.
@@ -85,7 +86,11 @@ interface SpeciesDetail {
 
 // ── Data fetching ────────────────────────────────────────────────────────────
 
-async function fetchSpeciesDetail(slug: string): Promise<SpeciesDetail | null> {
+// FIX1 — React.cache wraps both fetchers so generateMetadata() and the
+// page handler share ONE Supabase RPC + ONE PokeAPI hit per request.
+// The PokeAPI response now feeds the authoritative Pokémon display
+// name used in metadata and the visible H1.
+const fetchSpeciesDetail = cache(async (slug: string): Promise<SpeciesDetail | null> => {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_pokemon_species_detail`, {
     method: 'POST',
     headers: {
@@ -99,9 +104,9 @@ async function fetchSpeciesDetail(slug: string): Promise<SpeciesDetail | null> {
   if (!r.ok) return null
   const data = await r.json()
   return data || null
-}
+})
 
-async function fetchPokeApi(slug: string): Promise<{ pokemon: any; species: any } | null> {
+const fetchPokeApi = cache(async (slug: string): Promise<{ pokemon: any; species: any } | null> => {
   // Some species (Deoxys, Giratina, Shaymin, …) have non-default forms whose
   // /pokemon/{slug} endpoint 404s. Fall through to species.varieties for the
   // default variety name.
@@ -129,7 +134,7 @@ async function fetchPokeApi(slug: string): Promise<{ pokemon: any; species: any 
   } catch {
     return null
   }
-}
+})
 
 async function fetchNeighbours(id: number): Promise<{ prev: { id: number; name: string } | null; next: { id: number; name: string } | null }> {
   const ids = [id - 1, id + 1].filter(n => n >= 1)
@@ -172,8 +177,17 @@ function fmtUsdRaw(cents: Cents): string {
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params
-  const detail = await fetchSpeciesDetail(slug)
-  const name = capitalize(slug)
+  // FIX1 — PokeAPI provides the authoritative English display name
+  // ("Mr. Mime", "Farfetch’d", "Ho-Oh", "Nidoran♀"). Both fetches are
+  // cache()-wrapped so this metadata call and the page handler share
+  // one HTTP hit per request. Slug capitalize() is retained as the
+  // final fallback for when PokeAPI is unreachable.
+  const [detail, pokeBundle] = await Promise.all([
+    fetchSpeciesDetail(slug),
+    fetchPokeApi(slug),
+  ])
+  const authoritativeName = pokeApiEnglishDisplayName(pokeBundle?.species)
+  const name = authoritativeName || capitalize(slug)
 
   // Fall back to a sane default if the species exists in PokeAPI but has no
   // cards in our DB — we still want a valid title (no 404 unless slug doesn't
@@ -267,7 +281,14 @@ export default async function PokemonSpeciesPage({
   const fallers = detail?.fallers_30d ?? []
   const bySet = detail?.cards_by_set ?? []
 
-  const displayName = sp ? capitalize(sp.name) : capitalize(slug)
+  // FIX1 — prefer the authoritative PokeAPI English display name so
+  // the visible H1, prose and subtitle render "Mr. Mime" / "Farfetch’d"
+  // / "Ho-Oh" / "Nidoran♀" instead of the slug-capitalised
+  // "Mr Mime" / "Farfetchd" / etc. Falls back to the existing
+  // capitalize() derivation when PokeAPI is unavailable.
+  const displayName =
+       pokeApiEnglishDisplayName(pokeBundle?.species)
+    ?? (sp ? capitalize(sp.name) : capitalize(slug))
   const neighbours = sp ? await fetchNeighbours(sp.id) : { prev: null, next: null }
 
   // PokeAPI bits for the visual hero

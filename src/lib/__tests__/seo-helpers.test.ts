@@ -16,6 +16,7 @@ import {
   getInsightsArticleFallbackDescription,
   getPokemonSeo,
   getSetSeo,
+  pokeApiEnglishDisplayName,
 } from '../seo-helpers'
 
 // ── /insights hub ──────────────────────────────────────────────────
@@ -251,6 +252,107 @@ describe('getPokemonSeo (W46E-Lite shared brand-tail template)', () => {
     const seo = getPokemonSeo({ name: 'Eevee', slug: 'eevee', totalCards: 0 })
     expect(seo.description).not.toMatch(/across\s+0\s+cards/i)
     expect(seo.description).not.toMatch(/0 Eevee/)
+  })
+})
+
+// ── W46E-Lite-FIX1 — PokeAPI authoritative display-name extractor ──
+
+describe('pokeApiEnglishDisplayName (W46E-Lite-FIX1)', () => {
+  it('preserves the "Mr. Mime" period + space', () => {
+    const speciesData = { names: [
+      { language: { name: 'ja' }, name: 'バリヤード' },
+      { language: { name: 'en' }, name: 'Mr. Mime' },
+    ] }
+    expect(pokeApiEnglishDisplayName(speciesData)).toBe('Mr. Mime')
+  })
+  it('preserves the curly apostrophe in "Farfetch’d"', () => {
+    const speciesData = { names: [{ language: { name: 'en' }, name: 'Farfetch’d' }] }
+    expect(pokeApiEnglishDisplayName(speciesData)).toBe('Farfetch’d')
+  })
+  it('preserves hyphenated capitals like "Ho-Oh" and "Porygon-Z"', () => {
+    expect(pokeApiEnglishDisplayName({ names: [{ language: { name: 'en' }, name: 'Ho-Oh' }] })).toBe('Ho-Oh')
+    expect(pokeApiEnglishDisplayName({ names: [{ language: { name: 'en' }, name: 'Porygon-Z' }] })).toBe('Porygon-Z')
+  })
+  it('preserves gender symbols in Nidoran♀ / Nidoran♂', () => {
+    expect(pokeApiEnglishDisplayName({ names: [{ language: { name: 'en' }, name: 'Nidoran♀' }] })).toBe('Nidoran♀')
+    expect(pokeApiEnglishDisplayName({ names: [{ language: { name: 'en' }, name: 'Nidoran♂' }] })).toBe('Nidoran♂')
+  })
+  it('preserves colon + space in "Type: Null"', () => {
+    expect(pokeApiEnglishDisplayName({ names: [{ language: { name: 'en' }, name: 'Type: Null' }] })).toBe('Type: Null')
+  })
+  it('preserves the trailing period in "Mime Jr."', () => {
+    expect(pokeApiEnglishDisplayName({ names: [{ language: { name: 'en' }, name: 'Mime Jr.' }] })).toBe('Mime Jr.')
+  })
+  it('returns null when the English entry is missing', () => {
+    const speciesData = { names: [
+      { language: { name: 'ja' }, name: 'バリヤード' },
+      { language: { name: 'fr' }, name: 'M. Mime' },
+    ] }
+    expect(pokeApiEnglishDisplayName(speciesData)).toBeNull()
+  })
+  it('returns null for missing / null / undefined / malformed inputs (safe fallback)', () => {
+    expect(pokeApiEnglishDisplayName(null)).toBeNull()
+    expect(pokeApiEnglishDisplayName(undefined)).toBeNull()
+    expect(pokeApiEnglishDisplayName({})).toBeNull()
+    expect(pokeApiEnglishDisplayName({ names: null } as any)).toBeNull()
+    expect(pokeApiEnglishDisplayName({ names: [] })).toBeNull()
+    expect(pokeApiEnglishDisplayName({ names: [{ language: { name: 'en' } }] } as any)).toBeNull()
+    expect(pokeApiEnglishDisplayName({ names: [{ language: { name: 'en' }, name: '' }] })).toBeNull()
+    expect(pokeApiEnglishDisplayName({ names: [{ language: { name: 'en' }, name: '   ' }] })).toBeNull()
+  })
+  it('trims surrounding whitespace when the entry is otherwise valid', () => {
+    expect(pokeApiEnglishDisplayName({ names: [{ language: { name: 'en' }, name: '  Charizard  ' }] })).toBe('Charizard')
+  })
+})
+
+describe('W46E-Lite-FIX1 — authoritative name flows through getPokemonSeo', () => {
+  it('produces the correct Mr. Mime title when the authoritative name is passed', () => {
+    const seo = getPokemonSeo({
+      name: pokeApiEnglishDisplayName({ names: [{ language: { name: 'en' }, name: 'Mr. Mime' }] }) as string,
+      slug: 'mr-mime', totalCards: 71, hasPsa10Data: true, hasMovementData: true,
+    })
+    expect(seo.title).toBe('Mr. Mime Pokémon Card Prices & Values | PokePrices')
+    expect(seo.description).toContain('Mr. Mime Pokémon cards')
+    expect(seo.canonical).toBe('https://www.pokeprices.io/pokemon/mr-mime')
+  })
+  it('produces the correct Farfetch’d title (curly apostrophe preserved)', () => {
+    const seo = getPokemonSeo({
+      name: 'Farfetch’d', slug: 'farfetchd', totalCards: 45, hasPsa10Data: true, hasMovementData: true,
+    })
+    expect(seo.title).toBe('Farfetch’d Pokémon Card Prices & Values | PokePrices')
+    expect(seo.canonical).toBe('https://www.pokeprices.io/pokemon/farfetchd')
+  })
+  it('produces the correct Ho-Oh title (hyphen preserved)', () => {
+    const seo = getPokemonSeo({ name: 'Ho-Oh', slug: 'ho-oh', totalCards: 60, hasPsa10Data: true, hasMovementData: true })
+    expect(seo.title).toBe('Ho-Oh Pokémon Card Prices & Values | PokePrices')
+    expect(seo.canonical).toBe('https://www.pokeprices.io/pokemon/ho-oh')
+  })
+  it('produces the correct Nidoran♀ title (gender symbol preserved)', () => {
+    const seo = getPokemonSeo({ name: 'Nidoran♀', slug: 'nidoran-f', totalCards: 8, hasPsa10Data: true, hasMovementData: true })
+    expect(seo.title).toBe('Nidoran♀ Pokémon Card Prices & Values | PokePrices')
+    expect(seo.canonical).toBe('https://www.pokeprices.io/pokemon/nidoran-f')
+  })
+  it('canonical URL uses the slug (never the display name)', () => {
+    for (const [name, slug] of [
+      ['Mr. Mime',       'mr-mime'],
+      ['Farfetch’d', 'farfetchd'],
+      ['Ho-Oh',           'ho-oh'],
+      ['Nidoran♀',   'nidoran-f'],
+      ['Type: Null',      'type-null'],
+    ] as const) {
+      const seo = getPokemonSeo({ name, slug, totalCards: 1 })
+      expect(seo.canonical).toBe(`https://www.pokeprices.io/pokemon/${slug}`)
+    }
+  })
+  it('templates approved in W46E-Lite remain unchanged (regression pin)', () => {
+    // Full-data path — string equality with the W46E-Lite pinned template.
+    const seo = getPokemonSeo({
+      name: 'Greninja', slug: 'greninja', totalCards: 42, hasPsa10Data: true, hasMovementData: true,
+    })
+    expect(seo.title).toBe('Greninja Pokémon Card Prices & Values | PokePrices')
+    expect(seo.description).toBe(
+      'See current prices for 42 Greninja Pokémon cards, including raw and PSA 10 values, the most valuable cards, recent movers and represented sets.',
+    )
   })
 })
 
