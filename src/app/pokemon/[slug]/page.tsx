@@ -193,21 +193,25 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const sp = detail.species
   const topCard = detail.top_cards[0] ?? null
 
-  // Block 5A-W-34A — title/description via getPokemonSeo. Baseline
-  // for the highest-impression species page /pokemon/greninja before
-  // this change: 927 impressions, 4 clicks, 0.43% CTR, pos 10.8.
-  const topPrice = topCard?.current_psa10 ?? topCard?.current_raw ?? null
+  // Block 5A-W-46E-Lite — title/description via getPokemonSeo with
+  // the shared brand-tail template. hasPsa10Data + hasMovementData
+  // are derived from the real detail row so we don't claim data the
+  // page cannot render.
+  const allCards = detail.all_cards ?? detail.top_cards ?? []
+  const hasPsa10Data = allCards.some(c =>
+    typeof c.current_psa10 === 'number' && c.current_psa10 > 0,
+  )
+  const risers  = detail.risers_30d  ?? []
+  const fallers = detail.fallers_30d ?? []
+  const hasMovementData = [...risers, ...fallers].some(c =>
+    typeof c.raw_pct_30d === 'number' && Number.isFinite(c.raw_pct_30d) && c.raw_pct_30d !== 0,
+  )
   const seo = getPokemonSeo({
     name,
     slug,
     totalCards: sp.total_cards,
-    topCard: topCard
-      ? {
-          cardName:   topCard.card_name,
-          setName:    topCard.set_name,
-          priceLabel: fmtUsd(topPrice),
-        }
-      : null,
+    hasPsa10Data,
+    hasMovementData,
   })
   const title       = seo.title
   const description = seo.description

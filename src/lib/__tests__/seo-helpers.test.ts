@@ -20,17 +20,27 @@ import {
 
 // ── /insights hub ──────────────────────────────────────────────────
 
-describe('/insights hub copy constants', () => {
-  it('title pins the W34A rewrite', () => {
+describe('/insights hub copy constants (W46E-Lite rewrite)', () => {
+  it('title pins the W46E-Lite rewrite', () => {
     expect(INSIGHTS_HUB_TITLE).toBe(
-      'Pokémon Card Market Insights, Price Trends & Grading Reports | PokePrices',
+      'Pokémon Card Market Trends, Prices & Insights | PokePrices',
+    )
+    // Regression guard against the older W34A wording.
+    expect(INSIGHTS_HUB_TITLE).not.toContain('Grading Reports')
+  })
+  it('description pins the W46E-Lite rewrite', () => {
+    expect(INSIGHTS_HUB_DESCRIPTION).toBe(
+      'Track Pokémon card market trends, price movements, grading premiums and data-led analysis of popular cards and sets.',
     )
   })
-  it('description mentions market reports, price trends and grading', () => {
+  it('description mentions market trends, price movements and grading', () => {
     expect(INSIGHTS_HUB_DESCRIPTION.toLowerCase()).toContain('market')
     expect(INSIGHTS_HUB_DESCRIPTION.toLowerCase()).toContain('price')
     expect(INSIGHTS_HUB_DESCRIPTION.toLowerCase()).toContain('grading')
-    expect(INSIGHTS_HUB_DESCRIPTION.toLowerCase()).toContain('psa 10')
+    expect(INSIGHTS_HUB_DESCRIPTION.toLowerCase()).toContain('trends')
+  })
+  it('title contains no year token', () => {
+    expect(INSIGHTS_HUB_TITLE).not.toMatch(/\b20\d\d\b/)
   })
   it('description length stays under Google\'s 160 char cut-off + a small buffer', () => {
     expect(INSIGHTS_HUB_DESCRIPTION.length).toBeLessThanOrEqual(200)
@@ -40,11 +50,11 @@ describe('/insights hub copy constants', () => {
     expect(INSIGHTS_HUB_OG_TITLE.length).toBeLessThan(INSIGHTS_HUB_TITLE.length)
     expect(INSIGHTS_HUB_OG_TITLE.length).toBeGreaterThan(20)
   })
-  it('OG description is a distinct, shorter variant', () => {
-    expect(INSIGHTS_HUB_OG_DESCRIPTION.length).toBeLessThan(INSIGHTS_HUB_DESCRIPTION.length)
+  it('OG description is the same or shorter than the SERP description', () => {
+    expect(INSIGHTS_HUB_OG_DESCRIPTION.length).toBeLessThanOrEqual(INSIGHTS_HUB_DESCRIPTION.length)
     expect(INSIGHTS_HUB_OG_DESCRIPTION.length).toBeGreaterThan(40)
   })
-  it('canonical is the www absolute URL', () => {
+  it('canonical is the www absolute URL (unchanged)', () => {
     expect(INSIGHTS_HUB_CANONICAL).toBe('https://www.pokeprices.io/insights')
   })
   it('does not contain a doubled PokePrices marker', () => {
@@ -119,49 +129,112 @@ describe('getSetSeo', () => {
 
 // ── /pokemon/[slug] ────────────────────────────────────────────────
 
-describe('getPokemonSeo', () => {
-  it('uses the count-anchored title when the number fits within the SERP budget', () => {
+describe('getPokemonSeo (W46E-Lite shared brand-tail template)', () => {
+  it('emits the primary "{Name} Pokémon Card Prices & Values | PokePrices" title', () => {
+    const seo = getPokemonSeo({ name: 'Greninja', slug: 'greninja', totalCards: 42, hasPsa10Data: true, hasMovementData: true })
+    expect(seo.title).toBe('Greninja Pokémon Card Prices & Values | PokePrices')
+  })
+  it('no card count in the title (moved to description)', () => {
     const seo = getPokemonSeo({ name: 'Eevee', slug: 'eevee', totalCards: 74 })
-    expect(seo.title).toBe('Eevee Card Prices Across 74 Cards | Raw & PSA 10 Values')
-    expect(seo.title.length).toBeLessThanOrEqual(72)
+    expect(seo.title).not.toMatch(/74/)
+    expect(seo.title).not.toMatch(/\d+\s*Cards/)
   })
-  it('uses the benefit title when no count is available and it fits', () => {
-    const seo = getPokemonSeo({ name: 'Alakazam', slug: 'alakazam', totalCards: null })
-    expect(seo.title).toContain('Most Valuable')
-    expect(seo.title.toLowerCase()).toContain('psa 10 values')
+  it('no year token in the title or description', () => {
+    const seo = getPokemonSeo({ name: 'Eevee', slug: 'eevee', totalCards: 74 })
+    expect(seo.title).not.toMatch(/\b20\d\d\b/)
+    expect(seo.description).not.toMatch(/\b20\d\d\b/)
   })
-  it('falls back to compact title when both other variants would exceed 60 chars', () => {
-    const longName = 'Verylongspeciesname'
-    const seo = getPokemonSeo({ name: longName, slug: 'long', totalCards: null })
-    // Compact fits under ~65 chars for any reasonable name.
-    expect(seo.title).toContain(longName)
-    expect(seo.title).toContain('PokePrices')
+  it('brand tail present in the title', () => {
+    const seo = getPokemonSeo({ name: 'Vaporeon', slug: 'vaporeon', totalCards: 30 })
+    expect(seo.title.endsWith('| PokePrices')).toBe(true)
   })
-  it('description contains the species name plus intent tokens', () => {
+  it('"Pokémon" appears at most once in the title', () => {
+    const seo = getPokemonSeo({ name: 'Alakazam', slug: 'alakazam', totalCards: 40 })
+    const matches = (seo.title.match(/Pokémon/g) || []).length
+    expect(matches).toBeLessThanOrEqual(1)
+  })
+  it('no raw/PSA keyword stuffing in the title', () => {
     const seo = getPokemonSeo({ name: 'Greninja', slug: 'greninja', totalCards: 42 })
-    expect(seo.description).toContain('Greninja')
+    expect(seo.title.toLowerCase()).not.toContain('psa 10')
+    expect(seo.title.toLowerCase()).not.toContain('raw')
+  })
+
+  it('long-name fallback drops "Pokémon" first (still fits brand tail)', () => {
+    // 32-char name — primary (name + 42 = 74) blows past the 72-char
+    // budget; the "Pokémon"-dropping fallback (name + 34 = 66) fits.
+    const name = 'Thirtytwocharactersspeciesnameok'
+    expect(name.length).toBe(32)
+    const seo = getPokemonSeo({ name, slug: 'long-1' })
+    expect(seo.title).toBe(`${name} Card Prices & Values | PokePrices`)
+    expect(seo.title.endsWith('| PokePrices')).toBe(true)
+  })
+  it('long-name fallback drops "& Values" second (still fits brand tail)', () => {
+    // Name length that fits t3 ("{Name} Card Prices | PokePrices" =
+    // name + 24) but not t2 (name + 34). 39..48 chars is the target.
+    const name = 'FortyTwoCharacterSpeciesNameOkOkOkOkOkOkOK'
+    expect(name.length).toBe(42)
+    const seo = getPokemonSeo({ name, slug: 'long-2' })
+    expect(seo.title).toBe(`${name} Card Prices | PokePrices`)
+    expect(seo.title.endsWith('| PokePrices')).toBe(true)
+  })
+  it('final fallback drops the brand tail only when nothing else fits (species name still whole)', () => {
+    const veryLong = 'Verylongspeciesnamethatdefinitelyexceedsseventytwochars extra'
+    const seo = getPokemonSeo({ name: veryLong, slug: 'long' })
+    expect(seo.title).toContain(veryLong)
+    expect(seo.title).toBe(`${veryLong} Card Prices`)
+    expect(seo.title).not.toContain('…')
+  })
+  it('species name is NEVER truncated or ellipsised, at any length', () => {
+    const cases = ['A', 'Verylongspeciesnamethatdefinitelyexceedsseventytwochars extra', 'X'.repeat(200)]
+    for (const name of cases) {
+      const seo = getPokemonSeo({ name, slug: 'x' })
+      expect(seo.title).not.toContain('…')
+      expect(seo.title).toContain(name)
+    }
+  })
+
+  it('description contains the real card count', () => {
+    const seo = getPokemonSeo({ name: 'Greninja', slug: 'greninja', totalCards: 42, hasPsa10Data: true, hasMovementData: true })
     expect(seo.description).toContain('42')
-    expect(seo.description.toLowerCase()).toContain('psa 10')
-    expect(seo.description.toLowerCase()).toContain('raw')
-    expect(seo.description.toLowerCase()).toContain('most valuable')
+    expect(seo.description).toContain('Greninja Pokémon cards')
   })
-  it('includes the top-card fact when supplied', () => {
-    const seo = getPokemonSeo({
-      name: 'Charizard', slug: 'charizard', totalCards: 100,
-      topCard: { cardName: 'Charizard VMAX', setName: 'Champion\'s Path', priceLabel: '$450' },
-    })
-    expect(seo.description).toContain('Top:')
-    expect(seo.description).toContain('Charizard VMAX')
-    expect(seo.description).toContain("Champion's Path")
-    expect(seo.description).toContain('$450')
+  it('description grammar matches the pinned template with full data', () => {
+    const seo = getPokemonSeo({ name: 'Greninja', slug: 'greninja', totalCards: 42, hasPsa10Data: true, hasMovementData: true })
+    expect(seo.description).toBe(
+      'See current prices for 42 Greninja Pokémon cards, including raw and PSA 10 values, the most valuable cards, recent movers and represented sets.',
+    )
   })
-  it('omits the top-card sentence when no top card is provided', () => {
-    const seo = getPokemonSeo({ name: 'Eevee', slug: 'eevee', totalCards: 74 })
-    expect(seo.description).not.toContain('Top:')
+  it('description omits PSA 10 when hasPsa10Data is false', () => {
+    const seo = getPokemonSeo({ name: 'Zubat', slug: 'zubat', totalCards: 3, hasPsa10Data: false, hasMovementData: false })
+    expect(seo.description.toLowerCase()).not.toContain('psa 10')
+    expect(seo.description).toBe(
+      'See current prices for 3 Zubat Pokémon cards, including raw values, the most valuable cards and represented sets.',
+    )
   })
-  it('canonical uses the URL slug (never the display name)', () => {
+  it('description omits recent-movers when hasMovementData is false', () => {
+    const seo = getPokemonSeo({ name: 'Zubat', slug: 'zubat', totalCards: 3, hasPsa10Data: true, hasMovementData: false })
+    expect(seo.description.toLowerCase()).not.toContain('recent movers')
+  })
+  it('description falls back gracefully without a card count', () => {
+    const seo = getPokemonSeo({ name: 'Farfetch’d', slug: 'farfetchd', totalCards: null })
+    expect(seo.description).toContain('Pokémon cards')
+    expect(seo.description).not.toMatch(/\bnull\b/)
+    expect(seo.description).not.toMatch(/across\s+0/)
+  })
+  it('does not use live-prices, investment or grading-advice language', () => {
+    const seo = getPokemonSeo({ name: 'Greninja', slug: 'greninja', totalCards: 42, hasPsa10Data: true, hasMovementData: true })
+    for (const banned of ['live prices', 'guaranteed', 'invest', 'flip', 'profit', 'undervalued', 'evolves from', 'legendary']) {
+      expect(seo.title.toLowerCase()).not.toContain(banned)
+      expect(seo.description.toLowerCase()).not.toContain(banned)
+    }
+  })
+  it('canonical uses the URL slug and is unchanged (never the display name)', () => {
     const seo = getPokemonSeo({ name: 'Mr. Mime', slug: 'mr-mime' })
     expect(seo.canonical).toBe('https://www.pokeprices.io/pokemon/mr-mime')
+  })
+  it('canonical unchanged for a Farfetch\'d-shaped input', () => {
+    const seo = getPokemonSeo({ name: 'Farfetch’d', slug: 'farfetchd' })
+    expect(seo.canonical).toBe('https://www.pokeprices.io/pokemon/farfetchd')
   })
   it('handles missing name gracefully', () => {
     const seo = getPokemonSeo({ name: '', slug: 'unknown' })
@@ -174,10 +247,10 @@ describe('getPokemonSeo', () => {
       expect(seo.title).not.toMatch(/PokePrices.*PokePrices/i)
     }
   })
-  it('treats zero-or-negative totalCards as no-count (uses benefit or compact title)', () => {
+  it('treats zero-or-negative totalCards as no-count', () => {
     const seo = getPokemonSeo({ name: 'Eevee', slug: 'eevee', totalCards: 0 })
-    expect(seo.title).not.toMatch(/\d+\s+Cards/i)
     expect(seo.description).not.toMatch(/across\s+0\s+cards/i)
+    expect(seo.description).not.toMatch(/0 Eevee/)
   })
 })
 

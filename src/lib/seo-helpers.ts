@@ -75,13 +75,18 @@ export function getCardSeo(card: {
 // The templates (`src/app/{insights,set/[slug],pokemon/[slug]}/page.tsx`)
 // import from here so a copy change is one edit + one test update.
 
-export const INSIGHTS_HUB_TITLE       = 'Pokémon Card Market Insights, Price Trends & Grading Reports | PokePrices'
-export const INSIGHTS_HUB_DESCRIPTION = 'Read Pokémon card market reports, price trends, grading insights and collecting analysis. Track movers, PSA 10 values, set trends and cards worth watching.'
+// Block 5A-W-46E-Lite — shortened + brand-tail insights index metadata.
+// Prior wording ("Insights, Price Trends & Grading Reports") tripped
+// the SERP snippet's ellipsis on mobile. The new title leads with
+// intent-first tokens (Market Trends / Prices / Insights) followed by
+// the PokePrices brand.
+export const INSIGHTS_HUB_TITLE       = 'Pokémon Card Market Trends, Prices & Insights | PokePrices'
+export const INSIGHTS_HUB_DESCRIPTION = 'Track Pokémon card market trends, price movements, grading premiums and data-led analysis of popular cards and sets.'
 export const INSIGHTS_HUB_CANONICAL   = `${SITE}/insights`
 
 /** Compact OG variant — keeps under 90 chars for share previews. */
-export const INSIGHTS_HUB_OG_TITLE       = 'Pokémon Card Market Insights, Price Trends & Grading Reports'
-export const INSIGHTS_HUB_OG_DESCRIPTION = 'Pokémon card market reports, price trends and grading insights. Track movers, PSA 10 values and cards worth watching.'
+export const INSIGHTS_HUB_OG_TITLE       = 'Pokémon Card Market Trends, Prices & Insights'
+export const INSIGHTS_HUB_OG_DESCRIPTION = 'Pokémon card market trends, price movements, grading premiums and data-led analysis of popular cards and sets.'
 
 /**
  * Fallback description used by the article template when the article
@@ -139,7 +144,15 @@ export type PokemonSeoInput = {
   slug:  string
   /** Total distinct cards known for this species; null when unknown. */
   totalCards?: number | null
-  /** Top card fact for the description tail; falsy → no top-card line. */
+  /** True when at least one card carries a positive PSA 10 value.
+   *  Drives the conditional "PSA 10 values" clause in the description. */
+  hasPsa10Data?: boolean
+  /** True when at least one card has recent-movement data
+   *  (raw_pct_30d present + non-zero). Drives the conditional
+   *  "recent movers" clause in the description. */
+  hasMovementData?: boolean
+  /** Kept for backwards compatibility with any surviving caller; the
+   *  W46E-Lite description path does not reference it. */
   topCard?: {
     cardName: string
     setName:  string
@@ -154,15 +167,28 @@ export type PokemonSeo = {
 }
 
 /**
- * Build title / description / canonical for /pokemon/{slug}.
+ * Block 5A-W-46E-Lite — shared search-intent Pokémon metadata.
  *
- * Title variants:
- *   * When totalCards is a positive integer AND the composed length
- *     stays ≤ 60 chars, we emit the count-anchored variant:
- *       "{Name} Card Prices Across {N} Cards | Raw & PSA 10 Values"
- *   * Otherwise the plain-benefit variant.
- *   * If that's still too long (very long species names), fall back
- *     to a compact variant that always fits.
+ * Length-aware fallback ladder — species name renders whole, never
+ * truncated, never ellipsised:
+ *   1. `{Name} Pokémon Card Prices & Values | PokePrices` (primary)
+ *   2. `{Name} Card Prices & Values | PokePrices`         (drops "Pokémon")
+ *   3. `{Name} Card Prices | PokePrices`                  (drops "& Values")
+ *   4. `{Name} Card Prices`                               (drops brand tail)
+ *
+ * Description:
+ *   `See current prices for {N} {Name} Pokémon cards, including raw
+ *    [and PSA 10 values], the most valuable cards[, recent movers]
+ *    and represented sets.`
+ *
+ * Rules baked in:
+ *   * No year token.
+ *   * No card count in the title.
+ *   * No duplicated "Pokémon".
+ *   * No raw/PSA keyword stuffing in the title.
+ *   * PSA 10 clause only when `hasPsa10Data === true`.
+ *   * Recent-movers clause only when `hasMovementData === true`.
+ *   * Species name never truncated to fit the SERP budget.
  */
 export function getPokemonSeo(input: PokemonSeoInput): PokemonSeo {
   const safeName = input.name?.trim() || 'Pokémon'
@@ -170,26 +196,32 @@ export function getPokemonSeo(input: PokemonSeoInput): PokemonSeo {
     ? Math.floor(input.totalCards)
     : null
 
-  const countTitle   = total !== null
-    ? `${safeName} Card Prices Across ${total} Cards | Raw & PSA 10 Values`
-    : null
-  const benefitTitle = `${safeName} Card Prices | Most Valuable ${safeName} Cards & PSA 10 Values`
-  const compactTitle = `${safeName} Card Prices — Raw & PSA 10 Values | PokePrices`
-
+  // Length-aware title. Optional tokens drop in order; species name
+  // is preserved intact at every step.
+  const t1 = `${safeName} Pokémon Card Prices & Values | PokePrices`
+  const t2 = `${safeName} Card Prices & Values | PokePrices`
+  const t3 = `${safeName} Card Prices | PokePrices`
+  const t4 = `${safeName} Card Prices`
   const title =
-    countTitle   && countTitle.length   <= SERP_TITLE_MAX ? countTitle   :
-    benefitTitle.length                 <= SERP_TITLE_MAX ? benefitTitle :
-    compactTitle
+      t1.length <= SERP_TITLE_MAX ? t1
+    : t2.length <= SERP_TITLE_MAX ? t2
+    : t3.length <= SERP_TITLE_MAX ? t3
+    : t4
 
-  // Description: prefer the count-anchored lead when available.
-  const lead = total !== null
-    ? `View ${safeName} Pokémon card prices across ${total} cards.`
-    : `View ${safeName} Pokémon card prices across sets.`
-  const body = `Compare raw, PSA 9 and PSA 10 values, recent movement and the most valuable ${safeName} cards.`
-  const topTail = input.topCard
-    ? ` Top: ${input.topCard.cardName} from ${input.topCard.setName} at ${input.topCard.priceLabel}.`
-    : ''
-  let description = `${lead} ${body}${topTail}`
+  // Description assembly — every clause is conditional on real data.
+  const nounPhrase = total !== null
+    ? `${total} ${safeName} Pokémon card${total === 1 ? '' : 's'}`
+    : `${safeName} Pokémon cards`
+  const facts: string[] = []
+  if (input.hasPsa10Data)    facts.push('raw and PSA 10 values')
+  else                       facts.push('raw values')
+  facts.push('the most valuable cards')
+  if (input.hasMovementData) facts.push('recent movers')
+  facts.push('represented sets')
+  const factsJoined = facts.length > 1
+    ? facts.slice(0, -1).join(', ') + ' and ' + facts[facts.length - 1]
+    : facts[0]
+  let description = `See current prices for ${nounPhrase}, including ${factsJoined}.`
   if (description.length > 300) description = description.slice(0, 297) + '…'
 
   const canonical = `${SITE}/pokemon/${input.slug}`
