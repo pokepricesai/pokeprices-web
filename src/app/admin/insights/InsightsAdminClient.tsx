@@ -1,6 +1,18 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
+// Block 5A-W-47A — rich-text block editor helpers.
+import {
+  readParagraphSegments,
+  segmentsToEditorHtml,
+  domToSegments,
+  isSafeArticleHref,
+  isSafeArticleImageSrc,
+  validateArticleImageFile,
+  ARTICLE_IMAGE_MIME_ALLOWLIST,
+  type ArticleBlock,
+  type ParagraphSegment,
+} from '@/lib/insights/richText'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -47,6 +59,54 @@ function estimateReadTime(text: string): number {
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
+
+// ── W47A block helpers ───────────────────────────────────────────
+
+/** Normalise whatever body_json shape an article carries into an
+ *  editable block list. Handles:
+ *   * missing / empty body_json               → empty list
+ *   * modern { blocks: [...] } array          → preserved as-is
+ *   * legacy plain-text single-block          → split on \n\n and
+ *                                                 classify headings
+ *   * legacy body_json stored as bare array   → wrapped
+ */
+function loadBlocks(article: Partial<Article> | null | undefined): ArticleBlock[] {
+  if (!article || !article.body_json) return []
+  const raw = article.body_json
+  const blocks: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.blocks) ? raw.blocks : []
+  if (blocks.length === 0) return []
+  // Legacy plain-text-body case: single paragraph whose text carries
+  // \n\n separators. Split so each editable block is one visual unit.
+  if (blocks.length === 1
+    && (blocks[0].type === 'paragraph' || blocks[0].type === 'text')
+    && typeof blocks[0].text === 'string'
+    && blocks[0].text.includes('\n\n')
+  ) {
+    return blocks[0].text.split(/\n\n+/).filter(Boolean).map((chunk: string) => (
+      chunk.startsWith('## ')
+        ? { type: 'heading', text: chunk.replace(/^##\s*/, '') } as ArticleBlock
+        : { type: 'paragraph', text: chunk } as ArticleBlock
+    ))
+  }
+  return blocks as ArticleBlock[]
+}
+
+/** Concatenate all readable text out of a block list, used only for
+ *  the read-time estimate. */
+function blocksToPlainText(blocks: readonly ArticleBlock[]): string {
+  const chunks: string[] = []
+  for (const b of blocks) {
+    if (b.type === 'heading') chunks.push(b.text || '')
+    else if (b.type === 'paragraph' || (b as any).type === 'text') {
+      const segs = readParagraphSegments(b as any)
+      chunks.push(segs.map(s => s.text).join(''))
+    } else if (b.type === 'image') {
+      if (b.caption) chunks.push(b.caption)
+    }
+  }
+  return chunks.join(' ')
+}
+
 
 // ── AI Writing Assistant (calls Claude via Anthropic API) ─────────────────────
 
@@ -116,13 +176,20 @@ function ArticleEditor({ article, onSave, onBack }: {
     image_url: null, body_json: { blocks: [] },
     ...article,
   })
-  const [bodyText, setBodyText] = useState<string>(
-    article?.body_json?.blocks?.map((b: any) => b.text).join('\n\n') || ''
-  )
+  // Block 5A-W-47A — the body is now a typed block list rather than a
+  // plain-text textarea. Legacy plain-text bodies (single paragraph
+  // with embedded \n\n) are normalised into per-paragraph blocks on
+  // load so the editor UX is uniform. Existing rich blocks
+  // (heading / paragraph / paragraph.content / image / card_grid /
+  // chart) are preserved intact.
+  const [blocks, setBlocks] = useState<ArticleBlock[]>(() => loadBlocks(article))
   const [saving, setSaving] = useState(false)
   const [aiLoading, setAiLoading] = useState<string | null>(null)
   const [imageUploading, setImageUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // Estimated read time is derived from intro + all block text.
+  const bodyText = blocksToPlainText(blocks)
 
   function update(key: keyof Article, val: any) {
     setForm(f => ({ ...f, [key]: val }))
@@ -176,13 +243,22 @@ Use UK English. Never say "delve", "realm", "embark", "unleash", or similar AI c
           `Write a full article body for "${form.headline}".
            Theme: ${form.theme_label}.
            ${form.intro ? `Intro already written: "${form.intro}"` : ''}
-           
+
            Write 400-600 words. Structure with 3-4 clear sections. Each section should have a short bold heading followed by 2-3 paragraphs.
            Focus on practical, actionable information for collectors. Use specific examples where possible.
            Format: use ## for section headings, regular paragraphs otherwise. No bullet points.`,
           system
         )
-        setBodyText(text.trim())
+        // W47A: AI output is markdown-ish plain text. Split on \n\n
+        // and classify headings so the result appears as separate
+        // blocks in the editor. The admin can then style / rewrite
+        // any block inline.
+        const generated: ArticleBlock[] = text.trim().split(/\n\n+/).filter(Boolean).map((chunk: string) => (
+          chunk.startsWith('## ')
+            ? { type: 'heading', text: chunk.replace(/^##\s*/, '') } as ArticleBlock
+            : { type: 'paragraph', text: chunk } as ArticleBlock
+        ))
+        setBlocks(generated)
 
       } else if (type === 'meta') {
         const text = await generateWithAI(
@@ -209,16 +285,33 @@ Use UK English. Never say "delve", "realm", "embark", "unleash", or similar AI c
     if (!form.headline?.trim()) { alert('Headline is required'); return }
     setSaving(true)
 
-    // Convert body text to block format
-    const blocks = bodyText.split('\n\n').filter(Boolean).map((text, i) => ({
-      id: String(i), type: text.startsWith('## ') ? 'heading' : 'paragraph',
-      text: text.replace(/^## /, ''),
-    }))
+    // W47A: save the block list directly. Skip empty paragraph blocks
+    // (empty heading blocks are also skipped) so accidentally-added
+    // blocks don't clutter the published article.
+    const cleanedBlocks = blocks.filter(b => {
+      if (b.type === 'heading') return typeof b.text === 'string' && b.text.trim().length > 0
+      if (b.type === 'paragraph' || (b as any).type === 'text') {
+        const segs = readParagraphSegments(b as any)
+        return segs.some(s => s.text && s.text.trim().length > 0)
+      }
+      if (b.type === 'image') return isSafeArticleImageSrc(b.src)
+      return true // preserve legacy card_grid / chart / anything else
+    })
+
+    // Image-block alt-text guard: require alt text unless the block
+    // explicitly declares itself decorative.
+    for (const b of cleanedBlocks) {
+      if (b.type === 'image' && !b.decorative && (!b.alt || !b.alt.trim())) {
+        alert('Every image block needs alt text (or must be marked decorative).')
+        setSaving(false)
+        return
+      }
+    }
 
     const toSave: Partial<Article> = {
       ...form,
       status,
-      body_json: { blocks },
+      body_json: { blocks: cleanedBlocks },
       slug: form.slug || slugify(form.headline || ''),
       published_at: status === 'published' ? (form.published_at || new Date().toISOString()) : form.published_at,
     }
@@ -295,7 +388,7 @@ Use UK English. Never say "delve", "realm", "embark", "unleash", or similar AI c
               style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 }} />
           </div>
 
-          {/* Body */}
+          {/* Body — W47A block editor */}
           <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, padding: 18 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <label style={{ ...labelStyle, marginBottom: 0 }}>Article Body</label>
@@ -303,13 +396,10 @@ Use UK English. Never say "delve", "realm", "embark", "unleash", or similar AI c
                 {aiLoading === 'body' ? '⏳ Writing…' : '✨ Write with AI'}
               </button>
             </div>
-            <p style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 10px' }}>
-              Use ## for section headings. Separate paragraphs with a blank line.
+            <p style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 12px' }}>
+              Add heading, paragraph and image blocks below. Paragraphs support bold and inline links.
             </p>
-            <textarea value={bodyText} onChange={e => setBodyText(e.target.value)}
-              placeholder="## Section Heading&#10;&#10;Your paragraph here...&#10;&#10;## Next Section&#10;&#10;More content..."
-              rows={20}
-              style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.7, fontFamily: 'monospace', fontSize: 13 }} />
+            <BlockListEditor blocks={blocks} onChange={setBlocks} />
           </div>
 
           {/* Hero image */}
@@ -570,6 +660,386 @@ function ArticleList({ onNew, onEdit }: { onNew: () => void; onEdit: (a: Article
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// ── W47A block editors ────────────────────────────────────────────
+//
+// A small, focused block-list editor. Keeps the existing visual design
+// (card-in-a-card padding, brand colours). Every control has a text
+// label; a small handful of Unicode arrows (↑ ↓ ✕) are used purely as
+// affordances, not decoration. No third-party editor library, no
+// drag-and-drop — plain up/down buttons for reordering.
+
+type BlockListEditorProps = {
+  blocks: ArticleBlock[]
+  onChange: (next: ArticleBlock[]) => void
+}
+
+function BlockListEditor({ blocks, onChange }: BlockListEditorProps) {
+  function updateAt(i: number, next: ArticleBlock) {
+    const copy = blocks.slice()
+    copy[i] = next
+    onChange(copy)
+  }
+  function removeAt(i: number) {
+    if (!confirm('Delete this block? This cannot be undone until you close without saving.')) return
+    onChange(blocks.filter((_, idx) => idx !== i))
+  }
+  function moveAt(i: number, direction: -1 | 1) {
+    const j = i + direction
+    if (j < 0 || j >= blocks.length) return
+    const copy = blocks.slice()
+    ;[copy[i], copy[j]] = [copy[j], copy[i]]
+    onChange(copy)
+  }
+  function addBlock(kind: 'heading' | 'paragraph' | 'image') {
+    const next: ArticleBlock =
+      kind === 'heading'   ? { type: 'heading', text: '' }
+    : kind === 'paragraph' ? { type: 'paragraph', content: [] }
+                           : { type: 'image', src: '', alt: '' }
+    onChange([...blocks, next])
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {blocks.length === 0 && (
+        <div style={{ border: '2px dashed var(--border)', borderRadius: 12, padding: '24px 18px', textAlign: 'center', color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", fontSize: 13 }}>
+          No content yet. Add a heading, paragraph or image below.
+        </div>
+      )}
+      {blocks.map((block, i) => (
+        <BlockRow
+          key={i}
+          index={i}
+          total={blocks.length}
+          block={block}
+          onChange={next => updateAt(i, next)}
+          onRemove={() => removeAt(i)}
+          onMoveUp={() => moveAt(i, -1)}
+          onMoveDown={() => moveAt(i, 1)}
+        />
+      ))}
+      <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+        <button type="button" onClick={() => addBlock('heading')}   style={addBtnStyle}>+ Heading</button>
+        <button type="button" onClick={() => addBlock('paragraph')} style={addBtnStyle}>+ Paragraph</button>
+        <button type="button" onClick={() => addBlock('image')}     style={addBtnStyle}>+ Image</button>
+      </div>
+    </div>
+  )
+}
+
+const addBtnStyle: React.CSSProperties = {
+  padding: '8px 14px', borderRadius: 10, border: '1px solid var(--border)',
+  background: 'var(--bg-light)', color: 'var(--text)', fontSize: 12, fontWeight: 700,
+  fontFamily: "'Figtree', sans-serif", cursor: 'pointer',
+}
+const iconBtnStyle: React.CSSProperties = {
+  width: 28, height: 28, borderRadius: 6, border: '1px solid var(--border)',
+  background: 'var(--bg-light)', color: 'var(--text-muted)', fontSize: 13,
+  fontFamily: "'Figtree', sans-serif", cursor: 'pointer', display: 'inline-flex',
+  alignItems: 'center', justifyContent: 'center',
+}
+const inputInlineStyle: React.CSSProperties = {
+  width: '100%', padding: '9px 12px', fontSize: 14, borderRadius: 8,
+  border: '1px solid var(--border)', background: 'var(--bg-light)',
+  color: 'var(--text)', fontFamily: "'Figtree', sans-serif", outline: 'none',
+  boxSizing: 'border-box',
+}
+const blockContainerStyle: React.CSSProperties = {
+  border: '1px solid var(--border)', borderRadius: 12, padding: '12px 14px',
+  background: 'var(--bg-light)',
+}
+
+function BlockRow({
+  index, total, block, onChange, onRemove, onMoveUp, onMoveDown,
+}: {
+  index: number
+  total: number
+  block: ArticleBlock
+  onChange: (next: ArticleBlock) => void
+  onRemove: () => void
+  onMoveUp: () => void
+  onMoveDown: () => void
+}) {
+  const label =
+      block.type === 'heading'   ? 'Heading'
+    : block.type === 'paragraph' ? 'Paragraph'
+    : block.type === 'image'     ? 'Image'
+    : `Legacy (${(block as any).type})`
+  return (
+    <div style={blockContainerStyle}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+          Block #{index + 1} · {label}
+        </span>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button type="button" title="Move up"   onClick={onMoveUp}   disabled={index === 0}         style={iconBtnStyle}>↑</button>
+          <button type="button" title="Move down" onClick={onMoveDown} disabled={index === total - 1} style={iconBtnStyle}>↓</button>
+          <button type="button" title="Delete block" onClick={onRemove} style={{ ...iconBtnStyle, borderColor: 'rgba(239,68,68,0.3)', color: '#ef4444' }}>✕</button>
+        </div>
+      </div>
+      {block.type === 'heading' && (
+        <input
+          type="text"
+          value={block.text || ''}
+          onChange={e => onChange({ type: 'heading', text: e.target.value })}
+          placeholder="Section heading"
+          style={{ ...inputInlineStyle, fontFamily: "'Outfit', sans-serif", fontWeight: 700, fontSize: 16 }}
+        />
+      )}
+      {(block.type === 'paragraph' || (block as any).type === 'text') && (
+        <ParagraphBlockEditor block={block as any} onChange={onChange} />
+      )}
+      {block.type === 'image' && (
+        <ImageBlockEditor block={block} onChange={onChange} />
+      )}
+      {block.type !== 'heading' && block.type !== 'paragraph' && (block as any).type !== 'text' && block.type !== 'image' && (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", padding: '10px 0' }}>
+          Legacy block preserved. Edit body_json directly to modify.
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── ParagraphBlockEditor — contentEditable with a small toolbar ────
+
+function ParagraphBlockEditor({
+  block, onChange,
+}: {
+  block: any
+  onChange: (next: ArticleBlock) => void
+}) {
+  const editorRef = useRef<HTMLDivElement | null>(null)
+  const initialHtmlRef = useRef<string | null>(null)
+  const savedSelectionRef = useRef<Range | null>(null)
+
+  // Initial HTML rendered ONCE from the segment data. We deliberately
+  // do not sync HTML on every re-render — the contentEditable is the
+  // source of truth while focused; state is synced back to blocks on
+  // blur / on toolbar action.
+  if (initialHtmlRef.current === null) {
+    const segs = readParagraphSegments(block)
+    initialHtmlRef.current = segmentsToEditorHtml(segs) || ''
+  }
+
+  const commitFromDom = useCallback(() => {
+    if (!editorRef.current) return
+    const segs = domToSegments(editorRef.current)
+    onChange({ type: 'paragraph', content: segs })
+  }, [onChange])
+
+  function saveSelection() {
+    const sel = typeof window !== 'undefined' ? window.getSelection() : null
+    if (sel && sel.rangeCount > 0) savedSelectionRef.current = sel.getRangeAt(0).cloneRange()
+  }
+  function restoreSelection() {
+    const sel = typeof window !== 'undefined' ? window.getSelection() : null
+    if (sel && savedSelectionRef.current) {
+      sel.removeAllRanges()
+      sel.addRange(savedSelectionRef.current)
+    }
+  }
+
+  function applyBold() {
+    editorRef.current?.focus()
+    restoreSelection()
+    // execCommand is deprecated but widely supported and the simplest
+    // way to toggle inline bold formatting reliably. React writes
+    // nothing to the DOM here — we read back after.
+    document.execCommand('bold')
+    commitFromDom()
+  }
+  function applyLink() {
+    editorRef.current?.focus()
+    restoreSelection()
+    const current = document.getSelection()?.toString() || ''
+    if (!current.trim()) { alert('Select some text first, then click Add link.'); return }
+    const url = prompt('Link URL (starts with "/" for internal or "https://" for external):', '')?.trim()
+    if (!url) return
+    if (!isSafeArticleHref(url)) {
+      alert('That URL was not accepted. Use a /path or a full https:// URL.')
+      return
+    }
+    document.execCommand('createLink', false, url)
+    commitFromDom()
+  }
+  function removeLink() {
+    editorRef.current?.focus()
+    restoreSelection()
+    document.execCommand('unlink')
+    commitFromDom()
+  }
+
+  // Editable div. We stop React from re-rendering the innerHTML by
+  // rendering the initial HTML into a ref-attached div ONCE via
+  // dangerouslySetInnerHTML on mount, then never again. This is safe
+  // because the HTML is generated by our own escaper.
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+        <button type="button" title="Bold selected text" onMouseDown={e => { e.preventDefault(); saveSelection() }} onClick={applyBold} style={toolbarBtnStyle}>
+          <strong>B</strong>&nbsp;Bold
+        </button>
+        <button type="button" title="Add or edit a link on selected text" onMouseDown={e => { e.preventDefault(); saveSelection() }} onClick={applyLink} style={toolbarBtnStyle}>
+          Add link
+        </button>
+        <button type="button" title="Remove the link from selected text" onMouseDown={e => { e.preventDefault(); saveSelection() }} onClick={removeLink} style={toolbarBtnStyle}>
+          Remove link
+        </button>
+      </div>
+      <div
+        ref={editorRef}
+        contentEditable
+        suppressContentEditableWarning
+        onBlur={commitFromDom}
+        onKeyUp={saveSelection}
+        onMouseUp={saveSelection}
+        style={{
+          minHeight: 88, padding: '10px 12px', borderRadius: 8,
+          border: '1px solid var(--border)', background: 'var(--card)',
+          color: 'var(--text)', fontFamily: "'Figtree', sans-serif",
+          fontSize: 14, lineHeight: 1.7, outline: 'none', whiteSpace: 'pre-wrap',
+        }}
+        dangerouslySetInnerHTML={{ __html: initialHtmlRef.current || '' }}
+      />
+    </div>
+  )
+}
+
+const toolbarBtnStyle: React.CSSProperties = {
+  padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)',
+  background: 'var(--card)', color: 'var(--text)', fontSize: 12,
+  fontFamily: "'Figtree', sans-serif", cursor: 'pointer',
+  display: 'inline-flex', alignItems: 'center', gap: 4,
+}
+
+// ── ImageBlockEditor — URL + upload + alt + caption ────────────────
+
+function ImageBlockEditor({
+  block, onChange,
+}: {
+  block: { type: 'image'; src: string; alt: string; caption?: string; decorative?: boolean }
+  onChange: (next: ArticleBlock) => void
+}) {
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const fileInput = useRef<HTMLInputElement | null>(null)
+
+  function set<K extends keyof typeof block>(key: K, value: (typeof block)[K]) {
+    onChange({ ...block, [key]: value } as ArticleBlock)
+  }
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    const err = validateArticleImageFile(file)
+    if (err) { setError(err); return }
+    setError(null)
+    setUploading(true)
+    try {
+      const ext = (file!.name.split('.').pop() || 'jpg').toLowerCase()
+      const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+      const path = `insights/body/${filename}`
+      const { error: upErr } = await supabase.storage.from('creator-images').upload(path, file!, {
+        upsert: false,
+        contentType: file!.type,
+      })
+      if (upErr) {
+        setError('Upload failed: ' + upErr.message)
+        setUploading(false)
+        return
+      }
+      const { data: urlData } = supabase.storage.from('creator-images').getPublicUrl(path)
+      if (!urlData?.publicUrl || !isSafeArticleImageSrc(urlData.publicUrl)) {
+        setError('Uploaded file has an invalid URL.')
+        setUploading(false)
+        return
+      }
+      onChange({ ...block, src: urlData.publicUrl })
+    } catch (e: any) {
+      setError('Upload failed: ' + (e?.message || 'unknown'))
+    }
+    setUploading(false)
+  }
+
+  const srcSafe = isSafeArticleImageSrc(block.src)
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {srcSafe && (
+        <div>
+          <img
+            src={block.src}
+            alt={block.alt || ''}
+            style={{ display: 'block', width: '100%', maxHeight: 260, objectFit: 'cover', borderRadius: 8, background: 'var(--card)' }}
+            onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+          />
+        </div>
+      )}
+      <div>
+        <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 4, fontFamily: "'Figtree', sans-serif" }}>
+          Image URL
+        </label>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            type="text"
+            value={block.src}
+            onChange={e => set('src', e.target.value)}
+            placeholder="https://…"
+            style={{ ...inputInlineStyle, flex: 1, fontSize: 12, fontFamily: 'monospace' }}
+          />
+          <button type="button" onClick={() => fileInput.current?.click()} disabled={uploading} style={{ ...addBtnStyle, whiteSpace: 'nowrap' }}>
+            {uploading ? 'Uploading…' : 'Upload'}
+          </button>
+          {srcSafe && (
+            <button type="button" onClick={() => set('src', '')} style={{ ...iconBtnStyle, width: 36 }} title="Remove image">✕</button>
+          )}
+        </div>
+        <input
+          ref={fileInput}
+          type="file"
+          accept={ARTICLE_IMAGE_MIME_ALLOWLIST.join(',')}
+          style={{ display: 'none' }}
+          onChange={handleFile}
+        />
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontFamily: "'Figtree', sans-serif" }}>
+          JPEG, PNG or WebP · max 5 MB. Uploads go to the creator-images bucket.
+        </div>
+        {error && <div style={{ fontSize: 12, color: '#ef4444', marginTop: 6, fontFamily: "'Figtree', sans-serif" }}>{error}</div>}
+      </div>
+      <div>
+        <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 4, fontFamily: "'Figtree', sans-serif" }}>
+          Alt text {block.decorative ? '(decorative — optional)' : '(required)'}
+        </label>
+        <input
+          type="text"
+          value={block.alt}
+          onChange={e => set('alt', e.target.value)}
+          placeholder="Describe the image for screen readers and search engines"
+          style={inputInlineStyle}
+        />
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', marginTop: 6, fontFamily: "'Figtree', sans-serif" }}>
+          <input
+            type="checkbox"
+            checked={!!block.decorative}
+            onChange={e => set('decorative' as any, (e.target.checked || undefined) as any)}
+          />
+          Mark as decorative (skip alt text)
+        </label>
+      </div>
+      <div>
+        <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 4, fontFamily: "'Figtree', sans-serif" }}>
+          Caption (optional)
+        </label>
+        <input
+          type="text"
+          value={block.caption || ''}
+          onChange={e => set('caption', e.target.value)}
+          placeholder="Optional caption shown under the image"
+          style={inputInlineStyle}
+        />
+      </div>
     </div>
   )
 }

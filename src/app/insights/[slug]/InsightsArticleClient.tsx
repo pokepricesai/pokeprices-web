@@ -1,9 +1,17 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { Fragment, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import ArticleSchema from '@/components/ArticleSchema'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
+// Block 5A-W-47A — read segment / image block model + safe URL guards.
+import {
+  readParagraphSegments,
+  isSafeArticleHref,
+  isInternalArticleHref,
+  isSafeArticleImageSrc,
+  type ParagraphSegment,
+} from '@/lib/insights/richText'
 
 const THEME_COLOURS: Record<string, string> = {
   grading:    '#a78bfa',
@@ -127,10 +135,43 @@ function ChartBlock({ block }: { block: any }) {
   )
 }
 
+// ── Segment renderer (W47A) ────────────────────────────────────────
+// Walks a paragraph's content array and emits React nodes. Text
+// flows through React so any metacharacters escape automatically —
+// no dangerouslySetInnerHTML anywhere. Unsafe hrefs degrade to plain
+// <span> text; external HTTPS hrefs get target="_blank" +
+// rel="noopener noreferrer".
+function ParagraphSegments({ segments }: { segments: ParagraphSegment[] }) {
+  return (
+    <>
+      {segments.map((seg, i) => {
+        const inner = seg.bold ? <strong>{seg.text}</strong> : seg.text
+        if (seg.href && isSafeArticleHref(seg.href)) {
+          if (isInternalArticleHref(seg.href)) {
+            return (
+              <Link key={i} href={seg.href} style={{ color: 'var(--primary)', textDecoration: 'underline', fontWeight: 600 }}>
+                {inner}
+              </Link>
+            )
+          }
+          return (
+            <a key={i} href={seg.href} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', textDecoration: 'underline', fontWeight: 600 }}>
+              {inner}
+            </a>
+          )
+        }
+        // Malformed / unsafe hrefs degrade to plain text. Wrap in a
+        // Fragment so we keep a stable key without emitting a <span>.
+        return <Fragment key={i}>{inner}</Fragment>
+      })}
+    </>
+  )
+}
+
 // ── Body block renderer — handles both new admin format and legacy format ──────
 
 function Block({ block }: { block: any }) {
-  // ── New admin format (heading / paragraph) ──
+  // ── New admin format (heading / paragraph / image) ──
   if (block.type === 'heading') {
     return (
       <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, fontWeight: 800, color: 'var(--text)', margin: '32px 0 12px', lineHeight: 1.3 }}>
@@ -140,11 +181,55 @@ function Block({ block }: { block: any }) {
   }
 
   if (block.type === 'paragraph' || block.type === 'text') {
+    // W47A: prefer the new segment shape when present, fall back to
+    // the legacy plain-string shape unchanged so existing articles
+    // render byte-identical to before.
+    const segments = readParagraphSegments(block)
+    if (segments.length > 0) {
+      return (
+        <p style={{ fontSize: 15, lineHeight: 1.8, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", margin: '0 0 20px' }}>
+          <ParagraphSegments segments={segments} />
+        </p>
+      )
+    }
     const text = block.text || block.content || ''
     return (
       <p style={{ fontSize: 15, lineHeight: 1.8, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", margin: '0 0 20px' }}>
         {text}
       </p>
+    )
+  }
+
+  if (block.type === 'image') {
+    // W47A: article-body image block. Renders semantic
+    // <figure><img /><figcaption /></figure>. Unsafe src degrades to
+    // nothing (the image simply doesn't render). Alt text is required
+    // unless the block is explicitly marked decorative.
+    if (!isSafeArticleImageSrc(block.src)) return null
+    const alt = typeof block.alt === 'string' ? block.alt : ''
+    const decorative = block.decorative === true
+    const caption = typeof block.caption === 'string' ? block.caption.trim() : ''
+    return (
+      <figure
+        style={{ margin: '20px 0 28px' }}
+        aria-hidden={decorative ? 'true' : undefined}
+      >
+        <img
+          src={block.src}
+          alt={decorative ? '' : alt}
+          loading="lazy"
+          style={{
+            display: 'block', width: '100%', height: 'auto', maxWidth: '100%',
+            borderRadius: 12, background: 'var(--bg-light)',
+          }}
+          onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+        />
+        {caption && (
+          <figcaption style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 8, textAlign: 'center', lineHeight: 1.5 }}>
+            {caption}
+          </figcaption>
+        )}
+      </figure>
     )
   }
 
