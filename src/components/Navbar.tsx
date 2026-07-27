@@ -48,22 +48,19 @@ type NavGroup = {
   footer?: { label: string; href: string }
 }
 
-// Block 5A-W-40A-FIX — trimmed to only labels with a real, working
-// destination.
+// Block 5A-W-47B — restore the Community dropdown that Block 5A-W-40A
+// demoted to MOBILE_MORE_LINKS in July 2026. The four Community items
+// return to the top-level nav in their original pre-W40A order; Games
+// stays in the mobile "More" section (it was never a Community item).
 //
-// History:
+// Historical notes:
 //   * W40A split "Cards" and "Sets" into two top-level items, both
-//     pointing at /browse (Sets used the /browse#sets fallback since
-//     no dedicated /sets route exists yet). Two items resolving to the
-//     same page felt broken, so this fix consolidates them.
+//     pointing at /browse. W40A-FIX consolidated them.
 //   * W40A also added a top-level "Market" item pointing at the
-//     /#market-movers anchor. The matching id doesn't exist on the
-//     homepage yet (deferred to W40B), so the link currently just
-//     lands at the top of the homepage. Removed for now — W40B can
-//     reintroduce Market once the anchor / dedicated route lands.
+//     /#market-movers anchor. Removed in W40A-FIX pending W40B.
 //
-// Final W40A-FIX top level (5 items):
-//   Cards & Sets · Pokémon · Tools ▼ · Insights · Ask AI
+// Final W47B top level (6 items):
+//   Cards & Sets · Pokémon · Tools ▼ · Insights · Community ▼ · Ask AI
 //
 // No emoji-led labels — the hard constraint from the W40 design
 // brief still applies to every item below.
@@ -89,17 +86,28 @@ const NAV: NavGroup[] = [
     footer: { label: 'View All Tools →', href: '/tools' },
   },
   { label: 'Insights', href: '/insights' },
+  {
+    // W47B — exact restoration of the pre-W40A Community dropdown.
+    // Same label, same items, same order, no icons, no badges. The
+    // dropdown machinery below handles hover-open, keyboard focus,
+    // outside-click close, Escape close and route-change close
+    // uniformly with the other groups (Tools).
+    label: 'Community',
+    items: [
+      { label: 'Content Creators',    href: '/creators' },
+      { label: 'Vendors & Dealers',   href: '/vendors' },
+      { label: 'Upcoming Card Shows', href: '/card-shows' },
+      { label: 'Submit a Listing',    href: '/creators/submit' },
+    ],
+  },
   { label: 'Ask AI',   href: '/ai-assistant' },
 ]
 
-// Demoted items — surfaced in the footer and in the mobile drawer's
-// "More" section, no longer in the top-level nav.
+// W47B — Community items moved back to the top-level NAV above, so
+// they leave this list. Games stays here (was never a Community item)
+// and continues to surface only in the mobile drawer's "More" section.
 const MOBILE_MORE_LINKS: NavItem[] = [
-  { label: 'Content Creators',    href: '/creators' },
-  { label: 'Vendors & Dealers',   href: '/vendors' },
-  { label: 'Upcoming Card Shows', href: '/card-shows' },
-  { label: 'Submit a Listing',    href: '/creators/submit' },
-  { label: 'Games',               href: '/games' },
+  { label: 'Games', href: '/games' },
 ]
 
 // ── Icons ───────────────────────────────────────────────────────────────────

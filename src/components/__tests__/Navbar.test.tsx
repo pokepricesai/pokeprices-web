@@ -34,16 +34,14 @@ function extractNavBlock(): string {
   return NAVBAR_SRC.slice(start, end + 2)
 }
 
-describe('Navbar — Block 5A-W-40A-FIX consolidated top-level nav', () => {
+describe('Navbar — Block 5A-W-47B top-level nav with Community restored', () => {
   const navBlock = extractNavBlock()
 
-  it('lists the 5 required top-level items in priority order', () => {
-    // W40A-FIX trimmed the nav from 7 to 5 items:
-    //   * "Cards" and "Sets" merged into "Cards & Sets" (both used
-    //     to point at /browse — no dedicated /sets route yet).
-    //   * "Market" removed until W40B adds the matching homepage
-    //     anchor or a dedicated /market route.
-    const required = ['Cards & Sets', 'Pokémon', 'Tools', 'Insights', 'Ask AI']
+  it('lists the 6 required top-level items in priority order (W47B — Community restored between Insights and Ask AI)', () => {
+    // W40A-FIX pruned to 5 items. W47B restores the Community
+    // dropdown between Insights and Ask AI — the same slot it held
+    // pre-W40A. Total is 6 top-level items.
+    const required = ['Cards & Sets', 'Pokémon', 'Tools', 'Insights', 'Community', 'Ask AI']
     let cursor = 0
     for (const label of required) {
       const idx = navBlock.indexOf(`label: '${label}'`, cursor)
@@ -68,36 +66,67 @@ describe('Navbar — Block 5A-W-40A-FIX consolidated top-level nav', () => {
   it('Tools stays a dropdown group with /tools as the header link', () => {
     expect(navBlock).toMatch(/label:\s*'Tools',\s*href:\s*'\/tools',[\s\S]*items:\s*\[/)
   })
+
+  it('W47B — Community is a dropdown group (has an items array, no direct href on the group header)', () => {
+    // Locate the Community entry and confirm it opens a dropdown
+    // rather than being a direct link. The group header itself must
+    // not carry a href; the four child items are the destinations.
+    const communityStart = navBlock.indexOf("label: 'Community'")
+    expect(communityStart, 'Community entry present').toBeGreaterThan(-1)
+    // The section from `label: 'Community'` to the opening `items: [`
+    // must NOT contain a `href:` — that would put a direct link on
+    // the group header. Item hrefs come AFTER the `items: [` token
+    // and are validated by the next test.
+    const itemsOpen = navBlock.indexOf('items:', communityStart)
+    expect(itemsOpen, 'items: array present on the Community group').toBeGreaterThan(-1)
+    const headerSlice = navBlock.slice(communityStart, itemsOpen)
+    expect(headerSlice).not.toMatch(/href:/)
+  })
+
+  it('W47B — Community dropdown contains the 4 restored items in the exact pre-W40A order', () => {
+    const required = [
+      ["Content Creators",    "/creators"],
+      ["Vendors & Dealers",   "/vendors"],
+      ["Upcoming Card Shows", "/card-shows"],
+      ["Submit a Listing",    "/creators/submit"],
+    ] as const
+    const communityStart = navBlock.indexOf("label: 'Community'")
+    const communityEnd   = navBlock.indexOf(']', communityStart)
+    const communitySlice = navBlock.slice(communityStart, communityEnd)
+    let cursor = 0
+    for (const [label, href] of required) {
+      const idx = communitySlice.indexOf(`label: '${label}',`, cursor)
+      expect(idx, `expected Community item "${label}" at/after position ${cursor}`).toBeGreaterThan(-1)
+      // The href must appear on the same line entry.
+      const line = communitySlice.slice(idx, idx + 200)
+      expect(line).toContain(`href: '${href}'`)
+      cursor = idx + label.length
+    }
+  })
+
+  it('W47B — Community label appears exactly once in the NAV block (no duplicate button)', () => {
+    const matches = navBlock.match(/label:\s*'Community'/g) || []
+    expect(matches.length).toBe(1)
+  })
 })
 
-describe('Navbar — removed / demoted top-level items', () => {
+describe('Navbar — removed top-level items (pre-existing regressions)', () => {
   const navBlock = extractNavBlock()
 
   it('no top-level "Prices" group', () => {
-    // The Prices group used to hide Cards/Pokémon under a dropdown.
     expect(navBlock).not.toMatch(/label:\s*'Prices'/)
   })
-  it('no top-level "Community" group', () => {
-    // Community items live in the footer + mobile "More" now.
-    expect(navBlock).not.toMatch(/label:\s*'Community'/)
-  })
   it('no top-level "Games" link', () => {
-    // Games moved to footer + mobile "More".
+    // Games remains in the mobile "More" section only.
     expect(navBlock).not.toMatch(/label:\s*'Games'/)
   })
-
   it('no separate top-level "Cards" item (merged into "Cards & Sets")', () => {
-    // W40A-FIX regression pin — the split Cards / Sets pair went away.
-    // "label: 'Cards & Sets'" is allowed; "label: 'Cards'" is not.
     expect(navBlock).not.toMatch(/label:\s*'Cards'(?!\s*&)/)
   })
   it('no separate top-level "Sets" item (merged into "Cards & Sets")', () => {
     expect(navBlock).not.toMatch(/label:\s*'Sets'/)
   })
-  it('no top-level "Market" item (deferred until a real target exists)', () => {
-    // W40A pointed Market at /#market-movers before the anchor was
-    // built. W40A-FIX removed it. W40B may reintroduce it once the
-    // matching homepage anchor or a dedicated /market route lands.
+  it('no top-level "Market" item (deferred)', () => {
     expect(navBlock).not.toMatch(/label:\s*'Market'/)
   })
 })
@@ -143,17 +172,44 @@ describe('Navbar — Dashboard direct link for logged-in users', () => {
   })
 })
 
-describe('Navbar — mobile "More" section', () => {
-  it('surfaces the demoted Community + Games items in MOBILE_MORE_LINKS', () => {
-    for (const label of [
-      'Content Creators',
-      'Vendors & Dealers',
-      'Upcoming Card Shows',
-      'Submit a Listing',
-      'Games',
-    ]) {
-      // These appear inside the MOBILE_MORE_LINKS array below the NAV.
-      expect(NAVBAR_SRC).toContain(`label: '${label}'`)
+describe('Navbar — mobile "More" section (W47B)', () => {
+  // Isolate the MOBILE_MORE_LINKS block so the assertions here don't
+  // accidentally match text inside the top-level NAV block.
+  const start = NAVBAR_SRC.indexOf('const MOBILE_MORE_LINKS')
+  const end   = NAVBAR_SRC.indexOf('\n]', start)
+  const moreBlock = NAVBAR_SRC.slice(start, end + 2)
+
+  it('Games is still surfaced in MOBILE_MORE_LINKS', () => {
+    expect(moreBlock).toContain(`label: 'Games'`)
+    expect(moreBlock).toMatch(/href:\s*'\/games'/)
+  })
+  it('W47B — Community items are NO LONGER in MOBILE_MORE_LINKS (they returned to top-level)', () => {
+    for (const label of ['Content Creators', 'Vendors & Dealers', 'Upcoming Card Shows', 'Submit a Listing']) {
+      expect(moreBlock).not.toContain(`label: '${label}'`)
     }
+  })
+})
+
+describe('Navbar — Community routes (W47B)', () => {
+  // Confirm the source file references each restored destination
+  // exactly once (inside the Community group above).
+  it('references /creators, /vendors, /card-shows, /creators/submit', () => {
+    for (const href of ['/creators', '/vendors', '/card-shows', '/creators/submit']) {
+      expect(NAVBAR_SRC).toContain(`href: '${href}'`)
+    }
+  })
+  it('no unsafe / private / admin route leaked into the Community group', () => {
+    const navBlock = extractNavBlock()
+    const communityStart = navBlock.indexOf("label: 'Community'")
+    const communityEnd   = navBlock.indexOf(']', communityStart)
+    const slice = navBlock.slice(communityStart, communityEnd)
+    for (const bad of ['/admin', '/api', '/dashboard', '/intel', '/scan-test']) {
+      expect(slice).not.toContain(`href: '${bad}`)
+    }
+    // No external / protocol-relative / unsafe protocols either.
+    expect(slice).not.toMatch(/href:\s*'https?:/)
+    expect(slice).not.toMatch(/href:\s*'\/\//)
+    expect(slice).not.toMatch(/href:\s*'javascript:/)
+    expect(slice).not.toMatch(/\?/)  // no query strings
   })
 })
