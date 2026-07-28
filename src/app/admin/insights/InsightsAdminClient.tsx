@@ -1,6 +1,10 @@
 'use client'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
+// Block 5A-W-47C-FIX1 — shared admin header (Admin Home + Return to
+// site links). Rendered above the editor / list view so Luke can
+// always return to the central dashboard.
+import AdminToolHeader from '@/components/admin/AdminToolHeader'
 // Block 5A-W-47A — rich-text block editor helpers.
 import {
   readParagraphSegments,
@@ -1080,9 +1084,21 @@ export default function InsightsAdminClient() {
 
   if (!authed) return <LoginScreen onLogin={handleLogin} />
 
+  // FIX1 — wrap the authenticated view in a Fragment with the shared
+  // admin header on top so every authenticated Insights view carries
+  // the "Admin Home" / "Return to site" links without disturbing
+  // the editor or list layout below.
   if (view === 'edit') return (
-    <ArticleEditor article={editing} onSave={handleSave} onBack={handleBack} />
+    <>
+      <AdminToolHeader toolName="Insights (Articles)" />
+      <ArticleEditor article={editing} onSave={handleSave} onBack={handleBack} />
+    </>
   )
 
-  return <ArticleList onNew={handleNew} onEdit={handleEdit} />
+  return (
+    <>
+      <AdminToolHeader toolName="Insights (Articles)" />
+      <ArticleList onNew={handleNew} onEdit={handleEdit} />
+    </>
+  )
 }

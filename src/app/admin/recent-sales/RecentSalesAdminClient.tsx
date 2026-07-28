@@ -6,6 +6,11 @@
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+// Block 5A-W-47C-FIX1 — shared admin header. Only rendered because
+// this whole component is behind the RECENT_SALES_ADMIN_VIEW_ENABLED
+// server-side flag (page.tsx calls notFound() otherwise), so the
+// header never appears without the auth model already being satisfied.
+import AdminToolHeader from '@/components/admin/AdminToolHeader'
 import {
   DEFAULT_ARM_THRESHOLD_MS,
   initialArmedState,
@@ -2200,6 +2205,8 @@ export default function RecentSalesAdminClient() {
   useEffect(() => { void load() }, [load])
 
   return (
+    <>
+      <AdminToolHeader toolName="Recent Sales pipeline" />
     <main style={{ maxWidth: 1100, margin: '32px auto', padding: '0 16px', fontFamily: "'Figtree', sans-serif", color: 'var(--text)' }}>
       <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 16 }}>
         <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, margin: 0 }}>Recent Sales — Admin Inspection</h1>
@@ -2699,5 +2706,6 @@ curl -X POST /api/admin/alerts/evaluate \\
         </>
       )}
     </main>
+    </>
   )
 }

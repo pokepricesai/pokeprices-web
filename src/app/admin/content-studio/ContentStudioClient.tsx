@@ -3,6 +3,9 @@ import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import OnboardingEmailTester from '@/components/admin/OnboardingEmailTester'
 import OnboardingAutomationStatus from '@/components/admin/OnboardingAutomationStatus'
+// Block 5A-W-47C-FIX1 — shared admin header (Admin Home + Return to
+// site links).
+import AdminToolHeader from '@/components/admin/AdminToolHeader'
 import {
   TEMPLATE_LABELS,
   TEMPLATES_IMPLEMENTED,
@@ -29,7 +32,11 @@ import {
 } from '@/lib/contentStudio'
 
 const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'pokeprices2024'
-const SESSION_KEY = 'pp_content_studio_authed'
+// Block 5A-W-47C — unified admin sessionStorage key shared with
+// /admin, /admin/insights and /admin/newsletter-studio so Luke doesn't
+// re-enter the password when moving between admin tools in the same
+// browser tab.
+const SESSION_KEY = 'admin_authed'
 
 // Edge function URL slug. Supabase assigns its own random slug when you
 // create a function via the dashboard (e.g. "smooth-responder"); renaming
@@ -1042,6 +1049,11 @@ export default function ContentStudioClient() {
   }
 
   return (
+    <>
+      {/* FIX1 — shared admin header at the top of every authenticated
+          Content Studio view so Luke can return to /admin or the
+          public site without leaving the tool state behind. */}
+      <AdminToolHeader toolName="Content Studio" />
     <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 16px', fontFamily: "'Figtree', sans-serif" }}>
       {/* Admin Supabase Auth session status (Block 1A) */}
       <AdminSessionBar />
@@ -1209,6 +1221,7 @@ export default function ContentStudioClient() {
         </div>
       )}
     </div>
+    </>
   )
 }
 

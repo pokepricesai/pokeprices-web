@@ -185,12 +185,21 @@ describe('no public recent-sales routes', () => {
     expect(page).toMatch(/robots:\s*\{\s*index:\s*false/)
     // notFound when flag is off
     expect(page).toMatch(/notFound\(\)/)
-    // No public navigation link to /admin/recent-sales anywhere in src/
+    // No PUBLIC navigation link to /admin/recent-sales anywhere in
+    // src/. Exceptions:
+    //   * the recent-sales page + inspect API themselves
+    //   * files under src/app/admin/ (already noindex + password-gated
+    //     + robots-disallowed) — Block 5A-W-47C's unified admin
+    //     dashboard links to Recent Sales as an admin tool card, which
+    //     is not public exposure because the dashboard is inside the
+    //     same /admin gate.
     const files = walk(SRC, { skipTests: true })
     for (const f of files) {
-      // skip the page + route + tests themselves
-      if (f.includes(path.join('admin','recent-sales'))) continue
+      if (f.includes(path.join('admin','recent-sales')))     continue
       if (f.includes(path.join('api','admin','recent-sales'))) continue
+      // W47C — admin surfaces may reference the route; they're all
+      // themselves noindex,nofollow + robots-disallowed + gated.
+      if (f.includes(path.join('src','app','admin')))         continue
       const t = readFileSync(f, 'utf8')
       expect(t, `${f} should not link to /admin/recent-sales`).not.toMatch(/['"]\/admin\/recent-sales['"]/)
     }

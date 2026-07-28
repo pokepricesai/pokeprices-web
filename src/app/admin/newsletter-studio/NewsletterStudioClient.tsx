@@ -2,13 +2,19 @@
 
 import { useEffect, useState } from 'react'
 import { supabase, CHAT_ENDPOINT } from '@/lib/supabase'
+// Block 5A-W-47C-FIX1 — shared admin header (Admin Home + Return to
+// site links).
+import AdminToolHeader from '@/components/admin/AdminToolHeader'
 
 const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
 // ── Admin password gate (mirrors /admin/content-studio) ──────────────────
 
 const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'pokeprices2024'
-const SESSION_KEY = 'pp_newsletter_studio_authed'
+// Block 5A-W-47C — unified admin sessionStorage key shared with
+// /admin, /admin/insights and /admin/content-studio so Luke doesn't
+// re-enter the password when moving between admin tools.
+const SESSION_KEY = 'admin_authed'
 
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const [pw, setPw] = useState('')
@@ -581,6 +587,11 @@ export default function NewsletterStudioClient() {
   const allTxt  = sections.map(s => `${s.title.toUpperCase()}\n${'-'.repeat(s.title.length)}\n${s.text}`).join('\n\n')
 
   return (
+    <>
+      {/* FIX1 — shared admin header at the top so Luke can return to
+          /admin or the public site without leaving Newsletter Studio
+          state behind. */}
+      <AdminToolHeader toolName="Newsletter Studio" />
     <div style={{ maxWidth: 1080, margin: '0 auto', padding: '28px 16px 60px', fontFamily: "'Figtree', sans-serif" }}>
 
       {/* Header */}
@@ -663,6 +674,7 @@ export default function NewsletterStudioClient() {
         </>
       )}
     </div>
+    </>
   )
 }
 
