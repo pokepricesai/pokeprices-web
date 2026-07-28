@@ -8,7 +8,21 @@ export const metadata = {
   alternates: { canonical: 'https://www.pokeprices.io/games' },
 }
 
-const ANYTIME_GAMES = [
+// Block 5A-W-47E — added Build a Binder as the third anytime game.
+// FIX1 — Build a Binder ships with no emoji (the existing games use
+// emojis but there is no professional icon system to draw from and
+// the fix brief asks specifically to remove the emoji from this
+// card). The render below drops the emoji div when `emoji` is
+// undefined so the older cards keep their icons.
+type AnytimeGame = {
+  href:   string
+  kind:   string
+  title:  string
+  blurb:  string
+  accent: string
+  emoji?: string
+}
+const ANYTIME_GAMES: AnytimeGame[] = [
   {
     href: '/games/guess-price',
     kind: 'Anytime quiz',
@@ -24,6 +38,14 @@ const ANYTIME_GAMES = [
     blurb: 'Two cards, pick the more valuable one. Chain as far as you can before you miss. Start over any time.',
     accent: 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)',
     emoji: '📈',
+  },
+  {
+    href: '/games/build-a-binder',
+    kind: 'Budget puzzle',
+    title: 'Build a Binder',
+    blurb: 'Pick five cards without going over your budget. Real prices. Bonus points for mixing up sets and Pokémon.',
+    accent: 'linear-gradient(135deg, #7c3aed 0%, #a855f7 100%)',
+    // FIX1 — no emoji; the accent bar carries the visual weight.
   },
 ]
 
@@ -80,7 +102,10 @@ export default function GamesLanding() {
               <div style={{ fontSize: 24, fontWeight: 900, fontFamily: "'Outfit', sans-serif", lineHeight: 1.1 }}>
                 {g.title}
               </div>
-              <div style={{ marginTop: 'auto', fontSize: 26 }}>{g.emoji}</div>
+              {/* FIX1 — drop the emoji div entirely when the game
+                  provides no emoji so the card doesn't render an
+                  empty spacer. */}
+              {g.emoji && <div style={{ marginTop: 'auto', fontSize: 26 }}>{g.emoji}</div>}
             </div>
             <div style={{ padding: '16px 18px 20px', flex: 1, display: 'flex', flexDirection: 'column' }}>
               <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55, margin: '0 0 12px' }}>
