@@ -1,31 +1,31 @@
 'use client'
-// Block 5A-W-47E-B — Guess the Card game client.
+// Block 5A-W-47E-B (with FIX1) — Guess the Card game client.
 //
-// The player sees an obscured card image, submits guesses, gets
-// progressive clues after incorrect attempts, and can move to a
-// fresh card. Card pool comes from popular_card_trends — the same
-// existing table used by the other three games. Guess logic +
-// reveal progression + best-streak storage are all pure helpers
-// pinned by unit tests.
+// FIX1 changes:
+//   * blur is lighter — reads from the pure REVEAL_TRANSFORMS table
+//     which was retuned in the same fix. No client-side hard-coding.
+//   * text input is gone. The player now picks from 3 buttons
+//     (1 correct + 2 distractors from the pool). Wrong picks grey
+//     out with a strikethrough. After MAX_WRONG_PICKS misses (= 2
+//     with 3 options), the answer auto-reveals and the streak
+//     resets.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import { cleanCardName } from '@/lib/gamesUtil'
 import {
-  acceptedAnswersFor,
   clueForLevel,
   firstAcceptedDisplayName,
-  isCorrectGuess,
-  isDuplicateGuess,
+  generateOptions,
   isPlayableGuessCard,
-  MAX_ATTEMPTS,
+  MAX_WRONG_PICKS,
   pickNextCard,
   readBestStreak,
   REVEAL_TRANSFORMS,
   revealLevel,
   writeBestStreak,
   type GuessCard,
+  type GuessOption,
 } from '@/lib/games/guessTheCard'
 
 // ── Data loader ────────────────────────────────────
@@ -63,17 +63,15 @@ export default function GuessTheCardClient() {
 
   const seenSlugsRef = useRef<Set<string>>(new Set())
   const failuresRef  = useRef(0)
+  const firstOptionRef = useRef<HTMLButtonElement | null>(null)
 
   const [card, setCard] = useState<GuessCard | null>(null)
+  const [options, setOptions] = useState<GuessOption[]>([])
   const [phase, setPhase] = useState<Phase>('guessing')
-  const [guess, setGuess] = useState('')
-  const [guesses, setGuesses] = useState<string[]>([])
-  const [validationMsg, setValidationMsg] = useState<string | null>(null)
+  const [wrongPicks, setWrongPicks] = useState<string[]>([])
 
   const [streak, setStreak] = useState(0)
   const [bestStreak, setBestStreak] = useState(0)
-
-  const inputRef = useRef<HTMLInputElement | null>(null)
 
   // ── Boot: load pool, mount first card, read best streak ──
   useEffect(() => {
@@ -85,6 +83,7 @@ export default function GuessTheCardClient() {
         setPool(list)
         const first = pickNextCard(list, new Set())
         setCard(first)
+        setOptions(first ? generateOptions(first, list) : [])
         if (first?.card_url_slug) seenSlugsRef.current.add(first.card_url_slug)
       }
       setBestStreak(readBestStreak())
@@ -105,13 +104,12 @@ export default function GuessTheCardClient() {
     }
     if (next.card_url_slug) seenSlugsRef.current.add(next.card_url_slug)
     setCard(next)
+    setOptions(generateOptions(next, pool))
     setPhase('guessing')
-    setGuess('')
-    setGuesses([])
-    setValidationMsg(null)
-    // Return focus to the input so keyboard players don't have to
-    // click again. Guard against unmount.
-    setTimeout(() => inputRef.current?.focus(), 0)
+    setWrongPicks([])
+    // Return focus to the first option so keyboard players don't
+    // have to click. Guard against unmount.
+    setTimeout(() => firstOptionRef.current?.focus(), 0)
   }, [pool])
 
   function bumpStreakAndPersist() {
@@ -128,36 +126,18 @@ export default function GuessTheCardClient() {
     setStreak(0)
   }
 
-  // ── Submit handler ──
-  function onSubmitGuess(e: React.FormEvent) {
-    e.preventDefault()
+  // ── Pick handler ──
+  function onPickOption(opt: GuessOption) {
     if (phase !== 'guessing' || !card) return
-    const raw = guess.trim()
-    if (!raw) {
-      setValidationMsg('Type a card name first.')
-      return
-    }
-    // Duplicate guess — don't spend an attempt, just tell the user.
-    if (isDuplicateGuess(raw, guesses)) {
-      setValidationMsg('You already tried that guess.')
-      setGuess('')
-      return
-    }
-    setValidationMsg(null)
-
-    if (isCorrectGuess(raw, card)) {
-      setGuesses(prev => [...prev, raw])
+    if (wrongPicks.includes(opt.key)) return   // already eliminated
+    if (opt.isCorrect) {
       setPhase('won')
       bumpStreakAndPersist()
-      setGuess('')
       return
     }
-
-    // Incorrect. Record the guess and either continue or reveal.
-    const nextGuesses = [...guesses, raw]
-    setGuesses(nextGuesses)
-    setGuess('')
-    if (nextGuesses.length >= MAX_ATTEMPTS) {
+    const nextWrong = [...wrongPicks, opt.key]
+    setWrongPicks(nextWrong)
+    if (nextWrong.length >= MAX_WRONG_PICKS) {
       setPhase('lost')
       resetStreak()
     }
@@ -182,8 +162,7 @@ export default function GuessTheCardClient() {
   }
 
   // ── Reveal state + clue ──
-  const misses = guesses.length - (phase === 'won' ? 1 : 0)
-  const level = revealLevel(misses, phase !== 'guessing')
+  const level = revealLevel(wrongPicks.length, phase !== 'guessing')
   const transform = REVEAL_TRANSFORMS[level]
   const clue = clueForLevel(level, card)
 
@@ -214,8 +193,8 @@ export default function GuessTheCardClient() {
           Guess the Card
         </h1>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
-          Identify the card from the obscured artwork. Each miss makes the picture clearer
-          and unlocks another clue. You have {MAX_ATTEMPTS} guesses per card.
+          Identify the card from the obscured artwork. Pick from three options —
+          each miss makes the picture clearer and unlocks another clue.
         </p>
       </div>
 
@@ -239,9 +218,9 @@ export default function GuessTheCardClient() {
               <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Outfit', sans-serif", color: 'var(--text)' }}>{bestStreak}</div>
             </div>
             <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: '8px 14px', flex: 1, minWidth: 110, textAlign: 'center' }}>
-              <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.5, color: 'var(--text-muted)' }}>Attempts</div>
+              <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.5, color: 'var(--text-muted)' }}>Wrong</div>
               <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Outfit', sans-serif", color: 'var(--text)' }}>
-                {Math.min(guesses.length, MAX_ATTEMPTS)}/{MAX_ATTEMPTS}
+                {Math.min(wrongPicks.length, MAX_WRONG_PICKS)}/{MAX_WRONG_PICKS}
               </div>
             </div>
           </div>
@@ -258,6 +237,7 @@ export default function GuessTheCardClient() {
                 boxShadow: '0 12px 36px rgba(0,0,0,0.18)',
                 position: 'relative',
               }}
+              data-guess-card-image
             >
               <img
                 key={card.card_url_slug || 'x'}
@@ -294,7 +274,7 @@ export default function GuessTheCardClient() {
                   {cardDisplayName}
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>
-                  {card.set_name} · {guesses.length} {guesses.length === 1 ? 'attempt' : 'attempts'}
+                  {card.set_name}{wrongPicks.length > 0 ? ` · after ${wrongPicks.length} wrong` : ''}
                 </div>
               </div>
             )}
@@ -310,42 +290,54 @@ export default function GuessTheCardClient() {
               </div>
             )}
 
-            {/* Guess input row */}
+            {/* Options row (during guessing) or Next / View card (after) */}
             {phase === 'guessing' ? (
-              <form onSubmit={onSubmitGuess} style={{ width: '100%', maxWidth: 360 }} aria-label="Card name guess">
-                <label htmlFor="guess-input" style={{ display: 'block', fontSize: 11, fontWeight: 800, letterSpacing: 1.2, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>
-                  Your guess
-                </label>
-                <input
-                  id="guess-input"
-                  ref={inputRef}
-                  type="text"
-                  autoComplete="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  value={guess}
-                  onChange={e => { setGuess(e.target.value); setValidationMsg(null) }}
-                  placeholder="Enter a card name…"
-                  aria-invalid={!!validationMsg}
-                  aria-describedby={validationMsg ? 'guess-validation' : undefined}
+              <div
+                role="group"
+                aria-label="Card guess options"
+                style={{ width: '100%', maxWidth: 420, display: 'flex', flexDirection: 'column', gap: 8 }}
+              >
+                {options.map((opt, i) => {
+                  const eliminated = wrongPicks.includes(opt.key)
+                  return (
+                    <button
+                      key={opt.key || `opt-${i}`}
+                      ref={i === 0 ? firstOptionRef : undefined}
+                      type="button"
+                      onClick={() => onPickOption(opt)}
+                      disabled={eliminated}
+                      aria-disabled={eliminated}
+                      style={{
+                        width: '100%', padding: '12px 14px',
+                        borderRadius: 10,
+                        border: eliminated ? '1px solid var(--border)' : '1px solid var(--primary)',
+                        background: eliminated ? 'var(--bg-light)' : 'var(--card)',
+                        color: eliminated ? 'var(--text-muted)' : 'var(--text)',
+                        fontSize: 15, fontWeight: 700,
+                        fontFamily: "'Figtree', sans-serif",
+                        cursor: eliminated ? 'not-allowed' : 'pointer',
+                        textDecoration: eliminated ? 'line-through' : 'none',
+                        textAlign: 'left',
+                        boxSizing: 'border-box',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  )
+                })}
+                <button
+                  type="button"
+                  onClick={revealAnswer}
                   style={{
-                    width: '100%', padding: '10px 12px', fontSize: 15, borderRadius: 8,
-                    border: `1px solid ${validationMsg ? '#ef4444' : 'var(--border)'}`,
-                    background: 'var(--bg-light)', color: 'var(--text)',
-                    outline: 'none', boxSizing: 'border-box',
-                    fontFamily: "'Figtree', sans-serif",
+                    marginTop: 4, padding: '8px 14px', borderRadius: 8,
+                    border: '1px solid var(--border)', background: 'transparent',
+                    color: 'var(--text-muted)', fontSize: 12, fontWeight: 700,
+                    fontFamily: "'Figtree', sans-serif", cursor: 'pointer',
                   }}
-                />
-                {validationMsg && (
-                  <div id="guess-validation" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
-                    {validationMsg}
-                  </div>
-                )}
-                <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                  <button type="submit" style={primaryBtn}>Submit guess</button>
-                  <button type="button" onClick={revealAnswer} style={secondaryBtn}>Reveal answer</button>
-                </div>
-              </form>
+                >
+                  Reveal answer
+                </button>
+              </div>
             ) : (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
                 <button type="button" onClick={nextCard} style={primaryBtn}>Next card</button>
@@ -354,37 +346,15 @@ export default function GuessTheCardClient() {
                 )}
               </div>
             )}
-
-            {/* Past guesses (during the round) */}
-            {phase === 'guessing' && guesses.length > 0 && (
-              <div style={{ width: '100%', maxWidth: 360, marginTop: 4 }}>
-                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>
-                  Previous guesses
-                </div>
-                <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {guesses.map((g, i) => (
-                    <li key={i} style={{ fontSize: 12, padding: '3px 10px', border: '1px solid var(--border)', background: 'var(--bg-light)', color: 'var(--text-muted)', borderRadius: 20, textDecoration: 'line-through' }}>
-                      {g}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
           </div>
 
           {/* Reduced-motion respect */}
           <style dangerouslySetInnerHTML={{ __html: `
             @media (prefers-reduced-motion: reduce) {
-              [data-guess-card-image] { transition: none !important; }
+              [data-guess-card-image] img { transition: none !important; }
             }
           ` }} />
         </>
-      )}
-
-      {/* Accepted-answer accessibility hint — only after reveal so we
-          don't spoil the guess. */}
-      {phase !== 'guessing' && card && (
-        <div aria-hidden="true" style={{ display: 'none' }}>{acceptedAnswersFor(card).join(', ')}</div>
       )}
     </div>
   )

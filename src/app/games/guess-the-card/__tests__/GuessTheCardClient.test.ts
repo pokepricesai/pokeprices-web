@@ -1,8 +1,10 @@
-// Block 5A-W-47E-B — source-invariant tests for the Guess the Card
-// client + games-index registration. Follows the same pattern the
-// Build a Binder FIX1 tests use: the client has a Supabase import
-// chain and heavy client state, so we read the file as text and pin
-// the specific bytes that implement each brief requirement.
+// Block 5A-W-47E-B (with FIX1) — source-invariant tests for the
+// Guess the Card client + games-index registration.
+//
+// FIX1 changes:
+//   * the input form is gone; we now pin the presence of 3 option
+//     buttons and the absence of any typed-guess machinery.
+//   * the client uses MAX_WRONG_PICKS / generateOptions / GuessOption.
 
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -59,7 +61,6 @@ describe('Games index registration (Part 10)', () => {
     )
     expect(entry, 'Guess the Card entry not found').toBeTruthy()
     expect(entry![0]).not.toMatch(/emoji:\s*'/)
-    // Spot-check that no common emojis leaked into the entry.
     for (const glyph of ['📒', '🎯', '📈', '📕', '📖', '🎮', '🎲', '👀', '❓']) {
       expect(entry![0]).not.toContain(glyph)
     }
@@ -74,13 +75,12 @@ describe('Games index registration (Part 10)', () => {
   })
 })
 
-// ── Client — game loop wiring ───────
+// ── Client — game loop wiring (FIX1: multiple choice) ──
 
-describe('client (Part 4) — game loop wiring', () => {
-  it('maximum 4 guesses per round (MAX_ATTEMPTS constant used)', () => {
-    // The client imports and uses MAX_ATTEMPTS from the pure module.
-    expect(CLIENT_SRC).toContain("MAX_ATTEMPTS")
-    expect(CLIENT_SRC).toMatch(/nextGuesses\.length\s*>=\s*MAX_ATTEMPTS/)
+describe('client (Part 4 FIX1) — game loop wiring', () => {
+  it('uses MAX_WRONG_PICKS (2) as the reveal cap — 3 options × 1 correct = 2 misses max', () => {
+    expect(CLIENT_SRC).toContain('MAX_WRONG_PICKS')
+    expect(CLIENT_SRC).toMatch(/nextWrong\.length\s*>=\s*MAX_WRONG_PICKS/)
   })
   it('tracks a current streak in React state', () => {
     expect(CLIENT_SRC).toMatch(/const \[streak, setStreak\]\s*=\s*useState\(0\)/)
@@ -89,8 +89,7 @@ describe('client (Part 4) — game loop wiring', () => {
     expect(CLIENT_SRC).toContain('readBestStreak')
     expect(CLIENT_SRC).toContain('writeBestStreak')
   })
-  it('bumps and persists best streak on a correct guess', () => {
-    // The bump path calls writeBestStreak with the new value.
+  it('bumps and persists best streak on a correct pick', () => {
     expect(CLIENT_SRC).toMatch(/writeBestStreak\(nextStreak\)/)
   })
   it('resets current streak on a lost round (miss cap or reveal)', () => {
@@ -105,7 +104,6 @@ describe('client (Part 5) — image reveal method', () => {
   it('uses CSS filter + transform (no canvas, no remote image service)', () => {
     expect(CLIENT_SRC).toMatch(/filter:\s*`?blur\(/)
     expect(CLIENT_SRC).toMatch(/transform:\s*`?scale\(/)
-    // Prohibited: canvas or a third-party image processor.
     expect(CLIENT_SRC).not.toContain('canvas')
     expect(CLIENT_SRC).not.toContain('imgproxy')
     expect(CLIENT_SRC).not.toContain('cloudinary')
@@ -115,7 +113,6 @@ describe('client (Part 5) — image reveal method', () => {
     expect(CLIENT_SRC).toContain('revealLevel')
   })
   it('uses neutral alt text before reveal (no card name leak)', () => {
-    // The neutral alt is used whenever phase === guessing.
     expect(CLIENT_SRC).toContain("'Obscured Pokémon card'")
     expect(CLIENT_SRC).toMatch(/phase === 'guessing'[\s\S]*?'Obscured Pokémon card'/)
   })
@@ -127,33 +124,46 @@ describe('client (Part 5) — image reveal method', () => {
   })
 })
 
-// ── Client — guess input UX (Part 8) ─
+// ── Client — multiple-choice UX (FIX1 replaces old input UX) ──
 
-describe('client (Part 8) — input UX', () => {
-  it('submits via <form onSubmit=…> (Enter works natively)', () => {
-    expect(CLIENT_SRC).toMatch(/onSubmit=\{onSubmitGuess\}/)
+describe('client (Part 8 FIX1) — multiple-choice UX', () => {
+  it('renders option buttons by mapping over the generated options list', () => {
+    // The client should iterate `options.map` inside JSX.
+    expect(CLIENT_SRC).toMatch(/options\.map\(/)
   })
-  it('empty guess shows a validation message but does not consume an attempt', () => {
-    expect(CLIENT_SRC).toContain("'Type a card name first.'")
-    expect(CLIENT_SRC).toMatch(/if \(!raw\) \{[\s\S]*setValidationMsg[\s\S]*return\s*\}/)
+  it('uses the pure generateOptions helper to build the choices', () => {
+    expect(CLIENT_SRC).toContain('generateOptions')
   })
-  it('input clears after an incorrect guess', () => {
-    expect(CLIENT_SRC).toMatch(/setGuesses\(nextGuesses\)[\s\S]*setGuess\(''\)/)
+  it('has NO text input for the guess (the FIX1 regression pin)', () => {
+    // No <input type="text" ...>, no guess-input id, no isDuplicateGuess.
+    expect(CLIENT_SRC).not.toMatch(/<input[^>]*type=["']text["']/)
+    expect(CLIENT_SRC).not.toContain('isDuplicateGuess')
+    expect(CLIENT_SRC).not.toContain('isCorrectGuess')
+    expect(CLIENT_SRC).not.toContain('acceptedAnswersFor')
+    expect(CLIENT_SRC).not.toContain('normalizeAnswer')
   })
-  it('duplicate guesses do NOT consume another attempt', () => {
-    expect(CLIENT_SRC).toContain('isDuplicateGuess')
-    expect(CLIENT_SRC).toContain("'You already tried that guess.'")
+  it('has NO submit form for guesses (regression pin)', () => {
+    expect(CLIENT_SRC).not.toMatch(/onSubmit=/)
   })
-  it('is disabled (form not rendered) once the round is over', () => {
-    // The form only mounts while phase === 'guessing'; after the
-    // round it's replaced by the Next-card / View-card row.
-    expect(CLIENT_SRC).toMatch(/phase === 'guessing' \?[\s\S]{0,20}<form/)
+  it('wrong picks are eliminated (disabled + strikethrough)', () => {
+    // The client tracks eliminated slugs in `wrongPicks` and marks
+    // buttons `disabled` / `line-through` accordingly.
+    expect(CLIENT_SRC).toContain('wrongPicks')
+    expect(CLIENT_SRC).toMatch(/wrongPicks\.includes\(opt\.key\)/)
+    expect(CLIENT_SRC).toMatch(/line-through/)
+  })
+  it('option list only mounts while phase === "guessing"', () => {
+    expect(CLIENT_SRC).toMatch(/phase === 'guessing' \?[\s\S]{0,60}(<div|options\.map)/)
   })
   it('never uses browser alert() for feedback', () => {
     expect(CLIENT_SRC).not.toMatch(/\balert\s*\(/)
   })
-  it('re-focuses the input after Next card (keyboard-friendly)', () => {
-    expect(CLIENT_SRC).toMatch(/inputRef\.current\?\.focus\(\)/)
+  it('re-focuses the first option after Next card (keyboard-friendly)', () => {
+    expect(CLIENT_SRC).toMatch(/firstOptionRef\.current\?\.focus\(\)/)
+  })
+  it('provides a Reveal answer escape hatch', () => {
+    expect(CLIENT_SRC).toContain('function revealAnswer')
+    expect(CLIENT_SRC).toMatch(/Reveal answer/)
   })
 })
 
@@ -193,7 +203,6 @@ describe('client (Part 11) — error and empty states', () => {
     expect(CLIENT_SRC).toContain('The card pool is currently returning broken images')
   })
   it('never exposes raw Supabase error messages to the user', () => {
-    // The catch path emits a human message, not error.message.
     expect(CLIENT_SRC).not.toMatch(/setError\(.*error\.message/)
   })
 })

@@ -1,25 +1,33 @@
-// Block 5A-W-47E-B — pure tests for the Guess the Card helpers.
+// Block 5A-W-47E-B (with FIX1) — unit tests for the Guess the Card
+// pure helpers. Text-input matching is gone (game is now 3-option
+// multiple choice), so this file covers:
+//   - the playable-card filter (sealed / product / missing data)
+//   - the display-name cleaner (strips trailing #NN)
+//   - the reveal transform + level clamping
+//   - the clue-per-level table
+//   - option generation (3 shuffled options, distinct labels, no
+//     leak of the correct card into distractors)
+//   - card selection without repeats
+//   - best-streak storage (safe wrapper + malformed handling)
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import {
-  isPlayableGuessCard,
-  normalizeAnswer,
-  acceptedAnswersFor,
-  isCorrectGuess,
-  isDuplicateGuess,
+  BEST_STREAK_STORAGE_KEY,
+  MAX_WRONG_PICKS,
+  OPTIONS_PER_ROUND,
   REVEAL_TRANSFORMS,
-  revealLevel,
   clueForLevel,
   firstAcceptedDisplayName,
+  generateOptions,
+  isPlayableGuessCard,
   pickNextCard,
   readBestStreak,
+  revealLevel,
   writeBestStreak,
-  MAX_ATTEMPTS,
-  BEST_STREAK_STORAGE_KEY,
   type GuessCard,
 } from '../guessTheCard'
 
-function card(over: Partial<GuessCard> = {}): GuessCard {
+function mk(overrides: Partial<GuessCard> = {}): GuessCard {
   return {
     card_name:            'Pikachu #58',
     set_name:             'Base Set',
@@ -27,399 +35,273 @@ function card(over: Partial<GuessCard> = {}): GuessCard {
     card_number:          '58',
     card_number_display:  '58/102',
     set_printed_total:    '102',
-    image_url:            'https://example.com/pikachu.png',
-    sales_30d:            10,
+    image_url:            'https://example.com/pikachu.jpg',
     is_sealed:            false,
-    ...over,
+    sales_30d:            42,
+    ...overrides,
   }
 }
 
-// ── Constants ──────────────────────────
+// ── Constants ─────────────────────────────────────
 
 describe('constants', () => {
-  it('MAX_ATTEMPTS is 4', () => {
-    expect(MAX_ATTEMPTS).toBe(4)
+  it('MAX_WRONG_PICKS = 2 (so a 3-option round auto-reveals after 2 misses)', () => {
+    expect(MAX_WRONG_PICKS).toBe(2)
   })
-  it('has one reveal transform per level, plus the final revealed level', () => {
-    // 0 initial + 3 mid-game misses + 1 revealed = 5 entries
-    expect(REVEAL_TRANSFORMS.length).toBe(5)
+  it('OPTIONS_PER_ROUND = 3', () => {
+    expect(OPTIONS_PER_ROUND).toBe(3)
   })
-  it('reveal transforms de-obscure monotonically (blur decreases, scale decreases)', () => {
+  it('REVEAL_TRANSFORMS has one level per (miss, reveal) state and de-obscures monotonically', () => {
+    expect(REVEAL_TRANSFORMS.length).toBe(3) // 0: initial, 1: 1 miss, 2: revealed
     for (let i = 1; i < REVEAL_TRANSFORMS.length; i++) {
       expect(REVEAL_TRANSFORMS[i].blurPx).toBeLessThan(REVEAL_TRANSFORMS[i - 1].blurPx)
-      expect(REVEAL_TRANSFORMS[i].scale).toBeLessThan(REVEAL_TRANSFORMS[i - 1].scale + 0.001)
+      expect(REVEAL_TRANSFORMS[i].scale).toBeLessThanOrEqual(REVEAL_TRANSFORMS[i - 1].scale)
     }
-    // The final state is fully un-obscured.
     expect(REVEAL_TRANSFORMS[REVEAL_TRANSFORMS.length - 1].blurPx).toBe(0)
     expect(REVEAL_TRANSFORMS[REVEAL_TRANSFORMS.length - 1].scale).toBe(1)
   })
+  it('FIX1 — initial blur is much lighter than the original 18px (fixed complaint: "way too blurred")', () => {
+    expect(REVEAL_TRANSFORMS[0].blurPx).toBeLessThanOrEqual(10)
+  })
 })
 
-// ── isPlayableGuessCard ─────────────
+// ── isPlayableGuessCard ───────────────────────
 
 describe('isPlayableGuessCard', () => {
   it('accepts a normal card', () => {
-    expect(isPlayableGuessCard(card())).toBe(true)
+    expect(isPlayableGuessCard(mk())).toBe(true)
   })
   it('rejects null / undefined', () => {
     expect(isPlayableGuessCard(null)).toBe(false)
     expect(isPlayableGuessCard(undefined)).toBe(false)
   })
   it('rejects sealed products', () => {
-    expect(isPlayableGuessCard(card({ is_sealed: true }))).toBe(false)
+    expect(isPlayableGuessCard(mk({ is_sealed: true }))).toBe(false)
   })
-  it('rejects missing image', () => {
-    expect(isPlayableGuessCard(card({ image_url: null }))).toBe(false)
+  it('rejects rows with no image_url or slug', () => {
+    expect(isPlayableGuessCard(mk({ image_url: null }))).toBe(false)
+    expect(isPlayableGuessCard(mk({ card_url_slug: null }))).toBe(false)
   })
-  it('rejects missing slug', () => {
-    expect(isPlayableGuessCard(card({ card_url_slug: null }))).toBe(false)
+  it('rejects rows with no name or set_name', () => {
+    expect(isPlayableGuessCard(mk({ card_name: '' }))).toBe(false)
+    expect(isPlayableGuessCard(mk({ set_name: '' }))).toBe(false)
   })
-  it('rejects product-name patterns', () => {
+  it('rejects sealed products by name pattern', () => {
     for (const name of [
-      'Zekrom Box',
-      'Champion Path Tin',
-      'Booster Bundle',
+      'Charizard Booster Bundle',
       'Elite Trainer Box',
-      'Journey Together Booster Pack',
-      'Sword & Shield Deck',
-      'Legends Of Johto GX Collection',
-      'Charizard Binder',
-      'Blaziken Blister',
-      '3-Pack Booster',
+      'Pikachu Tin',
+      'Blister 3-Pack',
+      'Champion Path Binder Collection',
+      'Battle Deck',
     ]) {
-      expect(isPlayableGuessCard(card({ card_name: name }))).toBe(false)
+      expect(isPlayableGuessCard(mk({ card_name: name })), name).toBe(false)
     }
   })
-  it('does NOT reject a name whose word contains a substring token', () => {
-    // "Deoxys" contains "eo" not "deck"; "Boxxie" would be a false
-    // positive but no real card is named that. The \bbox\b token
-    // guarantees this. Just prove the common cases stay in.
-    expect(isPlayableGuessCard(card({ card_name: 'Deoxys #16' }))).toBe(true)
-    expect(isPlayableGuessCard(card({ card_name: 'Snorunt #24' }))).toBe(true)
+  it('does NOT reject a card whose set has a matching word (only card_name is checked)', () => {
+    expect(isPlayableGuessCard(mk({ card_name: 'Umbreon #22', set_name: 'Elite Trainer Box' }))).toBe(true)
   })
 })
 
-// ── normalizeAnswer ─────────────────
-
-describe('normalizeAnswer', () => {
-  it('lowercases', () => {
-    expect(normalizeAnswer('Pikachu')).toBe('pikachu')
-    expect(normalizeAnswer('CHARIZARD')).toBe('charizard')
-  })
-  it('collapses inner whitespace and trims', () => {
-    expect(normalizeAnswer('  Mr   Mime  ')).toBe('mr mime')
-  })
-  it('strips periods, commas, colons, question marks', () => {
-    expect(normalizeAnswer('Mr. Mime')).toBe('mr mime')
-    expect(normalizeAnswer('Type: Null')).toBe('type null')
-  })
-  it('strips ASCII and typographic apostrophes', () => {
-    expect(normalizeAnswer("Farfetch'd")).toBe('farfetchd')
-    expect(normalizeAnswer('Farfetch’d')).toBe('farfetchd')
-    expect(normalizeAnswer('Farfetch‘d')).toBe('farfetchd')
-  })
-  it('converts hyphens / dashes to spaces', () => {
-    expect(normalizeAnswer('Ho-Oh')).toBe('ho oh')
-    expect(normalizeAnswer('Porygon-Z')).toBe('porygon z')
-    expect(normalizeAnswer('Nidoran—F')).toBe('nidoran f')  // em-dash
-  })
-  it('strips accents', () => {
-    expect(normalizeAnswer('Pokémon')).toBe('pokemon')
-    expect(normalizeAnswer('café')).toBe('cafe')
-  })
-  it('handles ampersand → "and"', () => {
-    expect(normalizeAnswer('Team Rocket & Co.')).toBe('team rocket and co')
-  })
-  it('returns empty for null / undefined / non-string / punctuation-only', () => {
-    expect(normalizeAnswer(null)).toBe('')
-    expect(normalizeAnswer(undefined)).toBe('')
-    expect(normalizeAnswer('' as string)).toBe('')
-    expect(normalizeAnswer('   ')).toBe('')
-    expect(normalizeAnswer("!!!'''")).toBe('')
-  })
-})
-
-// ── acceptedAnswersFor ─────────────
-
-describe('acceptedAnswersFor', () => {
-  it('accepts the cleaned card name (without trailing #NN)', () => {
-    const answers = acceptedAnswersFor(card({ card_name: 'Pikachu #58' }))
-    expect(answers).toContain('pikachu')
-  })
-  it('accepts the name with the [variant] bracket stripped', () => {
-    const answers = acceptedAnswersFor(card({ card_name: 'Zarude [Gamestop] #171' }))
-    // Bracket-stripped form is accepted (block brief: bracketed
-    // variants are optional so the player never has to type them).
-    expect(answers).toContain('zarude')
-    // The bracket-included form is also accepted for completeness.
-    expect(answers).toContain('zarude gamestop')
-  })
-  it('accepts multiword names verbatim', () => {
-    const answers = acceptedAnswersFor(card({ card_name: 'Mr. Mime #6' }))
-    expect(answers).toContain('mr mime')
-  })
-  it('deduplicates identical normalised forms', () => {
-    const answers = acceptedAnswersFor(card({ card_name: 'Zubat' }))
-    // "Zubat" and cleaned "Zubat" and bracket-stripped "Zubat" all
-    // normalise the same; the set should contain a single form.
-    expect(answers.filter(a => a === 'zubat')).toHaveLength(1)
-  })
-  it('handles null / non-string card_name safely', () => {
-    expect(acceptedAnswersFor(null)).toEqual([])
-    expect(acceptedAnswersFor(undefined)).toEqual([])
-    expect(acceptedAnswersFor({ card_name: null } as any)).toEqual([])
-  })
-})
-
-// ── isCorrectGuess ─────────────────
-
-describe('isCorrectGuess', () => {
-  it('accepts exact name (case insensitive)', () => {
-    const c = card({ card_name: 'Pikachu #58' })
-    expect(isCorrectGuess('pikachu',   c)).toBe(true)
-    expect(isCorrectGuess('Pikachu',   c)).toBe(true)
-    expect(isCorrectGuess('PIKACHU',   c)).toBe(true)
-    expect(isCorrectGuess('  pikachu ', c)).toBe(true)
-  })
-  it('accepts Mr Mime with or without period', () => {
-    const c = card({ card_name: 'Mr. Mime #6' })
-    expect(isCorrectGuess('Mr Mime',   c)).toBe(true)
-    expect(isCorrectGuess('Mr. Mime',  c)).toBe(true)
-    expect(isCorrectGuess('mr mime',   c)).toBe(true)
-  })
-  it("accepts Farfetch'd with straight or curly apostrophe or none", () => {
-    const c = card({ card_name: 'Farfetch’d #83' })
-    expect(isCorrectGuess("Farfetch'd",   c)).toBe(true)
-    expect(isCorrectGuess('Farfetch’d',   c)).toBe(true)
-    expect(isCorrectGuess('Farfetchd',    c)).toBe(true)
-    expect(isCorrectGuess('farfetchd',    c)).toBe(true)
-  })
-  it('accepts Ho-Oh with or without the hyphen', () => {
-    const c = card({ card_name: 'Ho-Oh #22' })
-    expect(isCorrectGuess('Ho-Oh',  c)).toBe(true)
-    expect(isCorrectGuess('Ho Oh',  c)).toBe(true)
-    expect(isCorrectGuess('hooh',   c)).toBe(false)  // no space between; not a natural rendering
-  })
-  it('accepts Pokémon with or without the é', () => {
-    const c = card({ card_name: 'Pokémon Center #001' })
-    expect(isCorrectGuess('Pokémon Center', c)).toBe(true)
-    expect(isCorrectGuess('Pokemon Center', c)).toBe(true)
-  })
-  it('accepts multi-word names like Mega Charizard Y', () => {
-    const c = card({ card_name: 'Mega Charizard Y #14' })
-    expect(isCorrectGuess('Mega Charizard Y', c)).toBe(true)
-    expect(isCorrectGuess('mega charizard y', c)).toBe(true)
-  })
-  it('does not require the user to type the collector number', () => {
-    const c = card({ card_name: 'Blastoise #2' })
-    expect(isCorrectGuess('Blastoise', c)).toBe(true)
-    // Full form still works if they insist.
-    expect(isCorrectGuess('Blastoise #2', c)).toBe(true)
-  })
-  it('rejects unrelated partial substrings', () => {
-    const c = card({ card_name: 'Blaziken #90' })
-    expect(isCorrectGuess('bla',      c)).toBe(false)
-    expect(isCorrectGuess('blazi',    c)).toBe(false)
-    expect(isCorrectGuess('blaze',    c)).toBe(false)
-    // But wrong-Pokémon guesses are also rejected.
-    expect(isCorrectGuess('Charizard', c)).toBe(false)
-  })
-  it('rejects empty and null guesses', () => {
-    const c = card({ card_name: 'Pikachu' })
-    expect(isCorrectGuess('',    c)).toBe(false)
-    expect(isCorrectGuess('   ', c)).toBe(false)
-    expect(isCorrectGuess(null as any, c)).toBe(false)
-  })
-  it('accepts the bracket-stripped form for [Variant] cards (block brief rule)', () => {
-    const c = card({ card_name: 'Zarude [Gamestop] #171' })
-    // The block brief explicitly allows this — bracketed variants
-    // are optional and matching them is a deliberate helper choice.
-    expect(isCorrectGuess('Zarude', c)).toBe(true)
-    expect(isCorrectGuess('zarude gamestop', c)).toBe(true)
-  })
-})
-
-// ── isDuplicateGuess ────────────────
-
-describe('isDuplicateGuess', () => {
-  it('detects an exact duplicate', () => {
-    expect(isDuplicateGuess('Pikachu', ['Pikachu'])).toBe(true)
-  })
-  it('detects a duplicate that only differs in case / whitespace', () => {
-    expect(isDuplicateGuess('  PIKACHU ', ['pikachu'])).toBe(true)
-  })
-  it('detects a duplicate that differs in punctuation', () => {
-    expect(isDuplicateGuess("Farfetchd", ["Farfetch'd"])).toBe(true)
-  })
-  it('does not flag distinct guesses', () => {
-    expect(isDuplicateGuess('Charizard', ['Pikachu', 'Squirtle'])).toBe(false)
-  })
-  it('empty guess is not a duplicate', () => {
-    expect(isDuplicateGuess('', ['Pikachu'])).toBe(false)
-  })
-})
-
-// ── revealLevel + clueForLevel ─────
-
-describe('revealLevel', () => {
-  it('initial = 0 when no misses and not revealed', () => {
-    expect(revealLevel(0, false)).toBe(0)
-  })
-  it('increases with each miss up to MAX_ATTEMPTS - 1', () => {
-    expect(revealLevel(1, false)).toBe(1)
-    expect(revealLevel(2, false)).toBe(2)
-    expect(revealLevel(3, false)).toBe(3)
-    // Should not exceed MAX_ATTEMPTS - 1 while not revealed.
-    expect(revealLevel(4, false)).toBe(MAX_ATTEMPTS - 1)
-    expect(revealLevel(99, false)).toBe(MAX_ATTEMPTS - 1)
-  })
-  it('reveal flag jumps straight to MAX_ATTEMPTS', () => {
-    expect(revealLevel(0, true)).toBe(MAX_ATTEMPTS)
-    expect(revealLevel(2, true)).toBe(MAX_ATTEMPTS)
-  })
-  it('handles negative / NaN misses safely', () => {
-    expect(revealLevel(-3, false)).toBe(0)
-    expect(revealLevel(NaN as any, false)).toBe(0)
-  })
-})
-
-describe('clueForLevel', () => {
-  const c = card({ card_name: 'Charizard #4', set_name: 'Base Set' })
-  it('level 0: no clue', () => {
-    expect(clueForLevel(0, c)).toBeNull()
-  })
-  it('level 1: set-initial', () => {
-    const clue = clueForLevel(1, c)
-    expect(clue?.kind).toBe('set-initial')
-    expect(clue?.text).toBe('Set starts with "B".')
-  })
-  it('level 2: full set-name', () => {
-    const clue = clueForLevel(2, c)
-    expect(clue?.kind).toBe('set-name')
-    expect(clue?.text).toContain('Base Set')
-  })
-  it('level 3: name-hint (first letter + word count)', () => {
-    const clue = clueForLevel(3, c)
-    expect(clue?.kind).toBe('name-hint')
-    expect(clue?.text).toContain('"C"')
-    expect(clue?.text).toContain('1 word')
-  })
-  it('level 3: multi-word name pluralises "words"', () => {
-    const clue = clueForLevel(3, card({ card_name: 'Mega Charizard Y #14' }))
-    expect(clue?.text).toContain('3 words')
-  })
-  it('level 4: answer (cleaned name)', () => {
-    const clue = clueForLevel(4, c)
-    expect(clue?.kind).toBe('answer')
-    expect(clue?.text).toBe('Charizard')
-  })
-  it('handles missing card gracefully', () => {
-    for (const lvl of [0, 1, 2, 3, 4]) expect(clueForLevel(lvl, null)).toBeNull()
-  })
-  it('handles missing set_name gracefully', () => {
-    const c2 = card({ card_name: 'Zubat', set_name: '' })
-    expect(clueForLevel(1, c2)).toBeNull()
-    expect(clueForLevel(2, c2)).toBeNull()
-  })
-})
-
-// ── firstAcceptedDisplayName ────────
+// ── firstAcceptedDisplayName ─────────────────
 
 describe('firstAcceptedDisplayName', () => {
-  it('strips the collector-number suffix for the reveal display', () => {
-    expect(firstAcceptedDisplayName(card({ card_name: 'Charizard #4' }))).toBe('Charizard')
-    expect(firstAcceptedDisplayName(card({ card_name: 'Mr. Mime #6' }))).toBe('Mr. Mime')
+  it('strips the trailing #NN', () => {
+    expect(firstAcceptedDisplayName(mk({ card_name: 'Pikachu #58' }))).toBe('Pikachu')
   })
-  it('handles no suffix', () => {
-    expect(firstAcceptedDisplayName(card({ card_name: 'Pikachu' }))).toBe('Pikachu')
+  it('strips a #NN with a letter suffix (e.g. secret rares)', () => {
+    expect(firstAcceptedDisplayName(mk({ card_name: 'Charizard #201a' }))).toBe('Charizard')
   })
-  it('returns empty for null / bad input', () => {
+  it('returns empty string when name is missing', () => {
+    expect(firstAcceptedDisplayName(mk({ card_name: '' as any }))).toBe('')
     expect(firstAcceptedDisplayName(null)).toBe('')
-    expect(firstAcceptedDisplayName({} as any)).toBe('')
   })
 })
 
-// ── pickNextCard ─────────────────
+// ── revealLevel ───────────────────────────
+
+describe('revealLevel', () => {
+  it('returns 0 when no wrong picks and not revealed', () => {
+    expect(revealLevel(0, false)).toBe(0)
+  })
+  it('returns 1 after one wrong pick', () => {
+    expect(revealLevel(1, false)).toBe(1)
+  })
+  it('clamps unrevealed misses below the last (revealed) level', () => {
+    expect(revealLevel(2, false)).toBe(REVEAL_TRANSFORMS.length - 2)
+    expect(revealLevel(999, false)).toBe(REVEAL_TRANSFORMS.length - 2)
+  })
+  it('returns the revealed level when the reveal flag is set', () => {
+    expect(revealLevel(0, true)).toBe(REVEAL_TRANSFORMS.length - 1)
+  })
+  it('treats NaN / negative wrong-pick counts as 0', () => {
+    expect(revealLevel(NaN as any, false)).toBe(0)
+    expect(revealLevel(-3, false)).toBe(0)
+  })
+})
+
+// ── clueForLevel ───────────────────────────
+
+describe('clueForLevel', () => {
+  const card = mk({ card_name: 'Charizard #4', set_name: 'Base Set' })
+  it('level 0 → no clue (options themselves are the game)', () => {
+    expect(clueForLevel(0, card)).toBeNull()
+  })
+  it('level 1 → the full set name', () => {
+    expect(clueForLevel(1, card)).toEqual({ kind: 'set-name', text: 'From Base Set.' })
+  })
+  it('level 2 → the answer (cleaned card name)', () => {
+    expect(clueForLevel(2, card)).toEqual({ kind: 'answer', text: 'Charizard' })
+  })
+  it('returns null for null card', () => {
+    expect(clueForLevel(1, null)).toBeNull()
+  })
+  it('level 1 returns null if the set name is empty', () => {
+    expect(clueForLevel(1, mk({ set_name: '   ' as any }))).toBeNull()
+  })
+})
+
+// ── generateOptions ───────────────────────────
+
+const POOL: GuessCard[] = [
+  mk({ card_name: 'Pikachu #58',   card_url_slug: 'pikachu-58',   set_name: 'Base Set' }),
+  mk({ card_name: 'Charizard #4',  card_url_slug: 'charizard-4',  set_name: 'Base Set' }),
+  mk({ card_name: 'Blastoise #2',  card_url_slug: 'blastoise-2',  set_name: 'Base Set' }),
+  mk({ card_name: 'Venusaur #15',  card_url_slug: 'venusaur-15',  set_name: 'Base Set' }),
+  mk({ card_name: 'Mewtwo #10',    card_url_slug: 'mewtwo-10',    set_name: 'Base Set' }),
+]
+
+describe('generateOptions', () => {
+  it('returns exactly OPTIONS_PER_ROUND (=3) options by default', () => {
+    const opts = generateOptions(POOL[0], POOL)
+    expect(opts.length).toBe(3)
+  })
+  it('exactly one option is marked isCorrect', () => {
+    const opts = generateOptions(POOL[0], POOL)
+    expect(opts.filter(o => o.isCorrect).length).toBe(1)
+  })
+  it('the correct option references the source card', () => {
+    const opts = generateOptions(POOL[0], POOL)
+    const correct = opts.find(o => o.isCorrect)!
+    expect(correct.card).toBe(POOL[0])
+    expect(correct.key).toBe(POOL[0].card_url_slug)
+    expect(correct.label).toBe('Pikachu')
+  })
+  it('no duplicate labels within the option list (no two "Pikachu" buttons)', () => {
+    const withDupe: GuessCard[] = [
+      POOL[0],
+      mk({ card_name: 'Pikachu #99', card_url_slug: 'pikachu-99', set_name: 'Jungle' }),
+      POOL[1], POOL[2], POOL[3], POOL[4],
+    ]
+    const opts = generateOptions(withDupe[0], withDupe)
+    const labels = opts.map(o => o.label.toLowerCase())
+    expect(new Set(labels).size).toBe(labels.length)
+  })
+  it('no duplicate slugs within the option list (distractors are not the correct card)', () => {
+    const opts = generateOptions(POOL[0], POOL)
+    const slugs = opts.map(o => o.key)
+    expect(new Set(slugs).size).toBe(slugs.length)
+    expect(slugs.filter(s => s === POOL[0].card_url_slug).length).toBe(1)
+  })
+  it('does not mutate the pool array', () => {
+    const before = POOL.map(c => c.card_url_slug)
+    generateOptions(POOL[0], POOL)
+    expect(POOL.map(c => c.card_url_slug)).toEqual(before)
+  })
+  it('degrades gracefully when the pool is too small (fewer than count distractors)', () => {
+    const tiny = [POOL[0], POOL[1]]
+    const opts = generateOptions(POOL[0], tiny)
+    // Should still contain the correct card, and up to 1 distractor.
+    expect(opts.filter(o => o.isCorrect).length).toBe(1)
+    expect(opts.length).toBeGreaterThanOrEqual(1)
+    expect(opts.length).toBeLessThanOrEqual(2)
+  })
+  it('returns an empty list when the correct card is missing a slug or name', () => {
+    expect(generateOptions(mk({ card_url_slug: null }), POOL)).toEqual([])
+    expect(generateOptions(mk({ card_name: '' }), POOL)).toEqual([])
+  })
+})
+
+// ── pickNextCard ──────────────────────────
 
 describe('pickNextCard', () => {
-  const pool = [
-    card({ card_name: 'A', card_url_slug: 'a' }),
-    card({ card_name: 'B', card_url_slug: 'b' }),
-    card({ card_name: 'C', card_url_slug: 'c' }),
-  ]
-  it('returns null on empty pool', () => {
+  it('returns null on an empty pool', () => {
     expect(pickNextCard([], new Set())).toBeNull()
   })
-  it('avoids cards already seen', () => {
-    for (let i = 0; i < 20; i++) {
-      const picked = pickNextCard(pool, new Set(['a', 'b']))
-      expect(picked?.card_url_slug).toBe('c')
-    }
+  it('prefers unseen cards when they exist', () => {
+    const seen = new Set([POOL[0].card_url_slug!, POOL[1].card_url_slug!, POOL[2].card_url_slug!])
+    const picked = pickNextCard(POOL, seen)!
+    expect([POOL[3].card_url_slug, POOL[4].card_url_slug]).toContain(picked.card_url_slug)
   })
-  it('when all cards are seen, still returns one so the round can continue', () => {
-    const picked = pickNextCard(pool, new Set(['a', 'b', 'c']))
-    expect(picked).not.toBeNull()
-    expect(['a', 'b', 'c']).toContain(picked!.card_url_slug)
+  it('falls back to the full pool when every card has been seen', () => {
+    const seen = new Set(POOL.map(c => c.card_url_slug!))
+    const picked = pickNextCard(POOL, seen)!
+    expect(POOL).toContain(picked)
   })
-  it('does not mutate the source pool or the seen set', () => {
-    const originalPool = pool.slice()
-    const seen = new Set(['a'])
-    const originalSeen = new Set(seen)
-    pickNextCard(pool, seen)
-    expect(pool).toEqual(originalPool)
-    expect(seen).toEqual(originalSeen)
+  it('does not mutate the seen set', () => {
+    const seen = new Set([POOL[0].card_url_slug!])
+    const snap = new Set(seen)
+    pickNextCard(POOL, seen)
+    expect(seen).toEqual(snap)
   })
 })
 
-// ── readBestStreak / writeBestStreak ────
+// ── Best-streak storage ────────────────
+
+class MemStore implements Storage {
+  private m = new Map<string, string>()
+  get length() { return this.m.size }
+  clear() { this.m.clear() }
+  key(i: number) { return Array.from(this.m.keys())[i] ?? null }
+  getItem(k: string) { return this.m.get(k) ?? null }
+  setItem(k: string, v: string) { this.m.set(k, v) }
+  removeItem(k: string) { this.m.delete(k) }
+}
+
+class HostileStore implements Storage {
+  get length(): number { throw new Error('nope') }
+  clear() { throw new Error('nope') }
+  key(): string | null { throw new Error('nope') }
+  getItem(): string | null { throw new Error('nope') }
+  setItem() { throw new Error('nope') }
+  removeItem() { throw new Error('nope') }
+}
 
 describe('best-streak storage', () => {
-  function memStorage(initial: Record<string, string> = {}): Storage {
-    const map = new Map<string, string>(Object.entries(initial))
-    return {
-      length: 0,
-      clear:      () => map.clear(),
-      key:        () => null,
-      getItem:    k => map.get(k) ?? null,
-      setItem:    (k, v) => { map.set(k, v) },
-      removeItem: k => { map.delete(k) },
-    }
-  }
-  it('storage key is a stable string starting with the pp_game prefix (namespaced)', () => {
-    expect(BEST_STREAK_STORAGE_KEY).toMatch(/^pp_game_/)
+  let store: MemStore
+  beforeEach(() => { store = new MemStore() })
+
+  it('reads 0 when the key is missing', () => {
+    expect(readBestStreak(store)).toBe(0)
   })
-  it('reads back what was written', () => {
-    const store = memStorage()
+  it('round-trips a value', () => {
     writeBestStreak(7, store)
     expect(readBestStreak(store)).toBe(7)
   })
-  it('missing key returns 0', () => {
-    expect(readBestStreak(memStorage())).toBe(0)
+  it('reads 0 when the value is not a valid non-negative integer', () => {
+    store.setItem(BEST_STREAK_STORAGE_KEY, 'garbage')
+    expect(readBestStreak(store)).toBe(0)
+    store.setItem(BEST_STREAK_STORAGE_KEY, '-3')
+    expect(readBestStreak(store)).toBe(0)
+    store.setItem(BEST_STREAK_STORAGE_KEY, '999999999')
+    expect(readBestStreak(store)).toBe(0) // above the 100k cap
   })
-  it('malformed value returns 0', () => {
-    for (const bad of ['NaN', 'abc', '', '-3']) {
-      const store = memStorage({ [BEST_STREAK_STORAGE_KEY]: bad })
-      expect(readBestStreak(store)).toBe(0)
-    }
-  })
-  it('write rejects invalid inputs silently', () => {
-    const store = memStorage()
-    writeBestStreak(NaN, store)
-    writeBestStreak(-5, store)
+  it('write ignores NaN / negative values', () => {
+    writeBestStreak(NaN as any, store)
+    writeBestStreak(-1, store)
     expect(readBestStreak(store)).toBe(0)
   })
   it('write floors decimals', () => {
-    const store = memStorage()
-    writeBestStreak(3.7, store)
+    writeBestStreak(3.9, store)
     expect(readBestStreak(store)).toBe(3)
   })
-  it('read tolerates a store that throws getItem (private-mode style)', () => {
-    const hostile: Pick<Storage, 'getItem'> = { getItem: () => { throw new Error('nope') } }
-    expect(readBestStreak(hostile as any)).toBe(0)
+  it('read silently returns 0 when the store throws', () => {
+    expect(readBestStreak(new HostileStore() as any)).toBe(0)
   })
-  it('write tolerates a store that throws setItem', () => {
-    const hostile: Pick<Storage, 'setItem'> = { setItem: () => { throw new Error('nope') } }
-    // No throw — silent no-op.
-    expect(() => writeBestStreak(5, hostile as any)).not.toThrow()
+  it('write silently no-ops when the store throws', () => {
+    expect(() => writeBestStreak(4, new HostileStore() as any)).not.toThrow()
+  })
+  it('uses the versioned, namespaced key', () => {
+    expect(BEST_STREAK_STORAGE_KEY).toBe('pp_game_guess_the_card_best_streak_v1')
   })
 })
