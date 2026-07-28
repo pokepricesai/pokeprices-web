@@ -47,6 +47,15 @@ const ANYTIME_GAMES: AnytimeGame[] = [
     accent: 'linear-gradient(135deg, #7c3aed 0%, #a855f7 100%)',
     // FIX1 — no emoji; the accent bar carries the visual weight.
   },
+  {
+    // Block 5A-W-47E-B — same "no emoji, accent bar carries the
+    // visual weight" treatment introduced by Build a Binder.
+    href: '/games/guess-the-card',
+    kind: 'Guessing game',
+    title: 'Guess the Card',
+    blurb: 'Identify a Pokémon card as the artwork becomes clearer with every clue.',
+    accent: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+  },
 ]
 
 export default function GamesLanding() {
