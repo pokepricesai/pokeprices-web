@@ -137,6 +137,7 @@ const LOGO_MAP: Record<string, string> = {
   'Destined Rivals':        'Destined Rivals.webp',
   'Perfect Order':          'Perfect Order.webp',
   'Chaos Rising':           'Chaos Rising.webp',
+  'Pitch Black':            'Pitch Black.webp',
   // ── Misc / promos ─────────────────────────────────────────────────────────
   'Rumble':                 'Pokemon Rumble.webp',
   'Southern Islands':       'Southern Islands.webp',
@@ -288,6 +289,7 @@ const SYMBOL_MAP: Record<string, string> = {
   'Destined Rivals':        'Destined Rivals.png',
   'Perfect Order':          'Perfect Order.png',
   'Chaos Rising':           'Chaos Rising.png',
+  'Pitch Black':            'Pitch Black.png',
   // ── Misc ──────────────────────────────────────────────────────────────────
   'Southern Islands':       'Southern Islands.png',
   'Pikachu Libre & Suicune':'Pikachu Libre & Suicune.png',
@@ -366,12 +368,13 @@ const ERA_MAP: Record<string, string> = {
   // ── Mega Evolution era ────────────────────────────────────────────────────
   'Phantasmal Flames': 'Mega Evolution', 'Perfect Order': 'Mega Evolution',
   'Ascended Heroes': 'Mega Evolution',   'Chaos Rising': 'Mega Evolution',
+  'Pitch Black':     'Mega Evolution',
 }
 
 // Chronological order, oldest → newest. The current Mega Evolution era sits at
 // the end (it now covers Phantasmal Flames, Perfect Order, Ascended Heroes,
-// Chaos Rising and the upcoming Pitch Black — same bucket as the legacy XY-era
-// Mega Evolution set).
+// Chaos Rising and Pitch Black — same bucket as the legacy XY-era Mega
+// Evolution set).
 export const ERA_ORDER: string[] = [
   'Base',
   'Gym',

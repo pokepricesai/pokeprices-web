@@ -180,9 +180,63 @@ function formatInsightDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-const upcomingReleases = [
-  { name: 'Mega Evolution — Pitch Black', date: 'Jul 17, 2026', confirmed: true  },
-  { name: 'Journey Together 2',           date: 'Q4 2026',      confirmed: false },
+// Block 5A-W-47D — Pitch Black shipped 2026-07-17, so it moved out of
+// this "coming next" list and into a dedicated New Release feature in
+// the hero left column. Dates and descriptions are the editorial
+// source of truth handed down for this block — do not silently rewrite
+// them from other repository content.
+//
+// ctaHref semantics:
+//   * absolute URL (http[s]://…) — renders as a real outbound <a> with
+//     target="_blank" and rel="noopener noreferrer". No search-engine
+//     or tracking query strings; no affiliate parameters. This is a
+//     plain outbound link, not an affiliate link, so no affiliate
+//     disclosure surfaces around it.
+//   * null — renders as a disabled "Coming soon" pill preserving the
+//     CTA wording. Use this while no valid destination exists (no
+//     PokePrices preview route yet, no affiliate helper for the
+//     partner, etc.). When a valid destination lands later, wire it
+//     in and the CTA promotes to a real link automatically.
+//
+// Block 5A-W-47D-FIX1 — the First Partner CTA is now a real outbound
+// TCGPlayer product-page link (not an affiliate link — the site has
+// no TCGPlayer affiliate integration yet). The other two CTAs remain
+// null because no valid PokePrices preview route exists for them.
+type UpcomingRelease = {
+  name: string
+  contextLabel?: string
+  date: string
+  description: string
+  ctaLabel: string
+  ctaHref: string | null
+}
+
+const upcomingReleases: UpcomingRelease[] = [
+  {
+    name: 'First Partner Illustration Collection – Series 3',
+    date: '7 August 2026',
+    description: 'To feature the starters from Hoenn, Kalos and Paldea.',
+    ctaLabel: 'Shop Presale on TCGPlayer',
+    // Block 5A-W-47D-FIX1 — clean TCGPlayer product-page URL with no
+    // query string, no srsltid, no affiliate parameters. Rendered as a
+    // plain outbound link (target=_blank, rel=noopener noreferrer).
+    ctaHref: 'https://www.tcgplayer.com/product/695400/pokemon-first-partner-collection-2026-first-partner-illustration-collection-series-3',
+  },
+  {
+    name: '30th Anniversary Set',
+    contextLabel: 'Worldwide',
+    date: '16 September 2026',
+    description: 'More details to be released soon, but products expected include Elite Trainer Boxes, the 30th Celebration Premium Deck Set featuring Espeon and Umbreon, and an Ultra-Premium Collection.',
+    ctaLabel: 'Preview the 30th Anniversary Card List',
+    ctaHref: null,
+  },
+  {
+    name: 'Delta Reign',
+    date: '6 November 2026',
+    description: 'The sixth Mega Evolution set, featuring Mega Rayquaza ex, releases in English.',
+    ctaLabel: 'Preview the Delta Reign Card List as it becomes available',
+    ctaHref: null,
+  },
 ]
 
 // Block 5A-W-40B — dropped the leading emoji glyphs. Feature-tile
@@ -431,6 +485,67 @@ export default function HomeClient() {
                 </>
               )}
             </div>
+
+            {/* ── PITCH BLACK NEW-RELEASE FEATURE ──
+                Block 5A-W-47D. Compact card sitting directly beneath
+                the auth-aware Dashboard/Watchlist/Portfolio row (or the
+                signed-out Sign-up/Log-in row), inside the hero's left
+                column. Positioned OUTSIDE the isAuthed conditional so
+                the feature appears for both signed-in and signed-out
+                visitors — the two auth-conditional CTA groups occupy
+                roughly the same vertical footprint, keeping the layout
+                stable regardless of session state. Whole card is a
+                single Next.js <Link> to the canonical Pitch Black
+                route (URL-encoded, mirroring the existing Chaos Rising
+                "Just Released" banner). "View the set" is inline text,
+                not a nested link, so keyboard focus lands once and
+                screen readers announce a single actionable region. */}
+            <Link href="/set/Pitch%20Black" style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              marginTop: 18, padding: '10px 12px', borderRadius: 14,
+              background: 'rgba(255,255,255,0.10)',
+              border: '1px solid rgba(255,255,255,0.20)',
+              textDecoration: 'none', color: '#fff',
+              fontFamily: "'Figtree', sans-serif",
+              maxWidth: 380, minWidth: 0,
+              transition: 'background 0.15s',
+            }}
+              onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(255,255,255,0.16)'}
+              onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(255,255,255,0.10)'}
+            >
+              <img
+                src="/set-assets/logos/Pitch Black.webp"
+                alt="Pitch Black — Pokémon TCG set logo"
+                style={{
+                  height: 40, width: 'auto', maxWidth: 84,
+                  objectFit: 'contain', flexShrink: 0,
+                  filter: 'drop-shadow(0 1px 4px rgba(0,0,0,0.30))',
+                }}
+              />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span style={{
+                  display: 'block', fontSize: 9, fontWeight: 800,
+                  letterSpacing: 1.4, textTransform: 'uppercase',
+                  color: 'rgba(255,255,255,0.75)',
+                }}>New Release</span>
+                <span style={{
+                  display: 'block', fontSize: 15, fontWeight: 800,
+                  color: '#fff', fontFamily: "'Outfit', sans-serif",
+                  lineHeight: 1.2, marginTop: 1,
+                }}>Pitch Black</span>
+                <span style={{
+                  display: 'block', fontSize: 11.5,
+                  color: 'rgba(255,255,255,0.75)', marginTop: 2,
+                }}>Released 17 July 2026</span>
+              </div>
+              <span style={{
+                fontSize: 12, fontWeight: 700, color: '#fff',
+                padding: '6px 10px', borderRadius: 8,
+                background: 'rgba(255,255,255,0.12)',
+                border: '1px solid rgba(255,255,255,0.22)',
+                whiteSpace: 'nowrap', flexShrink: 0,
+              }}>View the set →</span>
+            </Link>
           </div>
 
           {/* ── RIGHT COLUMN: AI panel + Market pulse card ── */}
@@ -757,14 +872,90 @@ export default function HomeClient() {
             <p style={{ color: 'var(--text-muted)', fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', margin: '0 0 10px', fontFamily: "'Figtree', sans-serif" }}>
               Coming next
             </p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
+            {/* Block 5A-W-47D — expanded card layout so each entry can
+                carry the release date, a short description, and its
+                supplied CTA. CTAs render as disabled "Coming soon"
+                pills while no valid destination is wired up (see the
+                comment on `upcomingReleases`). Cards keep a single-
+                column stack on narrow viewports and grow to a
+                responsive multi-column grid at ~500px+. */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
               {upcomingReleases.map(r => (
-                <div key={r.name} style={{ padding: '12px 14px', background: 'var(--bg-light)', borderRadius: 12, border: '1px solid var(--border-light)' }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 2, fontFamily: "'Figtree', sans-serif" }}>{r.name}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-                    {r.date}
-                    {!r.confirmed && <span style={{ background: 'rgba(255,165,0,0.12)', color: '#b8741f', fontSize: 10, padding: '1px 6px', borderRadius: 4, marginLeft: 6, fontWeight: 700 }}>Rumoured</span>}
+                <div key={r.name} style={{
+                  display: 'flex', flexDirection: 'column',
+                  padding: '14px 16px', background: 'var(--bg-light)',
+                  borderRadius: 12, border: '1px solid var(--border-light)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 6, marginBottom: 2 }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.25 }}>{r.name}</span>
+                    {r.contextLabel && (
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, color: 'var(--text-muted)',
+                        background: 'var(--card)', border: '1px solid var(--border-light)',
+                        padding: '1px 6px', borderRadius: 4, letterSpacing: 0.3,
+                        fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase',
+                      }}>{r.contextLabel}</span>
+                    )}
                   </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>
+                    {r.date}
+                  </div>
+                  <p style={{
+                    fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 10px',
+                    fontFamily: "'Figtree', sans-serif", lineHeight: 1.5,
+                  }}>
+                    {r.description}
+                  </p>
+                  {r.ctaHref ? (
+                    // Block 5A-W-47D-FIX1 — outbound absolute URLs
+                    // render as a plain <a> with target="_blank" and
+                    // rel="noopener noreferrer". Internal href strings
+                    // (should any land later — e.g. a PokePrices card-
+                    // list preview route) fall through to the
+                    // Next.js <Link> branch for client-side nav.
+                    /^https?:\/\//.test(r.ctaHref) ? (
+                      <a
+                        href={r.ctaHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          alignSelf: 'flex-start', marginTop: 'auto',
+                          fontSize: 12, fontWeight: 700,
+                          color: '#fff', background: 'var(--primary)',
+                          padding: '7px 12px', borderRadius: 8,
+                          textDecoration: 'none', border: '1px solid var(--primary)',
+                          fontFamily: "'Figtree', sans-serif",
+                        }}
+                      >{r.ctaLabel} →</a>
+                    ) : (
+                      <Link href={r.ctaHref} style={{
+                        alignSelf: 'flex-start', marginTop: 'auto',
+                        fontSize: 12, fontWeight: 700,
+                        color: '#fff', background: 'var(--primary)',
+                        padding: '7px 12px', borderRadius: 8,
+                        textDecoration: 'none', border: '1px solid var(--primary)',
+                        fontFamily: "'Figtree', sans-serif",
+                      }}>{r.ctaLabel} →</Link>
+                    )
+                  ) : (
+                    <span
+                      aria-disabled="true"
+                      title={`${r.ctaLabel} — coming soon`}
+                      style={{
+                        alignSelf: 'flex-start', marginTop: 'auto',
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        fontSize: 11.5, fontWeight: 700,
+                        color: 'var(--text-muted)',
+                        background: 'transparent',
+                        padding: '6px 10px', borderRadius: 8,
+                        border: '1px dashed var(--border-light)',
+                        fontFamily: "'Figtree', sans-serif",
+                        cursor: 'default',
+                      }}>
+                      {r.ctaLabel}
+                      <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6, opacity: 0.75 }}>· Coming soon</span>
+                    </span>
+                  )}
                 </div>
               ))}
             </div>

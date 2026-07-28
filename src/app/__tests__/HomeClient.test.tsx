@@ -160,3 +160,282 @@ describe('HomeClient — W41A-RETRY section order', () => {
     }
   })
 })
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Block 5A-W-47D — replaced upcoming-releases list + Pitch Black feature.
+//
+// Pitch Black shipped 2026-07-17, so it moved out of the "coming next"
+// list into a dedicated compact feature under the hero's left-column
+// auth-aware CTA row. The upcoming list now carries three real future
+// releases with the exact dates, descriptions and CTA wording supplied
+// as the editorial source of truth. Source-text pins are used here for
+// the same reason the block above uses them — the runtime tree is
+// heavy and none of these assertions are behavioural.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const SETASSETS_SRC = readFileSync(
+  join(__dirname, '..', '..', 'lib', 'setAssets.ts'),
+  'utf8',
+)
+
+// Slice the upcomingReleases array literal so name/date checks cannot
+// be satisfied by an unrelated mention elsewhere in the file (Chaos
+// Rising still lives in the "Just Released" banner above, for
+// example; Pitch Black still lives in the New Release feature block).
+function upcomingArraySource(): string {
+  const match = SRC.match(
+    /const upcomingReleases:\s*UpcomingRelease\[\]\s*=\s*\[[\s\S]*?\n\]/,
+  )
+  if (!match) throw new Error('upcomingReleases array not found in HomeClient.tsx')
+  return match[0]
+}
+
+describe('HomeClient — upcoming releases (Block 5A-W-47D)', () => {
+  it('no longer surfaces Pitch Black as an upcoming release', () => {
+    const arr = upcomingArraySource()
+    expect(arr).not.toContain('Pitch Black')
+    expect(arr).not.toMatch(/Mega Evolution\s*—\s*Pitch Black/)
+    expect(arr).not.toContain('Journey Together 2')
+  })
+
+  it('lists First Partner Illustration Collection – Series 3 for 7 August 2026', () => {
+    const arr = upcomingArraySource()
+    expect(arr).toContain('First Partner Illustration Collection – Series 3')
+    expect(arr).toContain('7 August 2026')
+    expect(arr).toContain('starters from Hoenn, Kalos and Paldea')
+  })
+
+  it('lists the 30th Anniversary Set for 16 September 2026 with the Worldwide context', () => {
+    const arr = upcomingArraySource()
+    expect(arr).toContain('30th Anniversary Set')
+    expect(arr).toContain('16 September 2026')
+    expect(arr).toContain('Worldwide')
+    expect(arr).toContain('30th Celebration Premium Deck Set')
+    expect(arr).toContain('Ultra-Premium Collection')
+  })
+
+  it('lists Delta Reign for 6 November 2026', () => {
+    const arr = upcomingArraySource()
+    expect(arr).toContain('Delta Reign')
+    expect(arr).toContain('6 November 2026')
+    expect(arr).toContain('sixth Mega Evolution set')
+    expect(arr).toContain('Mega Rayquaza ex')
+  })
+
+  it('carries the supplied CTA wording verbatim for each release', () => {
+    const arr = upcomingArraySource()
+    expect(arr).toContain('Shop Presale on TCGPlayer')
+    expect(arr).toContain('Preview the 30th Anniversary Card List')
+    expect(arr).toContain('Preview the Delta Reign Card List as it becomes available')
+  })
+})
+
+describe('HomeClient — upcoming CTA destinations degrade safely', () => {
+  it('does not link the two card-list CTAs to unbuilt preview routes', () => {
+    expect(SRC).not.toMatch(/href=[^"]*\/preview\//)
+    expect(SRC).not.toMatch(/href=[^"]*\/upcoming\//)
+  })
+
+  it('two of three upcoming release entries ship with ctaHref: null today', () => {
+    // Block 5A-W-47D-FIX1 — the First Partner entry now carries a
+    // real TCGPlayer product URL; the other two remain null while no
+    // valid PokePrices preview route exists.
+    const arr = upcomingArraySource()
+    const nulls = arr.match(/ctaHref:\s*null/g) ?? []
+    expect(nulls.length).toBe(2)
+  })
+
+  it('renders a disabled "Coming soon" fallback when ctaHref is null', () => {
+    expect(SRC).toContain('Coming soon')
+    expect(SRC).toMatch(/aria-disabled="true"/)
+  })
+
+  it('leaves the two preview CTAs safely disabled (no invented URLs)', () => {
+    const arr = upcomingArraySource()
+
+    // 30th Anniversary — ctaHref null
+    const thirtieth = arr.match(
+      /\{[^{}]*30th Anniversary Set[\s\S]*?ctaHref:\s*null[\s\S]*?\}/,
+    )
+    expect(thirtieth, 'expected 30th Anniversary Set entry to carry ctaHref: null').toBeTruthy()
+
+    // Delta Reign — ctaHref null
+    const delta = arr.match(
+      /\{[^{}]*Delta Reign[\s\S]*?ctaHref:\s*null[\s\S]*?\}/,
+    )
+    expect(delta, 'expected Delta Reign entry to carry ctaHref: null').toBeTruthy()
+  })
+})
+
+// ── Block 5A-W-47D-FIX1: First Partner presale CTA promoted to a real link ───
+
+describe('HomeClient — First Partner presale CTA (Block 5A-W-47D-FIX1)', () => {
+  const EXPECTED_URL = 'https://www.tcgplayer.com/product/695400/pokemon-first-partner-collection-2026-first-partner-illustration-collection-series-3'
+
+  it('carries the exact clean TCGPlayer product URL in the entry', () => {
+    const arr = upcomingArraySource()
+    // First Partner block sits before "30th Anniversary" in the array;
+    // isolate it so the URL assertion cannot be satisfied elsewhere.
+    const firstPartner = arr.match(
+      /\{[^{}]*First Partner Illustration Collection [–-] Series 3[\s\S]*?\}/,
+    )
+    expect(firstPartner, 'First Partner entry not found').toBeTruthy()
+    expect(firstPartner![0]).toContain(`ctaHref: '${EXPECTED_URL}'`)
+    // Regression: no null CTA on the First Partner entry any more.
+    expect(firstPartner![0]).not.toMatch(/ctaHref:\s*null/)
+  })
+
+  it('preserves the exact CTA label wording', () => {
+    const arr = upcomingArraySource()
+    const firstPartner = arr.match(
+      /\{[^{}]*First Partner Illustration Collection [–-] Series 3[\s\S]*?\}/,
+    )
+    expect(firstPartner![0]).toContain("ctaLabel: 'Shop Presale on TCGPlayer'")
+  })
+
+  it('renders it as a real outbound <a>, not a Next.js <Link>', () => {
+    // The render branch keys off an absolute-URL check and emits a
+    // plain <a> with the outbound href. Pin the URL and the presence
+    // of a raw <a href={r.ctaHref}> element.
+    expect(SRC).toContain(EXPECTED_URL)
+    expect(SRC).toMatch(/<a\s[\s\S]*?href=\{r\.ctaHref\}/)
+  })
+
+  it('opens in a new tab with rel="noopener noreferrer"', () => {
+    // These attributes must live on the same <a> element as the
+    // outbound href — enforce it by pinning the render block ordering.
+    const renderBlock = SRC.match(
+      /<a[\s\S]*?href=\{r\.ctaHref\}[\s\S]*?<\/a>/,
+    )
+    expect(renderBlock, 'external CTA <a> render block not found').toBeTruthy()
+    expect(renderBlock![0]).toContain('target="_blank"')
+    expect(renderBlock![0]).toContain('rel="noopener noreferrer"')
+  })
+
+  it('adds NO tracking or search-engine query string to the URL', () => {
+    const arr = upcomingArraySource()
+    const firstPartner = arr.match(
+      /\{[^{}]*First Partner Illustration Collection [–-] Series 3[\s\S]*?\}/,
+    )
+    const ctaLine = firstPartner![0].match(/ctaHref:\s*'([^']+)'/)
+    expect(ctaLine, 'ctaHref value not parseable').toBeTruthy()
+    const url = ctaLine![1]
+    expect(url).toBe(EXPECTED_URL)
+    // The URL string carries no query, fragment, or common tracking
+    // parameters (srsltid, utm_*, ref, partner, camref, etc.).
+    expect(url.includes('?')).toBe(false)
+    expect(url.includes('#')).toBe(false)
+    expect(url).not.toMatch(/srsltid/i)
+    expect(url).not.toMatch(/utm_/i)
+    expect(url).not.toMatch(/\bref=|\bpartner=|\bcamref=|\baffiliate=/i)
+  })
+
+  it('does not describe itself as an affiliate link (no disclosure needed)', () => {
+    // This is a plain outbound link, not part of any affiliate
+    // programme yet. If a real TCGPlayer affiliate integration lands,
+    // both the disclosure wording and this test should be revisited
+    // in the same PR.
+    //
+    // We check the display-facing fields (name, description,
+    // ctaLabel) rather than the whole entry, because inline code
+    // comments legitimately mention the word "affiliate" while
+    // explaining why this link is NOT one.
+    const arr = upcomingArraySource()
+    const firstPartner = arr.match(
+      /\{[^{}]*First Partner Illustration Collection [–-] Series 3[\s\S]*?\}/,
+    )!
+    const nameLine     = firstPartner[0].match(/name:\s*'[^']*'/)![0]
+    const descLine     = firstPartner[0].match(/description:\s*'[^']*'/)![0]
+    const ctaLabelLine = firstPartner[0].match(/ctaLabel:\s*'[^']*'/)![0]
+    expect(nameLine    ).not.toMatch(/affiliate/i)
+    expect(descLine    ).not.toMatch(/affiliate/i)
+    expect(ctaLabelLine).not.toMatch(/affiliate/i)
+  })
+
+  it('displays the title with exactly one en dash and no accidental "Series – Series 3"', () => {
+    const arr = upcomingArraySource()
+    // Exact title string — one en dash between Collection and Series 3.
+    expect(arr).toContain("name: 'First Partner Illustration Collection – Series 3'")
+    // Regression guards for accidental duplication of "Series".
+    expect(arr).not.toMatch(/Series\s*[–-]\s*Series 3/)
+    expect(arr).not.toMatch(/Series 3\s*[–-]\s*Series 3/)
+    // The title contains exactly one U+2013 en dash.
+    const enDashes = ("First Partner Illustration Collection – Series 3".match(/–/g) ?? [])
+    expect(enDashes.length).toBe(1)
+    const displayed = arr.match(/name:\s*'([^']*First Partner[^']*)'/)![1]
+    expect((displayed.match(/–/g) ?? []).length).toBe(1)
+  })
+})
+
+describe('HomeClient — Pitch Black "New Release" feature (Block 5A-W-47D)', () => {
+  it('renders a "New Release" eyebrow (restrained label, not a NEW! badge)', () => {
+    expect(SRC).toContain('New Release')
+    expect(SRC).not.toContain('NEW!')
+  })
+
+  it('mentions Pitch Black and its release date in UK format', () => {
+    expect(SRC).toContain('Released 17 July 2026')
+    expect(SRC).toMatch(/>Pitch Black<\/span>/)
+  })
+
+  it('links to the canonical Pitch Black set route (URL-encoded space)', () => {
+    expect(SRC).toContain('/set/Pitch%20Black')
+    expect(SRC).not.toMatch(/href="\/set\/pitch-black"/i)
+    expect(SRC).not.toMatch(/href="\/set\/Pitch Black"/)
+  })
+
+  it('uses the local Pitch Black logo with meaningful alt text', () => {
+    expect(SRC).toContain('/set-assets/logos/Pitch Black.webp')
+    expect(SRC).toMatch(/alt="Pitch Black[^"]*"/)
+    // Never point the "set logo" slot at a card image.
+    expect(SRC).not.toMatch(/alt="Pitch Black[^"]*"[^>]*src=[^>]*pricecharting/i)
+  })
+
+  it('has surfacing text so the feature is not image-only for screen readers', () => {
+    expect(SRC).toContain('View the set →')
+  })
+
+  it('exposes the Pitch Black route exactly once from the homepage (no duplicate feature)', () => {
+    const matches = SRC.match(/\/set\/Pitch%20Black/g) ?? []
+    expect(matches.length).toBe(1)
+  })
+
+  it('sits inside the hero left column, ahead of the right column marker', () => {
+    const featureIdx = SRC.indexOf('── PITCH BLACK NEW-RELEASE FEATURE ──')
+    const leftIdx    = SRC.indexOf('── LEFT COLUMN')
+    const rightIdx   = SRC.indexOf('── RIGHT COLUMN')
+    expect(featureIdx).toBeGreaterThan(-1)
+    expect(leftIdx).toBeGreaterThan(-1)
+    expect(rightIdx).toBeGreaterThan(-1)
+    expect(featureIdx).toBeGreaterThan(leftIdx)
+    expect(featureIdx).toBeLessThan(rightIdx)
+  })
+})
+
+describe('HomeClient — Block 5A-W-47D regression pins', () => {
+  it('keeps Dashboard, Watchlist and Portfolio destinations unchanged', () => {
+    expect(SRC).toContain('href="/dashboard"')
+    expect(SRC).toContain('href="/dashboard/watchlist-alerts"')
+    expect(SRC).toContain('href="/dashboard/portfolio"')
+  })
+
+  it('keeps the Chaos Rising "Just Released" banner intact', () => {
+    expect(SRC).toContain('/set/Chaos%20Rising')
+    expect(SRC).toContain('Just Released')
+    expect(SRC).toContain('/set-assets/logos/Chaos Rising.webp')
+  })
+})
+
+describe('setAssets — Pitch Black is now registered (Block 5A-W-47D)', () => {
+  it('has a LOGO_MAP entry pointing to the local webp', () => {
+    expect(SETASSETS_SRC).toMatch(/'Pitch Black':\s+'Pitch Black\.webp'/)
+  })
+
+  it('has a SYMBOL_MAP entry pointing to the local png', () => {
+    expect(SETASSETS_SRC).toMatch(/'Pitch Black':\s+'Pitch Black\.png'/)
+  })
+
+  it('maps Pitch Black to the Mega Evolution era in ERA_MAP', () => {
+    expect(SETASSETS_SRC).toMatch(/'Pitch Black':\s+'Mega Evolution'/)
+  })
+})
