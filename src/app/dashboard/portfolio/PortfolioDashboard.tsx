@@ -1260,11 +1260,16 @@ export default function PortfolioDashboard() {
     // (portfolio_id, card_slug, holding_type) row in place; updates
     // don't grow the count, so blocking them on the limit would
     // erroneously prevent edits.
+    // Block 5A-W-48B — existence check must include set_name_snapshot
+    // so the free-plan cap gate correctly counts a new Japanese card
+    // as a new row even if an English row with the same card_url_slug
+    // already exists.
     const { data: existing } = await supabase
       .from('portfolio_items')
       .select('id')
       .eq('portfolio_id',  portfolioId)
       .eq('card_slug',     itemData.card_slug)
+      .eq('set_name_snapshot', itemData.set_name_snapshot ?? itemData.set_name ?? '')
       .eq('holding_type',  itemData.holding_type ?? 'raw')
       .maybeSingle()
     if (!existing) {
@@ -1275,9 +1280,13 @@ export default function PortfolioDashboard() {
         return
       }
     }
+    // Block 5A-W-48B — set_name_snapshot is now part of the uniqueness
+    // key so a portfolio can hold both English and Japanese printings
+    // of the same card_url_slug without one silently overwriting the
+    // other. See migrations/2026-07-29-japanese-foundation.sql.
     await supabase.from('portfolio_items').upsert([{
       ...itemData, portfolio_id: portfolioId, user_id: user.id,
-    }], { onConflict: 'portfolio_id,card_slug,holding_type' })
+    }], { onConflict: 'portfolio_id,card_slug,set_name_snapshot,holding_type' })
     await loadPortfolio()
   }
 
@@ -1289,11 +1298,15 @@ export default function PortfolioDashboard() {
   async function handleQuickScanAdd(card: ConfirmedCard, holdingType = 'raw', qty = 1) {
     if (!portfolioId || !user) return
     const safeQty = Math.max(1, qty)
+    // Block 5A-W-48B — match on set_name_snapshot too so an English
+    // Pikachu scan does not silently merge into a pre-existing
+    // Japanese Pikachu holding (or vice-versa).
     const { data: existing } = await supabase
       .from('portfolio_items')
       .select('id, quantity')
       .eq('portfolio_id', portfolioId)
       .eq('card_slug', card.card_url_slug)
+      .eq('set_name_snapshot', card.set_name)
       .eq('holding_type', holdingType)
       .maybeSingle()
     if (existing) {

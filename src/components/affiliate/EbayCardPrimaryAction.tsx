@@ -31,16 +31,29 @@ export type EbayCardPrimaryActionProps = {
   cardSlug?:   string | null
   setSlug?:    string | null
   isSealed?:   boolean
+  /** Block 5A-W-48B — language of the printing. When 'jp' the affiliate
+   *  action dispatches the existing `intent='japanese'` search query
+   *  which appends "Japanese Pokemon card" to the eBay query, keeping
+   *  results relevant to Japanese collectors. Defaults to 'en'. */
+  language?:   'en' | 'jp'
 }
 
 export default function EbayCardPrimaryAction(props: EbayCardPrimaryActionProps) {
   if (props.isSealed) return null
   if (!props.cardName?.trim() || !props.setName?.trim()) return null
 
+  // Block 5A-W-48B — route Japanese-printing cards through the
+  // 'japanese' intent so their eBay search does not surface English
+  // listings.
+  const intent = props.language === 'jp' ? 'japanese' : 'raw'
+  const label  = props.language === 'jp'
+    ? 'Find this Japanese card on eBay'
+    : 'Find this card on eBay'
+
   return (
     <div style={{ marginTop: 12, marginBottom: 4 }}>
       <EbayCompactLink
-        intent="raw"
+        intent={intent}
         cardName={props.cardName}
         setName={props.setName}
         cardNumber={props.cardNumber}
@@ -49,9 +62,9 @@ export default function EbayCardPrimaryAction(props: EbayCardPrimaryActionProps)
         placement="card_primary"
         pageType="card"
         sourceComponent="card_primary_action"
-        label="Find this card on eBay"
+        label={label}
         icon="🛒"
-        ariaLabel="Find this card on eBay — opens current listings in a new tab"
+        ariaLabel={`${label} — opens current listings in a new tab`}
         style={{
           display:        'inline-flex',
           alignItems:     'center',

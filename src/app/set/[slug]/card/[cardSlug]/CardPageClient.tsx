@@ -12,6 +12,8 @@ import GradeLadder, { type GradePrices } from '@/components/GradeLadder'
 import CardQuickActions from '@/components/CardQuickActions'
 import EbayCardPriceActions from '@/components/affiliate/EbayCardPriceActions'
 import EbayCardPrimaryAction from '@/components/affiliate/EbayCardPrimaryAction'
+import JapaneseBadge from '@/components/JapaneseBadge'
+import { resolveLanguage } from '@/lib/cardLanguage'
 import FAQ from '@/components/FAQ'
 import { getCardFaqItems } from '@/lib/faqs'
 import { getSetAssets } from '@/lib/setAssets'
@@ -632,12 +634,29 @@ export default function CardPageClient({
         </div>
 
         <div style={{ flex: 1, minWidth: 280 }}>
-          <h1 style={{ fontFamily: "'Outfit', serif", fontSize: 26, margin: '0 0 4px', color: 'var(--text)', letterSpacing: '-0.3px' }}>
-            {card.card_name.replace(/\s*#\d+\w*\s*$/, '').trim()}{cardNumberFormatted ? ` ${cardNumberFormatted}` : ''}
-          </h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 14px', fontFamily: "'Figtree', sans-serif" }}>
-            {card.set_name}
-          </p>
+          {/* Block 5A-W-48B — Japanese pill rendered above the H1.
+              resolveLanguage prefers card.language (once the RPC has
+              been updated) and falls back to the set_name prefix
+              convention otherwise. Renders NOTHING for English. */}
+          {(() => {
+            const cardLang = resolveLanguage(card.language as any, card.set_name)
+            return (
+              <>
+                <JapaneseBadge language={cardLang} size="md" style={{ marginBottom: 6 }} />
+                <h1 style={{ fontFamily: "'Outfit', serif", fontSize: 26, margin: '0 0 4px', color: 'var(--text)', letterSpacing: '-0.3px' }}>
+                  {card.card_name.replace(/\s*#\d+\w*\s*$/, '').trim()}{cardNumberFormatted ? ` ${cardNumberFormatted}` : ''}
+                </h1>
+                <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 14px', fontFamily: "'Figtree', sans-serif" }}>
+                  {card.set_name}
+                  {cardLang === 'jp' && (
+                    <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 700, color: 'var(--primary)' }}>
+                      · Language: Japanese
+                    </span>
+                  )}
+                </p>
+              </>
+            )
+          })()}
 
           <CardQuickActions card={card} />
 
@@ -667,6 +686,7 @@ export default function CardPageClient({
               cardSlug={(card.card_url_slug || card.card_slug || '').toString().replace(/^pc-/, '') || null}
               setSlug={card.set_name}
               isSealed={!!card.is_sealed}
+              language={resolveLanguage(card.language as any, card.set_name)}
             />
             <EbayCardPriceActions
               cardName={card.card_name}

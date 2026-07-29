@@ -31,8 +31,13 @@ async function loadPool(): Promise<BinderCard[]> {
   // preset budget so we don't waste bandwidth on cards no user could
   // ever buy inside the game.
   const highestBudget = BUDGETS_CENTS[BUDGETS_CENTS.length - 1]
+  // Block 5A-W-48B — hard-gate the game pool to English cards. Any
+  // Japanese pilot rows in popular_card_trends must not surface in
+  // English-native games before we decide whether to add a Japanese
+  // game mode.
   const { data, error } = await supabase.from('popular_card_trends')
-    .select('card_name, set_name, image_url, card_url_slug, card_number, card_number_display, set_printed_total, current_raw, sales_30d, is_sealed')
+    .select('card_name, set_name, image_url, card_url_slug, card_number, card_number_display, set_printed_total, current_raw, sales_30d, is_sealed, language')
+    .eq('language', 'en')
     .gt('current_raw', 100)                // reject nothing-priced cards
     .lte('current_raw', highestBudget)     // keep within the game's ceiling
     .order('sales_30d', { ascending: false })

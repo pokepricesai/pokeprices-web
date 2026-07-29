@@ -6,6 +6,8 @@ import InlineChat from '@/components/InlineChat'
 import PriceChart from '@/components/PriceChart'
 import { getSetAssets } from '@/lib/setAssets'
 import SetStructuredData from '@/components/SetStructuredData'
+import JapaneseBadge from '@/components/JapaneseBadge'
+import { resolveLanguage } from '@/lib/cardLanguage'
 // Block 5A-W-46B — BreadcrumbSchema moved to the parent server
 // component (page.tsx) so it appears in initial HTML. Do NOT re-import
 // here; a duplicate BreadcrumbList would invalidate the rich result.
@@ -166,7 +168,7 @@ function SealedSection({ sealedCards, setName }: { sealedCards: Card[]; setName:
   )
 }
 
-function SetHeader({ setName, releaseDate }: { setName: string; releaseDate: string | null }) {
+function SetHeader({ setName, releaseDate, language }: { setName: string; releaseDate: string | null; language?: string | null }) {
   const { logoUrl, symbolUrl, eraUrl, eraDisplay } = getSetAssets(setName)
 
   return (
@@ -204,6 +206,9 @@ function SetHeader({ setName, releaseDate }: { setName: string; releaseDate: str
         <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: logoUrl ? 26 : 34, fontWeight: 700, margin: 0, color: 'var(--text)', letterSpacing: '-0.5px', lineHeight: 1.2 }}>
           {setName}
         </h1>
+        {/* Block 5A-W-48B — pill flags Japanese sets. Renders nothing
+            for English so English sets are unchanged visually. */}
+        <JapaneseBadge language={language} size="md" />
       </div>
 
       {releaseDate && (
@@ -237,6 +242,9 @@ export default function SetPageClient({ slug }: { slug: string }) {
   const [topFallers, setTopFallers] = useState<TrendCard[]>([])
   const [topSealedMovers, setTopSealedMovers] = useState<TrendCard[]>([])
   const [error, setError] = useState(false)
+  // Block 5A-W-48B — read set_metadata.language so the header pill
+  // renders "Japanese" for JP sets. Missing / 'en' → nothing renders.
+  const [setLanguage, setSetLanguage] = useState<string | null>(null)
 
   useEffect(() => {
     async function loadData() {
@@ -260,6 +268,21 @@ export default function SetPageClient({ slug }: { slug: string }) {
           .eq('set_name', setName).not('set_release_date', 'is', null)
           .limit(1).single()
         if (rdData?.set_release_date) setReleaseDate(rdData.set_release_date)
+      }
+
+      // Block 5A-W-48B — pull the language flag from set_metadata.
+      // Safe defensively: if the column doesn't exist yet (pre-migration
+      // deploy) the query errors and we fall through to null, which
+      // renders as the existing English-styled header.
+      try {
+        const { data: metaLangData } = await supabase
+          .from('set_metadata').select('language')
+          .eq('set_name', setName).maybeSingle()
+        if (metaLangData && (metaLangData as any).language) {
+          setSetLanguage(((metaLangData as any).language ?? 'en').toString())
+        }
+      } catch {
+        /* pre-migration deploys land here; silently leave setLanguage=null */
       }
 
       const { data: insightData } = await supabase.rpc('get_set_insight', { set_text: setName })
@@ -350,7 +373,13 @@ export default function SetPageClient({ slug }: { slug: string }) {
           list is fetched server-side too — do NOT swap that helper
           up without matching the fetch move. */}
       <SetStructuredData setName={setName} slug={encodeURIComponent(setName)} cards={regularCards} releaseDate={releaseDate} />
-      <SetHeader setName={setName} releaseDate={releaseDate} />
+      {/* Block 5A-W-48B — resolveLanguage falls back to the "Japanese "
+          name-prefix convention if set_metadata.language isn't yet
+          returned (e.g. RPC fetch failed, or the migration isn't
+          applied yet). This guarantees the JP badge appears for any
+          Japanese pilot set imported by the seeder. */}
+      <SetHeader setName={setName} releaseDate={releaseDate}
+        language={resolveLanguage(setLanguage, setName)} />
 
       {/* ── Section jump links + eBay listing chips ── */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>

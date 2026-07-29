@@ -7,6 +7,7 @@ import { getSetAssets, ERA_ORDER, ERA_DISPLAY_NAMES } from '@/lib/setAssets'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import FAQ from '@/components/FAQ'
 import { getBrowseFaqItems } from '@/lib/faqs'
+import { resolveLanguage } from '@/lib/cardLanguage'
 
 interface SetInfo {
   set_name: string
@@ -15,7 +16,17 @@ interface SetInfo {
   total_raw_usd: number | null    // cents
   set_image_url: string | null
   set_release_date: string | null
+  /** Block 5A-W-48B — 'en' | 'jp'. When the get_set_list_v2 RPC has
+   *  not yet been updated to include this column the value is
+   *  undefined; the UI defaults to English so English behaviour is
+   *  identical to today. */
+  language?: string | null
 }
+
+/** Block 5A-W-48B — top-level filter for the browse page. Keeps
+ *  Japanese sets fully browsable but out of the default English list
+ *  so English collectors see the pre-W48B experience by default. */
+type LanguageFilter = 'en' | 'jp' | 'all'
 
 interface TrendingSet {
   set_name: string
@@ -218,6 +229,7 @@ export default function BrowsePageClient() {
   const [loading, setLoading]           = useState(true)
   const [sort, setSort]                 = useState<SortOption>('release_desc')
   const [eraFilter, setEraFilter]       = useState<string>('all')
+  const [languageFilter, setLanguageFilter] = useState<LanguageFilter>('en')
   const [trendingSets, setTrendingSets] = useState<{ rising: TrendingSet[]; falling: TrendingSet[] } | null>(null)
 
   useEffect(() => {
@@ -241,7 +253,17 @@ export default function BrowsePageClient() {
     .reverse()
     .filter(era => sets.some(s => getSetAssets(s.set_name).eraName === era))
 
+  // Block 5A-W-48B — English vs Japanese vs All.
+  // resolveLanguage prefers an explicit set.language value (when
+  // get_set_list_v2 has been extended to return it) and falls back
+  // to the set_name prefix convention otherwise, so the pilot works
+  // whether or not the RPC has been updated.
+  const jpSetCount = sets.filter(s => resolveLanguage(s.language, s.set_name) === 'jp').length
   const filtered = sets
+    .filter(s => {
+      if (languageFilter === 'all') return true
+      return resolveLanguage(s.language, s.set_name) === languageFilter
+    })
     .filter(s => s.set_name.toLowerCase().includes(search.toLowerCase()))
     .filter(s => eraFilter === 'all' || getSetAssets(s.set_name).eraName === eraFilter)
     .sort((a, b) => {
@@ -293,6 +315,47 @@ export default function BrowsePageClient() {
         <TrendingSetsPanel data={trendingSets} />
       )}
       {!loading && <SetInsightsBar sets={sets} />}
+
+      {/* Block 5A-W-48B — language tab strip. Rendered only when at
+          least one Japanese set has been loaded, so pre-pilot the
+          browse page is visually unchanged. Tabs: English (default),
+          Japanese, All. */}
+      {jpSetCount > 0 && (
+        <div
+          role="tablist"
+          aria-label="Filter sets by language"
+          style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}
+        >
+          {([
+            { key: 'en',  label: 'English',  count: sets.length - jpSetCount },
+            { key: 'jp',  label: 'Japanese', count: jpSetCount },
+            { key: 'all', label: 'All',      count: sets.length },
+          ] as const).map(tab => {
+            const active = languageFilter === tab.key
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setLanguageFilter(tab.key)}
+                style={{
+                  padding: '6px 14px',
+                  fontSize: 12, fontWeight: active ? 800 : 600,
+                  color: active ? 'var(--primary)' : 'var(--text-muted)',
+                  background: active ? 'rgba(26,95,173,0.10)' : 'var(--card)',
+                  border: `1px solid ${active ? 'var(--primary)' : 'var(--border)'}`,
+                  borderRadius: 20, cursor: 'pointer',
+                  fontFamily: "'Figtree', sans-serif",
+                  letterSpacing: 0.3,
+                }}
+              >
+                {tab.label} <span style={{ opacity: 0.7 }}>({tab.count})</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       <div id="set-list" style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' as const, alignItems: 'center' }}>
         <input
@@ -363,6 +426,21 @@ export default function BrowsePageClient() {
                   <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: "'Figtree', sans-serif" }}>
                     {s.set_name}
                   </div>
+                  {/* Block 5A-W-48B — pill only renders for JP tiles. */}
+                  {resolveLanguage(s.language, s.set_name) === 'jp' && (
+                    <span
+                      aria-label="Japanese-language set"
+                      style={{
+                        display: 'inline-block',
+                        fontSize: 9, fontWeight: 800, color: 'var(--primary)',
+                        background: 'rgba(26,95,173,0.10)',
+                        border: '1px solid var(--primary)',
+                        borderRadius: 4, padding: '1px 5px',
+                        letterSpacing: 1, textTransform: 'uppercase',
+                        marginBottom: 3,
+                      }}
+                    >JP</span>
+                  )}
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2, fontFamily: "'Figtree', sans-serif" }}>
                     {s.card_count} cards
                   </div>

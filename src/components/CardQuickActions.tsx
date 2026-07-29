@@ -75,24 +75,31 @@ export default function CardQuickActions({ card }: { card: Card }) {
 
   useEffect(() => {
     if (!user || !cardSlug) { setWatchId(null); return }
+    // Block 5A-W-48B — match on set_name too so this button correctly
+    // reflects "already watched" only for the exact card + printing on
+    // the current page (English Pikachu !== Japanese Pikachu).
     supabase
       .from('watchlist')
       .select('id')
       .eq('user_id', user.id)
       .eq('card_slug', cardSlug)
+      .eq('set_name', card.set_name)
       .maybeSingle()
       .then(({ data }) => setWatchId(data?.id ?? null))
-  }, [user, cardSlug])
+  }, [user, cardSlug, card.set_name])
 
   // ── Watchlist insert (no-op when already present) ─────────────────────────
   // Centralised so both the in-place click and the post-login replay use the
   // exact same upsert-shaped logic with the same duplicate guard.
   async function performWatchlistAdd(currentUserId: string): Promise<string | null> {
+    // Block 5A-W-48B — match set_name so English and Japanese
+    // printings are treated as independent watchlist entries.
     const { data: existing } = await supabase
       .from('watchlist')
       .select('id')
       .eq('user_id', currentUserId)
       .eq('card_slug', cardSlug)
+      .eq('set_name', card.set_name)
       .maybeSingle()
     if (existing?.id) return existing.id
     const { data: row, error } = await supabase.from('watchlist').insert([{
@@ -512,8 +519,11 @@ export function CardPortfolioAddModal({
         payload.manual_value_updated_at = new Date().toISOString()
       }
 
+      // Block 5A-W-48B — set_name_snapshot must be in the conflict
+      // key so English and Japanese printings of the same
+      // card_url_slug can coexist in one portfolio.
       const { error: err } = await supabase.from('portfolio_items').upsert([payload], {
-        onConflict: 'portfolio_id,card_slug,holding_type',
+        onConflict: 'portfolio_id,card_slug,set_name_snapshot,holding_type',
       })
 
       if (err) throw err

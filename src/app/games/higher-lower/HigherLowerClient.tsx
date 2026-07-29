@@ -51,8 +51,10 @@ export default function HigherLowerClient() {
   // network round-trip.
   useEffect(() => {
     (async () => {
+      // Block 5A-W-48B — hard-gate to English cards.
       const { data, error: e } = await supabase.from('popular_card_trends')
-        .select('card_name, set_name, image_url, card_url_slug, card_number, card_number_display, set_printed_total, current_raw, is_sealed')
+        .select('card_name, set_name, image_url, card_url_slug, card_number, card_number_display, set_printed_total, current_raw, is_sealed, language')
+        .eq('language', 'en')
         .gte('current_raw', 500)
         .lte('current_raw', 200000)
         .order('sales_30d', { ascending: false })

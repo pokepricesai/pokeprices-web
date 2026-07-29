@@ -35,8 +35,11 @@ export default function DailyPickClient({ embedded = false }: { embedded?: boole
       // Hydrate both cards from the popular_card_trends view; fall back to
       // the matchup label if the slug isn't found.
       const slugs = [matchup.a.card_url_slug, matchup.b.card_url_slug].filter(Boolean) as string[]
+      // Block 5A-W-48B — filter to English so the Daily Pick matchup
+      // never surfaces a Japanese card behind an English label.
       const { data } = await supabase.from('popular_card_trends')
-        .select('card_name, set_name, image_url, card_url_slug, current_raw')
+        .select('card_name, set_name, image_url, card_url_slug, current_raw, language')
+        .eq('language', 'en')
         .in('card_url_slug', slugs)
       const bySlug = new Map<string, CardData>()
       for (const r of (data || [])) bySlug.set((r as any).card_url_slug, r as CardData)

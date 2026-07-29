@@ -72,6 +72,10 @@ export type CardRow = {
   psa9_usd?:            number | null
   psa10_usd?:           number | null
   is_sealed?:           boolean | null
+  /** Block 5A-W-48B — 'en' | 'jp'. Populated by get_card_detail_by_url_slug
+   *  once the foundation migration is applied. Old clients treat a
+   *  missing value as 'en' so the passthrough is backwards-compatible. */
+  language?:            string | null
   // Every other tier field the RPC returns — kept as a permissive
   // index signature so the pure indexability helper can inspect them.
   [key: string]: unknown

@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { resolveLanguage } from '@/lib/cardLanguage'
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value)
@@ -19,6 +20,10 @@ interface Result {
   href: string
   image_url?: string | null
   price?: number | null
+  /** Block 5A-W-48B — language of the underlying card/set. 'jp' surfaces
+   *  a small pill in the dropdown so English collectors do not mistake
+   *  a Japanese printing for its English counterpart. */
+  language?: string | null
 }
 
 export default function SearchBar({ placeholder = 'Search cards, sets, Pokémon… try "Charizard Base Set" or "215/203"' }: { placeholder?: string }) {
@@ -57,6 +62,12 @@ export default function SearchBar({ placeholder = 'Search cards, sets, Pokémon�
 
       if (!cancelled && rpcData && rpcData.length > 0) {
         const mapped: Result[] = (rpcData as any[]).map(r => {
+          // Block 5A-W-48B — resolveLanguage prefers an explicit RPC
+          // field when present and derives from the set_name prefix
+          // ("Japanese ...") otherwise. Works today whether or not
+          // search_global has been extended to return c.language.
+          const setNameForLang = (r.subtitle || r.name) as string
+          const language = resolveLanguage(r.language, setNameForLang)
           if (r.result_type === 'set') return {
             type: 'set' as const,
             label: r.name,
@@ -64,6 +75,7 @@ export default function SearchBar({ placeholder = 'Search cards, sets, Pokémon�
             href: `/set/${encodeURIComponent(r.name)}`,
             image_url: r.image_url,
             price: null,
+            language,
           }
           if (r.result_type === 'pokemon') return {
             type: 'pokemon' as const,
@@ -72,6 +84,7 @@ export default function SearchBar({ placeholder = 'Search cards, sets, Pokémon�
             href: `/pokemon/${r.url_slug?.toLowerCase() || r.name.toLowerCase()}`,
             image_url: r.image_url,
             price: null,
+            language,
           }
           // card
           const href = r.subtitle
@@ -86,6 +99,7 @@ export default function SearchBar({ placeholder = 'Search cards, sets, Pokémon�
             href,
             image_url: r.image_url,
             price: r.price_usd,
+            language,
           }
         })
         setResults(mapped)
@@ -299,10 +313,31 @@ export default function SearchBar({ placeholder = 'Search cards, sets, Pokémon�
               )}
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{
-                  fontSize: 13, fontWeight: 700, color: 'var(--text)',
-                  fontFamily: "'Figtree', sans-serif",
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                }}>{r.label}</div>
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  whiteSpace: 'nowrap', overflow: 'hidden',
+                }}>
+                  <span style={{
+                    fontSize: 13, fontWeight: 700, color: 'var(--text)',
+                    fontFamily: "'Figtree', sans-serif",
+                    overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>{r.label}</span>
+                  {/* Block 5A-W-48B — small "JP" tag next to Japanese
+                      results so English and Japanese Pikachus are
+                      distinguishable at a glance. */}
+                  {r.language === 'jp' && (
+                    <span
+                      aria-label="Japanese-language printing"
+                      style={{
+                        fontSize: 9, fontWeight: 800, color: 'var(--primary)',
+                        background: 'rgba(26,95,173,0.10)',
+                        border: '1px solid var(--primary)',
+                        borderRadius: 4, padding: '1px 5px',
+                        letterSpacing: 1, textTransform: 'uppercase',
+                        flexShrink: 0,
+                      }}
+                    >JP</span>
+                  )}
+                </div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>{r.sublabel}</div>
               </div>
               {r.price != null && r.price > 0 && (

@@ -38,8 +38,12 @@ export default function GuessPriceClient() {
   // Load the candidate pool once, then pick a fresh card per game.
   useEffect(() => {
     (async () => {
+      // Block 5A-W-48B — hard-gate the guess pool to English cards.
+      // Japanese pilot rows must not surface here before we decide on
+      // a Japanese game mode.
       const { data, error: e } = await supabase.from('popular_card_trends')
-        .select('card_name, set_name, image_url, card_url_slug, card_number, card_number_display, set_printed_total, current_raw, current_psa10, sales_30d, is_sealed')
+        .select('card_name, set_name, image_url, card_url_slug, card_number, card_number_display, set_printed_total, current_raw, current_psa10, sales_30d, is_sealed, language')
+        .eq('language', 'en')
         .gte('current_raw', 1500)
         .lte('current_raw', 200000)
         .order('sales_30d', { ascending: false })

@@ -31,8 +31,11 @@ import {
 // ── Data loader ────────────────────────────────────
 
 async function loadPool(): Promise<GuessCard[]> {
+  // Block 5A-W-48B — Japanese cards must not surface in this game.
+  // Filter to language='en' at query time.
   const { data, error } = await supabase.from('popular_card_trends')
-    .select('card_name, set_name, image_url, card_url_slug, card_number, card_number_display, set_printed_total, is_sealed, sales_30d')
+    .select('card_name, set_name, image_url, card_url_slug, card_number, card_number_display, set_printed_total, is_sealed, sales_30d, language')
+    .eq('language', 'en')
     .not('image_url', 'is', null)
     .not('card_url_slug', 'is', null)
     .order('sales_30d', { ascending: false })
