@@ -23,9 +23,15 @@ describe('DashboardHubClient — W42A page framing', () => {
     expect(SRC).toMatch(/<DashboardOnboardingChecklist\b/)
   })
 
-  it('keeps DashboardNav and the avatar picker on the page', () => {
-    expect(SRC).toContain("import DashboardNav from './DashboardNav'")
-    expect(SRC).toMatch(/<DashboardNav\b/)
+  it('W47F — no longer imports or mounts the old DashboardNav (sidebar shell replaces it)', () => {
+    // The persistent sidebar in src/app/dashboard/layout.tsx now
+    // provides navigation for every /dashboard route. The hub must
+    // not double-render a top nav.
+    expect(SRC).not.toContain("from './DashboardNav'")
+    expect(SRC).not.toMatch(/<DashboardNav\b/)
+  })
+
+  it('keeps the avatar picker on the page', () => {
     expect(SRC).toContain("import AvatarPicker from '@/components/AvatarPicker'")
     expect(SRC).toMatch(/<AvatarPicker\b/)
   })

@@ -30,12 +30,12 @@ describe('WatchlistAlertsClient — W44B page framing', () => {
     expect(CLIENT_SRC).not.toContain('Update what you watch and how loud the alerts are')
   })
 
-  it('keeps Back to Dashboard via DashboardNav (W42B)', () => {
-    // The nav component provides the back link on every sub-page;
-    // this asserts the mount is present with the "watchlist" tab
-    // selected. Direct assertion of the link string lives in
-    // src/app/dashboard/__tests__/DashboardNav.test.tsx.
-    expect(CLIENT_SRC).toMatch(/<DashboardNav[\s\S]*?current="watchlist"/)
+  it('W47F — no longer renders its own DashboardNav (sidebar shell replaces it)', () => {
+    // The persistent sidebar in src/app/dashboard/layout.tsx supplies
+    // navigation + Back-to-PokePrices for every /dashboard route. The
+    // watchlist-alerts page must not double-render its own top nav.
+    expect(CLIENT_SRC).not.toContain("from '../DashboardNav'")
+    expect(CLIENT_SRC).not.toMatch(/<DashboardNav\b/)
   })
 
   it('keeps the four page sections + CTA footer intact', () => {

@@ -3,7 +3,6 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase, CHAT_ENDPOINT } from '@/lib/supabase'
-import DashboardNav from '../DashboardNav'
 import CardScanner, { ConfirmedCard, ConfirmContext } from '@/components/CardScanner'
 import EbayHoldingAction from '@/components/affiliate/EbayHoldingAction'
 import { canAddPortfolioItem } from '@/lib/account/entitlements'
@@ -1423,7 +1422,6 @@ export default function PortfolioDashboard() {
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 16px' }}>
-      <DashboardNav current="portfolio" email={user?.email} />
 
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>

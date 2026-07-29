@@ -22,7 +22,6 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import DashboardNav from '../DashboardNav'
 import WatchlistClient from '../watchlist/WatchlistClient'
 import AlertPreferencesCard from '../settings/AlertPreferencesCard'
 import RecentAlerts from './RecentAlerts'
@@ -46,8 +45,6 @@ export default function WatchlistAlertsClient() {
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 16px' }}>
-      <DashboardNav current="watchlist" email={user?.email ?? undefined} />
-
       <div style={{ marginBottom: 20 }}>
         {/* Block 5A-W-44B — softer heading + sub-copy. Old wording read
             like a settings page; the new line frames the page as a

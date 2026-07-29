@@ -11,7 +11,6 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import DashboardNav from '../DashboardNav'
 import { CardPortfolioAddModal } from '@/components/CardQuickActions'
 
 type Currency = 'GBP' | 'USD'
@@ -210,7 +209,6 @@ export default function SetTrackerClient() {
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 16px' }}>
-      <DashboardNav current="sets" email={user?.email} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: 18 }}>
         <div>

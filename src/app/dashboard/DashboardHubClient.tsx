@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AvatarPicker from '@/components/AvatarPicker'
 import ComingSoonBadge from '@/components/ComingSoonBadge'
-import DashboardNav from './DashboardNav'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge'
 import DashboardOnboardingChecklist from '@/components/dashboard/DashboardOnboardingChecklist'
 import PotentialDealsSection from '@/components/dashboard/PotentialDealsSection'
@@ -22,15 +21,15 @@ import { useUserPlan } from '@/lib/account/useUserPlan'
 // into a "My PokePrices" personal summary page. Existing tables /
 // RPCs only; no schema, no new RPC.
 //
-// Layout (top → bottom):
-//   1. DashboardNav (unchanged)
-//   2. Avatar prompt banner (unchanged, banner glyph removed)
-//   3. Header: "My PokePrices" + strapline + AccountPlanBadge
-//   4. DashboardOnboardingChecklist (unchanged, self-hides)
-//   5. Personal snapshot row: Portfolio · Watchlist · Alerts
-//   6. Market movement for you (top 5 personal movers)
-//   7. Tools tile grid (kept, emoji glyphs stripped)
-//   8. Free-forever footer + AvatarPicker mount
+// Layout (top → bottom) — W47F wraps the dashboard in a persistent
+// sidebar shell, so this hub no longer renders its own nav:
+//   1. Avatar prompt banner (unchanged, banner glyph removed)
+//   2. Header: "My PokePrices" + strapline + AccountPlanBadge
+//   3. DashboardOnboardingChecklist (unchanged, self-hides)
+//   4. Personal snapshot row: Portfolio · Watchlist · Alerts
+//   5. Market movement for you (top 5 personal movers)
+//   6. Tools tile grid (kept, emoji glyphs stripped)
+//   7. Free-forever footer + AvatarPicker mount
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -436,10 +435,6 @@ export default function DashboardHubClient() {
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '20px 16px 32px' }}>
-
-      {/* Same chip strip as every dashboard sub-page so users can jump
-          between tools quickly. Scrolls horizontally on narrow screens. */}
-      <DashboardNav email={user?.email} />
 
       {!avatarPokemonId && !bannerDismissed && (
         <div style={{

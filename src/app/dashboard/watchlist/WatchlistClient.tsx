@@ -3,7 +3,6 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import DashboardNav from '../DashboardNav'
 import { CardPortfolioAddModal } from '@/components/CardQuickActions'
 import EbayHoldingAction from '@/components/affiliate/EbayHoldingAction'
 import WatchlistAlertOverrideControl from '../watchlist-alerts/WatchlistAlertOverrideControl'
@@ -149,9 +148,9 @@ function AddWatchModal({ onAdd, onClose }: { onAdd: (card: any) => Promise<void>
 // ── Main client ──────────────────────────────────────────────────────────────
 
 // Block 5A-W-18 — `embedded` lets the unified /dashboard/watchlist-alerts
-// page reuse the entire watchlist body without rendering a second
-// DashboardNav or the standalone page header. Default false preserves
-// the original standalone surface in case a future block needs it.
+// page reuse the entire watchlist body without rendering the standalone
+// page header. Default false preserves the original standalone surface
+// in case a future block needs it.
 export default function WatchlistClient({ embedded = false }: { embedded?: boolean } = {}) {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
@@ -273,8 +272,6 @@ export default function WatchlistClient({ embedded = false }: { embedded?: boole
 
   return (
     <Outer style={outerStyle}>
-      {!embedded && <DashboardNav current="watchlist" email={user?.email} />}
-
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div>

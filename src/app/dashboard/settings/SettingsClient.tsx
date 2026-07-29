@@ -4,7 +4,6 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge'
-import DashboardNav from '../DashboardNav'
 import Avatar from '@/components/Avatar'
 import AvatarPicker from '@/components/AvatarPicker'
 import AlertPreferencesCard from './AlertPreferencesCard'
@@ -188,7 +187,6 @@ export default function SettingsClient() {
 
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '24px 16px' }}>
-      <DashboardNav current="settings" email={user?.email} />
 
       <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 26, margin: '0 0 4px', color: 'var(--text)' }}>Settings</h1>
       <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 20px' }}>

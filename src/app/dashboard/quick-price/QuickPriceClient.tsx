@@ -8,7 +8,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import DashboardNav from '../DashboardNav'
 import CardScanner, { ConfirmedCard, ConfirmContext } from '@/components/CardScanner'
 import {
   HOLDING_TYPES,
@@ -170,7 +169,6 @@ export default function QuickPriceClient() {
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '20px 16px 60px' }}>
-      <DashboardNav current="quick-price" email={email} />
 
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>

@@ -9,7 +9,6 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import DashboardNav from '../DashboardNav'
 import EbayGradingScenarioAction from '@/components/affiliate/EbayGradingScenarioAction'
 
 type Currency = 'GBP' | 'USD'
@@ -314,7 +313,6 @@ export default function GradingCalculatorClient() {
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 16px' }}>
-      <DashboardNav current="grading" email={user?.email} />
 
       <div style={{ marginBottom: 18 }}>
         <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 26, margin: '0 0 4px', color: 'var(--text)' }}>Grading Calculator</h1>

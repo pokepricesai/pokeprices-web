@@ -8,7 +8,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import DashboardNav from '../DashboardNav'
 import {
   cardShows,
   formatShowDate,
@@ -78,7 +77,6 @@ export default function CardShowsPlannerClient() {
 
   return (
     <div style={{ maxWidth: 880, margin: '0 auto', padding: '24px 16px' }}>
-      <DashboardNav current={'card-shows' as any} email={user?.email} />
 
       <div style={{ marginBottom: 20 }}>
         <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 26, margin: '0 0 4px', color: 'var(--text)' }}>
