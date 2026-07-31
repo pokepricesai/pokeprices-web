@@ -3,6 +3,11 @@
 // exactly one Japanese batch, and no English CSV leaks into a
 // Japanese batch (or vice versa).
 //
+// Block 5A-W-48D — Japanese batches grew from 2 to 4 balanced files
+// after the 116-set import. All batch/workflow assertions here iterate
+// `batch-japanese-*.txt` dynamically so future rebalances don't need
+// test edits.
+//
 // These tests read the sister scraper repo at
 // C:\Users\lukep\OneDrive\Desktop\pokeprices . On dev environments
 // that do not have the scraper repo checked out alongside the web
@@ -81,6 +86,27 @@ function loadCsvConsoleNames(): Map<string, Set<string>> {
   return out
 }
 
+/** Discover every batch-japanese-*.txt file present on disk. Callers
+ *  should always go through this so a rebalance (2 → 4 → N batches)
+ *  never requires touching the tests. Returns absolute names like
+ *  `batch-japanese-1.txt` sorted by numeric suffix. */
+function discoverJapaneseBatchFiles(): string[] {
+  if (!existsSync(BATCHDIR)) return []
+  return readdirSync(BATCHDIR)
+    .filter(f => /^batch-japanese-\d+\.txt$/.test(f))
+    .sort((a, b) => {
+      const na = Number(a.match(/(\d+)/)![1])
+      const nb = Number(b.match(/(\d+)/)![1])
+      return na - nb
+    })
+}
+
+function loadAllJapaneseBatches(): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>()
+  for (const f of discoverJapaneseBatchFiles()) out.set(f, loadBatch(f))
+  return out
+}
+
 // ── Batch coherence ───────────────────────────────
 
 describe('Japanese batch coherence', () => {
@@ -89,22 +115,28 @@ describe('Japanese batch coherence', () => {
     return
   }
 
-  it('the two Japanese batch files exist', () => {
-    expect(existsSync(join(BATCHDIR, 'batch-japanese-1.txt'))).toBe(true)
-    expect(existsSync(join(BATCHDIR, 'batch-japanese-2.txt'))).toBe(true)
+  it('at least two Japanese batch files exist (batch-japanese-1..2 minimum)', () => {
+    const files = discoverJapaneseBatchFiles()
+    expect(files.length).toBeGreaterThanOrEqual(2)
+    expect(files).toContain('batch-japanese-1.txt')
+    expect(files).toContain('batch-japanese-2.txt')
   })
 
-  it('no console name appears in both Japanese batches', () => {
-    const jp1 = loadBatch('batch-japanese-1.txt')
-    const jp2 = loadBatch('batch-japanese-2.txt')
-    const overlap = Array.from(jp1).filter(n => jp2.has(n))
-    expect(overlap).toEqual([])
+  it('no console name appears in more than one Japanese batch', () => {
+    const seen = new Map<string, string>()   // console -> first batch it appeared in
+    const dups: string[] = []
+    for (const [file, entries] of Array.from(loadAllJapaneseBatches().entries())) {
+      entries.forEach(c => {
+        if (seen.has(c)) dups.push(`"${c}" in both ${seen.get(c)} and ${file}`)
+        else seen.set(c, file)
+      })
+    }
+    expect(dups).toEqual([])
   })
 
   it('no console name appears in a Japanese batch AND an English batch', () => {
     const jp = new Set<string>()
-    loadBatch('batch-japanese-1.txt').forEach(c => jp.add(c))
-    loadBatch('batch-japanese-2.txt').forEach(c => jp.add(c))
+    for (const [, entries] of Array.from(loadAllJapaneseBatches().entries())) entries.forEach(c => jp.add(c))
     const en = new Set<string>()
     for (let i = 1; i <= 6; i++) {
       loadBatch(`batch${i}.txt`).forEach(c => en.add(c))
@@ -114,11 +146,9 @@ describe('Japanese batch coherence', () => {
   })
 
   it('every Japanese console-name found in pc_csvs is covered by exactly one Japanese batch', () => {
-    const jp1 = loadBatch('batch-japanese-1.txt')
-    const jp2 = loadBatch('batch-japanese-2.txt')
+    const batches = loadAllJapaneseBatches()
     const covered = new Set<string>()
-    jp1.forEach(c => covered.add(c))
-    jp2.forEach(c => covered.add(c))
+    for (const [, entries] of Array.from(batches.entries())) entries.forEach(c => covered.add(c))
 
     // Collect every distinct console name appearing in any JP-named CSV.
     const seen = new Set<string>()
@@ -127,12 +157,9 @@ describe('Japanese batch coherence', () => {
       if (!file.toLowerCase().includes('japan')) return
       consoles.forEach(c => seen.add(c))
     })
-    // Every observed Japanese console must land in exactly one batch.
+    // Every observed Japanese console must land in some batch.
     seen.forEach(c => {
-      const in1 = jp1.has(c)
-      const in2 = jp2.has(c)
-      expect(in1 || in2, `console "${c}" not in any batch`).toBe(true)
-      expect(in1 && in2, `console "${c}" in both batches`).toBe(false)
+      expect(covered.has(c), `console "${c}" not in any batch`).toBe(true)
     })
     // And every batch entry must correspond to a real CSV console.
     covered.forEach(c => {
@@ -141,9 +168,9 @@ describe('Japanese batch coherence', () => {
   })
 
   it('Japanese Battle Partners remains in a Japanese batch (regression pin)', () => {
-    const jp1 = loadBatch('batch-japanese-1.txt')
-    const jp2 = loadBatch('batch-japanese-2.txt')
-    expect(jp1.has('Pokemon Japanese Battle Partners') || jp2.has('Pokemon Japanese Battle Partners')).toBe(true)
+    const covered = new Set<string>()
+    for (const [, entries] of Array.from(loadAllJapaneseBatches().entries())) entries.forEach(c => covered.add(c))
+    expect(covered.has('Pokemon Japanese Battle Partners')).toBe(true)
   })
 
   it('the six English batch files are untouched (still exist, size non-empty)', () => {
@@ -157,23 +184,35 @@ describe('Japanese batch coherence', () => {
 
 // ── Workflow wiring ───────────────────────────────
 
-describe('Nightly workflow includes both Japanese batches', () => {
+describe('Nightly workflow includes every Japanese batch file', () => {
   if (!HAS_SCRAPER) {
     it.skip('scraper repo not present — skipping workflow tests', () => {})
     return
   }
 
   const wf = readFileSync(join(SCRAPER_ROOT, '.github', 'workflows', 'nightly-scrape.yml'), 'utf8')
+  const files = discoverJapaneseBatchFiles()
 
-  it('workflow declares batch-japanese-1 and batch-japanese-2 jobs', () => {
-    expect(wf).toMatch(/^  batch-japanese-1:/m)
-    expect(wf).toMatch(/^  batch-japanese-2:/m)
+  it('workflow declares one job per batch-japanese-N.txt file', () => {
+    for (const f of files) {
+      const jobName = f.replace(/\.txt$/, '')
+      expect(wf, `job ${jobName} missing from workflow`).toMatch(new RegExp(`^  ${jobName}:`, 'm'))
+    }
   })
-  it('each Japanese job runs pokeprices_scraper_v8.py with the correct sets-file', () => {
-    expect(wf).toContain('python pokeprices_scraper_v8.py --sets-file batches/batch-japanese-1.txt')
-    expect(wf).toContain('python pokeprices_scraper_v8.py --sets-file batches/batch-japanese-2.txt')
+  it('each Japanese job runs pokeprices_scraper_v8.py with the matching sets-file', () => {
+    for (const f of files) {
+      expect(wf).toContain(`python pokeprices_scraper_v8.py --sets-file batches/${f}`)
+    }
   })
-  it('refresh-and-analytics depends on BOTH Japanese batches', () => {
-    expect(wf).toMatch(/needs:\s*\[[^\]]*batch-japanese-1[^\]]*batch-japanese-2[^\]]*\]/)
+  it('refresh-and-analytics depends on EVERY Japanese batch job', () => {
+    // Find the refresh-and-analytics `needs:` line and confirm it lists
+    // every batch-japanese-N job name.
+    const needsMatch = wf.match(/refresh-and-analytics:[\s\S]*?needs:\s*\[([^\]]+)\]/)
+    expect(needsMatch, 'refresh-and-analytics needs: line not found').toBeTruthy()
+    const needs = needsMatch![1]
+    for (const f of files) {
+      const jobName = f.replace(/\.txt$/, '')
+      expect(needs, `refresh-and-analytics is missing ${jobName}`).toContain(jobName)
+    }
   })
 })
