@@ -20,6 +20,7 @@ import {
   type CardQuickFactsCardInput,
   type CardQuickFactsTrendInput,
 } from '@/lib/seo/quickFacts'
+import { displaySetName, resolveLanguage } from '@/lib/cardLanguage'
 
 export type CardPriceQuickFactsProps = {
   card:  CardQuickFactsCardInput | null | undefined
@@ -116,14 +117,19 @@ export default function CardPriceQuickFacts({
   // ── Server-rendered lead sentence. Concise, factual, one line. ──
   const numberSuffix = out.cardNumberLabel ? ` ${out.cardNumberLabel}` : ''
   const setName = card?.set_name ?? ''
+  // Block 5A-W-48C — visible copy strips the leading "Japanese "
+  // prefix for JP sets. Internal setName (used for hrefs elsewhere)
+  // is untouched. The Japanese identity remains clear via the
+  // JapaneseBadge + "Language: Japanese" row rendered by the page.
+  const visibleSetName = displaySetName(setName, resolveLanguage((card as any)?.language, setName))
   const rawFact  = out.facts.find(f => f.key === 'raw')
   const psa10Fact = out.facts.find(f => f.key === 'psa10')
   let lead: string | null = null
-  if (out.displayName && setName) {
+  if (out.displayName && visibleSetName) {
     if (rawFact) {
-      lead = `${out.displayName}${numberSuffix} from ${setName} has a current raw market value of ${rawFact.value}.`
+      lead = `${out.displayName}${numberSuffix} from ${visibleSetName} has a current raw market value of ${rawFact.value}.`
     } else if (psa10Fact) {
-      lead = `${out.displayName}${numberSuffix} from ${setName} currently trades at ${psa10Fact.value} in PSA 10.`
+      lead = `${out.displayName}${numberSuffix} from ${visibleSetName} currently trades at ${psa10Fact.value} in PSA 10.`
     }
   }
 
@@ -149,7 +155,7 @@ export default function CardPriceQuickFacts({
         <div style={linkRowStyle}>
           {setHref && (
             <Link href={setHref} style={linkStyle}>
-              View all cards from {setName || 'this set'} →
+              View all cards from {visibleSetName || 'this set'} →
             </Link>
           )}
           {pokemonHref && pokemonName && (
