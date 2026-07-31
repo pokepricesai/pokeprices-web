@@ -62,3 +62,37 @@ export function resolveLanguage(
   if (isJapaneseSetName(setName)) return 'jp'
   return 'en'
 }
+
+/** Block 5A-W-48C — return the visible display name for a set.
+ *  For Japanese sets we strip only the leading exact "Japanese "
+ *  prefix so H1s, tile labels, subtitles and result rows read as
+ *  "Battle Partners" rather than "Japanese Battle Partners". The
+ *  Japanese identity is not lost — the visible JapaneseBadge sits
+ *  alongside the clean name in every place this helper is used.
+ *
+ *  Guardrails:
+ *    * The prefix is only stripped when the record resolves to
+ *      language === 'jp'. An English set with the word "Japanese"
+ *      buried anywhere in its name is returned unchanged. This is
+ *      why we gate on language rather than a bare startsWith().
+ *    * When the explicit language argument is 'en' we always return
+ *      the set name verbatim. The internal identifier stays with the
+ *      caller (this helper never rewrites URLs or hrefs).
+ *    * null / undefined / empty inputs fall through to a safe
+ *      passthrough — callers can pipe user data through without
+ *      risking a crash.
+ *
+ *  This helper is the ONLY place the "Japanese " prefix is trimmed
+ *  for display. Internal set_name, canonical URLs, database rows
+ *  and RPC arguments all keep the Japanese-prefixed identity.
+ */
+export function displaySetName(
+  setName: string | null | undefined,
+  language?: string | null,
+): string {
+  if (!setName || typeof setName !== 'string') return ''
+  const lang = resolveLanguage(language, setName)
+  if (lang !== 'jp') return setName
+  if (!setName.startsWith(JAPANESE_SET_NAME_PREFIX)) return setName
+  return setName.slice(JAPANESE_SET_NAME_PREFIX.length)
+}

@@ -7,7 +7,7 @@ import PriceChart from '@/components/PriceChart'
 import { getSetAssets } from '@/lib/setAssets'
 import SetStructuredData from '@/components/SetStructuredData'
 import JapaneseBadge from '@/components/JapaneseBadge'
-import { resolveLanguage } from '@/lib/cardLanguage'
+import { resolveLanguage, displaySetName } from '@/lib/cardLanguage'
 // Block 5A-W-46B — BreadcrumbSchema moved to the parent server
 // component (page.tsx) so it appears in initial HTML. Do NOT re-import
 // here; a duplicate BreadcrumbList would invalidate the rich result.
@@ -201,10 +201,13 @@ function SetHeader({ setName, releaseDate, language }: { setName: string; releas
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-        {logoUrl && <img src={logoUrl} alt={setName} style={{ height: 56, width: 'auto', objectFit: 'contain', maxWidth: 240 }} loading="eager" />}
+        {logoUrl && <img src={logoUrl} alt={displaySetName(setName, language)} style={{ height: 56, width: 'auto', objectFit: 'contain', maxWidth: 240 }} loading="eager" />}
         {symbolUrl && <img src={symbolUrl} alt="" style={{ width: 28, height: 28, objectFit: 'contain' }} loading="lazy" />}
+        {/* Block 5A-W-48C — visible H1 strips leading "Japanese ".
+            Internal setName + canonical still use the Japanese-
+            prefixed identifier; only the visible label is cleaned. */}
         <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: logoUrl ? 26 : 34, fontWeight: 700, margin: 0, color: 'var(--text)', letterSpacing: '-0.5px', lineHeight: 1.2 }}>
-          {setName}
+          {displaySetName(setName, language)}
         </h1>
         {/* Block 5A-W-48B — pill flags Japanese sets. Renders nothing
             for English so English sets are unchanged visually. */}

@@ -13,7 +13,7 @@ import CardQuickActions from '@/components/CardQuickActions'
 import EbayCardPriceActions from '@/components/affiliate/EbayCardPriceActions'
 import EbayCardPrimaryAction from '@/components/affiliate/EbayCardPrimaryAction'
 import JapaneseBadge from '@/components/JapaneseBadge'
-import { resolveLanguage } from '@/lib/cardLanguage'
+import { resolveLanguage, displaySetName } from '@/lib/cardLanguage'
 import FAQ from '@/components/FAQ'
 import { getCardFaqItems } from '@/lib/faqs'
 import { getSetAssets } from '@/lib/setAssets'
@@ -603,9 +603,11 @@ export default function CardPageClient({
           onMouseLeave={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.borderColor = 'var(--border)'; el.style.color = 'var(--text)' }}
         >
           <span style={{ fontSize: 11, opacity: 0.5 }}>←</span>
-          {logoUrl ? <img src={logoUrl} alt={card.set_name} style={{ height: 20, width: 'auto', objectFit: 'contain', maxWidth: 90 }} loading="lazy" /> : null}
+          {logoUrl ? <img src={logoUrl} alt={displaySetName(card.set_name, card.language as any)} style={{ height: 20, width: 'auto', objectFit: 'contain', maxWidth: 90 }} loading="lazy" /> : null}
           {symbolUrl && <img src={symbolUrl} alt="" style={{ width: 16, height: 16, objectFit: 'contain' }} loading="lazy" />}
-          <span>{card.set_name}</span>
+          {/* Block 5A-W-48C — visible set label strips "Japanese " prefix.
+              The href above still uses the internal set_name identity. */}
+          <span>{displaySetName(card.set_name, card.language as any)}</span>
         </Link>
         {speciesSlug && (
           <Link href={`/pokemon/${speciesSlug}`}
@@ -647,7 +649,9 @@ export default function CardPageClient({
                   {card.card_name.replace(/\s*#\d+\w*\s*$/, '').trim()}{cardNumberFormatted ? ` ${cardNumberFormatted}` : ''}
                 </h1>
                 <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 14px', fontFamily: "'Figtree', sans-serif" }}>
-                  {card.set_name}
+                  {/* Block 5A-W-48C — clean visible label; internal
+                      identity + href unaffected. */}
+                  {displaySetName(card.set_name, cardLang)}
                   {cardLang === 'jp' && (
                     <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 700, color: 'var(--primary)' }}>
                       · Language: Japanese

@@ -428,3 +428,128 @@ describe('W48B — foundation migration exists in the migrations directory', () 
     expect(mig).toContain('DROP COLUMN IF EXISTS language')
   })
 })
+
+// ── W48C — displaySetName wiring across every JP surface ───────
+
+describe('W48C — displaySetName wired into every visible JP surface', () => {
+  const CARD_PAGE_SRC = readFileSync(
+    join(process.cwd(), 'src/app/set/[slug]/card/[cardSlug]/CardPageClient.tsx'), 'utf8',
+  )
+  const SET_PAGE_SRC = readFileSync(
+    join(process.cwd(), 'src/app/set/[slug]/SetPageClient.tsx'), 'utf8',
+  )
+  const BROWSE_SRC = readFileSync(
+    join(process.cwd(), 'src/app/browse/BrowsePageClient.tsx'), 'utf8',
+  )
+  const SEARCH_SRC = readFileSync(
+    join(process.cwd(), 'src/components/SearchBar.tsx'), 'utf8',
+  )
+  const WATCHLIST_SRC = readFileSync(
+    join(process.cwd(), 'src/app/dashboard/watchlist/WatchlistClient.tsx'), 'utf8',
+  )
+  const PORTFOLIO_SRC = readFileSync(
+    join(process.cwd(), 'src/app/dashboard/portfolio/PortfolioDashboard.tsx'), 'utf8',
+  )
+  const SCANNER_SRC = readFileSync(
+    join(process.cwd(), 'src/components/CardScanner.tsx'), 'utf8',
+  )
+  const SEO_SRC = readFileSync(
+    join(process.cwd(), 'src/lib/seo-helpers.ts'), 'utf8',
+  )
+  const PAGE_SRC = readFileSync(
+    join(process.cwd(), 'src/app/set/[slug]/card/[cardSlug]/page.tsx'), 'utf8',
+  )
+
+  for (const [label, src] of [
+    ['card page client',    CARD_PAGE_SRC],
+    ['set page client',     SET_PAGE_SRC],
+    ['browse page client',  BROWSE_SRC],
+    ['search bar',          SEARCH_SRC],
+    ['watchlist client',    WATCHLIST_SRC],
+    ['portfolio dashboard', PORTFOLIO_SRC],
+    ['card scanner',        SCANNER_SRC],
+  ] as const) {
+    it(`${label} imports displaySetName`, () => {
+      expect(src).toContain('displaySetName')
+      expect(src).toContain("from '@/lib/cardLanguage'")
+    })
+  }
+
+  it('card page metadata uses displaySetName + jpMarker for JP printings', () => {
+    // Server-side generateMetadata now strips "Japanese " from the visible
+    // set label AND injects a " Japanese" market marker into the title so
+    // search snippets remain unambiguous.
+    expect(PAGE_SRC).toContain('displaySetName')
+    expect(PAGE_SRC).toContain('jpMarker')
+    expect(PAGE_SRC).toMatch(/jpMarker\s*=\s*cardLang === 'jp' \? ' Japanese' : ''/)
+  })
+
+  it('set-page SEO helper uses cleaned name + Japanese marker for JP sets', () => {
+    // For a JP set the title reads e.g. "Battle Partners Japanese Card
+    // List & Prices …" — the market marker sits AFTER the set name.
+    expect(SEO_SRC).toContain('isJp')
+    expect(SEO_SRC).toContain("visible = isJp ? safeName.slice('Japanese '.length) : safeName")
+    expect(SEO_SRC).toContain('jpMarker')
+    expect(SEO_SRC).toMatch(/canonical\s*=\s*`\$\{SITE\}\/set\/\$\{slug \?\? encodeURIComponent\(safeName\)\}`/)
+  })
+
+  it('canonical URLs still use the internal Japanese-prefixed identity', () => {
+    // Card page canonical takes `slug` (a URL param) — unchanged.
+    // Set page canonical takes safeName (internal set_name) — unchanged.
+    // Neither strips "Japanese " from the URL.
+    expect(SEO_SRC).not.toMatch(/canonical[\s\S]{0,120}displaySetName/)
+  })
+
+  it('card page renders JapaneseBadge in the H1 area (unchanged from W48B)', () => {
+    expect(CARD_PAGE_SRC).toMatch(/<JapaneseBadge\b/)
+  })
+  it('watchlist rows render the JapaneseBadge alongside the clean set label', () => {
+    expect(WATCHLIST_SRC).toContain('<JapaneseBadge')
+    expect(WATCHLIST_SRC).toMatch(/displaySetName\(item\.set_name/)
+  })
+  it('portfolio rows render the JapaneseBadge alongside the clean set label', () => {
+    expect(PORTFOLIO_SRC).toContain('<JapaneseBadge')
+    expect(PORTFOLIO_SRC).toMatch(/displaySetName\(item\.set_name/)
+  })
+  it('scanner candidates render the JapaneseBadge alongside the clean set label', () => {
+    expect(SCANNER_SRC).toContain('<JapaneseBadge')
+    expect(SCANNER_SRC).toMatch(/displaySetName\(c\.set_name/)
+  })
+
+  it('browse tiles use displaySetName but tile hrefs use the internal set_name', () => {
+    expect(BROWSE_SRC).toMatch(/displaySetName\(s\.set_name/)
+    // href construction is byte-identical to pre-W48C: uses raw set_name.
+    expect(BROWSE_SRC).toContain('href={`/set/${encodeURIComponent(s.set_name)}`}')
+  })
+
+  it('search fallback paths derive language + strip prefix on every match branch', () => {
+    // 5 branches in SearchBar's fallback: 4 card branches + 1 set branch.
+    // Each must derive language via resolveLanguage and use displaySetName
+    // for its sublabel/label.
+    const langLines = (SEARCH_SRC.match(/const lang = resolveLanguage\(null, [^)]+\)/g) || []).length
+    expect(langLines).toBeGreaterThanOrEqual(4)
+    const visSetLines = (SEARCH_SRC.match(/displaySetName\([^,)]+, lang\)/g) || []).length
+    expect(visSetLines).toBeGreaterThanOrEqual(4)
+  })
+})
+
+// ── W48C — internal identity + route preservation ─────────────
+
+describe('W48C — internal set identity + routes preserved', () => {
+  const SET_PAGE_SRC = readFileSync(
+    join(process.cwd(), 'src/app/set/[slug]/SetPageClient.tsx'), 'utf8',
+  )
+  const CARD_PAGE_SRC = readFileSync(
+    join(process.cwd(), 'src/app/set/[slug]/card/[cardSlug]/CardPageClient.tsx'), 'utf8',
+  )
+  it('set page breadcrumb + all navigation Links use raw setName / set_name', () => {
+    // At least one navigation link must still use the un-cleaned name.
+    expect(SET_PAGE_SRC).toContain('href={`/set/${encodeURIComponent(')
+  })
+  it('card page breadcrumb Link uses card.set_name (Japanese-prefixed) for href', () => {
+    expect(CARD_PAGE_SRC).toContain('href={`/set/${encodeURIComponent(card.set_name)}`}')
+  })
+  it('no /ja route added', () => {
+    expect(existsSync(join(process.cwd(), 'src/app/ja'))).toBe(false)
+  })
+})

@@ -7,7 +7,7 @@ import { getSetAssets, ERA_ORDER, ERA_DISPLAY_NAMES } from '@/lib/setAssets'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import FAQ from '@/components/FAQ'
 import { getBrowseFaqItems } from '@/lib/faqs'
-import { resolveLanguage } from '@/lib/cardLanguage'
+import { resolveLanguage, displaySetName } from '@/lib/cardLanguage'
 
 interface SetInfo {
   set_name: string
@@ -423,8 +423,10 @@ export default function BrowsePageClient() {
                   )}
                 </div>
                 <div style={{ minWidth: 0 }}>
+                  {/* Block 5A-W-48C — visible tile label strips leading
+                      "Japanese ". Href above still uses internal set_name. */}
                   <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: "'Figtree', sans-serif" }}>
-                    {s.set_name}
+                    {displaySetName(s.set_name, s.language)}
                   </div>
                   {/* Block 5A-W-48B — pill only renders for JP tiles. */}
                   {resolveLanguage(s.language, s.set_name) === 'jp' && (

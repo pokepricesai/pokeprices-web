@@ -101,12 +101,12 @@ export function getInsightsArticleFallbackDescription(headline: string): string 
 // ── Set page ───────────────────────────────────────────────────────
 
 /** Long set-page title. Used when the composed title stays ≤ 60 chars. */
-function longSetTitle(setName: string): string {
-  return `${setName} Card List & Prices | Most Valuable Cards & PSA 10 Values`
+function longSetTitle(setName: string, jpMarker: string): string {
+  return `${setName}${jpMarker} Card List & Prices | Most Valuable Cards & PSA 10 Values`
 }
 /** Short set-page title. Used when the long variant would exceed 60 chars. */
-function shortSetTitle(setName: string): string {
-  return `${setName} Card List & Prices | PSA 10 Values`
+function shortSetTitle(setName: string, jpMarker: string): string {
+  return `${setName}${jpMarker} Card List & Prices | PSA 10 Values`
 }
 
 export type SetSeo = {
@@ -125,12 +125,27 @@ const SERP_TITLE_MAX = 72
  * The long title variant matches the W34A brief; when it would blow
  * past the SERP cut-off, we shrink to a short variant that still
  * carries the "PSA 10 Values" anchor.
+ *
+ * Block 5A-W-48C — Japanese sets get:
+ *   * a visible set label with the leading "Japanese " prefix removed
+ *     (e.g. "Battle Partners Card List & Prices …")
+ *   * a "Japanese" market marker injected AFTER the set label so search
+ *     snippets remain unambiguous: "Battle Partners Japanese Card List
+ *     & Prices | Most Valuable Cards & PSA 10 Values"
+ *   * canonical URL still uses the internal Japanese-prefixed slug —
+ *     the URL identity is not rewritten.
  */
 export function getSetSeo(setName: string, slug?: string): SetSeo {
   const safeName = setName?.trim() || 'Pokémon'
-  const long     = longSetTitle(safeName)
-  const title    = long.length <= SERP_TITLE_MAX ? long : shortSetTitle(safeName)
-  const description = `Browse ${safeName} Pokémon cards with raw and PSA 10 prices. See the most valuable cards, chase cards, grading opportunities and current set price trends.`
+  const isJp = safeName.startsWith('Japanese ')
+  const visible = isJp ? safeName.slice('Japanese '.length) : safeName
+  const jpMarker = isJp ? ' Japanese' : ''
+  const long     = longSetTitle(visible, jpMarker)
+  const title    = long.length <= SERP_TITLE_MAX ? long : shortSetTitle(visible, jpMarker)
+  const descName = isJp ? `${visible} Japanese` : visible
+  const description = `Browse ${descName} Pokémon cards with raw and PSA 10 prices. See the most valuable cards, chase cards, grading opportunities and current set price trends.`
+  // Canonical retains the internal Japanese-prefixed identity — URL
+  // routing must not depend on the visible display name.
   const canonical = `${SITE}/set/${slug ?? encodeURIComponent(safeName)}`
   return { title, description, canonical }
 }

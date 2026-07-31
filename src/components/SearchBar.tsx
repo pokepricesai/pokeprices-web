@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { resolveLanguage } from '@/lib/cardLanguage'
+import { resolveLanguage, displaySetName } from '@/lib/cardLanguage'
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value)
@@ -68,10 +68,16 @@ export default function SearchBar({ placeholder = 'Search cards, sets, Pokémon�
           // search_global has been extended to return c.language.
           const setNameForLang = (r.subtitle || r.name) as string
           const language = resolveLanguage(r.language, setNameForLang)
+          // Block 5A-W-48C — visible labels strip the leading
+          // "Japanese " prefix for JP results. `href` still uses the
+          // internal Japanese-prefixed set_name identity, so search
+          // → card page routing is unaffected.
+          const visibleSetName = displaySetName(r.subtitle, language)
+          const visibleName    = displaySetName(r.name,     language)
           if (r.result_type === 'set') return {
             type: 'set' as const,
-            label: r.name,
-            sublabel: r.subtitle || 'Set',
+            label: visibleName,
+            sublabel: visibleSetName || 'Set',
             href: `/set/${encodeURIComponent(r.name)}`,
             image_url: r.image_url,
             price: null,
@@ -94,8 +100,8 @@ export default function SearchBar({ placeholder = 'Search cards, sets, Pokémon�
             type: 'card' as const,
             label: r.name,
             sublabel: r.card_number_display
-              ? `${r.subtitle} · #${r.card_number_display}`
-              : (r.subtitle || ''),
+              ? `${visibleSetName} · #${r.card_number_display}`
+              : (visibleSetName || ''),
             href,
             image_url: r.image_url,
             price: r.price_usd,
@@ -130,14 +136,19 @@ export default function SearchBar({ placeholder = 'Search cards, sets, Pokémon�
           .not('card_url_slug', 'is', null)
           .limit(8)
         if (!cancelled && setCardData && setCardData.length > 0) {
-          const mapped: Result[] = setCardData.map((c: any) => ({
-            type: 'card' as const,
-            label: c.card_name,
-            sublabel: `${c.set_name} · #${c.card_number}`,
-            href: `/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`,
-            image_url: c.image_url,
-            price: null,
-          }))
+          const mapped: Result[] = setCardData.map((c: any) => {
+            const lang = resolveLanguage(null, c.set_name)
+            const visSet = displaySetName(c.set_name, lang)
+            return {
+              type: 'card' as const,
+              label: c.card_name,
+              sublabel: `${visSet} · #${c.card_number}`,
+              href: `/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`,
+              image_url: c.image_url,
+              price: null,
+              language: lang,
+            }
+          })
           setResults(mapped)
           setOpen(true)
           setHighlighted(-1)
@@ -156,14 +167,19 @@ export default function SearchBar({ placeholder = 'Search cards, sets, Pokémon�
             .ilike('card_name', `%${nameTokens}%`)
             .not('card_url_slug', 'is', null)
             .limit(5)
-          return (r.data || []).map((c: any) => ({
-            type: 'card' as const,
-            label: c.card_name,
-            sublabel: c.card_number ? `${c.set_name} · #${c.card_number}` : c.set_name,
-            href: `/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`,
-            image_url: c.image_url,
-            price: null,
-          }))
+          return (r.data || []).map((c: any) => {
+            const lang = resolveLanguage(null, c.set_name)
+            const visSet = displaySetName(c.set_name, lang)
+            return {
+              type: 'card' as const,
+              label: c.card_name,
+              sublabel: c.card_number ? `${visSet} · #${c.card_number}` : visSet,
+              href: `/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`,
+              image_url: c.image_url,
+              price: null,
+              language: lang,
+            }
+          })
         })
       }
 
@@ -174,14 +190,19 @@ export default function SearchBar({ placeholder = 'Search cards, sets, Pokémon�
           .ilike('card_name', `%${q}%`)
           .not('card_url_slug', 'is', null)
           .limit(5)
-        return (r.data || []).map((c: any) => ({
-          type: 'card' as const,
-          label: c.card_name,
-          sublabel: c.card_number ? `${c.set_name} · #${c.card_number}` : c.set_name,
-          href: `/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`,
-          image_url: c.image_url,
-          price: null,
-        }))
+        return (r.data || []).map((c: any) => {
+          const lang = resolveLanguage(null, c.set_name)
+          const visSet = displaySetName(c.set_name, lang)
+          return {
+            type: 'card' as const,
+            label: c.card_name,
+            sublabel: c.card_number ? `${visSet} · #${c.card_number}` : visSet,
+            href: `/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`,
+            image_url: c.image_url,
+            price: null,
+            language: lang,
+          }
+        })
       })
 
       // Set name search
@@ -194,14 +215,18 @@ export default function SearchBar({ placeholder = 'Search cards, sets, Pokémon�
         return (r.data || [])
           .filter((s: any) => { if (seen.has(s.set_name)) return false; seen.add(s.set_name); return true })
           .slice(0, 4)
-          .map((s: any) => ({
-            type: 'set' as const,
-            label: s.set_name,
-            sublabel: 'View set',
-            href: `/set/${encodeURIComponent(s.set_name)}`,
-            image_url: null,
-            price: null,
-          }))
+          .map((s: any) => {
+            const lang = resolveLanguage(null, s.set_name)
+            return {
+              type: 'set' as const,
+              label: displaySetName(s.set_name, lang),
+              sublabel: 'View set',
+              href: `/set/${encodeURIComponent(s.set_name)}`,
+              image_url: null,
+              price: null,
+              language: lang,
+            }
+          })
       })
 
       // Card number search
@@ -214,14 +239,19 @@ export default function SearchBar({ placeholder = 'Search cards, sets, Pokémon�
             .in('card_number', [num, padded])
             .not('card_url_slug', 'is', null)
             .limit(4)
-          return (r.data || []).map((c: any) => ({
-            type: 'card' as const,
-            label: c.card_name,
-            sublabel: `${c.set_name} · #${c.card_number}`,
-            href: `/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`,
-            image_url: c.image_url,
-            price: null,
-          }))
+          return (r.data || []).map((c: any) => {
+            const lang = resolveLanguage(null, c.set_name)
+            const visSet = displaySetName(c.set_name, lang)
+            return {
+              type: 'card' as const,
+              label: c.card_name,
+              sublabel: `${visSet} · #${c.card_number}`,
+              href: `/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`,
+              image_url: c.image_url,
+              price: null,
+              language: lang,
+            }
+          })
         })
       }
 

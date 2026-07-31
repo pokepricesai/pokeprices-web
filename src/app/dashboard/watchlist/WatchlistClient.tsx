@@ -7,6 +7,8 @@ import { CardPortfolioAddModal } from '@/components/CardQuickActions'
 import EbayHoldingAction from '@/components/affiliate/EbayHoldingAction'
 import WatchlistAlertOverrideControl from '../watchlist-alerts/WatchlistAlertOverrideControl'
 import { canAddWatchlistItem } from '@/lib/account/entitlements'
+import { resolveLanguage, displaySetName } from '@/lib/cardLanguage'
+import JapaneseBadge from '@/components/JapaneseBadge'
 import { useUserPlan } from '@/lib/account/useUserPlan'
 import { loadWatchlistCount } from '@/lib/account/usage'
 
@@ -394,8 +396,13 @@ export default function WatchlistClient({ embedded = false }: { embedded?: boole
                       <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.3, marginBottom: 2 }}>
                         {item.card_name}{item.card_number ? ` · ${item.card_number}` : ''}
                       </div>
-                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-                        {item.set_name}
+                      {/* Block 5A-W-48C — clean visible set label +
+                          inline Japanese badge. Internal item.set_name
+                          + cardUrl above still use the Japanese-
+                          prefixed identity. */}
+                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span>{displaySetName(item.set_name, resolveLanguage(null, item.set_name))}</span>
+                        <JapaneseBadge language={resolveLanguage(null, item.set_name)} size="sm" />
                       </div>
                     </Link>
                   </div>

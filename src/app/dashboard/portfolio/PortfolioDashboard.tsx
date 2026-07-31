@@ -7,6 +7,8 @@ import CardScanner, { ConfirmedCard, ConfirmContext } from '@/components/CardSca
 import EbayHoldingAction from '@/components/affiliate/EbayHoldingAction'
 import { canAddPortfolioItem } from '@/lib/account/entitlements'
 import { useUserPlan } from '@/lib/account/useUserPlan'
+import { resolveLanguage, displaySetName } from '@/lib/cardLanguage'
+import JapaneseBadge from '@/components/JapaneseBadge'
 import { loadPortfolioItemCount } from '@/lib/account/usage'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge'
 import { portfolioOverLimitMessage } from '@/components/account/overLimitMessages'
@@ -252,7 +254,11 @@ function EditHoldingModal({
           {item.image_url && <img src={item.image_url} alt={item.card_name} style={{ width: 40, height: 56, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />}
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>{item.card_name}</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>{item.set_name}</div>
+            {/* Block 5A-W-48C — clean visible set label. */}
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>{displaySetName(item.set_name, resolveLanguage(null, item.set_name))}</span>
+              <JapaneseBadge language={resolveLanguage(null, item.set_name)} size="sm" />
+            </div>
           </div>
         </div>
 
@@ -1592,8 +1598,13 @@ export default function PortfolioDashboard() {
                         <Link href={cardUrl} style={{ textDecoration: 'none' }}>
                           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.3, marginBottom: 2 }}>{item.card_name}</div>
                         </Link>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-                          {item.set_name} · {grade}
+                        {/* Block 5A-W-48C — clean visible set label,
+                            inline Japanese badge. Internal item.set_name
+                            + cardUrl above still use Japanese-prefixed
+                            identity for routing / value lookup. */}
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span>{displaySetName(item.set_name, resolveLanguage(null, item.set_name))} · {grade}</span>
+                          <JapaneseBadge language={resolveLanguage(null, item.set_name)} size="sm" />
                           <span style={{
                             marginLeft: 6, padding: '1px 7px', borderRadius: 6,
                             background: item.quantity > 1 ? 'var(--primary)' : 'var(--bg-light)',
@@ -1788,7 +1799,7 @@ export default function PortfolioDashboard() {
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>{item.card_name}</div>
                             <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 2 }}>
-                              {item.set_name} · now {fmt(item.current_value_cents, currency)}
+                              {displaySetName(item.set_name, resolveLanguage(null, item.set_name))} · now {fmt(item.current_value_cents, currency)}
                               {aboveBuy && <span style={{ marginLeft: 6, color: '#22c55e', fontWeight: 700 }}>· well above your buy price</span>}
                             </div>
                             <div style={{ display: 'flex', gap: 12, marginTop: 4, fontSize: 11, fontFamily: "'Figtree', sans-serif" }}>

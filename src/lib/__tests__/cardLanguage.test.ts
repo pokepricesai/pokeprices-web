@@ -10,6 +10,7 @@ import {
   JAPANESE_SET_NAME_PREFIX,
   isJapaneseSetName,
   resolveLanguage,
+  displaySetName,
 } from '../cardLanguage'
 
 // ── Constant sanity ─────────────────────────────
@@ -128,5 +129,68 @@ describe('resolveLanguage', () => {
     expect(resolveLanguage('de' as any, 'Base Set')).toBe('en')
     expect(resolveLanguage('unknown' as any, 'Base Set')).toBe('en')
     expect(resolveLanguage('de' as any, 'Japanese Battle Partners')).toBe('jp')
+  })
+})
+
+// ── displaySetName — strips "Japanese " for jp records ─────────
+
+describe('displaySetName', () => {
+  it('strips leading "Japanese " for Japanese sets', () => {
+    expect(displaySetName('Japanese Battle Partners', 'jp')).toBe('Battle Partners')
+    expect(displaySetName('Japanese Terastal Fest ex', 'jp')).toBe('Terastal Fest ex')
+    expect(displaySetName('Japanese Base Set', 'jp')).toBe('Base Set')
+    expect(displaySetName('Japanese Fire Red & Leaf Green', 'jp')).toBe('Fire Red & Leaf Green')
+  })
+  it('leaves English set names unchanged when language=en', () => {
+    expect(displaySetName('Base Set', 'en')).toBe('Base Set')
+    expect(displaySetName('Team Rocket', 'en')).toBe('Team Rocket')
+    expect(displaySetName('Pokemon 151', 'en')).toBe('Pokemon 151')
+  })
+  it('leaves English set names unchanged when language is absent (derived to en)', () => {
+    expect(displaySetName('Base Set', null)).toBe('Base Set')
+    expect(displaySetName('Base Set', undefined)).toBe('Base Set')
+  })
+  it('respects an explicit English language override for a "Japanese "-prefixed set (data anomaly guard)', () => {
+    // If the RPC says en for a set whose name accidentally starts with
+    // "Japanese ", the helper trusts the RPC and returns the raw name.
+    // The prefix rule NEVER overrides an explicit language marker.
+    expect(displaySetName('Japanese Charm Set', 'en')).toBe('Japanese Charm Set')
+  })
+  it('does not strip an internal "Japanese" appearing mid-string', () => {
+    expect(displaySetName('The Japanese Emperor', 'jp')).toBe('The Japanese Emperor')
+    expect(displaySetName('Team Rocket Japanese Edition', 'en')).toBe('Team Rocket Japanese Edition')
+  })
+  it('is case-sensitive on the prefix', () => {
+    // A rogue lowercase "japanese " prefix is left in place — the
+    // seeder always writes the exact capitalisation.
+    expect(displaySetName('japanese Battle Partners', 'jp')).toBe('japanese Battle Partners')
+  })
+  it('returns an empty string for null / undefined / empty inputs (safe fallback)', () => {
+    expect(displaySetName(null, 'jp')).toBe('')
+    expect(displaySetName(undefined, 'jp')).toBe('')
+    expect(displaySetName('', 'jp')).toBe('')
+  })
+  it('coerces non-string inputs to empty (belt and braces)', () => {
+    expect(displaySetName(123 as any, 'jp')).toBe('')
+    expect(displaySetName({} as any, 'jp')).toBe('')
+  })
+  it('is a pure function — same inputs always yield the same output', () => {
+    for (let i = 0; i < 5; i++) {
+      expect(displaySetName('Japanese Battle Partners', 'jp')).toBe('Battle Partners')
+      expect(displaySetName('Base Set', 'en')).toBe('Base Set')
+    }
+  })
+  it('derives language via resolveLanguage when explicit is null (Japanese prefix triggers jp)', () => {
+    // Even without an explicit language argument, the prefix
+    // convention drives the derivation, so the visible label is
+    // still stripped.
+    expect(displaySetName('Japanese Battle Partners', null)).toBe('Battle Partners')
+    expect(displaySetName('Japanese Battle Partners', undefined)).toBe('Battle Partners')
+  })
+  it('preserves the set name in unusual edge cases', () => {
+    // Single-word JP set name — should return empty string after strip.
+    expect(displaySetName('Japanese', 'jp')).toBe('Japanese')  // No trailing space → not stripped
+    // "Japanese " (JP + space + nothing) is a degenerate case.
+    expect(displaySetName('Japanese ', 'jp')).toBe('')
   })
 })

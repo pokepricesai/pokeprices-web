@@ -7,6 +7,7 @@ import CardPageClient from './CardPageClient'
 import RecentSalesSection from '@/components/recentSales/RecentSalesSection'
 import { loadRecentSalesGroupedForCardIfEnabled } from '@/lib/recentSales/cardQueries'
 import { isCardIndexable } from '@/lib/seo-indexability/cardIndexability'
+import { displaySetName, resolveLanguage } from '@/lib/cardLanguage'
 // Block 5A-W-46B (with W46B-FIX1) — server-emit BreadcrumbSchema only.
 //   * BreadcrumbSchema moved up from CardPageClient (which fetched
 //     `card` via useEffect and therefore shipped an empty initial HTML
@@ -184,24 +185,37 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   // Grading variant: PSA 10 is 3x+ raw — grading angle beats raw price angle
   const useGradingVariant = multiple != null && multiple >= 3
 
+  // Block 5A-W-48C — visible set label strips the leading "Japanese "
+  // for Japanese sets so the title reads "Battle Partners" rather
+  // than "Japanese Battle Partners". `jpMarker` restates the market
+  // in the title so search-result snippets still make it clear this
+  // is a Japanese printing (per the block-brief metadata pattern
+  // "Battle Partners Japanese Pokémon Card Prices | PokePrices").
+  // Internal set_name, canonical URL, and RPC arguments retain the
+  // "Japanese " prefix — none of them are touched here.
+  const cardLang = resolveLanguage((card as any).language, card.set_name)
+  const setLabel = displaySetName(card.set_name, cardLang)
+  const jpMarker = cardLang === 'jp' ? ' Japanese' : ''
+  const descSetPhrase = cardLang === 'jp' ? `${setLabel} (Japanese)` : setLabel
+
   let title: string
   let description: string
 
   if (useGradingVariant && rawUsd && psa10Usd) {
-    title = `${name}${num} Price: ${fmt(card.psa10_usd!)} PSA 10 vs ${fmt(card.raw_usd!)} Raw — Worth Grading? (${year})`
-    description = `Is ${name}${num} worth grading? PSA 10 ${fmt(card.psa10_usd!)} is ${multiple!.toFixed(1)}× the raw price of ${fmt(card.raw_usd!)}. ${card.set_name} price guide — gem rate, grading spread, PSA population and recent sold listings.`
+    title = `${name}${num}${jpMarker} Price: ${fmt(card.psa10_usd!)} PSA 10 vs ${fmt(card.raw_usd!)} Raw — Worth Grading? (${year})`
+    description = `Is ${name}${num} worth grading? PSA 10 ${fmt(card.psa10_usd!)} is ${multiple!.toFixed(1)}× the raw price of ${fmt(card.raw_usd!)}. ${descSetPhrase} price guide — gem rate, grading spread, PSA population and recent sold listings.`
   } else if (rawUsd && psa10Usd) {
-    title = `${name}${num} Price & Value: ${fmt(card.raw_usd!)} Raw, ${fmt(card.psa10_usd!)} PSA 10 (${year}) — ${card.set_name}`
-    description = `How much is ${name}${num} worth? ${card.set_name} price guide — ${fmt(card.raw_usd!)} raw${psa9Usd ? `, ${fmt(card.psa9_usd!)} PSA 9` : ''}, ${fmt(card.psa10_usd!)} PSA 10. Price trend, grading spread, PSA population and recent sold listings.`
+    title = `${name}${num}${jpMarker} Price & Value: ${fmt(card.raw_usd!)} Raw, ${fmt(card.psa10_usd!)} PSA 10 (${year}) — ${setLabel}`
+    description = `How much is ${name}${num} worth? ${descSetPhrase} price guide — ${fmt(card.raw_usd!)} raw${psa9Usd ? `, ${fmt(card.psa9_usd!)} PSA 9` : ''}, ${fmt(card.psa10_usd!)} PSA 10. Price trend, grading spread, PSA population and recent sold listings.`
   } else if (psa10Usd) {
-    title = `${name}${num} PSA 10 Price & Value: ${fmt(card.psa10_usd!)} (${year}) — ${card.set_name}`
-    description = `${name}${num} PSA 10 value: ${fmt(card.psa10_usd!)}. ${card.set_name} price guide — price trend, PSA population, gem rate and recent sold listings. Updated daily.`
+    title = `${name}${num}${jpMarker} PSA 10 Price & Value: ${fmt(card.psa10_usd!)} (${year}) — ${setLabel}`
+    description = `${name}${num} PSA 10 value: ${fmt(card.psa10_usd!)}. ${descSetPhrase} price guide — price trend, PSA population, gem rate and recent sold listings. Updated daily.`
   } else if (rawUsd) {
-    title = `${name}${num} Price: ${fmt(card.raw_usd!)} Raw (${year}) — ${card.set_name}`
-    description = `How much is ${name}${num} worth? ${card.set_name} price guide — currently ${fmt(card.raw_usd!)} raw. Price trend, grading data, PSA population and recent sold listings. Updated daily.`
+    title = `${name}${num}${jpMarker} Price: ${fmt(card.raw_usd!)} Raw (${year}) — ${setLabel}`
+    description = `How much is ${name}${num} worth? ${descSetPhrase} price guide — currently ${fmt(card.raw_usd!)} raw. Price trend, grading data, PSA population and recent sold listings. Updated daily.`
   } else {
-    title = `${name}${num} Pokémon Card Price Guide (${year}) — ${card.set_name}`
-    description = `Track ${name}${num} from ${card.set_name}: raw, PSA 9 and PSA 10 prices, grading spreads, PSA population and recent sold listings. Price guide updated daily.`
+    title = `${name}${num}${jpMarker} Pokémon Card Price Guide (${year}) — ${setLabel}`
+    description = `Track ${name}${num} from ${descSetPhrase}: raw, PSA 9 and PSA 10 prices, grading spreads, PSA population and recent sold listings. Price guide updated daily.`
   }
 
   // Block 5A-W-35 — thin-card gate. Card rows with no market signal

@@ -23,6 +23,8 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { getDeviceId } from '@/lib/deviceId'
 import { HOLDING_TYPES } from '@/lib/portfolioGrades'
+import { resolveLanguage, displaySetName } from '@/lib/cardLanguage'
+import JapaneseBadge from './JapaneseBadge'
 
 const SCAN_FN_SLUG = process.env.NEXT_PUBLIC_SCAN_CARD_FN_SLUG || 'quick-action'
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://egidpsrkqvymvioidatc.supabase.co'
@@ -58,6 +60,10 @@ interface Candidate {
   confidence: number
   number_match?: boolean
   denom_match?: boolean
+  /** Block 5A-W-48C — 'en' | 'jp'. scan_card_match returns this per
+   *  candidate; the visible label uses displaySetName() so JP results
+   *  show "Battle Partners" not "Japanese Battle Partners". */
+  language?: string | null
 }
 
 interface ScanResponse {
@@ -911,8 +917,12 @@ function CandidateRow({
       </div>
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
         <strong style={{ fontFamily: "'Figtree', sans-serif", fontSize: 13, color: 'var(--text)' }}>{c.clean_name}</strong>
-        <span style={{ fontFamily: "'Figtree', sans-serif", fontSize: 11, color: 'var(--text-muted)' }}>
-          {c.set_name} · {c.card_number_display || c.card_number}
+        {/* Block 5A-W-48C — clean visible set label + inline badge.
+            When confirmed, the confirmed card retains c.set_name so
+            navigation lands on the internal Japanese-prefixed route. */}
+        <span style={{ fontFamily: "'Figtree', sans-serif", fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span>{displaySetName(c.set_name, resolveLanguage(c.language, c.set_name))} · {c.card_number_display || c.card_number}</span>
+          <JapaneseBadge language={resolveLanguage(c.language, c.set_name)} size="sm" />
         </span>
         <button onClick={onConfirm} style={{ ...smallPrimaryButtonStyle, marginTop: 6 }}>
           {ctaLabel}
