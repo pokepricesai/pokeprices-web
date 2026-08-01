@@ -15,7 +15,41 @@ const STORAGE_KEY = 'pp_intended_action_v1'
 const TTL_MS      = 30 * 60 * 1000 // 30 minutes; longer than a Supabase magic-link window.
 
 export type IntendedAction =
-  | { type: 'watchlist_add';   payload: { card_slug: string; card_name: string; set_name: string; image_url?: string | null; card_number?: string | null; raw_usd?: number | null; psa10_usd?: number | null } }
+  | {
+      type: 'watchlist_add'
+      /** Block 5A-W-50B-FIX1 — `origin_set_name`, when present, scopes
+       *  the replay to the set page whose CardGrid produced the intent.
+       *  The existing card-page replay path (CardQuickActions) still
+       *  matches on card_slug alone, so pre-existing intents remain
+       *  compatible. */
+      payload: {
+        card_slug:        string
+        card_name:        string
+        set_name:         string
+        image_url?:       string | null
+        card_number?:     string | null
+        raw_usd?:         number | null
+        psa10_usd?:       number | null
+        origin_set_name?: string
+      }
+    }
+  | {
+      /** Block 5A-W-50B-FIX1 — logged-out Portfolio click on a set
+       *  tile. On return we open the existing portfolio modal for
+       *  this card; we never auto-write a holding without the modal
+       *  taking user input. */
+      type: 'portfolio_open'
+      payload: {
+        card_slug:        string
+        card_name:        string
+        set_name:         string
+        image_url?:       string | null
+        card_number?:     string | null
+        raw_usd?:         number | null
+        psa10_usd?:       number | null
+        origin_set_name:  string
+      }
+    }
   | { type: 'card_show_star';  payload: { show_id: string } }
 
 type StoredAction = IntendedAction & { ts: number }
@@ -53,7 +87,7 @@ export function consumeIntendedAction(): IntendedAction | null {
   try { parsed = JSON.parse(raw) } catch { return null }
   if (!parsed || typeof parsed !== 'object') return null
   if (typeof parsed.ts !== 'number' || Date.now() - parsed.ts > TTL_MS) return null
-  if (parsed.type !== 'watchlist_add' && parsed.type !== 'card_show_star') return null
+  if (parsed.type !== 'watchlist_add' && parsed.type !== 'card_show_star' && parsed.type !== 'portfolio_open') return null
   if (!parsed.payload || typeof parsed.payload !== 'object') return null
   // Strip the ts field before returning.
   const { ts: _ts, ...rest } = parsed

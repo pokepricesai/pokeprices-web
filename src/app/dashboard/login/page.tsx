@@ -26,7 +26,15 @@ function PortfolioLoginInner() {
   const safeReturn = safeReturnTo(searchParams.get('returnTo')) ?? '/dashboard'
   const callbackError = searchParams.get('error')
 
-  const [mode, setMode] = useState<Mode>('signin')
+  // Block 5A-W-50B-FIX1 — allow the initial mode to be selected via
+  // `?mode=signup|signin|magic`. Callers (e.g. set-page auth prompt's
+  // "Create free account" link) can now land the user directly on the
+  // registration form instead of the default sign-in form.
+  const initialMode: Mode = (() => {
+    const m = searchParams.get('mode')
+    return (m === 'signup' || m === 'signin' || m === 'magic') ? m : 'signin'
+  })()
+  const [mode, setMode] = useState<Mode>(initialMode)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')

@@ -15,6 +15,18 @@ import FAQ from '@/components/FAQ'
 import { EbayInlineLink } from '@/components/EbayLiveListings'
 import { buildCardEbayQuery, getEbayUkUrl, getEbayUsUrl } from '@/lib/ebayAffiliate'
 import { getSetFaqItems } from '@/lib/faqs'
+// Block 5A-W-50B — quick Watch + Portfolio actions inside every set-
+// page card tile. Two per-set bulk queries provide membership state,
+// so no per-tile watchlist/portfolio SELECT happens even for a set
+// with 500+ cards.
+import SetCardTileActions, { type TileCard } from '@/components/SetCardTileActions'
+import AuthPromptModal, { type AuthPromptContext } from '@/components/AuthPromptModal'
+import { CardPortfolioAddModal } from '@/components/CardQuickActions'
+import { loadSetMembership, EMPTY_MEMBERSHIP, normaliseSlug, type SetMembership } from '@/lib/setPageMembership'
+import { useUserPlan } from '@/lib/account/useUserPlan'
+import { peekIntendedAction, consumeIntendedAction } from '@/lib/intendedAction'
+import { performWatchlistAdd } from '@/lib/watchlistOps'
+import { trackEvent } from '@/lib/analytics'
 
 interface Card {
   card_slug: string
@@ -119,37 +131,67 @@ function MoverRow({ card, setName, positive }: { card: TrendCard; setName: strin
   )
 }
 
-function CardGrid({ cards, setName }: { cards: Card[]; setName: string }) {
+// Block 5A-W-50B — CardGrid now renders each tile as a wrapping
+// <div> instead of a wrapping <Link>. This is required so the two
+// action <button>s can live inside the same visual card without
+// violating HTML nesting rules (buttons cannot appear inside an <a>).
+// The clickable card body — image + name + prices — remains a Link;
+// only the tiny action row at the bottom sits outside it. Clicking
+// the image or the name still navigates to the card page exactly as
+// before; the row of two buttons is the only new interactive surface.
+type TileActionProps = React.ComponentProps<typeof SetCardTileActions>
+function CardGrid({
+  cards, setName, buildTileActionProps,
+}: {
+  cards: Card[]
+  setName: string
+  buildTileActionProps?: (c: Card) => TileActionProps | null
+}) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
-      {cards.map(c => (
-        <Link
-          key={c.card_slug}
-          href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`}
-          className="card-hover holo-shimmer"
-          style={{ background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)', padding: 14, textDecoration: 'none', color: 'var(--text)', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
-        >
-          {c.image_url
-            ? <img src={c.image_url} alt={c.card_name} style={{ width: 110, height: 154, objectFit: 'contain', marginBottom: 8, borderRadius: 6 }} loading="lazy" />
-            : <div style={{ width: 110, height: 154, background: 'var(--bg)', borderRadius: 6, marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, color: 'var(--border)' }}>{c.is_sealed ? '📦' : '🃏'}</div>}
-          <div style={{ fontWeight: 600, fontSize: 13, textAlign: 'center', marginBottom: 3, lineHeight: 1.3, fontFamily: "'Figtree', sans-serif", display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-            {c.card_name}
+      {cards.map(c => {
+        const actionProps = buildTileActionProps ? buildTileActionProps(c) : null
+        return (
+          <div
+            key={c.card_slug}
+            className="card-hover holo-shimmer"
+            style={{ background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)', padding: 14, color: 'var(--text)', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
+          >
+            <Link
+              href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`}
+              style={{ textDecoration: 'none', color: 'inherit', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}
+              aria-label={`Open ${c.card_name}`}
+            >
+              {c.image_url
+                ? <img src={c.image_url} alt={c.card_name} style={{ width: 110, height: 154, objectFit: 'contain', marginBottom: 8, borderRadius: 6 }} loading="lazy" />
+                : <div style={{ width: 110, height: 154, background: 'var(--bg)', borderRadius: 6, marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, color: 'var(--border)' }}>{c.is_sealed ? '📦' : '🃏'}</div>}
+              <div style={{ fontWeight: 600, fontSize: 13, textAlign: 'center', marginBottom: 3, lineHeight: 1.3, fontFamily: "'Figtree', sans-serif", display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                {c.card_name}
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+                {c.is_sealed ? 'Sealed' : 'Raw'}: {formatPrice(c.raw_usd)}
+              </div>
+              {!c.is_sealed && c.psa10_usd && c.psa10_usd > 0 && (
+                <div style={{ fontSize: 12, color: 'var(--accent-hover)', fontWeight: 500, fontFamily: "'Figtree', sans-serif" }}>
+                  PSA 10: {formatPrice(c.psa10_usd)}
+                </div>
+              )}
+            </Link>
+            {actionProps && <SetCardTileActions {...actionProps} />}
           </div>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-            {c.is_sealed ? 'Sealed' : 'Raw'}: {formatPrice(c.raw_usd)}
-          </div>
-          {!c.is_sealed && c.psa10_usd && c.psa10_usd > 0 && (
-            <div style={{ fontSize: 12, color: 'var(--accent-hover)', fontWeight: 500, fontFamily: "'Figtree', sans-serif" }}>
-              PSA 10: {formatPrice(c.psa10_usd)}
-            </div>
-          )}
-        </Link>
-      ))}
+        )
+      })}
     </div>
   )
 }
 
-function SealedSection({ sealedCards, setName }: { sealedCards: Card[]; setName: string }) {
+function SealedSection({
+  sealedCards, setName, buildTileActionProps,
+}: {
+  sealedCards: Card[]
+  setName: string
+  buildTileActionProps?: (c: Card) => React.ComponentProps<typeof SetCardTileActions> | null
+}) {
   if (sealedCards.length === 0) return null
   return (
     <div id="sealed" style={{ marginTop: 32 }}>
@@ -163,7 +205,7 @@ function SealedSection({ sealedCards, setName }: { sealedCards: Card[]; setName:
       <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 14, lineHeight: 1.6, background: 'var(--bg-light)', borderRadius: 8, padding: '10px 14px' }}>
         Sealed product prices track market value of unopened product — not individual cards.
       </p>
-      <CardGrid cards={sealedCards} setName={setName} />
+      <CardGrid cards={sealedCards} setName={setName} buildTileActionProps={buildTileActionProps} />
     </div>
   )
 }
@@ -248,6 +290,139 @@ export default function SetPageClient({ slug }: { slug: string }) {
   // Block 5A-W-48B — read set_metadata.language so the header pill
   // renders "Japanese" for JP sets. Missing / 'en' → nothing renders.
   const [setLanguage, setSetLanguage] = useState<string | null>(null)
+
+  // ── Block 5A-W-50B — user, plan and per-set membership state for
+  //    the tile actions. Two paginated queries per set-load;
+  //    anonymous users skip both.
+  const [user, setUser] = useState<{ id: string } | null>(null)
+  const { plan } = useUserPlan(user?.id ?? null)
+  const [membership, setMembership] = useState<SetMembership>(EMPTY_MEMBERSHIP)
+  const [authPromptOpen, setAuthPromptOpen] = useState<AuthPromptContext | null>(null)
+  const [portfolioModalCard, setPortfolioModalCard] = useState<{ card: TileCard; bareSlug: string } | null>(null)
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ? { id: session.user.id } : null)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+      setUser(session?.user ? { id: session.user.id } : null)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    if (!user?.id || !setName) { setMembership(EMPTY_MEMBERSHIP); return }
+    let live = true
+    loadSetMembership(supabase, user.id, setName).then(m => {
+      if (live) setMembership(m)
+    })
+    return () => { live = false }
+  }, [user?.id, setName])
+
+  // Block 5A-W-50B-FIX1 — intent replay on the set page.
+  //
+  // If the user clicked Watch or Portfolio while logged out, we
+  // stored the intent + redirected them to /dashboard/login with
+  // returnTo=<this set page>. On return we peek the stored intent
+  // and only consume it if origin_set_name matches THIS set. An
+  // intent from another set is left alone so it can replay when the
+  // user visits the matching set. Every acted-on intent is cleared,
+  // whether the replay succeeds or fails, so nothing lingers.
+  useEffect(() => {
+    if (!user?.id || !setName) return
+    const peeked = peekIntendedAction()
+    if (!peeked) return
+    const payload = peeked.payload as any
+    const originSet: string | undefined = payload?.origin_set_name
+    // Only act on set-page intents (must carry origin_set_name and
+    // match the current set). Older card-page intents without the
+    // origin field are handled by CardQuickActions on the card page.
+    if (!originSet || originSet !== setName) return
+    // Consume — clears whether we act or fail.
+    consumeIntendedAction()
+
+    if (peeked.type === 'watchlist_add') {
+      ;(async () => {
+        trackEvent('watchlist_add_attempt', {
+          card_slug:        payload.card_slug,
+          set_slug:         setName,
+          source_component: 'set_tile_replay',
+        })
+        const id = await performWatchlistAdd(supabase, user.id, {
+          card_slug:   payload.card_slug,
+          card_name:   payload.card_name,
+          set_name:    payload.set_name,
+          image_url:   payload.image_url ?? null,
+          card_number: payload.card_number ?? null,
+          raw_usd:     payload.raw_usd    ?? null,
+          psa10_usd:   payload.psa10_usd  ?? null,
+        })
+        if (id) {
+          trackEvent('watchlist_add_success', {
+            card_slug:        payload.card_slug,
+            set_slug:         setName,
+            source_component: 'set_tile_replay',
+          })
+          // Refresh membership so the tile flips to Watching.
+          loadSetMembership(supabase, user.id, setName).then(setMembership)
+        }
+      })()
+    } else if (peeked.type === 'portfolio_open') {
+      // Open the existing portfolio modal with the intent card.
+      const tileCard: TileCard = {
+        card_slug:     payload.card_slug,
+        card_name:     payload.card_name,
+        card_number:   payload.card_number ?? null,
+        set_name:      payload.set_name,
+        raw_usd:       payload.raw_usd    ?? null,
+        psa10_usd:     payload.psa10_usd  ?? null,
+        image_url:     payload.image_url  ?? null,
+        card_url_slug: payload.card_slug,
+        is_sealed:     false,
+      }
+      setPortfolioModalCard({ card: tileCard, bareSlug: payload.card_slug })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, setName])
+
+  const buildTileActionProps = (c: Card) => {
+    // Block 5A-W-50B-FIX1 — sealed products (booster boxes, ETBs,
+    // tins) don't have a matching holding_type in the portfolio
+    // schema (HOLDING_TYPES covers raw + graded only), so we hide
+    // the tile actions on sealed tiles. Sealed tiles keep their
+    // normal navigation to the individual card page.
+    if (c.is_sealed) return null
+    const bareSlug = normaliseSlug(c.card_slug)
+    return {
+      card: {
+        card_slug:     c.card_slug,
+        card_name:     c.card_name,
+        card_number:   c.card_number ?? null,
+        set_name:      c.set_name,
+        raw_usd:       c.raw_usd,
+        psa10_usd:     c.psa10_usd,
+        image_url:     c.image_url,
+        card_url_slug: c.card_url_slug,
+        is_sealed:     c.is_sealed,
+      } as TileCard,
+      bareSlug,
+      user,
+      plan,
+      isWatched:     membership.watched.has(bareSlug),
+      isInPortfolio: membership.inPortfolio.has(bareSlug),
+      onWatchedChanged: (slug: string, watched: boolean) => {
+        setMembership(prev => {
+          const next = new Set(prev.watched)
+          if (watched) next.add(slug); else next.delete(slug)
+          return { ...prev, watched: next }
+        })
+      },
+      onOpenAuthPrompt: (ctx: AuthPromptContext) => setAuthPromptOpen(ctx),
+      onOpenPortfolio:  (card: TileCard, bareSlug: string) => {
+        setPortfolioModalCard({ card, bareSlug })
+      },
+    }
+  }
 
   useEffect(() => {
     async function loadData() {
@@ -541,8 +716,8 @@ export default function SetPageClient({ slug }: { slug: string }) {
         </div>
       ) : (
         <>
-          <CardGrid cards={regularCards} setName={setName} />
-          <SealedSection sealedCards={sealedCards} setName={setName} />
+          <CardGrid cards={regularCards} setName={setName} buildTileActionProps={buildTileActionProps} />
+          <SealedSection sealedCards={sealedCards} setName={setName} buildTileActionProps={buildTileActionProps} />
         </>
       )}
 
@@ -555,6 +730,37 @@ export default function SetPageClient({ slug }: { slug: string }) {
           totalSetValueCents: totalSetValue,
           cardsTracked: regularCards.length,
         })} />
+      )}
+
+      {/* Block 5A-W-50B — shared modal state for the tile actions. */}
+      <AuthPromptModal
+        open={authPromptOpen !== null}
+        context={authPromptOpen ?? 'watchlist'}
+        returnTo={typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/'}
+        onClose={() => setAuthPromptOpen(null)}
+      />
+      {portfolioModalCard && user && (
+        <CardPortfolioAddModal
+          card={{
+            card_slug:     portfolioModalCard.card.card_slug,
+            card_name:     portfolioModalCard.card.card_name,
+            set_name:      portfolioModalCard.card.set_name,
+            card_url_slug: portfolioModalCard.card.card_url_slug,
+            image_url:     portfolioModalCard.card.image_url,
+            card_number:   portfolioModalCard.card.card_number,
+            raw_usd:       portfolioModalCard.card.raw_usd,
+            psa10_usd:     portfolioModalCard.card.psa10_usd,
+          }}
+          cardSlug={portfolioModalCard.bareSlug}
+          user={user}
+          onClose={() => {
+            setPortfolioModalCard(null)
+            // Refresh membership so the tile flips to "Owned" after
+            // a successful add. Avoids per-tile queries by refreshing
+            // just the two-query bulk load.
+            if (user?.id) loadSetMembership(supabase, user.id, setName).then(setMembership)
+          }}
+        />
       )}
     </div>
   )
