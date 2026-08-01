@@ -311,7 +311,10 @@ export default function AdminDashboardClient({ recentSalesAvailable }: AdminDash
               (no moderation tool yet). No link. */}
           <MetricCard label="Pending creators"   value={summary.pendingCreators}   href={null}            hint="Submitted, no admin review tool available" />
           <MetricCard label="Active vendors"     value={summary.activeVendors}     href="/vendors"        hint="View public directory" />
-          <MetricCard label="Pending vendors"    value={summary.pendingVendors}    href={null}            hint="Submitted, no admin review tool available" />
+          {/* Block 5A-W-50A — pending vendors now link to the new
+              moderation tool so approval no longer requires editing
+              Supabase directly. */}
+          <MetricCard label="Pending vendors"    value={summary.pendingVendors}    href="/admin/vendors"  hint="Approve, verify or unpublish" />
           <MetricCard label="Cards in catalogue" value={summary.cardsInCatalogue}  href={null}            hint="From cards table" />
           <MetricCard label="Content-studio posts" value={summary.contentPosts}    href="/admin/content-studio" hint="Saved posts total" />
         </div>
@@ -357,6 +360,15 @@ export default function AdminDashboardClient({ recentSalesAvailable }: AdminDash
             purpose="Compose newsletters using movers, market-index and card data."
             href="/admin/newsletter-studio"
             primary="Open Newsletter Studio"
+          />
+          {/* Block 5A-W-50A — vendor moderation. Previously Luke had to
+              edit vendors.active in Supabase by hand; this tool now
+              provides Approve / Verify / Unpublish actions directly. */}
+          <ToolCard
+            name="Vendor moderation"
+            purpose="Approve pending vendor submissions, toggle verified badges, or unpublish."
+            href="/admin/vendors"
+            primary="Open vendor moderation"
           />
           {recentSalesAvailable ? (
             <ToolCard

@@ -101,14 +101,17 @@ export function deriveAttention(input: AttentionInput): AttentionItem[] {
     })
   }
   if (typeof input.pendingVendors === 'number' && input.pendingVendors > 0) {
-    // FIX1 — informational only, same reasoning as pending creators.
+    // Block 5A-W-50A — moderation tool now exists at /admin/vendors,
+    // so this is a real actionable row rather than an informational
+    // signal. Clicking through lets Luke approve / verify / unpublish
+    // without editing Supabase directly.
     out.push({
       key:   'pending-vendors',
-      label: 'Vendor submissions awaiting a moderation tool',
+      label: 'Vendor submissions awaiting review',
       count: input.pendingVendors,
-      reason:`${input.pendingVendors} vendor submission${input.pendingVendors === 1 ? '' : 's'} with active = false. No admin review tool is currently available.`,
-      href:  null,
-      informational: true,
+      reason:`${input.pendingVendors} vendor submission${input.pendingVendors === 1 ? '' : 's'} with active = false. Approve, verify or unpublish in the moderation tool.`,
+      href:  '/admin/vendors',
+      informational: false,
     })
   }
   const staleDays = priceStalenessDays(input.latestPriceDate, input.today)

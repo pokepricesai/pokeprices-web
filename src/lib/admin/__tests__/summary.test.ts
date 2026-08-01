@@ -108,12 +108,12 @@ describe('deriveAttention', () => {
     // And critically — the label must NOT pretend this is a review action.
     expect(out[0].label.toLowerCase()).not.toContain('pending review')
   })
-  it('FIX1 — pending vendors surface as INFORMATIONAL (no misleading moderation link)', () => {
+  it('Block 5A-W-50A — pending vendors are actionable and link to /admin/vendors', () => {
     const out = deriveAttention({ ...CALM, pendingVendors: 5 })
     expect(out.map(a => a.key)).toEqual(['pending-vendors'])
-    expect(out[0].href).toBeNull()
-    expect(out[0].informational).toBe(true)
-    expect(out[0].reason).toMatch(/no admin review tool/i)
+    expect(out[0].href).toBe('/admin/vendors')
+    expect(out[0].informational).toBe(false)
+    expect(out[0].reason).toMatch(/moderation tool/i)
     expect(out[0].label.toLowerCase()).not.toContain('pending review')
   })
   it('surfaces stale price data when > 2 days old', () => {

@@ -25,12 +25,21 @@ const SPECIALISM_LABELS: Record<string, string> = {
   accessories: 'Accessories',
 }
 
+// Block 5A-W-50A — every vendor_type the submission form accepts is
+// also shown here. Previously the listing hid online_shop / marketplace
+// / private_seller entirely, so a submitter approved as one of those
+// types (e.g. EvoMarket, a marketplace) would be invisible to the
+// public despite `active=true`. Approval rule is now uniform: active
+// vendors appear; the type filters below narrow rather than exclude.
 const FILTER_TYPES = [
-  { value: 'all',             label: 'All'           },
-  { value: 'physical_shop',   label: '🏪 Shops'      },
-  { value: 'retailer',        label: '📦 Retailers'  },
+  { value: 'all',             label: 'All'            },
+  { value: 'physical_shop',   label: '🏪 Shops'       },
+  { value: 'retailer',        label: '📦 Retailers'   },
   { value: 'ebay_store',      label: '🛒 eBay Stores' },
-  { value: 'grading_service', label: '🏆 Grading'    },
+  { value: 'grading_service', label: '🏆 Grading'     },
+  { value: 'marketplace',     label: '🔄 Marketplaces'},
+  { value: 'online_shop',     label: '🌐 Online'      },
+  { value: 'private_seller',  label: '👤 Private'     },
 ]
 
 interface Vendor {
@@ -293,13 +302,16 @@ export default function VendorsPageClient() {
       setVendors(all.filter(v => !v.multiple_locations))
       setChainVendors(all.filter(v => v.multiple_locations))
     } else {
+      // Block 5A-W-50A — approval is the single visibility rule
+      // (`active=true`). The old `.not('vendor_type', 'in', …)` clause
+      // silently hid every marketplace / online_shop / private_seller
+      // even after Luke approved them in Supabase. Removed so
+      // approval alone is sufficient; users still narrow by vendor
+      // type via the FILTER_TYPES chips.
       let query = supabase
         .from('vendors')
         .select('*')
         .eq('active', true)
-        // Allow physical shops, retailers, ebay stores and grading services
-        // Exclude online-only, marketplaces and private sellers from directory
-        .not('vendor_type', 'in', '(online_shop,marketplace,private_seller)')
         .order('verified', { ascending: false })
         .order('name', { ascending: true })
       if (type !== 'all') query = query.eq('vendor_type', type)
