@@ -8,6 +8,13 @@ import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import FAQ from '@/components/FAQ'
 import { getBrowseFaqItems } from '@/lib/faqs'
 import { resolveLanguage, displaySetName } from '@/lib/cardLanguage'
+// Block 5A-W-50C — per-set portfolio completion.
+import SetCompletionProgress from '@/components/SetCompletionProgress'
+import {
+  loadPortfolioOwnedBySet,
+  buildCompletionMap,
+  type SetCompletionMap,
+} from '@/lib/setCompletion'
 
 interface SetInfo {
   set_name: string
@@ -39,7 +46,11 @@ interface TrendingSet {
   total_pct_90d: number
 }
 
-type SortOption = 'release_desc' | 'release_asc' | 'az' | 'za' | 'price_desc' | 'price_asc' | 'cards_desc'
+// Block 5A-W-50C — 'completion_desc' is the "Most complete" sort. It
+// is exposed in the UI only when the user is authenticated (anonymous
+// users cannot select it and the option itself is hidden). Every
+// existing sort remains available.
+type SortOption = 'release_desc' | 'release_asc' | 'az' | 'za' | 'price_desc' | 'price_asc' | 'cards_desc' | 'completion_desc'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -231,6 +242,11 @@ export default function BrowsePageClient() {
   const [eraFilter, setEraFilter]       = useState<string>('all')
   const [languageFilter, setLanguageFilter] = useState<LanguageFilter>('en')
   const [trendingSets, setTrendingSets] = useState<{ rising: TrendingSet[]; falling: TrendingSet[] } | null>(null)
+  // Block 5A-W-50C — user + completion state. Public set data does
+  // NOT wait on completion; the map hydrates in a second effect once
+  // the user is known. Anonymous users skip the query entirely.
+  const [userId, setUserId] = useState<string | null>(null)
+  const [completion, setCompletion] = useState<SetCompletionMap>({})
 
   useEffect(() => {
     async function loadSets() {
@@ -247,6 +263,41 @@ export default function BrowsePageClient() {
     }
     loadSets()
   }, [])
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUserId(session?.user?.id ?? null)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+      setUserId(session?.user?.id ?? null)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  // If the user signs out while "Most complete" is active, drop back
+  // to the default sort — otherwise the sort chip would disappear
+  // but the state would remain, and the browse list would appear
+  // stuck on the wrong ordering.
+  useEffect(() => {
+    if (!userId && sort === 'completion_desc') setSort('release_desc')
+  }, [userId, sort])
+
+  useEffect(() => {
+    if (!userId || sets.length === 0) { setCompletion({}); return }
+    let live = true
+    ;(async () => {
+      const owned = await loadPortfolioOwnedBySet(supabase, userId)
+      // Denominators come directly from get_set_list_v2 (already
+      // loaded above). Verified against the live cards table: the
+      // RPC's card_count matches COUNT(*) WHERE is_sealed = false
+      // for every sampled set (English, Japanese, Promo, pilot).
+      const totals: Record<string, number> = {}
+      for (const s of sets) totals[s.set_name] = s.card_count ?? 0
+      const map = buildCompletionMap(owned, totals)
+      if (live) setCompletion(map)
+    })()
+    return () => { live = false }
+  }, [userId, sets])
 
   // Eras that actually have at least one set in the current data, newest era first
   const availableEras = [...ERA_ORDER]
@@ -275,6 +326,23 @@ export default function BrowsePageClient() {
         case 'price_desc':   return (b.avg_raw_usd || 0) - (a.avg_raw_usd || 0)
         case 'price_asc':    return (a.avg_raw_usd || 0) - (b.avg_raw_usd || 0)
         case 'cards_desc':   return b.card_count - a.card_count
+        case 'completion_desc': {
+          // Block 5A-W-50C — Most complete. Primary: percentage desc.
+          // Secondary: ownedDistinct desc. Tertiary: newest release
+          // first (stable tie-breaker matching the default sort).
+          // Sets with zero owned cards fall to the end of the list
+          // but remain present so filters + counts still make sense.
+          const ca = completion[a.set_name]
+          const cb = completion[b.set_name]
+          const pa = ca?.percentage    ?? -1
+          const pb = cb?.percentage    ?? -1
+          if (pa !== pb) return pb - pa
+          const oa = ca?.ownedDistinct ?? -1
+          const ob = cb?.ownedDistinct ?? -1
+          if (oa !== ob) return ob - oa
+          return new Date(b.set_release_date || '1900-01-01').getTime()
+               - new Date(a.set_release_date || '1900-01-01').getTime()
+        }
         default: return 0
       }
     })
@@ -388,6 +456,10 @@ export default function BrowsePageClient() {
             ['price_desc',   'Highest Avg'],
             ['price_asc',    'Lowest Avg'],
             ['cards_desc',   'Most Cards'],
+            // Block 5A-W-50C — "Most complete" is authenticated-only.
+            // Hidden from the option list for anonymous visitors so
+            // they cannot select a user-specific sort at all.
+            ...(userId ? [['completion_desc', 'Most Complete']] as [SortOption, string][] : []),
           ] as [SortOption, string][]).map(([val, label]) => (
             <button key={val} className={`sort-btn ${sort === val ? 'active' : ''}`} onClick={() => setSort(val)} style={{ fontFamily: "'Figtree', sans-serif" }}>{label}</button>
           )))}
@@ -450,6 +522,18 @@ export default function BrowsePageClient() {
                     <div style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 600, fontFamily: "'Figtree', sans-serif" }}>
                       Avg: {formatPrice(s.avg_raw_usd)}
                     </div>
+                  )}
+                  {/* Block 5A-W-50C — only auth'd users with at least
+                      one owned card see the slim compact progress.
+                      Anonymous users and users with 0 owned cards
+                      from this set see the tile exactly as before. */}
+                  {userId && completion[s.set_name] && (
+                    <SetCompletionProgress
+                      ownedDistinct={completion[s.set_name].ownedDistinct}
+                      totalEligible={completion[s.set_name].totalEligible}
+                      variant="compact"
+                      setName={displaySetName(s.set_name, s.language)}
+                    />
                   )}
                 </div>
               </Link>

@@ -27,6 +27,8 @@ import { useUserPlan } from '@/lib/account/useUserPlan'
 import { peekIntendedAction, consumeIntendedAction } from '@/lib/intendedAction'
 import { performWatchlistAdd } from '@/lib/watchlistOps'
 import { trackEvent } from '@/lib/analytics'
+// Block 5A-W-50C — per-set portfolio completion bar in the header.
+import SetCompletionProgress from '@/components/SetCompletionProgress'
 
 interface Card {
   card_slug: string
@@ -558,6 +560,23 @@ export default function SetPageClient({ slug }: { slug: string }) {
           Japanese pilot set imported by the seeder. */}
       <SetHeader setName={setName} releaseDate={releaseDate}
         language={resolveLanguage(setLanguage, setName)} />
+
+      {/* Block 5A-W-50C — portfolio completion sits directly under the
+          set header. Same numerator + denominator as the browse tile.
+          Only renders for authenticated users who own >=1 card from
+          this set. Denominator = regularCards.length (non-sealed
+          singles), matching the SetPageClient card grid. Membership
+          is already loaded by W50B — no additional query. */}
+      {user && membership.inPortfolio.size > 0 && !loading && regularCards.length > 0 && (
+        <div style={{ margin: '-8px 0 20px' }}>
+          <SetCompletionProgress
+            ownedDistinct={membership.inPortfolio.size}
+            totalEligible={regularCards.length}
+            variant="full"
+            setName={displaySetName(setName, resolveLanguage(setLanguage, setName))}
+          />
+        </div>
+      )}
 
       {/* ── Section jump links + eBay listing chips ── */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
