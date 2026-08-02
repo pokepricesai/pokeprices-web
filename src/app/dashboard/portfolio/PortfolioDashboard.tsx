@@ -12,6 +12,22 @@ import JapaneseBadge from '@/components/JapaneseBadge'
 import { loadPortfolioItemCount } from '@/lib/account/usage'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge'
 import { portfolioOverLimitMessage } from '@/components/account/overLimitMessages'
+// Block 5A-W-50F — append-only event log powering the historical
+// portfolio-value chart. Every mutation of portfolio_items records
+// one row (or, for manual-value edits, a paired row).
+// Block 5A-W-50F/FIX1 — event writes are performed by the DB trigger
+// on portfolio_items; the client no longer inserts events directly.
+// Block 5A-W-50F/FIX3 — friendly error mapper for the trigger's
+// validation raises (future purchase date, purchase date after
+// subsequent activity).
+import { friendlyPortfolioUpdateError } from '@/lib/portfolio/errors'
+// Block 5A-W-50F — historical portfolio-value chart + valuation engine.
+import PortfolioValueHistoryChart from '@/components/portfolio/PortfolioValueHistoryChart'
+import {
+  computeValueHistory,
+  type RangeKey,
+  type ValueHistoryResult,
+} from '@/lib/portfolio/valueHistory'
 import {
   HOLDING_TYPES as ALL_HOLDING_TYPES,
   GRADE_LABELS as ALL_GRADE_LABELS,
@@ -942,6 +958,17 @@ export default function PortfolioDashboard() {
   // sales_30d for each portfolio card_slug — used to flag thinly-traded
   // holdings with an asterisk and prompt the user to enter a manual value.
   const [volumeMap, setVolumeMap] = useState<Record<string, number>>({})
+  // Block 5A-W-50F — portfolio value-history chart state. Loads
+  // independently from the main summary so the chart does not block
+  // the rest of the page.
+  const [valueHistoryRange, setValueHistoryRange] = useState<RangeKey>('90D')
+  const [valueHistoryResult, setValueHistoryResult] = useState<ValueHistoryResult | null>(null)
+  const [valueHistoryLoading, setValueHistoryLoading] = useState(false)
+  // Block 5A-W-50F/FIX1 — explicit mutation-version counter. Bumped
+  // after every portfolio mutation so the chart-load effect
+  // re-fires even when the mutation did not change item_count
+  // (quantity edit, manual-value edit, holding-type edit).
+  const [portfolioMutationVersion, setPortfolioMutationVersion] = useState(0)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -1259,6 +1286,28 @@ export default function PortfolioDashboard() {
 
   useEffect(() => { loadPortfolio() }, [loadPortfolio])
 
+  // Block 5A-W-50F — load the value-history chart data. Runs after
+  // the portfolio is resolved and again on range change. This is a
+  // separate effect so it can fail / retry / re-load without
+  // affecting the main summary panels.
+  // FIX1 — depends on portfolioMutationVersion (bumped after every
+  // mutation site) instead of summary.item_count, which does not
+  // change on quantity / manual-value / holding-type edits.
+  useEffect(() => {
+    if (!portfolioId) return
+    let live = true
+    setValueHistoryLoading(true)
+    computeValueHistory({
+      supabase, portfolioId, range: valueHistoryRange, currency,
+    })
+      .then(result => { if (live) setValueHistoryResult(result) })
+      .catch(err => {
+        if (typeof console !== 'undefined') console.warn('[value-history] load failed:', err)
+      })
+      .finally(() => { if (live) setValueHistoryLoading(false) })
+    return () => { live = false }
+  }, [portfolioId, valueHistoryRange, currency, portfolioMutationVersion])
+
   async function handleAddCard(itemData: any) {
     if (!portfolioId || !user) return
     // Block 5A-W-24 — only gate when this would create a NEW row.
@@ -1290,10 +1339,14 @@ export default function PortfolioDashboard() {
     // key so a portfolio can hold both English and Japanese printings
     // of the same card_url_slug without one silently overwriting the
     // other. See migrations/2026-07-29-japanese-foundation.sql.
+    // Block 5A-W-50F/FIX1 — the DB trigger on portfolio_items records
+    // the matching holding_added / quantity_added / quantity_removed
+    // event atomically. No client-side event insert.
     await supabase.from('portfolio_items').upsert([{
       ...itemData, portfolio_id: portfolioId, user_id: user.id,
     }], { onConflict: 'portfolio_id,card_slug,set_name_snapshot,holding_type' })
     await loadPortfolio()
+    setPortfolioMutationVersion(v => v + 1)
   }
 
   // Silent quick-add for scanner-confirmed cards. Honours the grade and
@@ -1315,6 +1368,8 @@ export default function PortfolioDashboard() {
       .eq('set_name_snapshot', card.set_name)
       .eq('holding_type', holdingType)
       .maybeSingle()
+    // Block 5A-W-50F/FIX1 — no client-side event insert; trigger owns
+    // event creation atomically with the portfolio_items write.
     if (existing) {
       await supabase.from('portfolio_items')
         .update({ quantity: (existing.quantity || 1) + safeQty })
@@ -1342,16 +1397,25 @@ export default function PortfolioDashboard() {
       }])
     }
     await loadPortfolio()
+    setPortfolioMutationVersion(v => v + 1)
   }
 
   async function handleRemove(itemId: string, cardName?: string) {
     const label = cardName ? `Remove "${cardName}" from your portfolio?` : 'Remove this card from your portfolio?'
     if (!confirm(label)) return
+    // Block 5A-W-50F/FIX1 — the DB trigger records a holding_removed
+    // event using OLD row identity + quantity. No sales UI in this
+    // block; sale events are only inserted by a future sell flow.
     await supabase.from('portfolio_items').delete().eq('id', itemId)
     await loadPortfolio()
+    setPortfolioMutationVersion(v => v + 1)
   }
 
   async function handleEditSave(itemId: string, patch: any, manualValueCents: number | null) {
+    // Block 5A-W-50F/FIX1 — the DB trigger records quantity_added /
+    // quantity_removed / manual_value_changed / correction events
+    // based on which columns actually changed. No client-side event
+    // insert; the trigger sees OLD vs NEW atomically.
     // Try the full update first. If the manual_value_* columns aren't in the
     // schema yet (migration not run), retry without them so other edits still
     // save and the user sees a clear failure for the manual-value field.
@@ -1362,9 +1426,23 @@ export default function PortfolioDashboard() {
     }
     const { error } = await supabase.from('portfolio_items').update(fullPatch).eq('id', itemId)
     if (error && /manual_value/.test(error.message || '')) {
-      await supabase.from('portfolio_items').update(patch).eq('id', itemId)
+      const { error: retryErr } = await supabase.from('portfolio_items').update(patch).eq('id', itemId)
+      if (retryErr) {
+        alert(friendlyPortfolioUpdateError(retryErr.message))
+        return
+      }
+    } else if (error) {
+      // Block 5A-W-50F/FIX3 — the trigger raises for a purchase_date
+      // that is in the future or that would place the initial event
+      // AFTER an already-recorded quantity / manual / correction /
+      // removal event. Convert the SQL exception into an actionable
+      // user-facing message; the portfolio_items row was NOT updated
+      // (atomic rollback), so we just surface the message and stop.
+      alert(friendlyPortfolioUpdateError(error.message))
+      return
     }
     await loadPortfolio()
+    setPortfolioMutationVersion(v => v + 1)
   }
 
   async function handleSignOut() {
@@ -1512,6 +1590,31 @@ export default function PortfolioDashboard() {
                 {stat.sub && <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{stat.sub}</div>}
               </div>
             ))}
+          </div>
+
+          {/* Block 5A-W-50F — historical value chart. Placed directly
+              beneath the key summary values, ahead of the tabs, so a
+              user can immediately see market vs contribution activity
+              without navigating away. Chart lives in its own panel so
+              a failed load / empty state does not block the rest of
+              the page. */}
+          <div style={{ marginBottom: 20 }}>
+            <PortfolioValueHistoryChart
+              result={valueHistoryResult ?? {
+                points: [], events: [], granularity: 'daily',
+                cumulativeMarketMovementCents: 0, cumulativeAdditionsCents: 0,
+                cumulativeRemovalsCents: 0, cumulativeAdjustmentsCents: 0,
+                cumulativeSaleProceedsCents: 0,
+                hasSaleActivity: false,
+                currency, hasEstimatedHistory: false, isEmpty: true,
+                isComplete: true,
+                warnings: [],
+              }}
+              currency={currency}
+              currentRange={valueHistoryRange}
+              onRangeChange={setValueHistoryRange}
+              loading={valueHistoryLoading}
+            />
           </div>
 
           {/* Tabs */}

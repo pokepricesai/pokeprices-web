@@ -18,6 +18,10 @@ import {
 } from '@/lib/ebayAffiliate'
 import { setIntendedAction, consumeIntendedAction } from '@/lib/intendedAction'
 import { trackEvent } from '@/lib/analytics'
+// Block 5A-W-50F/FIX1 — event writes are now performed by the DB
+// trigger on portfolio_items. This client no longer inserts into
+// portfolio_item_events; RLS blocks that anyway. The classification
+// helper survives elsewhere for UI hints and tests.
 import {
   canAddWatchlistItem,
   canAddPortfolioItem,
@@ -522,6 +526,9 @@ export function CardPortfolioAddModal({
       // Block 5A-W-48B — set_name_snapshot must be in the conflict
       // key so English and Japanese printings of the same
       // card_url_slug can coexist in one portfolio.
+      // Block 5A-W-50F/FIX1 — the DB trigger on portfolio_items
+      // records the corresponding events atomically. No client-side
+      // event insert here.
       const { error: err } = await supabase.from('portfolio_items').upsert([payload], {
         onConflict: 'portfolio_id,card_slug,set_name_snapshot,holding_type',
       })
