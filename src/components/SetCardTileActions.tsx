@@ -219,23 +219,29 @@ export default function SetCardTileActions({
     }
   }
 
+  // Block 5A-W-50B-UI1 — screen-reader labels remain descriptive.
+  // Tooltip text is short (visible on hover / focus) and does NOT
+  // duplicate the aria-label so screen readers hear only the full
+  // per-card sentence.
   const watchLabel = isWatched
     ? `Remove ${card.card_name} from watchlist`
     : `Add ${card.card_name} to watchlist`
   const pfLabel = isInPortfolio
     ? `Add another ${card.card_name} holding`
     : `Add ${card.card_name} to portfolio`
+  const watchTip = isWatched ? 'Remove from watchlist' : 'Add to watchlist'
+  const pfTip    = isInPortfolio ? 'Add another holding' : 'Add to portfolio'
 
-  // Inline eye + briefcase icons — matches existing quick-actions
-  // (no emoji, currentColor-tinted). Bell-like ring for active watch.
+  // Inline eye + briefcase icons — 15px, currentColor-tinted so
+  // active/inactive states are driven by button color alone.
   const eyeIcon = (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" style={{ display: 'block' }}>
       <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
       <circle cx="12" cy="12" r="3" />
     </svg>
   )
   const briefcaseIcon = (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" style={{ display: 'block' }}>
       <rect x="3" y="7" width="18" height="13" rx="2" />
       <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
     </svg>
@@ -244,47 +250,51 @@ export default function SetCardTileActions({
   return (
     <div
       style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
-        gap: 6,
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 10,
         width: '100%',
-        marginTop: 8,
+        marginTop: 6,
       }}
     >
-      <button
+      <IconAction
+        icon={eyeIcon}
+        tooltipId={`tip-watch-${bareSlug}`}
+        tooltip={watchTip}
+        ariaLabel={watchLabel}
+        active={isWatched}
+        activeState="watching"
+        disabled={busy !== null}
         onClick={handleWatch}
         onPointerDown={swallow}
+      />
+      <IconAction
+        icon={briefcaseIcon}
+        tooltipId={`tip-portfolio-${bareSlug}`}
+        tooltip={pfTip}
+        ariaLabel={pfLabel}
+        active={isInPortfolio}
+        activeState="owned"
         disabled={busy !== null}
-        aria-pressed={isWatched}
-        aria-label={watchLabel}
-        style={isWatched ? watchingStyle : neutralStyle}
-        title={isWatched ? 'Watching · click to remove' : 'Add to watchlist'}
-      >
-        {eyeIcon}
-        <span>{isWatched ? 'Watching' : 'Watch'}</span>
-      </button>
-      <button
         onClick={handlePortfolio}
         onPointerDown={swallow}
-        disabled={busy !== null}
-        aria-label={pfLabel}
-        style={isInPortfolio ? inPortfolioStyle : neutralStyle}
-        title={isInPortfolio ? 'In portfolio · click to add another holding' : 'Add to portfolio'}
-      >
-        {briefcaseIcon}
-        <span>{isInPortfolio ? 'Owned' : 'Portfolio'}</span>
-      </button>
+      />
       {err && (
         <div role="status" style={{
-          gridColumn: '1 / span 2',
+          position: 'absolute',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          marginTop: 40,
           fontSize: 10.5,
           color: '#b45309',
           background: 'rgba(245,158,11,0.10)',
           border: '1px solid rgba(245,158,11,0.30)',
           borderRadius: 6,
-          padding: '5px 8px',
-          marginTop: 2,
+          padding: '4px 8px',
           lineHeight: 1.3,
+          whiteSpace: 'nowrap',
+          zIndex: 2,
         }}>
           {err}
         </div>
@@ -293,38 +303,110 @@ export default function SetCardTileActions({
   )
 }
 
-const baseButton: React.CSSProperties = {
+// ── IconAction — small icon-only button with hover/focus tooltip ───
+// The tooltip is a plain div that becomes visible when the button is
+// hovered OR keyboard-focused. No external dependency; role="tooltip"
+// + aria-describedby link the two so assistive tech reads both the
+// aria-label AND the short tooltip line where consumers surface both.
+type IconActionProps = {
+  icon:         React.ReactNode
+  tooltipId:    string
+  tooltip:      string
+  ariaLabel:    string
+  active:       boolean
+  activeState:  'watching' | 'owned'
+  disabled:     boolean
+  onClick:      (e: React.MouseEvent) => void
+  onPointerDown:(e: React.MouseEvent) => void
+}
+function IconAction({
+  icon, tooltipId, tooltip, ariaLabel, active, activeState, disabled, onClick, onPointerDown,
+}: IconActionProps) {
+  const [showTip, setShowTip] = useState(false)
+  const showTooltip = () => setShowTip(true)
+  const hideTooltip = () => setShowTip(false)
+  return (
+    <span style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        type="button"
+        onClick={onClick}
+        onPointerDown={onPointerDown}
+        onMouseEnter={showTooltip}
+        onMouseLeave={hideTooltip}
+        onFocus={showTooltip}
+        onBlur={hideTooltip}
+        onTouchEnd={hideTooltip}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        aria-pressed={activeState === 'watching' ? active : undefined}
+        aria-describedby={tooltipId}
+        data-active={active ? 'true' : 'false'}
+        data-active-state={active ? activeState : 'inactive'}
+        style={active ? iconBtnActive : iconBtnInactive}
+      >
+        {icon}
+      </button>
+      <span
+        id={tooltipId}
+        role="tooltip"
+        style={{
+          ...tooltipStyle,
+          opacity:        showTip ? 1 : 0,
+          transform:      showTip ? 'translate(-50%, 0)' : 'translate(-50%, 2px)',
+          pointerEvents: 'none',
+        }}
+      >
+        {tooltip}
+      </span>
+    </span>
+  )
+}
+
+// ── Icon-button styles (Block 5A-W-50B-UI1) ─────────────────────────
+// Subtle grey by default. Green when active — light tint (not a solid
+// bright fill) so the tile chrome stays quiet. Sizing keeps the visible
+// control ~28px while the padded tap area sits around 36px.
+const iconBtnBase: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  gap: 5,
-  padding: '6px 8px',
-  borderRadius: 8,
-  fontSize: 11.5,
-  fontWeight: 700,
-  fontFamily: "'Figtree', sans-serif",
-  border: '1px solid var(--border)',
+  width: 28,
+  height: 28,
+  padding: 4,            // pushes the tap target to ~36px per side
+  borderRadius: 6,
   cursor: 'pointer',
-  minHeight: 32,          // touch-friendly
-  lineHeight: 1,
+  transition: 'color 0.12s, background 0.12s, border-color 0.12s',
+  boxSizing: 'content-box',
 }
-
-const neutralStyle: React.CSSProperties = {
-  ...baseButton,
-  background: 'var(--bg-light)',
-  color: 'var(--text)',
+const iconBtnInactive: React.CSSProperties = {
+  ...iconBtnBase,
+  background: 'transparent',
+  border: '1px solid transparent',
+  color: 'var(--text-muted)',
 }
-
-const watchingStyle: React.CSSProperties = {
-  ...baseButton,
-  background: 'rgba(34,197,94,0.12)',
-  border: '1px solid #22c55e',
+const iconBtnActive: React.CSSProperties = {
+  ...iconBtnBase,
+  background: 'rgba(34,197,94,0.10)',
+  border: '1px solid rgba(34,197,94,0.35)',
   color: '#16a34a',
 }
 
-const inPortfolioStyle: React.CSSProperties = {
-  ...baseButton,
-  background: 'rgba(59,130,246,0.10)',
-  border: '1px solid #3b82f6',
-  color: '#2563eb',
+// Lightweight custom tooltip — a small dark bubble anchored above the
+// icon. No positioning library / no dependency. Fixed 22px offset so
+// it doesn't obscure the card image below on small tiles.
+const tooltipStyle: React.CSSProperties = {
+  position:       'absolute',
+  bottom:         'calc(100% + 4px)',
+  left:           '50%',
+  padding:        '4px 8px',
+  background:     'var(--text)',
+  color:          'var(--card)',
+  fontSize:       11,
+  fontWeight:     600,
+  fontFamily:     "'Figtree', sans-serif",
+  borderRadius:   6,
+  whiteSpace:     'nowrap',
+  transition:     'opacity 0.12s, transform 0.12s',
+  zIndex:         3,
+  lineHeight:     1.2,
 }

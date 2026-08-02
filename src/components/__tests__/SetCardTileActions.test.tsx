@@ -91,15 +91,19 @@ describe('SetCardTileActions — contract', () => {
   })
 
   it('button labels include the card name for screen readers', () => {
-    expect(SRC).toContain('aria-label={watchLabel}')
-    expect(SRC).toContain('aria-label={pfLabel}')
-    expect(SRC).toContain('aria-pressed={isWatched}')
+    expect(SRC).toContain('ariaLabel={watchLabel}')
+    expect(SRC).toContain('ariaLabel={pfLabel}')
+    // aria-pressed is wired inside IconAction only for the watch button
+    // ("watching" state). Portfolio is a plain button (no pressed state).
+    expect(SRC).toContain("aria-pressed={activeState === 'watching' ? active : undefined}")
   })
 
-  it('touch-friendly: buttons have minHeight >= 32 and are always rendered (no hover gate)', () => {
-    // No :hover / onMouseEnter conditional rendering of the row.
+  it('touch-friendly: icons always rendered (no hover gate)', () => {
+    // No hover-gated visibility. Buttons render regardless of hover.
     expect(SRC).not.toMatch(/onMouseEnter[\s\S]*setShowActions/)
-    expect(SRC).toMatch(/minHeight:\s*32/)
+    // UI1 — visible control size around 28px, no minHeight tie-in now.
+    expect(SRC).toMatch(/width:\s*28/)
+    expect(SRC).toMatch(/height:\s*28/)
   })
 
   it('does not use emoji icons (uses inline SVG for eye + briefcase)', () => {
@@ -120,5 +124,59 @@ describe('SetCardTileActions — contract', () => {
     // never targets the Japanese row.
     const setNameFilters = (SRC.match(/\.eq\(['"]set_name['"]/g) || []).length
     expect(setNameFilters).toBeGreaterThanOrEqual(1)
+  })
+
+  // ── Block 5A-W-50B-UI1 — icon-only refinement ──────────────────
+
+  it('renders icon-only controls (no visible Watch/Portfolio text labels)', () => {
+    // The previous version rendered <span>{isWatched ? 'Watching' : 'Watch'}</span>
+    // and 'Portfolio' / 'Owned'. Those visible-text spans must be gone.
+    expect(SRC).not.toMatch(/'Watching' : 'Watch'/)
+    expect(SRC).not.toMatch(/'Owned' : 'Portfolio'/)
+  })
+
+  it('uses a data-attribute on the button to expose the active state (test-friendly, not colour-tied)', () => {
+    // Prefer data-active over asserting exact hex codes.
+    expect(SRC).toContain(`data-active={active ? 'true' : 'false'}`)
+    expect(SRC).toMatch(/data-active-state=\{active \? activeState : ['"]inactive['"]/)
+  })
+
+  it('tooltip text is short + context-specific for each state', () => {
+    // The 4 tooltip strings the brief calls out.
+    expect(SRC).toContain(`'Remove from watchlist'`)
+    expect(SRC).toContain(`'Add to watchlist'`)
+    expect(SRC).toContain(`'Add another holding'`)
+    expect(SRC).toContain(`'Add to portfolio'`)
+  })
+
+  it('tooltip appears on mouse hover AND keyboard focus', () => {
+    // IconAction wires both onMouseEnter and onFocus to set the same
+    // visibility state — required for keyboard accessibility.
+    expect(SRC).toContain('onMouseEnter={showTooltip}')
+    expect(SRC).toContain('onMouseLeave={hideTooltip}')
+    expect(SRC).toContain('onFocus={showTooltip}')
+    expect(SRC).toContain('onBlur={hideTooltip}')
+    // Also cleared on touchend so a tap-hold doesn't leave a stuck
+    // tooltip on mobile.
+    expect(SRC).toContain('onTouchEnd={hideTooltip}')
+  })
+
+  it('tooltip is role="tooltip" and linked via aria-describedby', () => {
+    expect(SRC).toContain(`role="tooltip"`)
+    expect(SRC).toContain('aria-describedby={tooltipId}')
+  })
+
+  it('active state uses green colour tokens (loose match — no exact hex assertion)', () => {
+    // Green tint / green stroke / green icon. Test on token names not
+    // exact hex — this is the closest we get without a snapshot.
+    expect(SRC).toMatch(/rgba\(34,\s*197,\s*94/)   // green tint
+    expect(SRC).toContain('#16a34a')                 // Tailwind green-700 for icon
+  })
+
+  it('inactive icons use neutral (text-muted) colour, not solid background', () => {
+    // Inactive style must not carry a coloured background beyond
+    // 'transparent' — the icon reads as subtle grey.
+    expect(SRC).toContain('color: \'var(--text-muted)\'')
+    expect(SRC).toMatch(/iconBtnInactive[\s\S]{0,120}background:\s*['"]transparent['"]/)
   })
 })
