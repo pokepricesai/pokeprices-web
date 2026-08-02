@@ -17,6 +17,10 @@ const SUB_SITEMAPS = [
   'sitemap-cards-2.xml',
   'sitemap-cards-3.xml',
   'sitemap-cards-4.xml',
+  // Block 5A-W-50D — 5th shard covering row positions 50000..100000
+  // so cards with high ids (including the entire Japanese catalogue
+  // from the W48D bulk import) are discoverable by search engines.
+  'sitemap-cards-5.xml',
   'sitemap-insights.xml',
 ]
 
