@@ -166,7 +166,12 @@ describe('W48B — browse page', () => {
     expect(src).toContain("aria-label=\"Filter sets by language\"")
   })
   it('defaults the tab to English (does not disrupt existing browsing)', () => {
-    expect(src).toMatch(/useState<LanguageFilter>\('en'\)/)
+    // Block 5A-W-50E — language is now URL-backed and initialises via
+    // `initialUrlState.language`, whose parser falls back to 'en' when
+    // the URL has no language param (BROWSE_DEFAULTS.language === 'en'
+    // — pinned separately in browseUrlState.test.ts). The user-facing
+    // default is unchanged; the code shape moved.
+    expect(src).toMatch(/useState<LanguageFilter>\((?:'en'|initialUrlState\.language)\)/)
   })
   it('renders a JP pill on individual JP tiles', () => {
     expect(src).toMatch(/aria-label="Japanese-language set"/)

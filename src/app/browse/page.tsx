@@ -1,5 +1,6 @@
 // app/browse/page.tsx
 import type { Metadata } from 'next'
+import { Suspense } from 'react'
 import BrowsePageClient from './BrowsePageClient'
 
 export const metadata: Metadata = {
@@ -23,5 +24,12 @@ export const metadata: Metadata = {
 }
 
 export default function BrowsePage() {
-  return <BrowsePageClient />
+  // Block 5A-W-50E — Suspense boundary required by Next.js so the
+  // client hook useSearchParams (added for URL-backed filter state)
+  // does not opt the whole route out of static rendering.
+  return (
+    <Suspense fallback={null}>
+      <BrowsePageClient />
+    </Suspense>
+  )
 }

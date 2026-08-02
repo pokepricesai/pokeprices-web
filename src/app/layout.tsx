@@ -7,6 +7,10 @@ import Footer from '@/components/Footer'
 import SiteStructuredData from '@/components/SiteStructuredData'
 import ScrollToTop from '@/components/ScrollToTop'
 import AnalyticsInit from '@/components/AnalyticsInit'
+// Block 5A-W-50E — ambient popstate listener that marks each history
+// navigation so per-route scroll restoration hooks can distinguish a
+// browser Back arrival from a fresh visit.
+import NavHistoryListener from '@/components/NavHistoryListener'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://www.pokeprices.io'),
@@ -77,6 +81,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </Script>
         <SiteStructuredData />
         <ScrollToTop />
+        <NavHistoryListener />
         <AnalyticsInit />
         <Navbar />
         <main className="flex-1">{children}</main>

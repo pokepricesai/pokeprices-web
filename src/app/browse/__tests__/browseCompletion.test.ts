@@ -23,8 +23,12 @@ describe('BrowsePageClient — Block 5A-W-50C wiring', () => {
 
   it('completion effect is gated on userId (anonymous makes 0 queries)', () => {
     // The completion-loading effect must early-return when userId is
-    // null so anonymous users make zero portfolio requests.
-    expect(SRC).toMatch(/if \(!userId[^)]*\) \{ setCompletion\(\{\}\); return \}/)
+    // null so anonymous users make zero portfolio requests. Block
+    // 5A-W-50E rewrote the early return across multiple lines and
+    // added a completionReady flag alongside; the intent (early exit
+    // that clears the map and skips the RPC) is what this test pins.
+    expect(SRC).toMatch(/if \(!userId[^\)]*\)[\s\S]{0,200}setCompletion\(\{\}\)/)
+    expect(SRC).toMatch(/if \(!userId[^\)]*\)[\s\S]{0,200}return/)
   })
 
   it('reuses get_set_list_v2.card_count as the denominator (no extra query)', () => {

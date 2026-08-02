@@ -1,6 +1,7 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { supabase, formatPrice } from '@/lib/supabase'
 import InlineChat from '@/components/InlineChat'
 import PriceChart from '@/components/PriceChart'
@@ -29,6 +30,18 @@ import { performWatchlistAdd } from '@/lib/watchlistOps'
 import { trackEvent } from '@/lib/analytics'
 // Block 5A-W-50C — per-set portfolio completion bar in the header.
 import SetCompletionProgress from '@/components/SetCompletionProgress'
+// Block 5A-W-50E — URL-backed sort + scroll restoration + smart back.
+import { parseSetUrl, serializeSetUrl, SET_DEFAULTS, type SetSort } from '@/lib/nav/setUrlState'
+import { normaliseRouteKey } from '@/lib/nav/routeKey'
+import { setOriginMarker } from '@/lib/nav/originMarker'
+import { markPendingOutbound } from '@/lib/nav/pendingOutbound'
+import { validateOriginMarkerForArrival } from '@/lib/nav/destinationValidity'
+import { makeSmartBackHandler } from '@/lib/nav/smartBack'
+import {
+  saveScrollForRoute,
+  useRouteScrollRestoration,
+  type RouteAnchor,
+} from '@/lib/nav/useRouteScrollRestoration'
 
 interface Card {
   card_slug: string
@@ -59,7 +72,10 @@ interface PopStats {
   total_psa10: number
 }
 
-type SortOption = 'raw_desc' | 'raw_asc' | 'psa10_desc' | 'name_asc' | 'number_asc'
+// Block 5A-W-50E — reuse the URL-state helper's SortOption type so
+// the parser, serializer and view share one canonical list. The five
+// values are unchanged from the pre-block set page.
+type SortOption = SetSort
 
 const statValue: React.CSSProperties = {
   fontSize: 20, fontWeight: 700, color: 'var(--text)',
@@ -143,24 +159,35 @@ function MoverRow({ card, setName, positive }: { card: TrendCard; setName: strin
 // before; the row of two buttons is the only new interactive surface.
 type TileActionProps = React.ComponentProps<typeof SetCardTileActions>
 function CardGrid({
-  cards, setName, buildTileActionProps,
+  cards, setName, buildTileActionProps, gridRef, onTileClick,
 }: {
   cards: Card[]
   setName: string
   buildTileActionProps?: (c: Card) => TileActionProps | null
+  // Block 5A-W-50E — optional forwarded ref + tile-click callback so
+  // the parent can attach scroll-anchor lookup and origin markers.
+  gridRef?: React.RefObject<HTMLDivElement | null>
+  onTileClick?: (c: Card) => void
 }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
+    <div ref={gridRef} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
       {cards.map(c => {
         const actionProps = buildTileActionProps ? buildTileActionProps(c) : null
+        const handleLinkClick = (e: React.MouseEvent) => {
+          if (e.button !== 0) return
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+          onTileClick?.(c)
+        }
         return (
           <div
             key={c.card_slug}
+            data-card-slug={c.card_slug}
             className="card-hover holo-shimmer"
             style={{ background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)', padding: 14, color: 'var(--text)', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
           >
             <Link
               href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`}
+              onClick={handleLinkClick}
               style={{ textDecoration: 'none', color: 'inherit', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}
               aria-label={`Open ${c.card_name}`}
             >
@@ -188,11 +215,12 @@ function CardGrid({
 }
 
 function SealedSection({
-  sealedCards, setName, buildTileActionProps,
+  sealedCards, setName, buildTileActionProps, onTileClick,
 }: {
   sealedCards: Card[]
   setName: string
   buildTileActionProps?: (c: Card) => React.ComponentProps<typeof SetCardTileActions> | null
+  onTileClick?: (c: Card) => void
 }) {
   if (sealedCards.length === 0) return null
   return (
@@ -207,18 +235,19 @@ function SealedSection({
       <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 14, lineHeight: 1.6, background: 'var(--bg-light)', borderRadius: 8, padding: '10px 14px' }}>
         Sealed product prices track market value of unopened product — not individual cards.
       </p>
-      <CardGrid cards={sealedCards} setName={setName} buildTileActionProps={buildTileActionProps} />
+      <CardGrid cards={sealedCards} setName={setName} buildTileActionProps={buildTileActionProps} onTileClick={onTileClick} />
     </div>
   )
 }
 
-function SetHeader({ setName, releaseDate, language }: { setName: string; releaseDate: string | null; language?: string | null }) {
+function SetHeader({ setName, releaseDate, language, onBackClick }: { setName: string; releaseDate: string | null; language?: string | null; onBackClick?: (e: React.MouseEvent) => void }) {
   const { logoUrl, symbolUrl, eraUrl, eraDisplay } = getSetAssets(setName)
 
   return (
     <div style={{ marginBottom: 20 }}>
       <Link
         href="/browse"
+        onClick={onBackClick}
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 6,
           color: 'var(--text)', fontSize: 13, textDecoration: 'none',
@@ -278,9 +307,20 @@ function SetHeader({ setName, releaseDate, language }: { setName: string; releas
 
 export default function SetPageClient({ slug }: { slug: string }) {
   const setName = decodeURIComponent(slug)
+  // Block 5A-W-50E — URL sort state. Initialised from the current URL
+  // so a bookmarked /set/Foo?sort=name_asc lands with the right sort.
+  // Malformed values silently fall back to the pre-block default.
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+  const initialUrlSort = useMemo(
+    () => parseSetUrl(new URLSearchParams(searchParams.toString())).sort,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
   const [cards, setCards] = useState<Card[]>([])
   const [loading, setLoading] = useState(true)
-  const [sort, setSort] = useState<SortOption>('raw_desc')
+  const [sort, setSort] = useState<SortOption>(initialUrlSort)
   const [releaseDate, setReleaseDate] = useState<string | null>(null)
   const [insight, setInsight] = useState<string | null>(null)
   const [priceHistory, setPriceHistory] = useState<any[]>([])
@@ -537,6 +577,112 @@ export default function SetPageClient({ slug }: { slug: string }) {
     loadData()
   }, [setName, sort])
 
+  // Block 5A-W-50E — sync state -> URL for sort. Only the sort key is
+  // touched; unrelated params are preserved. Default is omitted.
+  useEffect(() => {
+    const next = serializeSetUrl({ sort }, new URLSearchParams(searchParams.toString()))
+    const nextStr = next.toString()
+    const currentStr = searchParams.toString()
+    if (nextStr === currentStr) return
+    const target = pathname + (nextStr ? `?${nextStr}` : '')
+    router.replace(target, { scroll: false })
+  }, [sort, pathname, router, searchParams])
+
+  // Block 5A-W-50E — sync URL -> state. Handles browser Back / Forward
+  // where popstate updates searchParams before our React state.
+  useEffect(() => {
+    const parsed = parseSetUrl(new URLSearchParams(searchParams.toString())).sort
+    if (parsed !== sort) setSort(parsed)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
+  // Block 5A-W-50E — sort chip click is a deliberate view reset.
+  const handleSortClick = useCallback((next: SortOption) => {
+    setSort(next)
+    if (typeof window !== 'undefined' && window.scrollY > 0) window.scrollTo(0, 0)
+  }, [])
+
+  // Block 5A-W-50E — scroll restoration on the set page. routeKey
+  // includes only the meaningful sort param so different sort views
+  // save & restore to independent slots. Different sets already have
+  // different pathnames.
+  const routeKey = useMemo(
+    () => normaliseRouteKey(pathname, {
+      sort: sort === SET_DEFAULTS.sort ? undefined : sort,
+    }),
+    [pathname, sort],
+  )
+  const cardGridRef = useRef<HTMLDivElement | null>(null)
+  const findCardAnchor = useCallback((a: RouteAnchor): Element | null => {
+    if (a.kind !== 'card' || !cardGridRef.current) return null
+    const container = cardGridRef.current
+    const safe = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+      ? CSS.escape(a.id)
+      : null
+    if (safe) return container.querySelector(`[data-card-slug="${safe}"]`)
+    const nodes = container.querySelectorAll('[data-card-slug]')
+    for (let i = 0; i < nodes.length; i++) {
+      if ((nodes[i] as HTMLElement).getAttribute('data-card-slug') === a.id) return nodes[i]
+    }
+    return null
+  }, [])
+  const getCardAnchor = useCallback((): RouteAnchor | null => {
+    if (!cardGridRef.current) return null
+    const nodes = cardGridRef.current.querySelectorAll('[data-card-slug]')
+    for (let i = 0; i < nodes.length; i++) {
+      const el = nodes[i] as HTMLElement
+      const rect = el.getBoundingClientRect()
+      if (rect.top >= 0) {
+        const id = el.getAttribute('data-card-slug')
+        if (id) return { kind: 'card', id }
+      }
+    }
+    return null
+  }, [])
+  const scrollReady = !loading && cards.length > 0
+  useRouteScrollRestoration({ ready: scrollReady, routeKey, getAnchor: getCardAnchor, findAnchor: findCardAnchor })
+
+  // Block 5A-W-50E — outbound card-tile navigation writes an origin
+  // marker keyed by the card URL and flushes scroll for the set
+  // routeKey. Modifier-key clicks (Cmd/Ctrl+click, middle-click) are
+  // skipped upstream in CardGrid so new-tab flows don't overwrite the
+  // marker.
+  //
+  // Block 5A-W-50E-FIX1 — also writes a pendingOutbound token so the
+  // card page's mount validity check preserves the marker.
+  const handleTileClick = useCallback((c: Card) => {
+    if (!c.card_url_slug) return
+    const currentUrl = pathname + (searchParams.toString() ? `?${searchParams.toString()}` : '')
+    const destUrl = `/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`
+    saveScrollForRoute(routeKey, getCardAnchor, findCardAnchor)
+    setOriginMarker({ fromUrl: currentUrl, destinationUrl: destUrl, expects: 'card' })
+    markPendingOutbound(destUrl)
+  }, [pathname, searchParams, routeKey, getCardAnchor, findCardAnchor])
+
+  // Block 5A-W-50E-FIX1 — validate the origin marker on mount. When
+  // we are here because of an outbound click (marker + pending) or a
+  // browser Back (history-return marker), the origin marker is
+  // preserved. Otherwise (deep-link, external referrer, unrelated
+  // internal link) it is cleared so the visible back button falls
+  // back to /browse instead of navigating to a stale browse URL.
+  useEffect(() => {
+    validateOriginMarkerForArrival(pathname)
+  }, [pathname])
+
+  // Block 5A-W-50E — smart back for the SetHeader "Browse all sets"
+  // link. Falls back to /browse for direct visits.
+  //
+  // Block 5A-W-50E-FIX1 — router.back() is no longer used from here.
+  // We navigate deterministically to marker.fromUrl via router.replace
+  // so a stale marker cannot land the user on an unrelated page.
+  const handleBrowseBack = useMemo(
+    () => makeSmartBackHandler(
+      { push: (url: string) => router.push(url), replace: (url: string) => router.replace(url) },
+      { currentPathname: pathname, fallbackUrl: '/browse', expectOriginPath: '/browse' },
+    ),
+    [router, pathname],
+  )
+
   const regularCards = cards.filter(c => !c.is_sealed)
   const sealedCards = cards.filter(c => c.is_sealed)
   const cardsWithPrice = regularCards.filter(c => c.raw_usd && c.raw_usd > 0)
@@ -559,7 +705,8 @@ export default function SetPageClient({ slug }: { slug: string }) {
           applied yet). This guarantees the JP badge appears for any
           Japanese pilot set imported by the seeder. */}
       <SetHeader setName={setName} releaseDate={releaseDate}
-        language={resolveLanguage(setLanguage, setName)} />
+        language={resolveLanguage(setLanguage, setName)}
+        onBackClick={handleBrowseBack} />
 
       {/* Block 5A-W-50C — portfolio completion sits directly under the
           set header. Same numerator + denominator as the browse tile.
@@ -719,7 +866,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
             ['name_asc',   'Name A-Z'],
             ['number_asc', 'Card #'],
           ] as [SortOption, string][]).map(([val, label]) => (
-            <button key={val} className={`sort-btn ${sort === val ? 'active' : ''}`} onClick={() => setSort(val)} style={{ fontFamily: "'Figtree', sans-serif" }}>{label}</button>
+            <button key={val} className={`sort-btn ${sort === val ? 'active' : ''}`} onClick={() => handleSortClick(val)} style={{ fontFamily: "'Figtree', sans-serif" }}>{label}</button>
           )))}
         </div>
       </div>
@@ -735,8 +882,8 @@ export default function SetPageClient({ slug }: { slug: string }) {
         </div>
       ) : (
         <>
-          <CardGrid cards={regularCards} setName={setName} buildTileActionProps={buildTileActionProps} />
-          <SealedSection sealedCards={sealedCards} setName={setName} buildTileActionProps={buildTileActionProps} />
+          <CardGrid cards={regularCards} setName={setName} buildTileActionProps={buildTileActionProps} gridRef={cardGridRef} onTileClick={handleTileClick} />
+          <SealedSection sealedCards={sealedCards} setName={setName} buildTileActionProps={buildTileActionProps} onTileClick={handleTileClick} />
         </>
       )}
 

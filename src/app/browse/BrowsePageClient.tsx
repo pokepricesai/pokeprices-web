@@ -1,7 +1,8 @@
 // app/browse/BrowsePageClient.tsx
 'use client'
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { supabase, formatPrice } from '@/lib/supabase'
 import { getSetAssets, ERA_ORDER, ERA_DISPLAY_NAMES } from '@/lib/setAssets'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
@@ -15,6 +16,22 @@ import {
   buildCompletionMap,
   type SetCompletionMap,
 } from '@/lib/setCompletion'
+// Block 5A-W-50E — URL-backed filter state + scroll restoration.
+import {
+  BROWSE_DEFAULTS,
+  parseBrowseUrl,
+  serializeBrowseUrl,
+  type BrowseSort,
+  type LanguageFilter as UrlLanguageFilter,
+} from '@/lib/nav/browseUrlState'
+import { normaliseRouteKey } from '@/lib/nav/routeKey'
+import { setOriginMarker } from '@/lib/nav/originMarker'
+import { markPendingOutbound } from '@/lib/nav/pendingOutbound'
+import {
+  saveScrollForRoute,
+  useRouteScrollRestoration,
+  type RouteAnchor,
+} from '@/lib/nav/useRouteScrollRestoration'
 
 interface SetInfo {
   set_name: string
@@ -32,8 +49,10 @@ interface SetInfo {
 
 /** Block 5A-W-48B — top-level filter for the browse page. Keeps
  *  Japanese sets fully browsable but out of the default English list
- *  so English collectors see the pre-W48B experience by default. */
-type LanguageFilter = 'en' | 'jp' | 'all'
+ *  so English collectors see the pre-W48B experience by default.
+ *  Block 5A-W-50E — reuses the type from the URL-state helper so the
+ *  set of accepted values is centralised. */
+type LanguageFilter = UrlLanguageFilter
 
 interface TrendingSet {
   set_name: string
@@ -50,7 +69,9 @@ interface TrendingSet {
 // is exposed in the UI only when the user is authenticated (anonymous
 // users cannot select it and the option itself is hidden). Every
 // existing sort remains available.
-type SortOption = 'release_desc' | 'release_asc' | 'az' | 'za' | 'price_desc' | 'price_asc' | 'cards_desc' | 'completion_desc'
+// Block 5A-W-50E — SortOption is now sourced from the URL-state helper
+// so the parser, serializer and view share one canonical list.
+type SortOption = BrowseSort
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -235,18 +256,48 @@ function SetInsightsBar({ sets }: { sets: SetInfo[] }) {
 // ── Main ───────────────────────────────────────────────────────────────────────
 
 export default function BrowsePageClient() {
-  const [search, setSearch]             = useState('')
+  // Block 5A-W-50E — URL is the source of truth for language / era /
+  // sort / q. State initialises from the current URL so a bookmarked
+  // /browse?language=jp&sort=cards_desc lands with the right filters
+  // applied on first paint.
+  //
+  // Block 5A-W-50E-FIX1 — auth-race fix. Supabase getSession is async;
+  // an authenticated user landing on /browse?sort=completion_desc must
+  // NOT have their sort silently rewritten while auth is still
+  // loading. The initial parse therefore treats completion_desc as
+  // valid pending auth resolution. Once auth resolves either way, the
+  // gate at the end of the file (`useEffect` below) handles the
+  // anonymous case explicitly.
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+  const initialUrlState = useMemo(
+    () => parseBrowseUrl(new URLSearchParams(searchParams.toString()), { canUseCompletion: true }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
+
+  const [search, setSearch]             = useState(initialUrlState.q)
   const [sets, setSets]                 = useState<SetInfo[]>([])
   const [loading, setLoading]           = useState(true)
-  const [sort, setSort]                 = useState<SortOption>('release_desc')
-  const [eraFilter, setEraFilter]       = useState<string>('all')
-  const [languageFilter, setLanguageFilter] = useState<LanguageFilter>('en')
+  const [sort, setSort]                 = useState<SortOption>(initialUrlState.sort)
+  const [eraFilter, setEraFilter]       = useState<string>(initialUrlState.era)
+  const [languageFilter, setLanguageFilter] = useState<LanguageFilter>(initialUrlState.language)
   const [trendingSets, setTrendingSets] = useState<{ rising: TrendingSet[]; falling: TrendingSet[] } | null>(null)
   // Block 5A-W-50C — user + completion state. Public set data does
   // NOT wait on completion; the map hydrates in a second effect once
   // the user is known. Anonymous users skip the query entirely.
   const [userId, setUserId] = useState<string | null>(null)
   const [completion, setCompletion] = useState<SetCompletionMap>({})
+  // Block 5A-W-50E — flag driving the scroll-restoration ready gate.
+  // Anonymous users have no completion to load, so treat as ready.
+  const [completionReady, setCompletionReady] = useState(false)
+  // Block 5A-W-50E-FIX1 — auth-resolution state. Starts false (auth
+  // is unknown at first render). Flips true after supabase.getSession
+  // resolves, regardless of outcome. Used to defer decisions that
+  // depend on knowing whether the user is authenticated (e.g. whether
+  // completion_desc is legitimately requested).
+  const [authResolved, setAuthResolved] = useState(false)
 
   useEffect(() => {
     async function loadSets() {
@@ -267,9 +318,14 @@ export default function BrowsePageClient() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUserId(session?.user?.id ?? null)
+      setAuthResolved(true)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
       setUserId(session?.user?.id ?? null)
+      // Auth-state changes only fire after the initial getSession, so
+      // authResolved is already true here; keeping the setter for
+      // clarity / idempotence.
+      setAuthResolved(true)
     })
     return () => subscription.unsubscribe()
   }, [])
@@ -278,13 +334,29 @@ export default function BrowsePageClient() {
   // to the default sort — otherwise the sort chip would disappear
   // but the state would remain, and the browse list would appear
   // stuck on the wrong ordering.
+  //
+  // Block 5A-W-50E-FIX1 — gated on authResolved. Without this gate,
+  // an authenticated user landing on /browse?sort=completion_desc
+  // would have the sort stripped in the ~50-200ms window before
+  // getSession returns, because userId is transiently null.
   useEffect(() => {
+    if (!authResolved) return
     if (!userId && sort === 'completion_desc') setSort('release_desc')
-  }, [userId, sort])
+  }, [authResolved, userId, sort])
 
   useEffect(() => {
-    if (!userId || sets.length === 0) { setCompletion({}); return }
+    // Block 5A-W-50E — completionReady flips true once the async
+    // portfolio load has resolved (or immediately for anonymous
+    // users). The scroll-restoration hook waits on this flag when
+    // the active sort is completion_desc so it doesn't restore
+    // against a half-populated ordering.
+    if (!userId || sets.length === 0) {
+      setCompletion({})
+      setCompletionReady(!userId)
+      return
+    }
     let live = true
+    setCompletionReady(false)
     ;(async () => {
       const owned = await loadPortfolioOwnedBySet(supabase, userId)
       // Denominators come directly from get_set_list_v2 (already
@@ -294,10 +366,138 @@ export default function BrowsePageClient() {
       const totals: Record<string, number> = {}
       for (const s of sets) totals[s.set_name] = s.card_count ?? 0
       const map = buildCompletionMap(owned, totals)
-      if (live) setCompletion(map)
+      if (live) {
+        setCompletion(map)
+        setCompletionReady(true)
+      }
     })()
     return () => { live = false }
   }, [userId, sets])
+
+  // Block 5A-W-50E — debounced mirror of `search` used to write to the
+  // URL. The visible input stays instantly responsive; only the URL
+  // update waits so a keystroke burst does not spam router.replace.
+  const [debouncedSearch, setDebouncedSearch] = useState(initialUrlState.q)
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(search), 250)
+    return () => window.clearTimeout(t)
+  }, [search])
+
+  // Block 5A-W-50E — sync state -> URL. Runs on every meaningful state
+  // change and re-computes the params from the current searchParams
+  // so unrelated query keys are preserved. Uses router.replace with
+  // scroll: false so the browser does not reset scroll on each edit.
+  //
+  // Block 5A-W-50E-FIX1 — writes are deferred while auth is
+  // unresolved AND the current sort is completion_desc. Without this
+  // gate a genuinely logged-in user landing on the page would race
+  // the getSession Promise and have completion_desc stripped from
+  // the URL in the ~50-200ms auth window.
+  useEffect(() => {
+    if (!authResolved && sort === 'completion_desc') return
+    const next = serializeBrowseUrl(
+      { language: languageFilter, era: eraFilter, sort, q: debouncedSearch },
+      new URLSearchParams(searchParams.toString()),
+    )
+    const nextStr = next.toString()
+    const currentStr = searchParams.toString()
+    if (nextStr === currentStr) return
+    const target = pathname + (nextStr ? `?${nextStr}` : '')
+    router.replace(target, { scroll: false })
+  }, [authResolved, languageFilter, eraFilter, sort, debouncedSearch, pathname, router, searchParams])
+
+  // Block 5A-W-50E — sync URL -> state. Handles browser Back / Forward
+  // where popstate updates searchParams while our React state lags
+  // behind. Guarded by equality so it does not race with state->URL.
+  //
+  // Block 5A-W-50E-FIX1 — completion_desc is accepted while auth is
+  // still resolving so that an in-flight bookmark with sort=
+  // completion_desc keeps the value in state until we know whether
+  // the user is authenticated.
+  useEffect(() => {
+    const parsed = parseBrowseUrl(
+      new URLSearchParams(searchParams.toString()),
+      { canUseCompletion: !authResolved || !!userId },
+    )
+    if (parsed.language !== languageFilter) setLanguageFilter(parsed.language)
+    if (parsed.era !== eraFilter) setEraFilter(parsed.era)
+    if (parsed.sort !== sort) setSort(parsed.sort)
+    if (parsed.q !== search) {
+      setSearch(parsed.q)
+      setDebouncedSearch(parsed.q)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, userId, authResolved])
+
+  // Block 5A-W-50E — deliberate view resets. Each of these fires only
+  // when the user clicks the corresponding control, so scroll returns
+  // to top the way it did before URL state existed. Browser Back /
+  // Forward does not call these paths, so a restore is not interrupted.
+  const scrollToTopIfNeeded = useCallback(() => {
+    if (typeof window !== 'undefined' && window.scrollY > 0) window.scrollTo(0, 0)
+  }, [])
+  const handleLanguageClick = useCallback((next: LanguageFilter) => {
+    setLanguageFilter(next); scrollToTopIfNeeded()
+  }, [scrollToTopIfNeeded])
+  const handleEraChange = useCallback((next: string) => {
+    setEraFilter(next); scrollToTopIfNeeded()
+  }, [scrollToTopIfNeeded])
+  const handleSortClick = useCallback((next: SortOption) => {
+    setSort(next); scrollToTopIfNeeded()
+  }, [scrollToTopIfNeeded])
+
+  // Block 5A-W-50E — scroll restoration. routeKey is derived from the
+  // live filter state so `/browse?language=en` and `/browse?language=jp`
+  // save & restore to independent slots.
+  const routeKey = useMemo(
+    () => normaliseRouteKey('/browse', {
+      language: languageFilter === BROWSE_DEFAULTS.language ? undefined : languageFilter,
+      era: eraFilter === BROWSE_DEFAULTS.era ? undefined : eraFilter,
+      sort: sort === BROWSE_DEFAULTS.sort ? undefined : sort,
+      q: debouncedSearch || undefined,
+    }),
+    [languageFilter, eraFilter, sort, debouncedSearch],
+  )
+  const gridRef = useRef<HTMLDivElement | null>(null)
+  const findAnchor = useCallback((a: RouteAnchor): Element | null => {
+    if (a.kind !== 'set' || !gridRef.current) return null
+    const container = gridRef.current
+    const safe = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+      ? CSS.escape(a.id)
+      : null
+    if (safe) return container.querySelector(`[data-set-name="${safe}"]`)
+    // Fallback for environments without CSS.escape: iterate.
+    const nodes = container.querySelectorAll('[data-set-name]')
+    for (let i = 0; i < nodes.length; i++) {
+      if ((nodes[i] as HTMLElement).getAttribute('data-set-name') === a.id) return nodes[i]
+    }
+    return null
+  }, [])
+  const getAnchor = useCallback((): RouteAnchor | null => {
+    if (!gridRef.current) return null
+    const nodes = gridRef.current.querySelectorAll('[data-set-name]')
+    for (let i = 0; i < nodes.length; i++) {
+      const el = nodes[i] as HTMLElement
+      const rect = el.getBoundingClientRect()
+      if (rect.top >= 0) {
+        const id = el.getAttribute('data-set-name')
+        if (id) return { kind: 'set', id }
+      }
+    }
+    return null
+  }, [])
+  // Block 5A-W-50E-FIX1 — scroll restoration must not fire while
+  // completion_desc is pending on unresolved auth. When
+  // authResolved=false and sort=completion_desc, the ordering is not
+  // yet finalised so restoring against it would target the wrong
+  // list. When userId is present, we additionally wait for the
+  // completion map to hydrate.
+  const scrollReady = !loading && (
+    sort !== 'completion_desc'
+      ? true
+      : authResolved && !!userId && completionReady
+  )
+  useRouteScrollRestoration({ ready: scrollReady, routeKey, getAnchor, findAnchor })
 
   // Eras that actually have at least one set in the current data, newest era first
   const availableEras = [...ERA_ORDER]
@@ -406,7 +606,7 @@ export default function BrowsePageClient() {
                 type="button"
                 role="tab"
                 aria-selected={active}
-                onClick={() => setLanguageFilter(tab.key)}
+                onClick={() => handleLanguageClick(tab.key)}
                 style={{
                   padding: '6px 14px',
                   fontSize: 12, fontWeight: active ? 800 : 600,
@@ -434,7 +634,7 @@ export default function BrowsePageClient() {
         />
         <select
           value={eraFilter}
-          onChange={e => setEraFilter(e.target.value)}
+          onChange={e => handleEraChange(e.target.value)}
           aria-label="Filter sets by era"
           style={{
             padding: '10px 14px', fontSize: 14, border: '1px solid var(--border)', borderRadius: 10,
@@ -461,7 +661,7 @@ export default function BrowsePageClient() {
             // they cannot select a user-specific sort at all.
             ...(userId ? [['completion_desc', 'Most Complete']] as [SortOption, string][] : []),
           ] as [SortOption, string][]).map(([val, label]) => (
-            <button key={val} className={`sort-btn ${sort === val ? 'active' : ''}`} onClick={() => setSort(val)} style={{ fontFamily: "'Figtree', sans-serif" }}>{label}</button>
+            <button key={val} className={`sort-btn ${sort === val ? 'active' : ''}`} onClick={() => handleSortClick(val)} style={{ fontFamily: "'Figtree', sans-serif" }}>{label}</button>
           )))}
         </div>
       </div>
@@ -473,15 +673,37 @@ export default function BrowsePageClient() {
           ))}
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12 }}>
+        <div ref={gridRef} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12 }}>
           {filtered.map(s => {
             const { logoUrl, symbolUrl } = getSetAssets(s.set_name)
             const thumbSrc = logoUrl || s.set_image_url
+            // Block 5A-W-50E — outbound navigation writes a destination-
+            // scoped origin marker and flushes scroll so the set page's
+            // back button knows the exact browse URL to return to and
+            // the set's back through history restores this position.
+            //
+            // Block 5A-W-50E-FIX1 — also writes a pendingOutbound token
+            // for the destination pathname so the set page's mount
+            // validity check recognises this arrival as a legitimate
+            // click-through and preserves the marker for the visible
+            // back button. Without this token the marker would be
+            // treated as stale on any non-click arrival.
+            const onTileClick = (e: React.MouseEvent) => {
+              if (e.button !== 0) return
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+              const currentUrl = pathname + (searchParams.toString() ? `?${searchParams.toString()}` : '')
+              const destUrl = `/set/${encodeURIComponent(s.set_name)}`
+              saveScrollForRoute(routeKey, getAnchor, findAnchor)
+              setOriginMarker({ fromUrl: currentUrl, destinationUrl: destUrl, expects: 'set' })
+              markPendingOutbound(destUrl)
+            }
 
             return (
               <Link
                 key={s.set_name}
                 href={`/set/${encodeURIComponent(s.set_name)}`}
+                onClick={onTileClick}
+                data-set-name={s.set_name}
                 className="card-hover holo-shimmer"
                 style={{ background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)', padding: '16px', textDecoration: 'none', color: 'var(--text)', display: 'flex', gap: 14, alignItems: 'center' }}
               >

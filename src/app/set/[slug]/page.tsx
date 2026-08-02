@@ -1,6 +1,6 @@
 // app/set/[slug]/page.tsx
 import type { Metadata } from 'next'
-import { cache } from 'react'
+import { cache, Suspense } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { notFound } from 'next/navigation'
 import SetPageClient from './SetPageClient'
@@ -95,7 +95,11 @@ export default async function SetPage({ params }: { params: Promise<{ slug: stri
         { name: 'Sets', url: '/browse' },
         { name: setName },
       ]} />
-      <SetPageClient slug={slug} />
+      {/* Block 5A-W-50E — Suspense boundary required for the client
+          useSearchParams hook (URL-backed sort state). */}
+      <Suspense fallback={null}>
+        <SetPageClient slug={slug} />
+      </Suspense>
     </>
   )
 }

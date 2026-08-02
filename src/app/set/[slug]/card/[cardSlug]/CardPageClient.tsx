@@ -1,6 +1,7 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { usePathname, useRouter } from 'next/navigation'
 import { supabase, formatPct } from '@/lib/supabase'
 import InlineChat from '@/components/InlineChat'
 import PriceChart, { type ChartSeries } from '@/components/PriceChart'
@@ -17,6 +18,14 @@ import { resolveLanguage, displaySetName } from '@/lib/cardLanguage'
 import FAQ from '@/components/FAQ'
 import { getCardFaqItems } from '@/lib/faqs'
 import { getSetAssets } from '@/lib/setAssets'
+// Block 5A-W-50E — smart back for the set breadcrumb so the card
+// page returns to the exact originating set URL (preserving sort
+// and any future set-page query state).
+// Block 5A-W-50E-FIX1 — validity check discards a stale origin
+// marker on a non-click-through arrival, so back never navigates to
+// an unrelated old set URL.
+import { makeSmartBackHandler } from '@/lib/nav/smartBack'
+import { validateOriginMarkerForArrival } from '@/lib/nav/destinationValidity'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -309,6 +318,16 @@ export default function CardPageClient({
   // (fall back to a client fetch). We use `undefined` as the "did
   // the server hand us anything?" marker so a future null becomes a
   // conscious change rather than an accidental one.
+  // Block 5A-W-50E — router + pathname for the smart-back breadcrumb.
+  const router = useRouter()
+  const pathname = usePathname()
+  // Block 5A-W-50E-FIX1 — validate the origin marker on mount so a
+  // stale marker from an earlier visit cannot be reused after
+  // unrelated navigation.
+  useEffect(() => {
+    validateOriginMarkerForArrival(pathname)
+  }, [pathname])
+
   const serverProvidedCard = initialCardData !== undefined && initialCardData !== null
   const [card,         setCard]         = useState<any>(serverProvidedCard ? initialCardData : null)
   const [trend,        setTrend]        = useState<any>(initialTrendData ?? null)
@@ -597,7 +616,20 @@ export default function CardPageClient({
 
       {/* Breadcrumb */}
       <div style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {/* Block 5A-W-50E — smart back. If we have a valid origin
+            marker pointing at the set page we arrived from (including
+            its exact sort query), consume it and go there via
+            router.back(); otherwise fall back to the canonical set
+            URL. Ordinary Ctrl+click / new-tab still hits the href. */}
         <Link href={`/set/${encodeURIComponent(card.set_name)}`}
+          onClick={makeSmartBackHandler(
+            { push: (url: string) => router.push(url), replace: (url: string) => router.replace(url) },
+            {
+              currentPathname: pathname,
+              fallbackUrl: `/set/${encodeURIComponent(card.set_name)}`,
+              expectOriginPath: `/set/${encodeURIComponent(card.set_name)}`,
+            },
+          )}
           style={{ display: 'inline-flex', alignItems: 'center', gap: 8, textDecoration: 'none', color: 'var(--text)', fontSize: 13, fontFamily: "'Figtree', sans-serif", fontWeight: 600, padding: '7px 14px 7px 10px', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 20, transition: 'all 0.15s' }}
           onMouseEnter={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.borderColor = 'var(--primary)'; el.style.color = 'var(--primary)' }}
           onMouseLeave={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.borderColor = 'var(--border)'; el.style.color = 'var(--text)' }}
