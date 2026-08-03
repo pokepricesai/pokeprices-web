@@ -17,3 +17,9 @@ response2.html
 # Never committed. The analyzer reads them locally; only the generated
 # markdown / CSV reports under seo/reports/ are committed (manually).
 seo/exports/
+
+# Block 5A-W-50H — manual Japanese set-asset intake.
+# The per-set inbox folder holds user-supplied image binaries that are
+# never committed. The scaffold script recreates the folder structure
+# locally. Only manual-assets/jp/README.md + the two indexes ship.
+manual-assets/jp/inbox/

@@ -13,7 +13,9 @@
     "test": "vitest",
     "test:run": "vitest run",
     "audit:ebay": "node scripts/audit-ebay-links.mjs",
-    "indexnow": "node scripts/submit-indexnow.js"
+    "indexnow": "node scripts/submit-indexnow.js",
+    "scaffold:jp-manual-assets": "npx tsx scripts/set-assets/jp-manual-scaffold.mjs",
+    "audit:jp-manual-assets": "node scripts/set-assets/jp-manual-audit.mjs"
   },
   "dependencies": {
     "@react-email/components": "^1.0.12",
