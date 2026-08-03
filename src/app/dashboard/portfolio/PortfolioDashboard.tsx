@@ -90,6 +90,11 @@ interface PortfolioItem {
   pct_90d: number | null
   pct_365d: number | null
   notes: string | null
+  // ISO timestamp of when this holding row was first inserted into
+  // portfolio_items. Enriched client-side from a supplementary
+  // portfolio_items query; optional so the type stays compatible with
+  // rows produced by RPCs that do not project it.
+  created_at?: string | null
 }
 
 interface PortfolioSummary {
@@ -947,7 +952,7 @@ export default function PortfolioDashboard() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showScanner, setShowScanner] = useState(false)
   const [scannedCard, setScannedCard] = useState<ConfirmedCard | null>(null)
-  const [sortBy, setSortBy] = useState<'value' | 'pct_30d' | 'name'>('value')
+  const [sortBy, setSortBy] = useState<'value' | 'pct_30d' | 'name' | 'recent'>('value')
   const [setFilter, setSetFilter] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'holdings' | 'insights'>('holdings')
   const [editingItem, setEditingItem] = useState<PortfolioItem | null>(null)
@@ -998,16 +1003,19 @@ export default function PortfolioDashboard() {
         // Defensive: try-with-display_currency, then fall back if column missing
         supabase.from('user_email_preferences').select('display_currency').eq('user_id', user.id).maybeSingle()
           .then((res: any) => res.error ? { data: null } : res),
-        // Defensive: try-with-manual-columns, then fall back if migration not run
+        // Defensive: try-with-manual-columns, then fall back if migration not run.
+        // Also selects created_at so the "Recently Added" sort can order by
+        // the true portfolio-insertion timestamp (present on every row via
+        // the Supabase default).
         supabase
           .from('portfolio_items')
-          .select('id, card_slug, manual_value_cents, manual_value_updated_at')
+          .select('id, card_slug, manual_value_cents, manual_value_updated_at, created_at')
           .eq('portfolio_id', pid)
           .then(async (res: any) => {
             if (!res.error) return res
             return await supabase
               .from('portfolio_items')
-              .select('id, card_slug')
+              .select('id, card_slug, created_at')
               .eq('portfolio_id', pid)
           }),
       ])
@@ -1240,14 +1248,33 @@ export default function PortfolioDashboard() {
 
       const manualMap: Record<string, number | null> = {}
       const stampMap: Record<string, string | null> = {}
+      const createdAtMap: Record<string, string | null> = {}
       const cardSlugs = new Set<string>()
       ;(manualsRes.data || []).forEach((r: any) => {
         manualMap[r.id] = r.manual_value_cents ?? null
         stampMap[r.id] = r.manual_value_updated_at ?? null
+        createdAtMap[r.id] = r.created_at ?? null
         if (r.card_slug) cardSlugs.add(r.card_slug)
       })
       setManualOverrides(manualMap)
       setManualValueUpdatedAt(stampMap)
+
+      // Merge the fetched created_at values onto the summary items so
+      // the Recently Added sort has an authoritative timestamp. Uses
+      // a functional setSummary because the earlier price-recompute
+      // block already committed the items; created_at is enriched in
+      // a second pass here without duplicating that logic.
+      setSummary(prev => prev
+        ? {
+            ...prev,
+            items: prev.items.map(i => (
+              createdAtMap[i.id] !== undefined
+                ? { ...i, created_at: createdAtMap[i.id] }
+                : i
+            )),
+          }
+        : prev,
+      )
 
       // Look up is_sealed and recent sales volume for each portfolio card.
       // is_sealed feeds the Cards-vs-Sealed split. sales_30d powers the
@@ -1477,6 +1504,13 @@ export default function PortfolioDashboard() {
   const sortedItems = [...filteredItems].sort((a, b) => {
     if (sortBy === 'value') return (b.position_value_cents || 0) - (a.position_value_cents || 0)
     if (sortBy === 'pct_30d') return (b.pct_30d || -999) - (a.pct_30d || -999)
+    if (sortBy === 'recent') {
+      // Newest first. ISO timestamps sort lexicographically the same
+      // way they sort chronologically, so localeCompare is fine.
+      // Rows without a created_at (defensive; the DB default guarantees
+      // one) fall to the end because '' < any real timestamp.
+      return (b.created_at || '').localeCompare(a.created_at || '')
+    }
     return a.card_name.localeCompare(b.card_name)
   })
 
@@ -1631,7 +1665,7 @@ export default function PortfolioDashboard() {
           {activeTab === 'holdings' && (
             <>
               <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-                {([['value', 'By Value'], ['pct_30d', 'Best 30d'], ['name', 'A–Z']] as const).map(([val, label]) => (
+                {([['value', 'By Value'], ['recent', 'Recently Added'], ['pct_30d', 'Best 30d'], ['name', 'A–Z']] as const).map(([val, label]) => (
                   <button key={val} onClick={() => setSortBy(val)}
                     className={`sort-btn ${sortBy === val ? 'active' : ''}`}
                     style={{ fontFamily: "'Figtree', sans-serif", fontSize: 11 }}>
