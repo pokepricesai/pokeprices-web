@@ -154,6 +154,12 @@ const LOGO_MAP: Record<string, string> = {
   'POP Series 7':           'Pop Series 7.webp',
   'POP Series 8':           'Pop Series 8.webp',
   'POP Series 9':           'Pop Series 9.webp',
+  // ── Japanese sets ─────────────────────────────────────────────────────────
+  // Block 5A-W-50I-LITE — Japanese logos live in the same flat
+  // public/set-assets/logos/ directory as English ones. Filename is
+  // the exact DB set_name (with the "Japanese " prefix preserved) so
+  // the mapping stays trivially auditable.
+  'Japanese Battle Partners': 'Japanese Battle Partners.webp',
 }
 
 const SYMBOL_MAP: Record<string, string> = {
@@ -310,6 +316,10 @@ const SYMBOL_MAP: Record<string, string> = {
   'McDonalds 2019':         "McDonald's 2019.png",
   'McDonalds 2021':         "McDonald's 2021.png",
   'McDonalds 2022':         "McDonald's 2022.png",
+  // ── Japanese sets ─────────────────────────────────────────────────────────
+  // Block 5A-W-50I-LITE — mirror of the LOGO_MAP convention for
+  // Japanese sets. Same flat public/set-assets/symbols/ directory.
+  'Japanese Battle Partners': 'Japanese Battle Partners.png',
 }
 
 const ERA_MAP: Record<string, string> = {
