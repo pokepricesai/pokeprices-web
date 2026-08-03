@@ -29,6 +29,23 @@ describe('Japanese Battle Partners — static pilot mapping', () => {
   })
 })
 
+describe('additional Japanese static pilots', () => {
+  it('Japanese Abyss Eye resolves to logo + symbol PNGs', () => {
+    const a = getSetAssets('Japanese Abyss Eye')
+    expect(a.logoUrl).toBe('/set-assets/logos/Japanese Abyss Eye.png')
+    expect(a.symbolUrl).toBe('/set-assets/symbols/Japanese Abyss Eye.png')
+    expect(existsSync(join(process.cwd(), 'public', 'set-assets', 'logos',   'Japanese Abyss Eye.png'))).toBe(true)
+    expect(existsSync(join(process.cwd(), 'public', 'set-assets', 'symbols', 'Japanese Abyss Eye.png'))).toBe(true)
+  })
+
+  it('Japanese Ruler of the Black Flame resolves to logo PNG (no symbol supplied yet)', () => {
+    const a = getSetAssets('Japanese Ruler of the Black Flame')
+    expect(a.logoUrl).toBe('/set-assets/logos/Japanese Ruler of the Black Flame.png')
+    expect(a.symbolUrl).toBeNull()
+    expect(existsSync(join(process.cwd(), 'public', 'set-assets', 'logos', 'Japanese Ruler of the Black Flame.png'))).toBe(true)
+  })
+})
+
 describe('unmapped Japanese sets still return null (consumer applies first-card fallback)', () => {
   it('Japanese Old Maid — no mapping → logoUrl null → tile falls back to set_image_url', () => {
     const a = getSetAssets('Japanese Old Maid')

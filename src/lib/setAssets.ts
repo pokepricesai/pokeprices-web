@@ -159,7 +159,9 @@ const LOGO_MAP: Record<string, string> = {
   // public/set-assets/logos/ directory as English ones. Filename is
   // the exact DB set_name (with the "Japanese " prefix preserved) so
   // the mapping stays trivially auditable.
-  'Japanese Battle Partners': 'Japanese Battle Partners.webp',
+  'Japanese Battle Partners':          'Japanese Battle Partners.webp',
+  'Japanese Abyss Eye':                'Japanese Abyss Eye.png',
+  'Japanese Ruler of the Black Flame': 'Japanese Ruler of the Black Flame.png',
 }
 
 const SYMBOL_MAP: Record<string, string> = {
@@ -320,6 +322,7 @@ const SYMBOL_MAP: Record<string, string> = {
   // Block 5A-W-50I-LITE — mirror of the LOGO_MAP convention for
   // Japanese sets. Same flat public/set-assets/symbols/ directory.
   'Japanese Battle Partners': 'Japanese Battle Partners.png',
+  'Japanese Abyss Eye':       'Japanese Abyss Eye.png',
 }
 
 const ERA_MAP: Record<string, string> = {
