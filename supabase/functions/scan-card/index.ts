@@ -111,12 +111,17 @@ Return ONLY this JSON shape. No preamble, no markdown code fence.
 
 {
   "language": "en" | "jp" | null,        // "jp" if you see Kanji, Hiragana or Katakana anywhere; "en" for an English-market card; null if truly ambiguous
-  "pokemon_name": string | null,         // the Pokemon's English name if you can identify the species from artwork, otherwise transcribe the printed name verbatim (Japanese OK)
-  "collector_number": string | null,     // exact format printed, e.g. "4/102", "016/165", "102/130" (JP Battle Partners), "SWSH-123"
-  "set_name": string | null,             // best guess at the full set name if you recognize it; for a JP card give the English translation of the set name if you know it
+  "pokemon_name": string | null,         // the Pokemon or card's PRINTED name — Japanese OK; verbatim from the card
+  "canonical_pokemon_name": string | null, // the English Pokemon species name if you can identify the species from artwork (used to match translated database records)
+  "printed_name": string | null,         // if language=jp, the visible Japanese card name verbatim; else same as pokemon_name
+  "collector_number": string | null,     // exact format printed, e.g. "4/102", "016/165", "102/100" (real printed JP Battle Partners), "SWSH-123". Some vintage JP cards show NO N/M number — return null in that case
+  "set_name": string | null,             // best guess at the full set name if you recognize it; for a JP card give the English translation of the set name if you know it (e.g. "Rocket Gang" for ロケット団, "Battle Partners" for バトルパートナーズ)
+  "set_symbol_description": string | null, // brief description of the set symbol visible on the card (e.g. "black R inside a red circle" for Team Rocket, "silver crescent moon" for Neo Genesis)
   "set_abbreviation": string | null,     // 3-letter code if visible (SVI, PAR, OBF, PAF, etc)
   "copyright_year": number | null,       // 4-digit year from copyright line
+  "card_era": string | null,             // one of: "vintage-1996-2001", "e-card-2002-2003", "ex-2003-2007", "dp-2007-2010", "black-white-2010-2013", "xy-2013-2016", "sun-moon-2016-2019", "sword-shield-2019-2022", "scarlet-violet-2023-present"; use visual + copyright cues
   "is_promo": boolean,                   // PROMO badge, black star, or promo-prefixed number (SWSH/XY/SM/SVP...)
+  "rarity_hint": string | null,          // e.g. "common", "uncommon", "rare-holo", "ultra-rare", "secret-rare", "special-art-rare", "1st-edition"
   "variant": "regular" | "holo" | "reverse_holo" | "full_art" | "textured" | "unknown",
   "variant_confidence": "high" | "medium" | "low",
   "notes": string                        // one short sentence about anything unclear in your reading
@@ -125,8 +130,14 @@ Return ONLY this JSON shape. No preamble, no markdown code fence.
 Language guidance:
 - Japanese cards have Japanese script (Kanji / Hiragana / Katakana) somewhere on the card — usually in the flavour text or move descriptions, even if the Pokemon name looks similar to English.
 - English cards contain only Latin script.
-- The collector number format is usually the same across languages (e.g. 102/130), so the number alone is NOT a language signal.
-- If you cannot decide, return language=null and let the downstream matcher use other evidence.
+- Some vintage Japanese cards (1996-2001) do NOT print a collector number in N/M form on the card face — return collector_number=null in that case rather than guessing.
+
+Pokemon name guidance:
+- canonical_pokemon_name should be the English species name (Charizard, Moltres, Espeon, etc.) — this matches how PokePrices stores Japanese cards translated by species.
+- If the card shows a special-form Pokemon (e.g. Galarian, Alolan, Team Rocket's, Dark), include the qualifier in canonical_pokemon_name (e.g. "Rocket's Moltres", "Team Rocket's Moltres ex", "Dark Charizard", "Galarian Moltres").
+
+Era + rarity guidance:
+- card_era + rarity_hint help resolve which specific printing this is when multiple sets contain the same Pokemon at the same number.
 
 Variant guidance:
 - holo:         foil pattern visible IN the artwork window only
@@ -181,19 +192,33 @@ async function callAIVision(imageBase64: string): Promise<{ signals: ParsedSigna
   // pokemon_name / set_name / notes fields so we still get a signal
   // when the model returned language: null.
   const modelLang = parsed.language === "en" || parsed.language === "jp" ? parsed.language : null
-  const textJoined = [parsed.pokemon_name, parsed.set_name, parsed.notes]
+  const textJoined = [parsed.pokemon_name, parsed.printed_name, parsed.set_name, parsed.notes]
     .filter(Boolean).map((s: unknown) => String(s)).join(" ")
   const language: "en" | "jp" | null = modelLang ?? detectCardLanguageFromText(textJoined)
+
+  // Block 5A-W-51B — prefer the canonical English name for RPC matching
+  // (PokePrices stores Japanese cards under their English translation).
+  // Fall back to pokemon_name / printed_name for older prompts that
+  // don't return the canonical field.
+  const nameForMatching = parsed.canonical_pokemon_name
+    ? String(parsed.canonical_pokemon_name).trim()
+    : (parsed.pokemon_name ? String(parsed.pokemon_name).trim() : null)
 
   const signals: ParsedSignals = {
     collector_number: parsed.collector_number ? String(parsed.collector_number).trim() : null,
     collector_number_pattern: parsed.collector_number ? "ai-vision" : null,
-    name: parsed.pokemon_name ? String(parsed.pokemon_name).trim() : null,
+    name: nameForMatching,
     set_hint: parsed.set_name ? String(parsed.set_name).trim() : null,
     set_abbreviation: parsed.set_abbreviation ? String(parsed.set_abbreviation).trim().toUpperCase() : null,
     copyright_year: typeof parsed.copyright_year === "number" ? parsed.copyright_year : null,
     is_promo: !!parsed.is_promo,
     language,
+    // Block 5A-W-51B — extra diagnostic fields for hybrid merging + logs.
+    canonical_pokemon_name: parsed.canonical_pokemon_name ? String(parsed.canonical_pokemon_name).trim() : null,
+    printed_name:           parsed.printed_name ? String(parsed.printed_name).trim() : null,
+    card_era:               parsed.card_era ? String(parsed.card_era).trim() : null,
+    rarity_hint:            parsed.rarity_hint ? String(parsed.rarity_hint).trim() : null,
+    set_symbol_description: parsed.set_symbol_description ? String(parsed.set_symbol_description).trim() : null,
     full_text: JSON.stringify(parsed, null, 2),
   }
   return {
@@ -253,6 +278,16 @@ export interface ParsedSignals {
   // scan_card_match — see migrations/2026-08-04-scan-card-match-
   // language-signal.sql for how the RPC uses it.
   language: "en" | "jp" | null
+  // Block 5A-W-51B — additional diagnostic fields populated only by
+  // the AI vision path. Downstream matching still uses `name` (which
+  // is set to canonical_pokemon_name when available) so no RPC
+  // signature change is needed. These carry through into scan_logs
+  // for offline analysis of which fields the AI extracted.
+  canonical_pokemon_name?: string | null
+  printed_name?: string | null
+  card_era?: string | null
+  rarity_hint?: string | null
+  set_symbol_description?: string | null
   full_text: string
 }
 
@@ -465,6 +500,8 @@ async function logScan(opts: {
   aiVariantConfidence: string | null
   userId: string | null
   deviceId: string | null
+  autoAiInvoked?: boolean
+  aiMergedFields?: string[]
 }): Promise<number | null> {
   const top = opts.candidates[0]
   try {
@@ -485,6 +522,18 @@ async function logScan(opts: {
         // Block 5A-W-51A — inferred language passed to the matcher.
         // Never contains user PII; safe to log.
         language: opts.signals.language,
+        // Block 5A-W-51B — extended AI fields recorded for offline
+        // analysis of which fields the model provides. None are
+        // sensitive; all originate from the card image.
+        canonical_pokemon_name: opts.signals.canonical_pokemon_name ?? null,
+        printed_name: opts.signals.printed_name ?? null,
+        card_era: opts.signals.card_era ?? null,
+        rarity_hint: opts.signals.rarity_hint ?? null,
+        set_symbol_description: opts.signals.set_symbol_description ?? null,
+        // Block 5A-W-51B — records whether the OCR path auto-invoked
+        // AI and merged its output.
+        auto_ai_invoked: opts.autoAiInvoked ?? false,
+        ai_merged_fields: opts.aiMergedFields ?? [],
         ai_variant: opts.aiVariant,
         ai_variant_confidence: opts.aiVariantConfidence,
       },
@@ -635,6 +684,91 @@ Deno.serve(async (req) => {
     signals = parseSignals(visionResult.full, visionResult.numberStrip, visionResult.corner)
     parseMs = Date.now() - tParseStart
   }
+
+  // Block 5A-W-51B — auto-invoke AI when OCR detected Japanese and OCR
+  // signals are weak. Symptom this fixes: the id=426 scan of a vintage
+  // JP Team Rocket Moltres returned 0 candidates because OCR read
+  // Japanese text ("R団のファイヤー") that doesn't match English
+  // `cards.card_name`. AI can supply the canonical English name
+  // ("Rocket's Moltres" or "Moltres"), plus era/rarity hints for
+  // ranking. Adds one Haiku call (~$0.0025) to JP scans only —
+  // English scans skip the AI path entirely.
+  let autoAiInvoked = false
+  const aiMergedFields: string[] = []
+  const shouldAutoInvokeAI = (
+    engine === "vision_ocr"                          // only auto-augment the OCR path
+    && CLAUDE_API_KEY                                 // AI is available
+    && signals.language === "jp"                      // OCR saw CJK → definitely Japanese
+    && (
+      // Weak OCR signal — either no number, or no Latin-friendly name.
+      !signals.collector_number
+      || !signals.name
+      || (signals.name != null && CJK_RE.test(signals.name) && !/[A-Za-z]{3,}/.test(signals.name))
+    )
+  )
+  if (shouldAutoInvokeAI) {
+    const tAIStart = Date.now()
+    try {
+      const aiResult = await callAIVision(imageBase64)
+      autoAiInvoked = true
+      // Merge signals per the 51B priority list:
+      //   1. Collector number — OCR wins when it produced a valid
+      //      pattern (fraction / promo-prefixed); AI fills in when OCR
+      //      returned null.
+      if (!signals.collector_number && aiResult.signals.collector_number) {
+        signals.collector_number = aiResult.signals.collector_number
+        signals.collector_number_pattern = aiResult.signals.collector_number_pattern
+        aiMergedFields.push("collector_number")
+      }
+      //   2. Name — prefer AI's canonical English name whenever OCR's
+      //      name is missing or CJK-only (untranslatable by the RPC).
+      const ocrNameUsable = signals.name && /[A-Za-z]{3,}/.test(signals.name)
+      if (!ocrNameUsable && aiResult.signals.name) {
+        signals.name = aiResult.signals.name
+        aiMergedFields.push("name")
+      }
+      //   3. Language — keep OCR's CJK-derived value (definitive; the
+      //      OCR text saw raw script). Only overwrite null → AI value.
+      if (!signals.language && aiResult.signals.language) {
+        signals.language = aiResult.signals.language
+        aiMergedFields.push("language")
+      }
+      //   4. Set hint — AI is stronger here (can recognise set art);
+      //      only take it when OCR gave nothing.
+      if (!signals.set_hint && aiResult.signals.set_hint) {
+        signals.set_hint = aiResult.signals.set_hint
+        aiMergedFields.push("set_hint")
+      }
+      if (!signals.set_abbreviation && aiResult.signals.set_abbreviation) {
+        signals.set_abbreviation = aiResult.signals.set_abbreviation
+        aiMergedFields.push("set_abbreviation")
+      }
+      //   5. Copyright year — OCR read the actual text; keep it when
+      //      present, otherwise take AI's.
+      if (!signals.copyright_year && aiResult.signals.copyright_year) {
+        signals.copyright_year = aiResult.signals.copyright_year
+        aiMergedFields.push("copyright_year")
+      }
+      //   6. Promo — OR both sides.
+      signals.is_promo = signals.is_promo || aiResult.signals.is_promo
+      //   7. Extended AI diagnostic fields — always populated by AI.
+      signals.canonical_pokemon_name = aiResult.signals.canonical_pokemon_name ?? null
+      signals.printed_name           = aiResult.signals.printed_name           ?? null
+      signals.card_era               = aiResult.signals.card_era               ?? null
+      signals.rarity_hint            = aiResult.signals.rarity_hint            ?? null
+      signals.set_symbol_description = aiResult.signals.set_symbol_description ?? null
+      aiVariant           = aiResult.variant
+      aiVariantConfidence = aiResult.variantConfidence
+      console.log("[scan-card] auto_ai_invoked=true merged=", aiMergedFields.join(","), " haikuMs=", Date.now() - tAIStart)
+    } catch (e: any) {
+      // Auto-AI failure is non-fatal — the original OCR signals stand
+      // and we still attempt the match. The Haiku key not being set is
+      // guarded by `CLAUDE_API_KEY` above; other failures (network,
+      // 5xx) are logged but do not fail the whole scan.
+      console.error("[scan-card] auto AI vision error (non-fatal):", e?.message || e)
+    }
+  }
+
   // Match
   const tMatchStart = Date.now()
   let candidates: any[] = []
@@ -662,6 +796,7 @@ Deno.serve(async (req) => {
     feature, engine, signals, candidates, timing,
     holoAnalysis: body.holo_analysis ?? null,
     aiVariant, aiVariantConfidence,
+    autoAiInvoked, aiMergedFields,
     userId, deviceId,
   })
   const logMs = Date.now() - tLogStart
@@ -672,6 +807,10 @@ Deno.serve(async (req) => {
     feature_used: feature,
     ai_variant: aiVariant,
     ai_variant_confidence: aiVariantConfidence,
+    // Block 5A-W-51B — surface auto-AI provenance to the client so the
+    // portfolio scanner can show "Enhanced with AI" or similar.
+    auto_ai_invoked: autoAiInvoked,
+    ai_merged_fields: aiMergedFields,
     vision: {
       full_text: signals.full_text,
       word_count: Array.isArray(visionResult.full?.textAnnotations) ? visionResult.full.textAnnotations.length - 1 : 0,

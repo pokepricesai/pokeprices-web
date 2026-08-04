@@ -103,7 +103,11 @@ describe('edge function — bilingual OCR + language routing', () => {
   it('Haiku prompt commits to Japanese guidance and a language output field', () => {
     expect(EDGE_FN).toMatch(/"language":\s*"en"\s*\|\s*"jp"\s*\|\s*null/)
     expect(EDGE_FN).toMatch(/Kanji \/ Hiragana \/ Katakana/i)
-    expect(EDGE_FN).toMatch(/Japanese Battle Partners|102\/130/)
+    // Block 5A-W-51B — the prompt now uses the CORRECT printed
+    // denominator (102/100) as the Battle Partners example, matching
+    // reality; the older 102/130 (catalogue-count derived) was moved
+    // out with the denominator-tolerance work.
+    expect(EDGE_FN).toMatch(/Japanese Battle Partners|102\/100/)
   })
 
   it('ParsedSignals carries an inferred language field', () => {
