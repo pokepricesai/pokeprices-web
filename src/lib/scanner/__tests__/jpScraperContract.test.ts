@@ -38,7 +38,8 @@ describe.skipIf(scraper == null)('bulk_seed_japanese.py — 51C printed_denomina
   })
 
   it('marks the entry as a failure rather than seeding with the wrong denominator', () => {
-    expect(scraper).toMatch(/failures\.append\(\{"set_name": e\["set_name"\], "reason": "printed_denominator missing"\}\)/)
+    // 51D — failure tuple shape matches the summary loop's 3-arity unpack
+    expect(scraper).toMatch(/failures\.append\(\(e\["console_name"\], -1, f"printed_denominator missing from manifest/)
   })
 
   it('registers --allow-total-cards-as-denominator as an argparse flag with a warning description', () => {
