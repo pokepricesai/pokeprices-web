@@ -51,11 +51,19 @@ async function callVision(
   //   [2] bottom-R corner  — vintage bottom-RIGHT collector number,
   //                           contrast-boosted, max zoom
   const url = `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_VISION_API_KEY}`
+  // Block 5A-W-51A — language hints extended to ["en", "ja"]. Google
+  // Vision's OCR model returns Japanese-language card text (Kanji /
+  // Hiragana / Katakana) when "ja" is included as a hint. Keeping "en"
+  // first preserves the existing English behaviour — the hint list is
+  // an ORDER OF PREFERENCE, not a filter. English cards still OCR
+  // exactly as before; Japanese cards now return real Japanese text
+  // instead of garbled Latin approximations.
+  const LANG_HINTS = ["en", "ja"]
   const requests: any[] = [
     {
       image: { content: imageBase64 },
       features: [{ type: feature, maxResults: 50 }],
-      imageContext: { languageHints: ["en"] },
+      imageContext: { languageHints: LANG_HINTS },
     },
   ]
   const stripIdx = numberStripBase64 ? requests.length : -1
@@ -63,7 +71,7 @@ async function callVision(
     requests.push({
       image: { content: numberStripBase64 },
       features: [{ type: "TEXT_DETECTION", maxResults: 20 }],
-      imageContext: { languageHints: ["en"] },
+      imageContext: { languageHints: LANG_HINTS },
     })
   }
   const cornerIdx = cornerBase64 ? requests.length : -1
@@ -71,7 +79,7 @@ async function callVision(
     requests.push({
       image: { content: cornerBase64 },
       features: [{ type: "TEXT_DETECTION", maxResults: 20 }],
-      imageContext: { languageHints: ["en"] },
+      imageContext: { languageHints: LANG_HINTS },
     })
   }
   const res = await fetch(url, {
@@ -97,14 +105,15 @@ async function callVision(
 // when engine === "ai_vision". Designed to be a drop-in alternative so
 // downstream matching is identical.
 
-const HAIKU_VISION_PROMPT = `You are an expert Pokemon TCG card identifier. Look at this card photo and return a JSON object describing what you see.
+const HAIKU_VISION_PROMPT = `You are an expert Pokemon TCG card identifier. This card may be from any language market — English, Japanese, or another. Look at the photo and return a JSON object describing what you see.
 
 Return ONLY this JSON shape. No preamble, no markdown code fence.
 
 {
-  "pokemon_name": string | null,         // just the Pokemon name, strip HP, symbols, brackets
-  "collector_number": string | null,     // exact format printed, e.g. "4/102", "016/165", "SWSH-123"
-  "set_name": string | null,             // best guess at full set name if you recognize it
+  "language": "en" | "jp" | null,        // "jp" if you see Kanji, Hiragana or Katakana anywhere; "en" for an English-market card; null if truly ambiguous
+  "pokemon_name": string | null,         // the Pokemon's English name if you can identify the species from artwork, otherwise transcribe the printed name verbatim (Japanese OK)
+  "collector_number": string | null,     // exact format printed, e.g. "4/102", "016/165", "102/130" (JP Battle Partners), "SWSH-123"
+  "set_name": string | null,             // best guess at the full set name if you recognize it; for a JP card give the English translation of the set name if you know it
   "set_abbreviation": string | null,     // 3-letter code if visible (SVI, PAR, OBF, PAF, etc)
   "copyright_year": number | null,       // 4-digit year from copyright line
   "is_promo": boolean,                   // PROMO badge, black star, or promo-prefixed number (SWSH/XY/SM/SVP...)
@@ -112,6 +121,12 @@ Return ONLY this JSON shape. No preamble, no markdown code fence.
   "variant_confidence": "high" | "medium" | "low",
   "notes": string                        // one short sentence about anything unclear in your reading
 }
+
+Language guidance:
+- Japanese cards have Japanese script (Kanji / Hiragana / Katakana) somewhere on the card — usually in the flavour text or move descriptions, even if the Pokemon name looks similar to English.
+- English cards contain only Latin script.
+- The collector number format is usually the same across languages (e.g. 102/130), so the number alone is NOT a language signal.
+- If you cannot decide, return language=null and let the downstream matcher use other evidence.
 
 Variant guidance:
 - holo:         foil pattern visible IN the artwork window only
@@ -161,6 +176,15 @@ async function callAIVision(imageBase64: string): Promise<{ signals: ParsedSigna
     throw new Error(`Could not parse Haiku JSON: ${e?.message || e}. Raw: ${text.slice(0, 200)}`)
   }
 
+  // Block 5A-W-51A — trust the model's language field when it commits
+  // to "en" or "jp"; fall back to text-based CJK detection on the
+  // pokemon_name / set_name / notes fields so we still get a signal
+  // when the model returned language: null.
+  const modelLang = parsed.language === "en" || parsed.language === "jp" ? parsed.language : null
+  const textJoined = [parsed.pokemon_name, parsed.set_name, parsed.notes]
+    .filter(Boolean).map((s: unknown) => String(s)).join(" ")
+  const language: "en" | "jp" | null = modelLang ?? detectCardLanguageFromText(textJoined)
+
   const signals: ParsedSignals = {
     collector_number: parsed.collector_number ? String(parsed.collector_number).trim() : null,
     collector_number_pattern: parsed.collector_number ? "ai-vision" : null,
@@ -169,6 +193,7 @@ async function callAIVision(imageBase64: string): Promise<{ signals: ParsedSigna
     set_abbreviation: parsed.set_abbreviation ? String(parsed.set_abbreviation).trim().toUpperCase() : null,
     copyright_year: typeof parsed.copyright_year === "number" ? parsed.copyright_year : null,
     is_promo: !!parsed.is_promo,
+    language,
     full_text: JSON.stringify(parsed, null, 2),
   }
   return {
@@ -221,7 +246,30 @@ export interface ParsedSignals {
   set_abbreviation: string | null
   copyright_year: number | null
   is_promo: boolean
+  // Block 5A-W-51A — 'jp' when OCR text contains CJK unicode (Kanji /
+  // Hiragana / Katakana) or the Haiku model returned language: 'jp'.
+  // 'en' when text is Latin-only with at least one letter. null when
+  // OCR returned nothing usable. Passed as p_language to
+  // scan_card_match — see migrations/2026-08-04-scan-card-match-
+  // language-signal.sql for how the RPC uses it.
+  language: "en" | "jp" | null
   full_text: string
+}
+
+// ── Language detection (mirrors src/lib/scanner/parseHelpers.ts) ─
+//
+// Kept as a copy here because Deno edge functions cannot import from
+// src/. The boundary test in
+// src/lib/scanner/__tests__/scanMatchMigration.test.ts asserts that
+// the regex + function shape match the src/ copy so the two paths
+// stay in sync.
+const CJK_RE = /[぀-ゟ゠-ヿ一-鿿ｦ-ﾟ]/
+
+function detectCardLanguageFromText(text: string | null | undefined): "en" | "jp" | null {
+  if (!text) return null
+  if (CJK_RE.test(text)) return "jp"
+  if (/[A-Za-z]/.test(text)) return "en"
+  return null
 }
 
 function extractCollectorNumber(text: string): { value: string | null; pattern: string | null } {
@@ -370,6 +418,11 @@ function parseSignals(fullResponse: any, numberStripResponse: any | null, corner
     set_abbreviation: abbreviation,
     copyright_year: extractCopyrightYear(fullText),
     is_promo: extractIsPromo(combinedText, number.pattern),
+    // Block 5A-W-51A — inspect ALL three OCR passes for CJK unicode.
+    // Even a single Hiragana or Kanji character anywhere is a strong
+    // "this is a Japanese-market card" signal. English cards never
+    // contain CJK, so this is unambiguous.
+    language: detectCardLanguageFromText(combinedText),
     full_text: fullText
       + (stripText  ? `\n--- bottom strip ---\n${stripText}`     : "")
       + (cornerText ? `\n--- bottom-right corner ---\n${cornerText}` : ""),
@@ -383,12 +436,17 @@ async function matchCards(signals: ParsedSignals): Promise<any[]> {
   // signal: it maps to the printed set code), otherwise the long-form
   // series words. Both get an ILIKE %hint% against cards.set_name.
   const setHint = signals.set_abbreviation || signals.set_hint
+  // Block 5A-W-51A — p_language routes ranking preference toward the
+  // detected language. When signals.language is null (OCR gave no
+  // signal) the RPC behaves exactly as pre-51A. See
+  // migrations/2026-08-04-scan-card-match-language-signal.sql.
   const { data, error } = await supabase.rpc("scan_card_match", {
     p_collector_number: signals.collector_number,
     p_name:             signals.name,
     p_set_hint:         setHint,
     p_copyright_year:   signals.copyright_year,
     p_is_promo:         signals.is_promo,
+    p_language:         signals.language,
   })
   if (error) throw new Error(`scan_card_match RPC failed: ${error.message}`)
   return data || []
@@ -424,6 +482,9 @@ async function logScan(opts: {
         set_abbreviation: opts.signals.set_abbreviation,
         copyright_year: opts.signals.copyright_year,
         is_promo: opts.signals.is_promo,
+        // Block 5A-W-51A — inferred language passed to the matcher.
+        // Never contains user PII; safe to log.
+        language: opts.signals.language,
         ai_variant: opts.aiVariant,
         ai_variant_confidence: opts.aiVariantConfidence,
       },
@@ -540,6 +601,7 @@ Deno.serve(async (req) => {
       name: signals.name,
       set_hint: signals.set_hint,
       is_promo: signals.is_promo,
+      language: signals.language,
       variant: aiVariant,
     }))
   } else {
