@@ -367,7 +367,7 @@ export default function HomeClient() {
             }} />
 
             <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-              {['100% Free', 'No Login', 'No Data Collection'].map(pill => (
+              {['100% Free', 'No Login', 'No Data Collection', 'Japanese Sets Included'].map(pill => (
                 <span key={pill} style={{
                   background: 'rgba(255,255,255,0.15)', color: '#fff', fontSize: 11, fontWeight: 700,
                   padding: '4px 12px', borderRadius: 20, border: '1px solid rgba(255,255,255,0.2)',
@@ -391,7 +391,7 @@ export default function HomeClient() {
               color: 'rgba(255,255,255,0.9)', fontSize: 15, margin: '0 0 20px',
               lineHeight: 1.55, fontFamily: "'Figtree', sans-serif", fontWeight: 600,
             }}>
-              Live values · PSA 10 data · grading insights · 40,000+ cards · 156+ sets
+              Live values · PSA 10 data · grading insights · 40,000+ cards · English & Japanese sets
             </p>
 
             <div style={{ maxWidth: 560, marginBottom: 10 }}>
