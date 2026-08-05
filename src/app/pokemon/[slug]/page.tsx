@@ -50,6 +50,12 @@ interface SpeciesRow {
   most_recent_set: string | null
   description: string | null
   updated_at: string | null
+  // Block 5A-W-53A — per-language card totals from the updated
+  // get_pokemon_species_detail RPC. Older cached RPC results may
+  // omit these fields, so the client falls back to counting the
+  // all_cards payload when they are absent.
+  en_total_cards?: number
+  jp_total_cards?: number
 }
 
 interface CardRow {
@@ -65,6 +71,10 @@ interface CardRow {
   current_psa10: Cents
   raw_pct_30d: number | null
   set_release_date?: string | null
+  // Block 5A-W-53A — language projection from the RPC. Used by
+  // SpeciesInteractiveSection's language filter and by the JP
+  // ribbon on card tiles.
+  language?: 'en' | 'jp' | null
 }
 
 interface BySetRow {
@@ -677,6 +687,9 @@ export default async function PokemonSpeciesPage({
         <SpeciesInteractiveSection
           cards={cards}
           displayName={displayName}
+          pokemonSlug={sp?.name ?? slug}
+          enTotal={sp?.en_total_cards}
+          jpTotal={sp?.jp_total_cards}
         />
       )}
 
