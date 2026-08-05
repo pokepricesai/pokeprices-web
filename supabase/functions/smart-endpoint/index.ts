@@ -503,9 +503,16 @@ async function dbSearchCards(searchTerm: string): Promise<any> {
   const setNames = [...new Set(parsedCards.map((p: any) => p.setName))];
   const cardNames = [...new Set(parsedCards.map((p: any) => p.cardName))];
 
+  // Block 5A-W-52A.3 — extend the projection with the identifier
+  // fields the candidate-selection response needs (id, card_number,
+  // card_number_display, language, variant, image_url). Without
+  // these, the ambiguous-free-text short-circuit builds candidate
+  // objects with empty slugs and null PC ids, and the client's
+  // resend fails closed.
+  const CARD_SEL = "id, card_slug, card_name, set_name, card_url_slug, card_number, card_number_display, language, variant, image_url";
   const { data: cardRows } = await supabase
     .from("cards")
-    .select("card_slug, card_name, set_name, card_url_slug")
+    .select(CARD_SEL)
     .in("set_name", setNames)
     .in("card_name", cardNames)
     .limit(20);
@@ -517,7 +524,7 @@ async function dbSearchCards(searchTerm: string): Promise<any> {
       .trim();
     const { data: fallbackRows } = await supabase
       .from("cards")
-      .select("card_slug, card_name, set_name, card_url_slug")
+      .select(CARD_SEL)
       .in("set_name", setNames)
       .ilike("card_name", `%${baseName}%`)
       .limit(20);
@@ -585,6 +592,19 @@ async function enrichCards(
       card_name_plain: card.card_name,
       set_name: card.set_name,
       card_url: cardUrl,
+      // Block 5A-W-52A.3 — raw identifier fields so the ambiguous-
+      // free-text short-circuit can build well-formed CardCandidate
+      // objects and the client's resend has real identifiers to send
+      // in card_context. The LLM ignores these; they're for the
+      // candidate response body path.
+      id: card.id,
+      card_slug: card.card_slug,
+      card_url_slug: card.card_url_slug,
+      card_number: card.card_number,
+      card_number_display: card.card_number_display,
+      language: card.language,
+      variant: card.variant,
+      image_url: card.image_url,
       raw_usd: usdCentsToUsd(trend?.current_raw),
       raw_gbp: usdCentsToGbp(trend?.current_raw),
       psa9_usd: usdCentsToUsd(trend?.current_psa9),
@@ -1143,6 +1163,8 @@ function logChat(params: any) {
     ...legacyRow,
     intent: params.intent ?? null,
     context_source: params.context_source ?? null,
+    // 52A.2 short-form columns (DB-column-inspired names).
+    // Retained for backward compatibility with existing analytics.
     requested_card_id: params.requested_card_record_id ?? null,
     requested_card_slug: params.requested_pc_product_id ?? null,
     requested_card_url_slug: params.requested_card_url_slug ?? null,
@@ -1161,6 +1183,15 @@ function logChat(params: any) {
     exact_match_found: params.exact_match_found ?? null,
     candidate_count: params.candidate_count ?? null,
     match_confidence: params.match_confidence ?? null,
+    // 52A.3 dual-write to explicit-name columns. A mismatch audit
+    // must never compare a DB primary key to a PriceCharting id,
+    // so the explicit columns make the type unambiguous:
+    //   *_card_record_id → cards.id (DB PK)
+    //   *_pc_product_id  → cards.card_slug (PriceCharting id)
+    requested_card_record_id: params.requested_card_record_id ?? null,
+    requested_pc_product_id:  params.requested_pc_product_id ?? null,
+    matched_card_record_id:   params.matched_card_record_id ?? null,
+    matched_pc_product_id:    params.matched_pc_product_id ?? null,
   };
   supabase.from("chat_logs").insert([extendedRow]).then(({ error }) => {
     if (!error) return;
@@ -1534,6 +1565,13 @@ Deno.serve(async (req: Request) => {
     let cacheCreationTokens = 0;
     let cacheReadTokens = 0;
     let toolUse: any = null;
+    // Block 5A-W-52A.3 — ambiguous-free-text candidates. When
+    // search_cards returns more than one card on a free-text
+    // (no-structured-context) turn, we short-circuit BEFORE the
+    // LLM writes a card-specific answer and return the candidate
+    // list for the client's selection UI. See the tool-result
+    // handler below.
+    let ambiguousCandidates: any[] | null = null;
 
     const MAX_LOOPS = 3;
     for (let loopCount = 0; loopCount < MAX_LOOPS; loopCount++) {
@@ -1606,7 +1644,11 @@ Deno.serve(async (req: Request) => {
             if (candidateArr.length === 1) {
               const c = candidateArr[0];
               if (c && (c.card_url_slug || c.card_slug)) {
-                const rawName = typeof c.card_name === "string" ? c.card_name : "";
+                // Prefer card_name_plain (raw DB name) over card_name
+                // (markdown-linked) so matched_card_name is clean.
+                const rawName = typeof c.card_name_plain === "string"
+                  ? c.card_name_plain
+                  : (typeof c.card_name === "string" ? c.card_name : "");
                 matchedCardRecordId = c.id != null ? String(c.id) : null;
                 matchedCardUrlSlug  = c.card_url_slug ?? null;
                 matchedPcProductId  = c.card_slug != null ? String(c.card_slug) : null;
@@ -1623,6 +1665,12 @@ Deno.serve(async (req: Request) => {
               }
             } else if (candidateArr.length > 1) {
               candidateCount = Math.max(candidateCount, candidateArr.length);
+              // Block 5A-W-52A.3 — capture the raw candidate rows so
+              // we can build the selection response after the
+              // Promise.all completes. Only the FIRST search_cards
+              // ambiguity wins — later loop iterations won't happen
+              // because we break out below.
+              if (!ambiguousCandidates) ambiguousCandidates = candidateArr;
             }
           }
 
@@ -1633,6 +1681,19 @@ Deno.serve(async (req: Request) => {
           };
         })
       );
+
+      // Block 5A-W-52A.3 — short-circuit before the LLM sees the
+      // ambiguous tool result. Otherwise the LLM would pick one
+      // variant and answer as if it were the right one (the exact
+      // silent-substitution problem this block closes).
+      if (ambiguousCandidates && !structuredCard) {
+        answer = "I found more than one card that matches. Which one did you mean?";
+        matchMethod = "ambiguous_free_text";
+        toolUsed = "candidate_selection";
+        queryType = "candidate_selection";
+        exactMatchFound = false;
+        break;
+      }
 
       agentMessages.push({
         role: "assistant",
@@ -1705,28 +1766,57 @@ Deno.serve(async (req: Request) => {
       match_confidence: matchConfidence,
     });
 
+    // Block 5A-W-52A.3 — candidate-selection payload. Kept on the
+    // primary response so the client can render selection UI in
+    // place. Limited to 6 for the UI; the true candidate_count is
+    // preserved for logging.
+    const responseBody: Record<string, unknown> = {
+      answer,
+      tool_used: toolUsed,
+      query_type: queryType,
+      card_data_found: cardDataFound,
+      exact_match_found: exactMatchFound,
+      match_method: matchMethod,
+      candidate_count: candidateCount,
+      requested_card_record_id: requestedCardRecordId,
+      matched_card_record_id: matchedCardRecordId,
+      matched_card_url_slug: matchedCardUrlSlug,
+      matched_pc_product_id: matchedPcProductId,
+      matched_card_name: matchedCardName,
+      matched_set_name: matchedSetName,
+      matched_card_number: matchedCardNumber,
+      matched_card_number_display: matchedCardNumberDisplay,
+      matched_language: matchedLanguage,
+      matched_variant: matchedVariant,
+    };
+    if (ambiguousCandidates && !structuredCard) {
+      const list = ambiguousCandidates.slice(0, 6).map((c: any) => {
+        // enrichCards() emits `card_name` as a markdown-linked
+        // string ("[Name](url)") and `card_name_plain` as the raw
+        // DB value ("Kleavor [Holo] #86"). Use the plain field
+        // and strip the trailing "#NN".
+        const rawName = typeof c.card_name_plain === "string"
+          ? c.card_name_plain
+          : (typeof c.card_name === "string" ? c.card_name : "");
+        const cleaned = rawName.replace(/\s*#[A-Za-z0-9/-]+\s*$/, "").trim() || rawName;
+        return {
+          cardRecordId: c.id != null ? String(c.id) : null,
+          cardUrlSlug: c.card_url_slug ?? "",
+          priceChartingProductId: c.card_slug != null ? String(c.card_slug) : null,
+          cardName: cleaned,
+          setName: c.set_name ?? "",
+          cardNumber: c.card_number != null ? String(c.card_number) : null,
+          cardNumberDisplay: c.card_number_display ?? null,
+          language: c.language === "jp" ? "jp" : "en",
+          variant: c.variant ?? null,
+          imageUrl: c.image_url ?? null,
+        };
+      });
+      responseBody.requires_card_selection = true;
+      responseBody.card_candidates = list;
+    }
     return new Response(
-      JSON.stringify({
-        answer,
-        tool_used: toolUsed,
-        query_type: queryType,
-        card_data_found: cardDataFound,
-        // Block 5A-W-52A.2 — full provenance so the client can
-        // reconstruct activeCard on a free-text exact match.
-        exact_match_found: exactMatchFound,
-        match_method: matchMethod,
-        candidate_count: candidateCount,
-        requested_card_record_id: requestedCardRecordId,
-        matched_card_record_id: matchedCardRecordId,
-        matched_card_url_slug: matchedCardUrlSlug,
-        matched_pc_product_id: matchedPcProductId,
-        matched_card_name: matchedCardName,
-        matched_set_name: matchedSetName,
-        matched_card_number: matchedCardNumber,
-        matched_card_number_display: matchedCardNumberDisplay,
-        matched_language: matchedLanguage,
-        matched_variant: matchedVariant,
-      }),
+      JSON.stringify(responseBody),
       {
         headers: {
           "Content-Type": "application/json",

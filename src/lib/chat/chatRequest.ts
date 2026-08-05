@@ -30,6 +30,12 @@ export type ContextSource =
    * so the server resolves the newly named card fresh.
    */
   | 'card_switch'
+  /**
+   * The user picked one card from an ambiguous-match candidate
+   * list (52A.3). The client resends the original question with
+   * that card's structured card_context.
+   */
+  | 'candidate_selection'
 
 export interface ChatMessage {
   role: 'user' | 'assistant'
@@ -65,9 +71,38 @@ export interface ChatRequestBody {
 }
 
 /**
+ * One candidate card the server returns when a free-text search
+ * finds more than one plausible match. The client renders these
+ * as inline selection buttons; picking one resends the original
+ * question with structured card_context reconstructed from the
+ * chosen candidate.
+ *
+ * Field names match `CardContext` so a candidate can be promoted
+ * directly to `activeCard` without a per-field mapping step.
+ */
+export interface CardCandidate {
+  cardRecordId: number | string | null
+  cardUrlSlug: string
+  priceChartingProductId: string | null
+  cardName: string
+  setName: string
+  cardNumber: string | null
+  cardNumberDisplay: string | null
+  language: 'en' | 'jp'
+  variant: string | null
+  /** Optional artwork URL for the selection UI. */
+  imageUrl?: string | null
+}
+
+/**
  * Server-returned provenance fields. The client uses these on a
  * free-text turn to reconstruct an activeCard so follow-ups on the
  * general AI page pin to the resolved card.
+ *
+ * When the free-text search returned more than one card, the server
+ * sets `requires_card_selection: true` and returns the candidate
+ * list on `card_candidates`. In that case `exact_match_found` is
+ * false and the client MUST NOT auto-pin any card.
  */
 export interface ChatResponseProvenance {
   answer: string
@@ -77,6 +112,10 @@ export interface ChatResponseProvenance {
   exact_match_found?: boolean
   match_method?: string
   candidate_count?: number
+  /** Set to true when the user must pick a card before we can answer. */
+  requires_card_selection?: boolean
+  /** Up to 6 candidate cards for the client's selection UI. */
+  card_candidates?: CardCandidate[]
   requested_card_record_id?: string | number | null
   matched_card_record_id?: string | number | null
   matched_card_url_slug?: string | null

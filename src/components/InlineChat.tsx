@@ -1,6 +1,7 @@
-// v5 — Block 5A-W-52A.1 structured card context (unambiguous
-// identifier naming), explicit-card-switch detection, and
-// server-provenance activeCard reconstruction on free-text turns.
+// v6 — Block 5A-W-52A.3 candidate-selection UI for ambiguous
+// free-text card queries. Previous history:
+//   v5 — 52A.1 unambiguous identifier naming, explicit-switch
+//        detection, server-provenance activeCard reconstruction.
 // See src/lib/chat/cardContext.ts + chatRequest.ts.
 'use client'
 import { useState, useRef, useEffect, useCallback } from 'react'
@@ -17,7 +18,7 @@ import {
   cleanCardName,
   displayQuickActionText,
 } from '@/lib/chat/cardContext'
-import type { ChatRequestBody, ContextSource } from '@/lib/chat/chatRequest'
+import type { ChatRequestBody, ContextSource, CardCandidate } from '@/lib/chat/chatRequest'
 import { detectExplicitCardSwitch, KNOWN_SETS as EXPLICIT_SWITCH_SETS } from '@/lib/chat/explicitSwitch'
 
 const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -31,7 +32,20 @@ const quickQuestions = [
   'Cheapest Pikachu cards',
 ]
 
-interface Message { role: 'user' | 'assistant'; content: string }
+interface Message {
+  role: 'user' | 'assistant'
+  content: string
+  /**
+   * Block 5A-W-52A.3 — when the server returns
+   * requires_card_selection, we attach the candidate list here so
+   * the assistant bubble renders the picker inline. Cleared when
+   * the user picks a card and we resend.
+   */
+  candidates?: CardCandidate[]
+  candidateCount?: number
+  /** Once the user has picked, the picker is disabled. */
+  selectedCandidateSlug?: string | null
+}
 
 function ChatLink({ href, children }: { href?: string; children?: React.ReactNode }) {
   if (!href) return <>{children}</>
@@ -183,6 +197,10 @@ export default function InlineChat({
   // from server provenance. Explicit switches (user names a new
   // card mid-conversation) clear it for the resolving turn.
   const [activeCard, setActiveCard] = useState<CardContext | null>(cardContext ?? null)
+  // Block 5A-W-52A.3 — the last user question that triggered a
+  // candidate-selection response. When the user picks a card, we
+  // resend this question with the newly pinned card_context.
+  const [pendingQuestion, setPendingQuestion] = useState<{ text: string; intent: QuickActionIntent | null } | null>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   // Keep activeCard in sync when the parent remounts with a different
@@ -201,41 +219,56 @@ export default function InlineChat({
   const clearChat = useCallback(() => {
     setMessages([]); setSessionId('web-' + Math.random().toString(36).slice(2, 10)); setInput('')
     setActiveCard(cardContext ?? null)
+    setPendingQuestion(null)
   }, [cardContext])
 
-  const send = async (visibleText: string, intent: QuickActionIntent | null) => {
+  /**
+   * Block 5A-W-52A.3 — a single sender used by both the normal
+   * chat input and the candidate-selection resend flow. When the
+   * caller passes overrides.card / overrides.contextSource, we
+   * skip the explicit-switch detection and use them verbatim.
+   */
+  const send = async (
+    visibleText: string,
+    intent: QuickActionIntent | null,
+    overrides?: { card?: CardContext | null; contextSource?: ContextSource; appendUserMessage?: boolean },
+  ) => {
     if (!visibleText.trim() || loading) return
     setInput('')
+    const shouldAppendUser = overrides?.appendUserMessage !== false
     const userMsg: Message = { role: 'user', content: visibleText }
-    setMessages((prev) => [...prev, userMsg])
+    if (shouldAppendUser) setMessages((prev) => [...prev, userMsg])
     setLoading(true)
     trackEvent('ai_question_submitted', { source_component: 'inline_chat' })
 
     // Block 5A-W-52A.1 — explicit card-switch detection. If the
     // user's message clearly names a different card while an
     // activeCard is set, drop the pinned context so the server
-    // resolves the newly named card fresh. Pre-routed quick
-    // actions are exempt: those come from a button and cannot
-    // reference another card.
+    // resolves the newly named card fresh. Skipped when the caller
+    // supplied an override (quick actions + candidate-selection
+    // resend both fall in this branch).
+    const usingOverride = overrides?.card !== undefined || overrides?.contextSource !== undefined
     const explicitSwitch =
+      !usingOverride &&
       !intent && activeCard != null && detectExplicitCardSwitch(visibleText, activeCard)
-    const outgoingCard: CardContext | null = explicitSwitch ? null : activeCard
+    const outgoingCard: CardContext | null =
+      overrides?.card !== undefined ? overrides.card :
+      explicitSwitch                ? null            :
+                                      activeCard
 
-    // Block 5A-W-52A.1 — structured request body. The visible
-    // `message` is clean text. Identity flows through card_context
-    // / set_context / intent — never through free-form bracketed
-    // prefixes.
     const contextSource: ContextSource =
-      explicitSwitch           ? 'card_switch' :
-      intent && activeCard     ? 'card_page' :
-      intent && setContext     ? 'set_page' :
-      activeCard               ? (messages.length === 0 ? 'card_page' : 'conversation') :
-      setContext               ? 'set_page' :
-                                 'text'
+      overrides?.contextSource ?? (
+        explicitSwitch           ? 'card_switch' :
+        intent && activeCard     ? 'card_page' :
+        intent && setContext     ? 'set_page' :
+        activeCard               ? (messages.length === 0 ? 'card_page' : 'conversation') :
+        setContext               ? 'set_page' :
+                                   'text'
+      )
     const body: ChatRequestBody = {
       message: visibleText,
       session_id: sessionId,
-      history: [...messages, userMsg].slice(-10),
+      history: [...messages, ...(shouldAppendUser ? [userMsg] : [])].slice(-10),
       card_context: outgoingCard,
       set_context: setContext ?? null,
       intent: intent ?? null,
@@ -260,11 +293,28 @@ export default function InlineChat({
         // 'yes' on an exact match.
         card_found:      data?.exact_match_found === true ? 'yes' : 'no',
       })
-      // Block 5A-W-52A.1 — server-returned activeCard reconstruction.
-      // On a free-text or card_switch turn that resolved to exactly
-      // one exact card, pin it as activeCard so follow-ups don't
-      // re-parse identity. The provenance shape is defined in
-      // src/lib/chat/chatRequest.ts::ChatResponseProvenance.
+
+      // Block 5A-W-52A.3 — candidate selection short-circuit. When
+      // the server can't disambiguate the free-text query, it
+      // returns requires_card_selection with a list of candidates.
+      // We render selectable buttons in the assistant bubble and
+      // remember the original question for the resend. Do NOT set
+      // activeCard here — that only happens after the user picks.
+      if (data?.requires_card_selection === true && Array.isArray(data.card_candidates) && data.card_candidates.length > 0) {
+        setPendingQuestion({ text: visibleText, intent })
+        setMessages((prev) => [...prev, {
+          role: 'assistant',
+          content: linkedAnswer,
+          candidates: data.card_candidates as CardCandidate[],
+          candidateCount: typeof data.candidate_count === 'number' ? data.candidate_count : data.card_candidates.length,
+          selectedCandidateSlug: null,
+        }])
+        setLoading(false)
+        return
+      }
+
+      // Block 5A-W-52A.1 — server-returned activeCard reconstruction
+      // on a single-exact free-text match.
       if (data?.exact_match_found === true &&
           typeof data.matched_card_url_slug === 'string' &&
           typeof data.matched_set_name === 'string') {
@@ -290,6 +340,46 @@ export default function InlineChat({
   }
 
   const sendMessage = (text?: string) => send(text ?? input, null)
+
+  /**
+   * Block 5A-W-52A.3 — user picked one card from the candidate
+   * list. Promote it to activeCard, disable the picker in the
+   * assistant bubble, resend the original question with the
+   * chosen structured card_context, and record the source as
+   * "candidate_selection" so the audit query can distinguish
+   * user-picked answers from card-page requests.
+   */
+  const handleCandidatePick = async (bubbleIndex: number, candidate: CardCandidate) => {
+    if (loading) return
+    const nextCard: CardContext = {
+      cardRecordId: candidate.cardRecordId,
+      cardUrlSlug: candidate.cardUrlSlug,
+      priceChartingProductId: candidate.priceChartingProductId,
+      cardName: candidate.cardName,
+      setName: candidate.setName,
+      cardNumber: candidate.cardNumber,
+      cardNumberDisplay: candidate.cardNumberDisplay,
+      language: candidate.language,
+      variant: candidate.variant ?? null,
+    }
+    setActiveCard(nextCard)
+    // Freeze the picker in the assistant bubble so a second click
+    // can't fire another resend.
+    setMessages((prev) => prev.map((m, idx) => idx === bubbleIndex
+      ? { ...m, selectedCandidateSlug: candidate.cardUrlSlug }
+      : m))
+    trackEvent('ai_candidate_selected', { source_component: 'inline_chat' })
+    const q = pendingQuestion
+    setPendingQuestion(null)
+    if (!q) return
+    // Resend the original user turn WITHOUT re-appending it — the
+    // original user bubble is already visible above the picker.
+    await send(q.text, q.intent, {
+      card: nextCard,
+      contextSource: 'candidate_selection',
+      appendUserMessage: false,
+    })
+  }
 
   const sendQuickAction = (intent: QuickActionIntent) => {
     // Build a clean natural sentence for the visible bubble; identity
@@ -365,17 +455,69 @@ export default function InlineChat({
               maxWidth: '85%', fontSize: 14, lineHeight: 1.6,
             }}>
               {msg.role === 'assistant' ? (
-                <ReactMarkdown components={{
-                  a: ({ href, children }) => <ChatLink href={href}>{children}</ChatLink>,
-                  p: ({ children }) => <p style={{ margin: '0 0 8px 0' }}>{children}</p>,
-                  strong: ({ children }) => <strong style={{ color: 'var(--text)', fontWeight: 800 }}>{children}</strong>,
-                  code: ({ children }) => <code style={{ background: 'rgba(0,0,0,0.08)', borderRadius: 4, padding: '1px 5px', fontSize: 13, fontFamily: 'monospace' }}>{children}</code>,
-                  ul: ({ children }) => <ul style={{ margin: '4px 0', paddingLeft: 20 }}>{children}</ul>,
-                  ol: ({ children }) => <ol style={{ margin: '4px 0', paddingLeft: 20 }}>{children}</ol>,
-                  li: ({ children }) => <li style={{ marginBottom: 2 }}>{children}</li>,
-                }}>
-                  {msg.content}
-                </ReactMarkdown>
+                <>
+                  <ReactMarkdown components={{
+                    a: ({ href, children }) => <ChatLink href={href}>{children}</ChatLink>,
+                    p: ({ children }) => <p style={{ margin: '0 0 8px 0' }}>{children}</p>,
+                    strong: ({ children }) => <strong style={{ color: 'var(--text)', fontWeight: 800 }}>{children}</strong>,
+                    code: ({ children }) => <code style={{ background: 'rgba(0,0,0,0.08)', borderRadius: 4, padding: '1px 5px', fontSize: 13, fontFamily: 'monospace' }}>{children}</code>,
+                    ul: ({ children }) => <ul style={{ margin: '4px 0', paddingLeft: 20 }}>{children}</ul>,
+                    ol: ({ children }) => <ol style={{ margin: '4px 0', paddingLeft: 20 }}>{children}</ol>,
+                    li: ({ children }) => <li style={{ marginBottom: 2 }}>{children}</li>,
+                  }}>
+                    {msg.content}
+                  </ReactMarkdown>
+                  {msg.candidates && msg.candidates.length > 0 && (
+                    <div data-testid="candidate-picker" style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {msg.candidates.map((c) => {
+                        const isSelected = msg.selectedCandidateSlug === c.cardUrlSlug
+                        const isDisabled = msg.selectedCandidateSlug != null || loading
+                        const variantLabel = c.variant && c.variant !== 'regular' && c.variant !== 'unknown'
+                          ? c.variant.replace(/_/g, ' ')
+                          : null
+                        return (
+                          <button
+                            key={`${c.cardUrlSlug}-${c.setName}`}
+                            data-candidate-slug={c.cardUrlSlug}
+                            disabled={isDisabled}
+                            onClick={() => handleCandidatePick(i, c)}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 10,
+                              padding: '8px 10px', borderRadius: 10,
+                              background: isSelected ? 'var(--primary)' : 'var(--card)',
+                              color: isSelected ? '#fff' : 'var(--text)',
+                              border: `1px solid ${isSelected ? 'var(--primary)' : 'var(--border)'}`,
+                              cursor: isDisabled ? 'default' : 'pointer',
+                              opacity: msg.selectedCandidateSlug && !isSelected ? 0.55 : 1,
+                              fontFamily: 'inherit', fontWeight: 700, fontSize: 13,
+                              textAlign: 'left',
+                            }}
+                          >
+                            {c.imageUrl && (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={c.imageUrl} alt={c.cardName} style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
+                            )}
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ fontWeight: 800 }}>
+                                {c.cardName}
+                                {variantLabel && <span style={{ marginLeft: 6, fontWeight: 600, opacity: 0.85 }}>({variantLabel})</span>}
+                              </div>
+                              <div style={{ fontSize: 11, marginTop: 2, opacity: 0.85 }}>
+                                {c.setName}{c.cardNumberDisplay ? ` · ${c.cardNumberDisplay}` : c.cardNumber ? ` · #${c.cardNumber}` : ''}
+                                {c.language === 'jp' ? ' · JP' : ' · EN'}
+                              </div>
+                            </div>
+                          </button>
+                        )
+                      })}
+                      {typeof msg.candidateCount === 'number' && msg.candidateCount > msg.candidates.length && (
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                          Showing {msg.candidates.length} of {msg.candidateCount} matches. Try being more specific if none of these are right.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
               ) : (
                 <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>
               )}

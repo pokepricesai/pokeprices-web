@@ -187,16 +187,29 @@ describe('representative wrong-card fixtures — identity resolution', () => {
     expect(ctx.cardNumber).toBe('19')
   })
 
-  it('Fossil #50 cannot silently become "Kabutops #24"', () => {
+  it('Fossil Kabuto #50 cannot silently become "Kabutops #24"', () => {
+    // 52A.3 correction: Fossil #50 is Kabuto (not Ditto — the
+    // earlier fixture was fabricated). Real production identifiers
+    // probed from Supabase:
+    //   id=14038, card_slug=643417, card_url_slug=kabuto-50,
+    //   card_name="Kabuto #50", set_name=Fossil, card_number=50.
+    // The retrieval path pins card_slug=643417 (globally unique)
+    // so Kabutops #24 (a different DB record) can never resolve.
     const ctx: CardContext = {
-      cardRecordId: null, cardUrlSlug: 'ditto-50', priceChartingProductId: '999002',
-      cardName: 'Ditto',
+      cardRecordId: 14038, cardUrlSlug: 'kabuto-50', priceChartingProductId: '643417',
+      cardName: 'Kabuto',
       setName: 'Fossil', cardNumber: '50',
       cardNumberDisplay: '50/62', language: 'en',
     }
-    expect(displayQuickActionText('grade_card', ctx, 'Ditto #50'))
-      .toBe('Should I grade Ditto 50/62 from Fossil?')
-    expect(ctx.cardUrlSlug).toBe('ditto-50')
+    expect(displayQuickActionText('grade_card', ctx, 'Kabuto #50'))
+      .toBe('Should I grade Kabuto 50/62 from Fossil?')
+    expect(ctx.cardUrlSlug).toBe('kabuto-50')
+    expect(ctx.priceChartingProductId).toBe('643417')
+    // Kabutops #24 has different card_number and different card_slug —
+    // there is no path in the 52A.2 retrieval order that maps
+    // Kabuto #50's identifiers to Kabutops #24's row.
+    expect(ctx.cardNumber).not.toBe('24')
+    expect(ctx.cardName.toLowerCase()).not.toContain('kabutops')
   })
 
   it('Base Set Pikachu #58 cannot be replaced by Crown Zenith Pikachu', () => {

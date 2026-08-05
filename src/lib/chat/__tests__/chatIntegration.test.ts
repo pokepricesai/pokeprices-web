@@ -21,7 +21,9 @@ const SET_PAGE_CLIENT = readFileSync(join(process.cwd(), 'src', 'app', 'set', '[
 const AI_ASSISTANT_CLIENT = readFileSync(join(process.cwd(), 'src', 'app', 'ai-assistant', 'AIAssistantClient.tsx'), 'utf8')
 const SMART_EP = readFileSync(join(process.cwd(), 'supabase', 'functions', 'smart-endpoint', 'index.ts'), 'utf8')
 const MIGRATION = readFileSync(join(process.cwd(), 'migrations', '2026-08-05-chat-logs-structured-context.sql'), 'utf8')
+const MIGRATION_52A3 = readFileSync(join(process.cwd(), 'migrations', '2026-08-05-chat-logs-52a3-explicit-provenance.sql'), 'utf8')
 const CARD_CONTEXT_MOD = readFileSync(join(process.cwd(), 'src', 'lib', 'chat', 'cardContext.ts'), 'utf8')
+const CHAT_REQUEST_MOD = readFileSync(join(process.cwd(), 'src', 'lib', 'chat', 'chatRequest.ts'), 'utf8')
 
 // ── The malformed-prefix regression ────────────────────
 
@@ -39,7 +41,9 @@ describe('the [Context: asking about ...] prefix is gone from the client', () =>
   })
 
   it('InlineChat carries card_context on EVERY message (follow-ups too)', () => {
-    expect(INLINE_CHAT).toMatch(/const outgoingCard: CardContext \| null = explicitSwitch \? null : activeCard/)
+    // 52A.3 refactored send() to accept overrides, so the default
+    // branch is the explicit-switch ? null : activeCard fallthrough.
+    expect(INLINE_CHAT).toMatch(/const outgoingCard: CardContext \| null =[\s\S]{0,300}explicitSwitch\s*\?\s*null\s*:\s*activeCard/)
   })
 })
 
@@ -279,8 +283,8 @@ describe('client explicit-card-switch signal', () => {
   })
 
   it('the send() flow uses detectExplicitCardSwitch to drop card_context', () => {
-    expect(INLINE_CHAT).toMatch(/const explicitSwitch =[\s\S]{0,200}detectExplicitCardSwitch\(visibleText, activeCard\)/)
-    expect(INLINE_CHAT).toMatch(/const outgoingCard: CardContext \| null = explicitSwitch \? null : activeCard/)
+    expect(INLINE_CHAT).toMatch(/const explicitSwitch =[\s\S]{0,300}detectExplicitCardSwitch\(visibleText, activeCard\)/)
+    expect(INLINE_CHAT).toMatch(/const outgoingCard: CardContext \| null =[\s\S]{0,300}explicitSwitch\s*\?\s*null\s*:\s*activeCard/)
   })
 
   it('pre-routed quick-action intents are exempt from the switch check', () => {
@@ -487,6 +491,302 @@ describe('URL-slug cross-set collision regression (52A.2)', () => {
   it('smart-endpoint fails closed when the composite lookup returns >1 row', () => {
     const p3 = SMART_EP.slice(SMART_EP.indexOf('Priority 3:')).slice(0, 1000)
     expect(p3).toMatch(/count > 1[\s\S]{0,120}card_url_slug_ambiguous/)
+  })
+})
+
+// ── 52A.3 candidate-selection contract ───────────────
+
+describe('52A.3 — ambiguous free-text short-circuit', () => {
+  it('smart-endpoint declares ambiguousCandidates before the LLM loop', () => {
+    expect(SMART_EP).toMatch(/let ambiguousCandidates: any\[\] \| null = null;/)
+  })
+
+  it('the multi-candidate branch captures the raw candidate rows', () => {
+    expect(SMART_EP).toMatch(/if \(!ambiguousCandidates\) ambiguousCandidates = candidateArr;/)
+  })
+
+  it('the short-circuit fires BEFORE the tool result is fed back to the LLM', () => {
+    // In the loop body, the guard sits between Promise.all() and
+    // the agentMessages.push({ role: "assistant" ... }) that would
+    // feed the tool result back into the model. We locate both by
+    // a permissive regex to avoid brittleness on trivia whitespace.
+    const loopBody = SMART_EP.slice(SMART_EP.indexOf('for (let loopCount = 0'))
+      .slice(0, 6000)
+    const guardMatch = loopBody.match(/if \(ambiguousCandidates && !structuredCard\)/)
+    const pushMatch = loopBody.match(/agentMessages\.push\(\{[\s\S]{0,60}role: "assistant"/)
+    expect(guardMatch).not.toBeNull()
+    expect(pushMatch).not.toBeNull()
+    expect(guardMatch!.index!).toBeLessThan(pushMatch!.index!)
+    expect(loopBody).toMatch(/matchMethod = "ambiguous_free_text"/)
+    expect(loopBody).toMatch(/toolUsed = "candidate_selection"/)
+  })
+
+  it('response body includes requires_card_selection + card_candidates on ambiguous turn', () => {
+    expect(SMART_EP).toMatch(/responseBody\.requires_card_selection = true;/)
+    expect(SMART_EP).toMatch(/responseBody\.card_candidates = list;/)
+  })
+
+  it('candidate list is limited to 6 entries', () => {
+    expect(SMART_EP).toMatch(/ambiguousCandidates\.slice\(0,\s*6\)/)
+  })
+
+  it('candidate objects use CardContext-shaped field names', () => {
+    const mapBlock = SMART_EP.slice(SMART_EP.indexOf('ambiguousCandidates.slice(0, 6)'))
+      .slice(0, 1500)
+    expect(mapBlock).toMatch(/cardRecordId:/)
+    expect(mapBlock).toMatch(/cardUrlSlug:/)
+    expect(mapBlock).toMatch(/priceChartingProductId:/)
+    expect(mapBlock).toMatch(/cardName:/)
+    expect(mapBlock).toMatch(/setName:/)
+    expect(mapBlock).toMatch(/cardNumberDisplay:/)
+    expect(mapBlock).toMatch(/language:/)
+    expect(mapBlock).toMatch(/variant:/)
+    expect(mapBlock).toMatch(/imageUrl:/)
+  })
+
+  it('candidate cardName uses card_name_plain (raw DB name), not the markdown-linked card_name', () => {
+    // enrichCards() emits card_name as "[Name #NN](url)" and
+    // card_name_plain as "Name #NN". Reading card_name would land
+    // a bracketed markdown link into CardContext.cardName.
+    const mapBlock = SMART_EP.slice(SMART_EP.indexOf('ambiguousCandidates.slice(0, 6)'))
+      .slice(0, 1500)
+    expect(mapBlock).toMatch(/card_name_plain/)
+  })
+
+  it('enrichCards() enriched output includes raw identifier fields for candidate use', () => {
+    // Without these fields, ambiguous candidates land with empty
+    // slug / null pc id / null card_number and the client's resend
+    // fails closed on step 2 of the E2E flow.
+    const enrich = SMART_EP.slice(SMART_EP.indexOf('async function enrichCards'))
+      .slice(0, 3500)
+    for (const field of [
+      'id: card.id',
+      'card_slug: card.card_slug',
+      'card_url_slug: card.card_url_slug',
+      'card_number: card.card_number',
+      'card_number_display: card.card_number_display',
+      'language: card.language',
+      'variant: card.variant',
+      'image_url: card.image_url',
+    ]) {
+      expect(enrich).toContain(field)
+    }
+  })
+
+  it('dbSearchCards SELECT projects the identifier columns', () => {
+    // Both the primary cardRows query and the fallback fuzzy query
+    // must pull the same identifier columns so ambiguous candidates
+    // are consistently well-formed.
+    const dbSearch = SMART_EP.slice(SMART_EP.indexOf('async function dbSearchCards'))
+      .slice(0, 3500)
+    expect(dbSearch).toMatch(/id, card_slug, card_name, set_name, card_url_slug, card_number, card_number_display, language, variant, image_url/)
+  })
+
+  it('single-exact-match capture also uses card_name_plain', () => {
+    // The 52A.1 free-text single-exact capture wrote matched_card_name
+    // from c.card_name — which is now markdown-linked. Same fix
+    // needed there so matched_card_name isn't a bracketed URL.
+    const cap = SMART_EP.slice(SMART_EP.indexOf('free-text single-exact-match capture'))
+      .slice(0, 2000)
+    expect(cap).toMatch(/card_name_plain/)
+  })
+
+  it('candidate short-circuit only fires on free-text (no structuredCard)', () => {
+    // The `!structuredCard` guard means a card-page request with
+    // multiple ambiguous variants still uses the fail-closed
+    // "context_ambiguous" path, not candidate selection.
+    expect(SMART_EP).toMatch(/if \(ambiguousCandidates && !structuredCard\) \{[\s\S]{0,600}break;/)
+  })
+})
+
+// ── 52A.3 candidate wire type ────────────────────────
+
+describe('52A.3 — CardCandidate wire type', () => {
+  it('chatRequest exports CardCandidate with the CardContext-mirroring shape', () => {
+    expect(CHAT_REQUEST_MOD).toMatch(/export interface CardCandidate/)
+    expect(CHAT_REQUEST_MOD).toMatch(/cardRecordId:\s*number \| string \| null/)
+    expect(CHAT_REQUEST_MOD).toMatch(/cardUrlSlug:\s*string/)
+    expect(CHAT_REQUEST_MOD).toMatch(/priceChartingProductId:\s*string \| null/)
+    expect(CHAT_REQUEST_MOD).toMatch(/cardName:\s*string/)
+    expect(CHAT_REQUEST_MOD).toMatch(/setName:\s*string/)
+    expect(CHAT_REQUEST_MOD).toMatch(/language:\s*'en' \| 'jp'/)
+    expect(CHAT_REQUEST_MOD).toMatch(/variant:\s*string \| null/)
+    expect(CHAT_REQUEST_MOD).toMatch(/imageUrl\?:\s*string \| null/)
+  })
+
+  it('ChatResponseProvenance exposes requires_card_selection + card_candidates', () => {
+    expect(CHAT_REQUEST_MOD).toMatch(/requires_card_selection\?:\s*boolean/)
+    expect(CHAT_REQUEST_MOD).toMatch(/card_candidates\?:\s*CardCandidate\[\]/)
+  })
+
+  it('ContextSource enumerates candidate_selection', () => {
+    expect(CHAT_REQUEST_MOD).toMatch(/\|\s*'candidate_selection'/)
+  })
+})
+
+// ── 52A.3 client picker + resend flow ───────────────
+
+describe('52A.3 — InlineChat candidate picker + resend', () => {
+  it('InlineChat imports CardCandidate from chatRequest', () => {
+    expect(INLINE_CHAT).toMatch(/CardCandidate/)
+  })
+
+  it('Message shape carries candidates + candidateCount + selectedCandidateSlug', () => {
+    expect(INLINE_CHAT).toMatch(/candidates\?:\s*CardCandidate\[\]/)
+    expect(INLINE_CHAT).toMatch(/candidateCount\?:\s*number/)
+    expect(INLINE_CHAT).toMatch(/selectedCandidateSlug\?:\s*string \| null/)
+  })
+
+  it('send() short-circuits and stores pendingQuestion on requires_card_selection', () => {
+    expect(INLINE_CHAT).toMatch(/data\?\.requires_card_selection === true/)
+    expect(INLINE_CHAT).toMatch(/setPendingQuestion\(\{ text: visibleText, intent \}\)/)
+    // Do NOT set activeCard on the ambiguous turn.
+    const ambBlock = INLINE_CHAT.slice(INLINE_CHAT.indexOf('candidate selection short-circuit'))
+      .slice(0, 2000)
+    expect(ambBlock).not.toMatch(/setActiveCard\(/)
+  })
+
+  it('handleCandidatePick promotes the selected candidate to activeCard', () => {
+    expect(INLINE_CHAT).toMatch(/const handleCandidatePick = async/)
+    const pick = INLINE_CHAT.slice(INLINE_CHAT.indexOf('const handleCandidatePick'))
+      .slice(0, 2500)
+    expect(pick).toMatch(/setActiveCard\(nextCard\)/)
+    expect(pick).toMatch(/cardRecordId:\s*candidate\.cardRecordId/)
+    expect(pick).toMatch(/cardUrlSlug:\s*candidate\.cardUrlSlug/)
+    expect(pick).toMatch(/priceChartingProductId:\s*candidate\.priceChartingProductId/)
+    expect(pick).toMatch(/cardName:\s*candidate\.cardName/)
+  })
+
+  it('handleCandidatePick resends the ORIGINAL question with card_context', () => {
+    const pick = INLINE_CHAT.slice(INLINE_CHAT.indexOf('const handleCandidatePick'))
+      .slice(0, 2500)
+    expect(pick).toMatch(/const q = pendingQuestion/)
+    expect(pick).toMatch(/send\(q\.text, q\.intent, \{[\s\S]{0,200}card: nextCard/)
+    expect(pick).toMatch(/contextSource:\s*'candidate_selection'/)
+    expect(pick).toMatch(/appendUserMessage: false/)
+  })
+
+  it('picker disables after a selection (freezes the buttons)', () => {
+    expect(INLINE_CHAT).toMatch(/selectedCandidateSlug === c\.cardUrlSlug/)
+    expect(INLINE_CHAT).toMatch(/disabled=\{isDisabled\}/)
+  })
+
+  it('picker shows variant, set, number, language, and image when present', () => {
+    const pickerBlock = INLINE_CHAT.slice(INLINE_CHAT.indexOf('data-testid="candidate-picker"'))
+      .slice(0, 3000)
+    expect(pickerBlock).toMatch(/variantLabel/)
+    expect(pickerBlock).toMatch(/c\.setName/)
+    expect(pickerBlock).toMatch(/c\.cardNumberDisplay/)
+    expect(pickerBlock).toMatch(/c\.language === 'jp'/)
+    expect(pickerBlock).toMatch(/c\.imageUrl/)
+  })
+
+  it('overflow footer shows "N of TRUE_TOTAL matches" when candidateCount > candidates.length', () => {
+    expect(INLINE_CHAT).toMatch(/Showing \{msg\.candidates\.length\} of \{msg\.candidateCount\} matches/)
+  })
+
+  it('activeCard is NOT set on the ambiguous turn — only after the pick', () => {
+    // The response-branch that renders the picker returns early
+    // and never reaches the exact-match reconstruction block.
+    const ambSection = INLINE_CHAT.slice(INLINE_CHAT.indexOf('candidate selection short-circuit'))
+      .slice(0, 1500)
+    expect(ambSection).toMatch(/setLoading\(false\)/)
+    expect(ambSection).toMatch(/return/)
+  })
+})
+
+// ── 52A.3 dual-write to explicit-name log columns ────
+
+describe('52A.3 — dual-write explicit provenance columns', () => {
+  it('logChat writes both short-form and explicit-name columns for card_record_id', () => {
+    const logChatBody = SMART_EP.slice(
+      SMART_EP.indexOf('function logChat'),
+      SMART_EP.indexOf('Deno.serve('),
+    )
+    expect(logChatBody).toMatch(/matched_card_id: params\.matched_card_record_id/)
+    expect(logChatBody).toMatch(/matched_card_record_id:\s*params\.matched_card_record_id/)
+  })
+
+  it('logChat writes both short-form and explicit-name columns for pc_product_id', () => {
+    const logChatBody = SMART_EP.slice(
+      SMART_EP.indexOf('function logChat'),
+      SMART_EP.indexOf('Deno.serve('),
+    )
+    expect(logChatBody).toMatch(/matched_card_slug: params\.matched_pc_product_id/)
+    expect(logChatBody).toMatch(/matched_pc_product_id:\s*params\.matched_pc_product_id/)
+  })
+
+  it('the requested_* explicit columns are also dual-written', () => {
+    const logChatBody = SMART_EP.slice(
+      SMART_EP.indexOf('function logChat'),
+      SMART_EP.indexOf('Deno.serve('),
+    )
+    expect(logChatBody).toMatch(/requested_card_record_id:\s*params\.requested_card_record_id/)
+    expect(logChatBody).toMatch(/requested_pc_product_id:\s*params\.requested_pc_product_id/)
+  })
+})
+
+// ── 52A.3 additive migration ────────────────────────
+
+describe('52A.3 — explicit-provenance additive migration', () => {
+  it('adds the four explicit-name columns', () => {
+    for (const col of [
+      'requested_card_record_id','requested_pc_product_id',
+      'matched_card_record_id','matched_pc_product_id',
+    ]) {
+      expect(MIGRATION_52A3).toMatch(new RegExp(`ADD COLUMN IF NOT EXISTS ${col}\\b`))
+    }
+  })
+
+  it('context_source CHECK includes candidate_selection', () => {
+    expect(MIGRATION_52A3).toMatch(/'candidate_selection'/)
+  })
+
+  it('match_method CHECK includes ambiguous_free_text', () => {
+    expect(MIGRATION_52A3).toMatch(/'ambiguous_free_text'/)
+  })
+
+  it('adds mismatch indexes on the explicit columns (like-with-like audits)', () => {
+    expect(MIGRATION_52A3).toMatch(/idx_chat_logs_record_id_mismatch/)
+    expect(MIGRATION_52A3).toMatch(/idx_chat_logs_pc_product_mismatch/)
+    // The comparisons must be within the same identifier type.
+    expect(MIGRATION_52A3).toMatch(/requested_card_record_id <> matched_card_record_id/)
+    expect(MIGRATION_52A3).toMatch(/requested_pc_product_id <> matched_pc_product_id/)
+  })
+
+  it('is additive: no DROP COLUMN in the main path', () => {
+    // The rollback block is fenced inside a comment so DROP COLUMN
+    // only appears in the commented-out exceptional cleanup section.
+    // Assert: any DROP COLUMN line is preceded by a `-- ` marker on
+    // its own line within the same block.
+    const dropLines = MIGRATION_52A3.split(/\r?\n/).filter(l => /DROP COLUMN/.test(l))
+    for (const line of dropLines) {
+      expect(line.trim().startsWith('--')).toBe(true)
+    }
+  })
+
+  it('documents that mismatch queries compare same-type identifiers', () => {
+    // The header comment explains why the explicit-name columns
+    // exist — a mismatch audit must never compare a PK to a PC id.
+    expect(MIGRATION_52A3).toMatch(/must never compare a DB primary key/i)
+  })
+})
+
+// ── 52A.3 Fossil fixture uses the real Kabuto identifiers ─
+
+describe('52A.3 — Fossil Kabuto #50 fixture (real production identifiers)', () => {
+  it('the fixture uses Kabuto (not Ditto) and real identifiers', () => {
+    const CARD_TEST = readFileSync(join(process.cwd(), 'src', 'lib', 'chat', '__tests__', 'cardContext.test.ts'), 'utf8')
+    // The block spec text says "Fossil Kabuto #50 → cannot resolve
+    // to Kabutops #24". The fixture must use real Kabuto identifiers.
+    expect(CARD_TEST).toMatch(/Fossil Kabuto #50 cannot silently become "Kabutops #24"/)
+    expect(CARD_TEST).toMatch(/cardRecordId:\s*14038/)
+    expect(CARD_TEST).toMatch(/priceChartingProductId:\s*'643417'/)
+    expect(CARD_TEST).toMatch(/cardUrlSlug:\s*'kabuto-50'/)
+    expect(CARD_TEST).toMatch(/cardName:\s*'Kabuto'/)
+    // Old fabricated Ditto identifiers must not resurrect.
+    expect(CARD_TEST).not.toMatch(/cardUrlSlug:\s*'ditto-50'/)
+    expect(CARD_TEST).not.toMatch(/priceChartingProductId:\s*'999002'/)
   })
 })
 
