@@ -756,7 +756,12 @@ export default function SetPageClient({ slug }: { slug: string }) {
       {/* ── Chat ── */}
       <div style={{ marginBottom: 20 }}>
         <InlineChat
-          cardContext={setName}
+          setContext={{
+            // Block 5A-W-52A — set page identity is structural too. No
+            // card_context because there is no active card yet.
+            setName: setName,
+            language: resolveLanguage(setLanguage, setName) === 'jp' ? 'jp' : 'en',
+          }}
           suggestedPrompts={[
             `What are the most valuable cards in ${setName}?`,
             `Is ${setName} worth investing in right now?`,

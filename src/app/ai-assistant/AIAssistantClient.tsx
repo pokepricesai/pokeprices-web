@@ -27,15 +27,24 @@ export default function AIAssistantClient() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // Build the cardContext string that InlineChat already understands.
-  // Match the format card detail pages use exactly — "<card_name> from
-  // <set_name>" — because card_name carries the "#NN" suffix that
-  // anchors the chat backend's search to the specific variant. Without
-  // the "#NN" suffix the backend's search_cards tool can return both
-  // "Mega Starmie ex #21" and "#118" and the answer covers both.
-  const cardContext = scannedCard
-    ? `${scannedCard.card_name} from ${scannedCard.set_name}`
-    : undefined
+  // Block 5A-W-52A.2 — structured card context. ConfirmedCard
+  // doesn't carry cards.id (the DB PK), so cardRecordId is null;
+  // the PC product id lives in card_slug and is globally unique
+  // so we prefer it over the URL-slug lookup (which needs setName
+  // + language to disambiguate).
+  const cardContext = scannedCard ? {
+    cardRecordId: null,
+    cardUrlSlug: scannedCard.card_url_slug || scannedCard.card_slug,
+    priceChartingProductId: scannedCard.card_slug,
+    cardName: scannedCard.clean_name || scannedCard.card_name || '',
+    setName: scannedCard.set_name,
+    cardNumber: null,
+    cardNumberDisplay: scannedCard.card_number_display,
+    // ConfirmedCard doesn't currently carry language; derive from the
+    // set_name prefix which is authoritative for JP sets.
+    language: (scannedCard.set_name?.startsWith('Japanese ') ? 'jp' : 'en') as 'en' | 'jp',
+    variant: scannedCard.variant,
+  } : null
 
   function handleConfirmed(card: ConfirmedCard) {
     setScannedCard(card)
@@ -167,6 +176,7 @@ export default function AIAssistantClient() {
           // focus on the newly scanned card.
           key={scannedCard?.card_slug ?? 'no-context'}
           cardContext={cardContext}
+          cardName={scannedCard?.card_name}
           suggestedPrompts={scannedCard ? undefined : SUGGESTED_PROMPTS}
         />
       </div>

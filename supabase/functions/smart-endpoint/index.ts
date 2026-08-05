@@ -1099,8 +1099,32 @@ function calcCost(
   ) / 1_000_000;
 }
 
+// Block 5A-W-52A.2 — extended chat_logs row + legacy-shape fallback.
+//
+// Deployment order is: (1) migration → (2) edge function → (3)
+// client. If the edge function ships before the migration, the
+// extended INSERT would fail with Postgres error 42703
+// "column ... does not exist" (or PostgREST PGRST204). This
+// helper retries once with the pre-52A legacy shape so we never
+// lose a log entry, and logs a loud warning naming the missing
+// migration, the original error, and the fallback action.
+//
+// Any error other than a missing-column error is surfaced as-is —
+// no silent swallowing of unrelated database errors.
+//
+// Column naming (DB-side, short form):
+//   * matched_card_id       ← cards.id      (DB primary key)
+//   * matched_card_slug     ← cards.card_slug (PriceCharting id)
+//   * matched_card_url_slug ← cards.card_url_slug
+//   * matched_card_name     ← cards.card_name (cleaned)
 function logChat(params: any) {
-  supabase.from("chat_logs").insert([{
+  const cost = calcCost(
+    params.input_tokens || 0,
+    params.output_tokens || 0,
+    params.cache_creation_tokens || 0,
+    params.cache_read_tokens || 0,
+  );
+  const legacyRow: Record<string, unknown> = {
     session_id: params.session_id || null,
     user_message: params.user_message?.substring(0, 1000),
     response: params.response?.substring(0, 2000),
@@ -1111,16 +1135,52 @@ function logChat(params: any) {
     card_data_found: params.card_data_found,
     input_tokens: params.input_tokens || 0,
     output_tokens: params.output_tokens || 0,
-    cost_usd: calcCost(
-      params.input_tokens || 0,
-      params.output_tokens || 0,
-      params.cache_creation_tokens || 0,
-      params.cache_read_tokens || 0,
-    ),
+    cost_usd: cost,
     conversation_turn: params.conversation_turn || 1,
     pre_routed: false,
-  }]).then(({ error }) => {
-    if (error) console.error("Log failed:", error);
+  };
+  const extendedRow: Record<string, unknown> = {
+    ...legacyRow,
+    intent: params.intent ?? null,
+    context_source: params.context_source ?? null,
+    requested_card_id: params.requested_card_record_id ?? null,
+    requested_card_slug: params.requested_pc_product_id ?? null,
+    requested_card_url_slug: params.requested_card_url_slug ?? null,
+    requested_set_name: params.requested_set_name ?? null,
+    requested_language: params.requested_language ?? null,
+    matched_card_id: params.matched_card_record_id ?? null,
+    matched_card_slug: params.matched_pc_product_id ?? null,
+    matched_card_url_slug: params.matched_card_url_slug ?? null,
+    matched_card_name: params.matched_card_name ?? null,
+    matched_set_name: params.matched_set_name ?? null,
+    matched_card_number: params.matched_card_number ?? null,
+    matched_card_number_display: params.matched_card_number_display ?? null,
+    matched_language: params.matched_language ?? null,
+    matched_variant: params.matched_variant ?? null,
+    match_method: params.match_method ?? null,
+    exact_match_found: params.exact_match_found ?? null,
+    candidate_count: params.candidate_count ?? null,
+    match_confidence: params.match_confidence ?? null,
+  };
+  supabase.from("chat_logs").insert([extendedRow]).then(({ error }) => {
+    if (!error) return;
+    const msg = typeof error.message === "string" ? error.message : "";
+    const missingColumn = error.code === "42703"
+      || error.code === "PGRST204"
+      || /column .+ does not exist/i.test(msg)
+      || /could not find the .+ column/i.test(msg);
+    if (!missingColumn) {
+      // Unrelated DB error — surface, don't retry.
+      console.error("chat_logs insert failed (non-recoverable):", error);
+      return;
+    }
+    console.warn(
+      "chat_logs missing 52A.2 provenance columns — retrying with the legacy insert shape. Apply migrations/2026-08-05-chat-logs-structured-context.sql to enable structured provenance logging. Original error:",
+      error,
+    );
+    supabase.from("chat_logs").insert([legacyRow]).then(({ error: err2 }) => {
+      if (err2) console.error("chat_logs legacy insert failed:", err2);
+    });
   });
 }
 
@@ -1137,7 +1197,8 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { message, session_id, history } = await req.json();
+    const body = await req.json();
+    const { message, session_id, history } = body;
     if (!message) {
       return new Response(
         JSON.stringify({ error: "No message" }),
@@ -1151,21 +1212,306 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    let cleanMessage = message;
-    let cardPageContext = "";
-    const ctxMatch = message.match(
-      /^\[Context: asking about ([^\]]+)\]\s*(.*)/s,
-    );
-    if (ctxMatch) {
-      cardPageContext = ctxMatch[1].trim();
-      cleanMessage = ctxMatch[2].trim() ||
-        `Tell me about ${cardPageContext}`;
+    // ── Block 5A-W-52A.2 — structured context path ──────────
+    //
+    // Client passes card identity in a structured card_context object
+    // (see src/lib/chat/cardContext.ts). Load the EXACT record here
+    // rather than letting the LLM parse a bracketed prefix.
+    //
+    // Identifier semantics:
+    //   * cardRecordId           → cards.id (bigint PK, unique)
+    //   * priceChartingProductId → cards.card_slug (globally unique)
+    //   * cardUrlSlug            → cards.card_url_slug
+    //                              (UNIQUE ONLY WITHIN A SET —
+    //                               never queried alone)
+    //
+    // Retrieval priority (52A.2 correction):
+    //   1. cards.id via cardRecordId                       → "card_id"
+    //   2. cards.card_slug via priceChartingProductId      → "card_slug"
+    //   3. cards.card_url_slug + set_name + language
+    //      (composite, single-row guard)                   → "card_url_slug_composite"
+    //   4. set_name + card_number + language (+variant)
+    //      (composite, single-row guard)                   → "set_number_language"
+    //   5. Fail closed. No fuzzy fallback for structured requests.
+    //
+    // For priorities 3 and 4: query all rows matching the composite
+    // key, populate candidate_count, accept only when EXACTLY one
+    // row remains, fail closed on zero or multiple. Never pick the
+    // first arbitrary candidate.
+    //
+    // The pre-52A `[Context: asking about ...]` prefix path is kept
+    // for backward compatibility during the rolling deploy; a
+    // structured card_context always takes precedence when both are
+    // supplied on the same request.
+    const cardContextIn = body.card_context ?? null;
+    const setContextIn = body.set_context ?? null;
+    const intentIn: string | null = typeof body.intent === "string" ? body.intent : null;
+    const contextSourceIn: string | null = typeof body.context_source === "string" ? body.context_source : null;
+
+    // Structured-context provenance for the response + chat_logs.
+    let requestedCardRecordId: string | null = null;
+    let requestedCardUrlSlug: string | null = null;
+    let requestedPcProductId: string | null = null;
+    let requestedSetName: string | null = null;
+    let requestedLanguage: string | null = null;
+    let matchedCardRecordId: string | null = null;
+    let matchedCardUrlSlug: string | null = null;
+    let matchedPcProductId: string | null = null;
+    let matchedCardName: string | null = null;
+    let matchedSetName: string | null = null;
+    let matchedCardNumber: string | null = null;
+    let matchedCardNumberDisplay: string | null = null;
+    let matchedLanguage: string | null = null;
+    let matchedVariant: string | null = null;
+    let matchMethod: string = "none";
+    let exactMatchFound = false;
+    let candidateCount = 0;
+    let matchConfidence: number | null = null;
+    let structuredCard: any = null;
+
+    if (cardContextIn && typeof cardContextIn === "object") {
+      requestedCardRecordId = cardContextIn.cardRecordId != null
+        ? String(cardContextIn.cardRecordId) : null;
+      requestedCardUrlSlug  = cardContextIn.cardUrlSlug ?? null;
+      requestedPcProductId  = cardContextIn.priceChartingProductId != null
+        ? String(cardContextIn.priceChartingProductId) : null;
+      requestedSetName      = cardContextIn.setName ?? null;
+      requestedLanguage     = cardContextIn.language ?? null;
+
+      // Priority 1: cards.id via cardRecordId. Only when a numeric
+      // primary key is supplied.
+      if (cardContextIn.cardRecordId != null) {
+        const idNum = Number(cardContextIn.cardRecordId);
+        if (Number.isFinite(idNum)) {
+          const { data } = await supabase
+            .from("cards")
+            .select("*")
+            .eq("id", idNum)
+            .maybeSingle();
+          if (data) { structuredCard = data; matchMethod = "card_id"; }
+        }
+      }
+      // Priority 2: cards.card_slug (the PriceCharting product id) via
+      // priceChartingProductId. Globally unique — safer than the URL
+      // slug lookup.
+      if (!structuredCard && cardContextIn.priceChartingProductId != null) {
+        const { data } = await supabase
+          .from("cards")
+          .select("*")
+          .eq("card_slug", String(cardContextIn.priceChartingProductId))
+          .maybeSingle();
+        if (data) { structuredCard = data; matchMethod = "card_slug"; }
+      }
+      // Priority 3: cards.card_url_slug + set_name + language
+      // (composite). cards.card_url_slug is NOT globally unique
+      // (unique-within-set only), so we always add set_name and
+      // language filters and fail closed unless exactly one row
+      // remains. Never queried alone.
+      if (!structuredCard && cardContextIn.cardUrlSlug && cardContextIn.setName) {
+        const lang = cardContextIn.language === "jp" ? "jp" : "en";
+        const { data } = await supabase
+          .from("cards")
+          .select("*")
+          .eq("card_url_slug", String(cardContextIn.cardUrlSlug))
+          .eq("set_name", String(cardContextIn.setName))
+          .eq("language", lang);
+        const count = data?.length ?? 0;
+        candidateCount = Math.max(candidateCount, count);
+        if (count === 1) {
+          structuredCard = data![0];
+          matchMethod = "card_url_slug_composite";
+        } else if (count > 1) {
+          matchMethod = "card_url_slug_ambiguous";
+        }
+      }
+      // Priority 4: set_name + card_number + language (+variant).
+      // Composite fail-closed guard: EXACTLY one row or nothing.
+      if (!structuredCard && cardContextIn.setName && cardContextIn.cardNumber) {
+        const lang = cardContextIn.language === "jp" ? "jp" : "en";
+        let query = supabase
+          .from("cards")
+          .select("*")
+          .eq("set_name", cardContextIn.setName)
+          .eq("card_number", String(cardContextIn.cardNumber))
+          .eq("language", lang);
+        const variant = cardContextIn.variant;
+        if (typeof variant === "string" && variant.length > 0) {
+          query = query.eq("variant", variant);
+        }
+        const { data } = await query;
+        const count = data?.length ?? 0;
+        candidateCount = Math.max(candidateCount, count);
+        if (count === 1) {
+          structuredCard = data![0];
+          matchMethod = "set_number_language";
+        } else if (count > 1) {
+          matchMethod = "set_number_language_ambiguous";
+        }
+      }
+
+      if (structuredCard) {
+        matchedCardRecordId = structuredCard.id != null ? String(structuredCard.id) : null;
+        matchedCardUrlSlug  = structuredCard.card_url_slug ?? null;
+        matchedPcProductId  = structuredCard.card_slug != null ? String(structuredCard.card_slug) : null;
+        // Strip the DB "#NN" suffix that cards.card_name embeds.
+        const rawName = typeof structuredCard.card_name === "string" ? structuredCard.card_name : "";
+        matchedCardName     = rawName.replace(/\s*#[A-Za-z0-9/-]+\s*$/, "").trim() || rawName;
+        matchedSetName      = structuredCard.set_name ?? null;
+        matchedCardNumber   = structuredCard.card_number != null ? String(structuredCard.card_number) : null;
+        matchedCardNumberDisplay = structuredCard.card_number_display ?? null;
+        matchedLanguage     = structuredCard.language ?? null;
+        matchedVariant      = structuredCard.variant ?? null;
+        matchConfidence     = 1.0;
+        candidateCount      = candidateCount > 0 ? candidateCount : 1;
+
+        // Identifier-consistency guard. If the client supplied any
+        // identifier and the loaded record disagrees, fail closed.
+        const idMismatch = requestedCardRecordId != null
+          && matchedCardRecordId != null
+          && requestedCardRecordId !== matchedCardRecordId;
+        const pcMismatch = requestedPcProductId != null
+          && matchedPcProductId != null
+          && requestedPcProductId !== matchedPcProductId;
+        // For card_url_slug, mismatch is meaningful ONLY when we
+        // resolved via one of the other identifiers — the URL slug
+        // is not globally unique so a bare inequality is uninformative.
+        const urlSlugMismatch = requestedCardUrlSlug != null
+          && matchedCardUrlSlug != null
+          && requestedCardUrlSlug !== matchedCardUrlSlug
+          && (matchMethod === "card_id" || matchMethod === "card_slug");
+
+        if (idMismatch || urlSlugMismatch || pcMismatch) {
+          const mismatchMsg =
+            "I couldn't confirm the exact card for that request. " +
+            "Please try again from the card page.";
+          logChat({
+            session_id, user_message: message, response: mismatchMsg,
+            tool_used: "context_mismatch", tool_input: null,
+            query_type: "context_load_failed", card_data_found: false,
+            input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0,
+            cache_read_tokens: 0, conversation_turn: 1,
+            intent: intentIn, context_source: contextSourceIn,
+            requested_card_record_id: requestedCardRecordId,
+            requested_card_url_slug: requestedCardUrlSlug,
+            requested_pc_product_id: requestedPcProductId,
+            requested_set_name: requestedSetName,
+            requested_language: requestedLanguage,
+            matched_card_record_id: matchedCardRecordId,
+            matched_card_url_slug: matchedCardUrlSlug,
+            matched_pc_product_id: matchedPcProductId,
+            matched_card_name: matchedCardName,
+            matched_set_name: matchedSetName,
+            matched_card_number: matchedCardNumber,
+            matched_card_number_display: matchedCardNumberDisplay,
+            matched_language: matchedLanguage,
+            matched_variant: matchedVariant,
+            match_method: matchMethod, exact_match_found: false,
+            candidate_count: candidateCount, match_confidence: matchConfidence,
+          });
+          return new Response(
+            JSON.stringify({
+              answer: mismatchMsg, tool_used: "context_mismatch",
+              query_type: "context_load_failed", card_data_found: false,
+              exact_match_found: false, match_method: matchMethod,
+              requested_card_record_id: requestedCardRecordId,
+              matched_card_record_id: matchedCardRecordId,
+              matched_card_url_slug: matchedCardUrlSlug,
+              matched_pc_product_id: matchedPcProductId,
+              matched_card_name: matchedCardName,
+            }),
+            { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } },
+          );
+        }
+        exactMatchFound = true;
+      } else {
+        // No structured record found (or multiple candidates for a
+        // composite fallback). Fail closed rather than falling back
+        // to fuzzy text search.
+        const ambiguousMulti = matchMethod === "set_number_language_ambiguous"
+          || matchMethod === "card_url_slug_ambiguous";
+        const notFoundMsg = ambiguousMulti
+          ? "I found more than one card that matches those details. " +
+            "Please try again from the specific card page or include the printing (regular / holo / reverse holo)."
+          : "I couldn't retrieve the details for that card right now. " +
+            "Please try again in a moment or search by name.";
+        logChat({
+          session_id, user_message: message, response: notFoundMsg,
+          tool_used: ambiguousMulti ? "context_ambiguous" : "context_load_failed",
+          tool_input: null,
+          query_type: "context_load_failed", card_data_found: false,
+          input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0,
+          cache_read_tokens: 0, conversation_turn: 1,
+          intent: intentIn, context_source: contextSourceIn,
+          requested_card_record_id: requestedCardRecordId,
+          requested_card_url_slug: requestedCardUrlSlug,
+          requested_pc_product_id: requestedPcProductId,
+          requested_set_name: requestedSetName,
+          requested_language: requestedLanguage,
+          matched_card_record_id: null,
+          matched_card_url_slug: null,
+          matched_pc_product_id: null,
+          matched_card_name: null,
+          match_method: matchMethod, exact_match_found: false,
+          candidate_count: candidateCount, match_confidence: null,
+        });
+        return new Response(
+          JSON.stringify({
+            answer: notFoundMsg,
+            tool_used: ambiguousMulti ? "context_ambiguous" : "context_load_failed",
+            query_type: "context_load_failed", card_data_found: false,
+            exact_match_found: false, match_method: matchMethod,
+            requested_card_record_id: requestedCardRecordId,
+            matched_card_record_id: null,
+            candidate_count: candidateCount,
+          }),
+          { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } },
+        );
+      }
     }
 
-    const userContent = cardPageContext
-      ? `Currently viewing on PokePrices: "${cardPageContext}". ` +
-        `Question: ${cleanMessage}. Search for this card.`
-      : cleanMessage;
+    // ── Legacy `[Context: asking about ...]` extraction ─────
+    // Only when NO structured context was supplied.
+    let cleanMessage = message;
+    let cardPageContext = "";
+    if (!structuredCard) {
+      const ctxMatch = message.match(
+        /^\[Context: asking about ([^\]]+)\]\s*(.*)/s,
+      );
+      if (ctxMatch) {
+        cardPageContext = ctxMatch[1].trim();
+        cleanMessage = ctxMatch[2].trim() ||
+          `Tell me about ${cardPageContext}`;
+      }
+    }
+
+    // Build the LLM user turn. When we have a loaded exact card, embed
+    // its identifiers so the LLM cannot substitute a different record.
+    // Pre-routed intent adds a strong "answer with THIS card" directive.
+    let userContent: string;
+    if (structuredCard) {
+      const cn = structuredCard.card_number_display ??
+        (structuredCard.card_number ? `#${structuredCard.card_number}` : "");
+      const idBlock =
+        `Currently viewing on PokePrices (EXACT card, do not search for a different one): ` +
+        `card_slug="${structuredCard.card_slug}", ` +
+        `card_name="${structuredCard.card_name}", ` +
+        `set_name="${structuredCard.set_name}", ` +
+        `number="${cn}", ` +
+        `language="${structuredCard.language ?? "en"}".`;
+      const intentBlock = intentIn
+        ? ` The user's quick-action intent is "${intentIn}"; ` +
+          `answer specifically about this card, do NOT ask which card they mean.`
+        : "";
+      userContent = `${idBlock}${intentBlock} User question: ${message}`;
+    } else if (setContextIn && setContextIn.setName) {
+      userContent = `Currently viewing on PokePrices: set "${setContextIn.setName}" ` +
+        `(language="${setContextIn.language ?? "en"}"). User question: ${message}`;
+    } else if (cardPageContext) {
+      userContent = `Currently viewing on PokePrices: "${cardPageContext}". ` +
+        `Question: ${cleanMessage}. Search for this card.`;
+    } else {
+      userContent = cleanMessage;
+    }
 
     const trimmedHistory = (history || []).slice(-8);
     const agentMessages: any[] = [];
@@ -1244,6 +1590,42 @@ Deno.serve(async (req: Request) => {
           );
           if (found) cardDataFound = true;
 
+          // Block 5A-W-52A.1 — free-text single-exact-match capture.
+          // When the client sent no structured card_context and the
+          // LLM ran a card-scoped tool (search_cards / get_grading_pop)
+          // that returned exactly one card, promote it to matched_*
+          // so the client can pin activeCard for follow-up turns.
+          //
+          // Multiple candidates → do not auto-select. The absence of
+          // matched_* on the response is the signal that this turn
+          // is ambiguous and activeCard should stay as-is.
+          if (!structuredCard && tb.name === "search_cards" && d) {
+            const candidateArr: any[] =
+              Array.isArray(d.results) ? d.results :
+              Array.isArray(d.cards)   ? d.cards   : [];
+            if (candidateArr.length === 1) {
+              const c = candidateArr[0];
+              if (c && (c.card_url_slug || c.card_slug)) {
+                const rawName = typeof c.card_name === "string" ? c.card_name : "";
+                matchedCardRecordId = c.id != null ? String(c.id) : null;
+                matchedCardUrlSlug  = c.card_url_slug ?? null;
+                matchedPcProductId  = c.card_slug != null ? String(c.card_slug) : null;
+                matchedCardName     = rawName.replace(/\s*#[A-Za-z0-9/-]+\s*$/, "").trim() || rawName || null;
+                matchedSetName      = c.set_name ?? null;
+                matchedCardNumber   = c.card_number != null ? String(c.card_number) : null;
+                matchedCardNumberDisplay = c.card_number_display ?? null;
+                matchedLanguage     = c.language ?? null;
+                matchedVariant      = c.variant ?? null;
+                matchMethod         = "fuzzy";
+                exactMatchFound     = true;
+                candidateCount      = 1;
+                matchConfidence     = 0.9;
+              }
+            } else if (candidateArr.length > 1) {
+              candidateCount = Math.max(candidateCount, candidateArr.length);
+            }
+          }
+
           return {
             type: "tool_result" as const,
             tool_use_id: tb.id,
@@ -1279,6 +1661,13 @@ Deno.serve(async (req: Request) => {
       ? Math.floor(history.length / 2) + 1
       : 1;
 
+    // Block 5A-W-52A.1 — extended chat_logs row with structured
+    // provenance (requested_* + matched_*). exactMatchFound is a
+    // stricter identity guarantee than card_data_found: cardDataFound
+    // is true whenever any tool returned data, while exactMatchFound
+    // is true only when the client's identifiers matched the loaded
+    // record (structured path) or when a free-text search resolved
+    // to exactly one card.
     logChat({
       session_id,
       user_message: cleanMessage || message,
@@ -1294,6 +1683,26 @@ Deno.serve(async (req: Request) => {
       cache_creation_tokens: cacheCreationTokens,
       cache_read_tokens: cacheReadTokens,
       conversation_turn: conversationTurn,
+      intent: intentIn,
+      context_source: contextSourceIn,
+      requested_card_record_id: requestedCardRecordId,
+      requested_card_url_slug: requestedCardUrlSlug,
+      requested_pc_product_id: requestedPcProductId,
+      requested_set_name: requestedSetName,
+      requested_language: requestedLanguage,
+      matched_card_record_id: matchedCardRecordId,
+      matched_card_url_slug: matchedCardUrlSlug,
+      matched_pc_product_id: matchedPcProductId,
+      matched_card_name: matchedCardName,
+      matched_set_name: matchedSetName,
+      matched_card_number: matchedCardNumber,
+      matched_card_number_display: matchedCardNumberDisplay,
+      matched_language: matchedLanguage,
+      matched_variant: matchedVariant,
+      match_method: matchMethod,
+      exact_match_found: exactMatchFound,
+      candidate_count: candidateCount,
+      match_confidence: matchConfidence,
     });
 
     return new Response(
@@ -1302,6 +1711,21 @@ Deno.serve(async (req: Request) => {
         tool_used: toolUsed,
         query_type: queryType,
         card_data_found: cardDataFound,
+        // Block 5A-W-52A.2 — full provenance so the client can
+        // reconstruct activeCard on a free-text exact match.
+        exact_match_found: exactMatchFound,
+        match_method: matchMethod,
+        candidate_count: candidateCount,
+        requested_card_record_id: requestedCardRecordId,
+        matched_card_record_id: matchedCardRecordId,
+        matched_card_url_slug: matchedCardUrlSlug,
+        matched_pc_product_id: matchedPcProductId,
+        matched_card_name: matchedCardName,
+        matched_set_name: matchedSetName,
+        matched_card_number: matchedCardNumber,
+        matched_card_number_display: matchedCardNumberDisplay,
+        matched_language: matchedLanguage,
+        matched_variant: matchedVariant,
       }),
       {
         headers: {

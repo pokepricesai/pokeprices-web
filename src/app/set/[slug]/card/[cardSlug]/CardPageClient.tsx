@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { supabase, formatPct } from '@/lib/supabase'
 import InlineChat from '@/components/InlineChat'
+import { cleanCardName } from '@/lib/chat/cardContext'
 import PriceChart, { type ChartSeries } from '@/components/PriceChart'
 import GradeLadder, { type GradePrices } from '@/components/GradeLadder'
 // Block 5A-W-46B — CardStructuredData + BreadcrumbSchema moved to the
@@ -654,7 +655,31 @@ export default function CardPageClient({
       </div>
 
       <div style={{ margin: '0 0 28px' }}>
-        <InlineChat cardContext={`${card.card_name} from ${card.set_name}`} prefillMessage={prefillMessage} />
+        <InlineChat
+          cardContext={{
+            // Block 5A-W-52A.2 — unambiguous identifiers. The
+            // card-detail RPC does not project cards.id, so
+            // cardRecordId is null. priceChartingProductId
+            // (cards.card_slug) is globally unique and safer than
+            // URL slug lookup, so we always populate it. The edge
+            // function's priority order is:
+            //   1. cardRecordId → cards.id
+            //   2. priceChartingProductId → cards.card_slug
+            //   3. cardUrlSlug + setName + language (single-row guard)
+            //   4. setName + cardNumber + language + variant
+            cardRecordId: null,
+            cardUrlSlug: card.card_url_slug ?? String(card.card_slug),
+            priceChartingProductId: String(card.card_slug),
+            cardName: cleanCardName(String(card.card_name ?? '')),
+            setName: String(card.set_name ?? ''),
+            cardNumber: card.card_number ? String(card.card_number) : null,
+            cardNumberDisplay: card.card_number_display ?? null,
+            language: (card.language === 'jp' ? 'jp' : 'en'),
+            variant: null,
+          }}
+          cardName={String(card.card_name ?? '')}
+          prefillMessage={prefillMessage}
+        />
       </div>
 
       {/* Hero: image + core data */}

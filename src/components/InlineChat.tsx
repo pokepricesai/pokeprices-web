@@ -1,10 +1,24 @@
-// v3
+// v5 — Block 5A-W-52A.1 structured card context (unambiguous
+// identifier naming), explicit-card-switch detection, and
+// server-provenance activeCard reconstruction on free-text turns.
+// See src/lib/chat/cardContext.ts + chatRequest.ts.
 'use client'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { CHAT_ENDPOINT } from '@/lib/supabase'
 import { trackEvent } from '@/lib/analytics'
 import { affiliateWrapEbayUrl } from '@/lib/ebayAffiliate'
+import {
+  type CardContext,
+  type SetContext,
+  type QuickActionIntent,
+  CARD_QUICK_PROMPTS,
+  SET_QUICK_PROMPTS,
+  cleanCardName,
+  displayQuickActionText,
+} from '@/lib/chat/cardContext'
+import type { ChatRequestBody, ContextSource } from '@/lib/chat/chatRequest'
+import { detectExplicitCardSwitch, KNOWN_SETS as EXPLICIT_SWITCH_SETS } from '@/lib/chat/explicitSwitch'
 
 const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
@@ -15,13 +29,6 @@ const quickQuestions = [
   'When is the next set coming out?',
   'Is Moonbreon a good investment?',
   'Cheapest Pikachu cards',
-]
-
-const cardQuickQuestions = [
-  'Should I grade this card?',
-  'How has the price trended?',
-  'What grade is best value?',
-  'How far from all-time high?',
 ]
 
 interface Message { role: 'user' | 'assistant'; content: string }
@@ -105,8 +112,17 @@ const KNOWN_SETS = [
   'Stellar Crown', 'Surging Sparks', 'Prismatic Evolutions', 'Journey Together',
 ]
 
-// Sort longest first so multi-word sets match before substrings
+// Sort longest first so multi-word sets match before substrings.
+// Uses the module-level KNOWN_SETS above (needed by linkifyResponse);
+// the identical list re-exported from explicitSwitch.ts is the one
+// detectExplicitCardSwitch() uses. Keeping both in sync via
+// EXPLICIT_SWITCH_SETS === KNOWN_SETS assertion at build time
+// would be over-engineered — the tests cover the switch behaviour.
 const SETS_SORTED = [...KNOWN_SETS].sort((a, b) => b.length - a.length)
+// Assertion at load time so a future edit doesn't quietly drift.
+if (EXPLICIT_SWITCH_SETS.length !== KNOWN_SETS.length) {
+  console.warn('KNOWN_SETS length mismatch between InlineChat and explicitSwitch — update both.')
+}
 
 function linkifyResponse(text: string): string {
   // Track which ranges are already linked to avoid double-linking
@@ -132,16 +148,51 @@ function linkifyResponse(text: string): string {
   return result
 }
 
-export default function InlineChat({ cardContext, prefillMessage, suggestedPrompts }: {
-  cardContext?: string
+export default function InlineChat({
+  cardContext,
+  cardName,
+  setContext,
+  prefillMessage,
+  suggestedPrompts,
+}: {
+  /**
+   * Structured card identity. When present, every message this chat
+   * sends carries the same card_context in the request body — the
+   * edge function loads the exact record without LLM parsing, and
+   * follow-up questions retain identity across turns.
+   */
+  cardContext?: CardContext | null
+  /**
+   * Raw card_name for building the visible chat header. The DB stores
+   * "Kleavor #86" so the header helper strips the trailing "#NN".
+   */
+  cardName?: string | null
+  /** Structured set identity when the chat is mounted on a set page. */
+  setContext?: SetContext | null
   prefillMessage?: string
+  /** Optional label overrides for the quick-suggestion pills. */
   suggestedPrompts?: string[]
 }) {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
   const [sessionId, setSessionId] = useState(() => 'web-' + Math.random().toString(36).slice(2, 10))
+  // Block 5A-W-52A.1 — the active card retains identity across
+  // turns. Initialised from the mounted cardContext (card page).
+  // Free-text turns that resolve to exactly one card update this
+  // from server provenance. Explicit switches (user names a new
+  // card mid-conversation) clear it for the resolving turn.
+  const [activeCard, setActiveCard] = useState<CardContext | null>(cardContext ?? null)
   const chatEndRef = useRef<HTMLDivElement>(null)
+
+  // Keep activeCard in sync when the parent remounts with a different
+  // card (e.g. Suspense flush on a slug change). Comparison by
+  // cardUrlSlug avoids ref-identity churn.
+  useEffect(() => {
+    if (cardContext?.cardUrlSlug !== activeCard?.cardUrlSlug) {
+      setActiveCard(cardContext ?? null)
+    }
+  }, [cardContext?.cardUrlSlug, activeCard?.cardUrlSlug])
 
   useEffect(() => {
     if (messages.length > 0) chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -149,24 +200,53 @@ export default function InlineChat({ cardContext, prefillMessage, suggestedPromp
 
   const clearChat = useCallback(() => {
     setMessages([]); setSessionId('web-' + Math.random().toString(36).slice(2, 10)); setInput('')
-  }, [])
+    setActiveCard(cardContext ?? null)
+  }, [cardContext])
 
-  const sendMessage = async (text?: string) => {
-    const msg = text || input
-    if (!msg.trim() || loading) return
+  const send = async (visibleText: string, intent: QuickActionIntent | null) => {
+    if (!visibleText.trim() || loading) return
     setInput('')
-    let fullMsg = msg
-    if (cardContext && messages.length === 0) fullMsg = `[Context: asking about ${cardContext}] ${msg}`
-    const userMsg: Message = { role: 'user', content: msg }
+    const userMsg: Message = { role: 'user', content: visibleText }
     setMessages((prev) => [...prev, userMsg])
     setLoading(true)
-    // Question text is intentionally NOT sent to GA4.
     trackEvent('ai_question_submitted', { source_component: 'inline_chat' })
+
+    // Block 5A-W-52A.1 — explicit card-switch detection. If the
+    // user's message clearly names a different card while an
+    // activeCard is set, drop the pinned context so the server
+    // resolves the newly named card fresh. Pre-routed quick
+    // actions are exempt: those come from a button and cannot
+    // reference another card.
+    const explicitSwitch =
+      !intent && activeCard != null && detectExplicitCardSwitch(visibleText, activeCard)
+    const outgoingCard: CardContext | null = explicitSwitch ? null : activeCard
+
+    // Block 5A-W-52A.1 — structured request body. The visible
+    // `message` is clean text. Identity flows through card_context
+    // / set_context / intent — never through free-form bracketed
+    // prefixes.
+    const contextSource: ContextSource =
+      explicitSwitch           ? 'card_switch' :
+      intent && activeCard     ? 'card_page' :
+      intent && setContext     ? 'set_page' :
+      activeCard               ? (messages.length === 0 ? 'card_page' : 'conversation') :
+      setContext               ? 'set_page' :
+                                 'text'
+    const body: ChatRequestBody = {
+      message: visibleText,
+      session_id: sessionId,
+      history: [...messages, userMsg].slice(-10),
+      card_context: outgoingCard,
+      set_context: setContext ?? null,
+      intent: intent ?? null,
+      context_source: contextSource,
+    }
+
     try {
       const res = await fetch(CHAT_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON_KEY}` },
-        body: JSON.stringify({ message: fullMsg, session_id: sessionId, history: [...messages, userMsg].slice(-10) }),
+        body: JSON.stringify(body),
       })
       const data = await res.json()
       const rawAnswer = data.answer || 'Sorry, something went wrong.'
@@ -174,8 +254,33 @@ export default function InlineChat({ cardContext, prefillMessage, suggestedPromp
       trackEvent('ai_response_received', {
         query_type:      typeof data?.query_type === 'string' ? data.query_type : undefined,
         response_status: res.ok ? 'ok' : `http_${res.status}`,
-        card_found:      data?.card_data_found ? 'yes' : 'no',
+        // Block 5A-W-52A — trust the exact-match flag from the edge
+        // function instead of the older card_data_found which could
+        // be true even when the wrong card was returned. Only report
+        // 'yes' on an exact match.
+        card_found:      data?.exact_match_found === true ? 'yes' : 'no',
       })
+      // Block 5A-W-52A.1 — server-returned activeCard reconstruction.
+      // On a free-text or card_switch turn that resolved to exactly
+      // one exact card, pin it as activeCard so follow-ups don't
+      // re-parse identity. The provenance shape is defined in
+      // src/lib/chat/chatRequest.ts::ChatResponseProvenance.
+      if (data?.exact_match_found === true &&
+          typeof data.matched_card_url_slug === 'string' &&
+          typeof data.matched_set_name === 'string') {
+        const nextCard: CardContext = {
+          cardRecordId: data.matched_card_record_id ?? null,
+          cardUrlSlug: data.matched_card_url_slug,
+          priceChartingProductId: data.matched_pc_product_id ?? null,
+          cardName: typeof data.matched_card_name === 'string' ? data.matched_card_name : '',
+          setName: data.matched_set_name,
+          cardNumber: typeof data.matched_card_number === 'string' ? data.matched_card_number : null,
+          cardNumberDisplay: typeof data.matched_card_number_display === 'string' ? data.matched_card_number_display : null,
+          language: data.matched_language === 'jp' ? 'jp' : 'en',
+          variant: typeof data.matched_variant === 'string' ? data.matched_variant : null,
+        }
+        setActiveCard(nextCard)
+      }
       setMessages((prev) => [...prev, { role: 'assistant', content: linkedAnswer }])
     } catch {
       trackEvent('ai_error', { failure_stage: 'network', response_status: 'network_error' })
@@ -184,7 +289,31 @@ export default function InlineChat({ cardContext, prefillMessage, suggestedPromp
     setLoading(false)
   }
 
-  const suggestions = suggestedPrompts ?? (cardContext ? cardQuickQuestions : quickQuestions)
+  const sendMessage = (text?: string) => send(text ?? input, null)
+
+  const sendQuickAction = (intent: QuickActionIntent) => {
+    // Build a clean natural sentence for the visible bubble; identity
+    // flows via structured card_context/set_context alongside intent.
+    const visibleText = activeCard
+      ? displayQuickActionText(intent, activeCard, cardName ?? '')
+      : setContext
+      ? displayQuickActionText(intent, {
+          cardRecordId: null, cardUrlSlug: '', priceChartingProductId: null,
+          cardName: '', setName: setContext.setName,
+          cardNumber: null, cardNumberDisplay: null, language: setContext.language,
+        }, '')
+      : ''
+    if (!visibleText) return
+    return send(visibleText, intent)
+  }
+
+  const quickPromptButtons = suggestedPrompts
+    ? suggestedPrompts.map(label => ({ label, intent: null as QuickActionIntent | null }))
+    : activeCard
+    ? CARD_QUICK_PROMPTS.map(p => ({ label: p.label, intent: p.intent }))
+    : setContext
+    ? SET_QUICK_PROMPTS.map(p => ({ label: p.label, intent: p.intent }))
+    : quickQuestions.map(label => ({ label, intent: null as QuickActionIntent | null }))
 
   return (
     <div style={{
@@ -211,7 +340,7 @@ export default function InlineChat({ cardContext, prefillMessage, suggestedPromp
             </svg>
           </div>
           <span style={{ fontSize: 13, color: 'var(--text)', fontWeight: 800, fontFamily: "'Figtree', sans-serif" }}>
-            {cardContext ? `Ask about ${cardContext.split(' | ')[0]}` : "Collector's AI assistant"}
+            {activeCard ? `Ask about ${cleanCardName(cardName)}` : setContext ? `Ask about ${setContext.setName}` : "Collector's AI assistant"}
           </span>
           <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green)', boxShadow: '0 0 6px rgba(39,174,96,0.5)' }} />
         </div>
@@ -266,16 +395,19 @@ export default function InlineChat({ cardContext, prefillMessage, suggestedPromp
       {/* Quick suggestions */}
       {messages.length === 0 && (
         <div style={{ padding: '0 16px 14px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {suggestions.map((q) => (
-            <button key={q} onClick={() => sendMessage(q)} style={{
-              background: 'var(--bg-light)', border: '1px solid var(--border)',
-              borderRadius: 20, padding: '6px 13px', fontSize: 12,
-              color: 'var(--text)', cursor: 'pointer', fontWeight: 700,
-              transition: 'all 0.15s', fontFamily: 'inherit',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--primary)'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = 'var(--primary)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-light)'; e.currentTarget.style.color = 'var(--text)'; e.currentTarget.style.borderColor = 'var(--border)' }}
-            >{q}</button>
+          {quickPromptButtons.map((q) => (
+            <button
+              key={q.label}
+              onClick={() => q.intent ? sendQuickAction(q.intent) : sendMessage(q.label)}
+              style={{
+                background: 'var(--bg-light)', border: '1px solid var(--border)',
+                borderRadius: 20, padding: '6px 13px', fontSize: 12,
+                color: 'var(--text)', cursor: 'pointer', fontWeight: 700,
+                transition: 'all 0.15s', fontFamily: 'inherit',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--primary)'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = 'var(--primary)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-light)'; e.currentTarget.style.color = 'var(--text)'; e.currentTarget.style.borderColor = 'var(--border)' }}
+            >{q.label}</button>
           ))}
         </div>
       )}
@@ -286,7 +418,7 @@ export default function InlineChat({ cardContext, prefillMessage, suggestedPromp
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-          placeholder={cardContext ? 'Ask anything about this card…' : 'Ask anything about Pokémon cards…'}
+          placeholder={activeCard ? 'Ask anything about this card…' : setContext ? 'Ask anything about this set…' : 'Ask anything about Pokémon cards…'}
           style={{ flex: 1, border: 'none', outline: 'none', fontSize: 16, color: 'var(--text)', background: 'transparent', fontFamily: 'inherit', fontWeight: 600 }}
         />
         <button onClick={() => sendMessage()} disabled={loading} style={{
