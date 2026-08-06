@@ -56,6 +56,13 @@ interface SpeciesRow {
   // all_cards payload when they are absent.
   en_total_cards?: number
   jp_total_cards?: number
+  // Block 5A-W-53A.1 — true distinct-set counts, never capped.
+  // The subtitle prose now uses `distinct_set_count` instead of
+  // `bySet.length` (which is limited to 12 by the RPC for tile
+  // layout). Optional for backward compatibility.
+  distinct_set_count?: number
+  en_distinct_set_count?: number
+  jp_distinct_set_count?: number
 }
 
 interface CardRow {
@@ -348,8 +355,15 @@ export default async function PokemonSpeciesPage({
 
   // The brief's H1 + subtitle. SEO-targeted at price queries.
   const h1 = `${displayName} Pokémon Cards — Prices & Values`
+  // Block 5A-W-53A.1 — the RPC's cards_by_set is capped at 12 for
+  // the tile layout, so bySet.length under-reports for Pokémon
+  // that span more than 12 sets (Pikachu previously showed "12
+  // sets" instead of its true 134). Prefer the un-capped
+  // distinct_set_count field; fall back to bySet.length only when
+  // the RPC hasn't been redeployed with the 53A.1 change yet.
+  const distinctSetCount = sp?.distinct_set_count ?? bySet.length
   const subtitle = sp && sp.total_cards > 0
-    ? `All ${sp.total_cards} ${displayName} cards across ${bySet.length || sp.total_cards} sets, with live prices, PSA 10 values and rarity guide. Updated nightly.`
+    ? `All ${sp.total_cards} ${displayName} cards across ${distinctSetCount || sp.total_cards} sets, with live prices, PSA 10 values and rarity guide. Updated nightly.`
     : `${displayName} doesn't appear on any Pokémon TCG cards in our database yet — we'll add them as soon as new sets land.`
 
   // Programmatic prose — every sentence is conditional on real data presence.
@@ -357,7 +371,7 @@ export default async function PokemonSpeciesPage({
   if (sp && sp.total_cards > 0) {
     const parts: string[] = []
     if (sp.first_appeared_set && sp.first_appeared_year) {
-      parts.push(`${displayName} has appeared on ${sp.total_cards} different Pokémon TCG cards across ${bySet.length || 'multiple'} sets since first being printed in ${sp.first_appeared_set} in ${sp.first_appeared_year}.`)
+      parts.push(`${displayName} has appeared on ${sp.total_cards} different Pokémon TCG cards across ${distinctSetCount || 'multiple'} sets since first being printed in ${sp.first_appeared_set} in ${sp.first_appeared_year}.`)
     } else {
       parts.push(`${displayName} has appeared on ${sp.total_cards} Pokémon TCG cards.`)
     }
@@ -394,7 +408,7 @@ export default async function PokemonSpeciesPage({
   const faqItems = sp && sp.total_cards > 0 ? getPokemonFaqItems({
     name: displayName,
     cards: cards.map(c => ({ card_name: c.card_name, set_name: c.set_name, raw_usd: c.current_raw, psa10_usd: c.current_psa10 })),
-    uniqueSets: bySet.length,
+    uniqueSets: distinctSetCount,
     primaryType,
     isLegendary,
     isMythical,
@@ -534,7 +548,7 @@ export default async function PokemonSpeciesPage({
                   image_url: c.image_url, raw_usd: c.current_raw, psa10_usd: c.current_psa10,
                   card_number: c.card_number, is_sealed: false,
                 }))}
-                uniqueSetCount={bySet.length}
+                uniqueSetCount={distinctSetCount}
                 mostExpensiveRaw={topCards[0] ? {
                   card_name: topCards[0].card_name, set_name: topCards[0].set_name,
                   card_url_slug: topCards[0].card_url_slug, image_url: topCards[0].image_url,
@@ -607,7 +621,7 @@ export default async function PokemonSpeciesPage({
       {sp && sp.total_cards > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10, marginBottom: 24 }}>
           <StatTile label="Total cards" value={sp.total_cards.toString()} />
-          <StatTile label="Sets featured in" value={(bySet.length || 0).toString()} />
+          <StatTile label="Sets featured in" value={(distinctSetCount || 0).toString()} />
           {sp.highest_card_price_cents && <StatTile label="Highest price" value={fmtUsdRaw(sp.highest_card_price_cents)} />}
           {sp.first_appeared_year && <StatTile label="First appeared" value={String(sp.first_appeared_year)} sub={sp.first_appeared_set || undefined} />}
         </div>

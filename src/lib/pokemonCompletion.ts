@@ -131,10 +131,23 @@ export function buildPokemonCompletion(
  * — the caller then renders "You don't own any [Pokémon] cards yet"
  * rather than two 0/N bars.
  *
- * Filters the user's portfolio down to the cards that map to the
- * given Pokémon slug via cards.primary_pokemon_slug so a
- * Pikachu-owning collector doesn't get their Charizard counts
- * on the Pikachu page.
+ * Block 5A-W-53A.1 — Pokémon membership is resolved through
+ * `card_pokemon.species_slug` (the same source the page's card
+ * grid uses), NOT through `cards.primary_pokemon_slug`. This is
+ * load-bearing:
+ *   * The page catalogue includes secondary-Pokémon cards
+ *     (e.g. "Ditto (Pikachu)" is primary=ditto but has a
+ *     card_pokemon row for pikachu). The 53A completion loader
+ *     used primary_pokemon_slug only, so 14 secondary Pikachu
+ *     cards existed in the grid but were invisible to
+ *     completion — probed live against the DB.
+ *   * The denominator (species.en_total_cards / jp_total_cards
+ *     from the RPC) is already computed via card_pokemon, so the
+ *     numerator and denominator now come from the same
+ *     population.
+ *   * card_pokemon uses (card_slug, species_slug) as PK, so a
+ *     given (owned card, species) pair appears at most once —
+ *     no risk of double-counting the same card_slug.
  */
 export async function loadPokemonCompletion(
   supabase: SupabaseClient,
@@ -161,13 +174,26 @@ export async function loadPokemonCompletion(
   if (ownedSlugs.length === 0) return null
 
   const uniqueOwned = [...new Set(ownedSlugs)]
-  // Narrow the follow-up query to slugs that actually map to this
-  // Pokémon so a large portfolio doesn't pull the entire catalogue.
+
+  // Intersect owned slugs against the species membership table.
+  // `card_pokemon` PK is (card_slug, species_slug) so at most one
+  // row per owned card ever comes back — no dedupe needed for the
+  // join itself.
+  const { data: membershipRows, error: membershipErr } = await supabase
+    .from('card_pokemon')
+    .select('card_slug')
+    .eq('species_slug', pokemonSlug)
+    .in('card_slug', uniqueOwned)
+  if (membershipErr) return null
+  const ownedInSpecies = [...new Set((membershipRows ?? []).map(r => r.card_slug).filter(Boolean))]
+  if (ownedInSpecies.length === 0) return null
+
+  // Resolve language for those specific slugs. is_sealed=false
+  // matches the eligibility rule the RPC uses server-side.
   const { data: cardRows, error: cardsErr } = await supabase
     .from('cards')
     .select('card_slug,language')
-    .in('card_slug', uniqueOwned)
-    .eq('primary_pokemon_slug', pokemonSlug)
+    .in('card_slug', ownedInSpecies)
     .eq('is_sealed', false)
   if (cardsErr) return null
 
@@ -175,7 +201,7 @@ export async function loadPokemonCompletion(
   for (const r of cardRows ?? []) {
     slugLanguage[r.card_slug] = r.language === 'jp' ? 'jp' : r.language === 'en' ? 'en' : null
   }
-  const owned = aggregateOwnedByLanguage(uniqueOwned, slugLanguage)
+  const owned = aggregateOwnedByLanguage(ownedInSpecies, slugLanguage)
   if (owned.en.size === 0 && owned.jp.size === 0) return null
   return buildPokemonCompletion(owned, totals)
 }

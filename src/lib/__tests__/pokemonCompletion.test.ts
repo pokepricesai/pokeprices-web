@@ -99,6 +99,78 @@ describe('buildPokemonCompletion', () => {
   })
 })
 
+// ── 53A.1 loader shape — via card_pokemon, not primary_pokemon_slug ─
+
+describe('loadPokemonCompletion — 53A.1 membership via card_pokemon', () => {
+  // Source-contract check: the loader must query the `card_pokemon`
+  // table for species membership. The pre-53A.1 code queried
+  // `cards.primary_pokemon_slug` which under-counted secondary-
+  // Pokémon cards (e.g. "Ditto (Pikachu)", "Squirtle Vs Pikachu"
+  // — 14 such cards for Pikachu at block time).
+  it('queries card_pokemon.species_slug for membership', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const src = readFileSync(join(process.cwd(), 'src', 'lib', 'pokemonCompletion.ts'), 'utf8')
+    expect(src).toMatch(/\.from\('card_pokemon'\)/)
+    expect(src).toMatch(/\.eq\('species_slug', pokemonSlug\)/)
+    expect(src).toMatch(/\.in\('card_slug', uniqueOwned\)/)
+  })
+
+  it('no longer filters ownership by cards.primary_pokemon_slug', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const src = readFileSync(join(process.cwd(), 'src', 'lib', 'pokemonCompletion.ts'), 'utf8')
+    // The 53A version used .eq('primary_pokemon_slug', pokemonSlug)
+    // on the cards query. The 53A.1 rewrite drops that filter — the
+    // cards query only resolves language + is_sealed for the
+    // membership-filtered slug set.
+    expect(src).not.toMatch(/\.eq\('primary_pokemon_slug', pokemonSlug\)/)
+  })
+
+  it('applies is_sealed=false to match the RPC denominator eligibility rule', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const src = readFileSync(join(process.cwd(), 'src', 'lib', 'pokemonCompletion.ts'), 'utf8')
+    expect(src).toMatch(/\.eq\('is_sealed', false\)/)
+  })
+
+  it('deduplicates the membership rows into a Set (so a single card_slug counts once)', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const src = readFileSync(join(process.cwd(), 'src', 'lib', 'pokemonCompletion.ts'), 'utf8')
+    expect(src).toMatch(/\[\.\.\.new Set\(\(membershipRows \?\? \[\]\)\.map\(r => r\.card_slug\)/)
+  })
+})
+
+// ── 53A.1 secondary-Pokémon ownership fixture ───────
+
+describe('aggregateOwnedByLanguage — secondary-Pokémon fixture', () => {
+  // Fixture: a user owns a "Ditto (Pikachu)" card where the
+  // primary Pokémon is Ditto but Pikachu is a secondary
+  // card_pokemon association. The 53A.1 loader intersects owned
+  // slugs against card_pokemon for the Pikachu species page, so
+  // the card increments Pikachu's owned count.
+  it('a secondary-Pokémon card counts toward completion (Ditto-Pikachu on Pikachu page)', () => {
+    // Simulated: loader has already resolved ownedInSpecies via
+    // card_pokemon(species=pikachu). We only need to verify the
+    // aggregator treats the resulting slug like any other.
+    const dittoPikachuSlug = 'ditto-pikachu-63'
+    const language: Record<string, 'en'> = { [dittoPikachuSlug]: 'en' }
+    const { en, jp } = aggregateOwnedByLanguage([dittoPikachuSlug], language)
+    expect(en.has(dittoPikachuSlug)).toBe(true)
+    expect(jp.size).toBe(0)
+  })
+
+  it('duplicate card_slugs from raw + graded holdings collapse to one owned entry', () => {
+    // portfolio_items can carry the same card_slug twice (once
+    // ungraded, once PSA 10). The Set-of-slug aggregation drops
+    // the duplicate.
+    const slugs = ['pc-1', 'pc-1', 'pc-1']
+    const { en } = aggregateOwnedByLanguage(slugs, { 'pc-1': 'en' })
+    expect(en.size).toBe(1)
+  })
+})
+
 // ── Regression: block spec examples ────────────────
 
 describe('block spec fixtures — Pikachu completion', () => {

@@ -17,6 +17,7 @@ const SECTION = readFileSync(join(process.cwd(), 'src', 'app', 'pokemon', '[slug
 const PAGE = readFileSync(join(process.cwd(), 'src', 'app', 'pokemon', '[slug]', 'page.tsx'), 'utf8')
 const COMPLETION = readFileSync(join(process.cwd(), 'src', 'lib', 'pokemonCompletion.ts'), 'utf8')
 const MIGRATION = readFileSync(join(process.cwd(), 'migrations', '2026-08-05-pokemon-species-language.sql'), 'utf8')
+const MIGRATION_531 = readFileSync(join(process.cwd(), 'migrations', '2026-08-06-pokemon-species-distinct-set-count.sql'), 'utf8')
 
 // ── Filter tabs + counts ────────────────────────────
 
@@ -167,6 +168,109 @@ describe('get_pokemon_species_detail — language migration', () => {
         throw new Error(`unexpected destructive DDL: ${line}`)
       }
     }
+  })
+})
+
+// ── 53A.1 distinct-set-count fix ────────────────────
+
+describe('53A.1 — distinct_set_count returned by RPC + consumed by page', () => {
+  it('migration adds distinct_set_count on species', () => {
+    expect(MIGRATION_531).toMatch(/COUNT\(DISTINCT c\.set_name\)::INT/)
+    expect(MIGRATION_531).toMatch(/'distinct_set_count',\s+COALESCE\(distinct_sets, 0\)/)
+  })
+
+  it('migration also emits per-language distinct set counts', () => {
+    expect(MIGRATION_531).toMatch(/COUNT\(DISTINCT c\.set_name\) FILTER \(WHERE c\.language = 'en'\)/)
+    expect(MIGRATION_531).toMatch(/COUNT\(DISTINCT c\.set_name\) FILTER \(WHERE c\.language = 'jp'\)/)
+    expect(MIGRATION_531).toMatch(/'en_distinct_set_count',\s+COALESCE\(en_sets, 0\)/)
+    expect(MIGRATION_531).toMatch(/'jp_distinct_set_count',\s+COALESCE\(jp_sets, 0\)/)
+  })
+
+  it('cards_by_set stays capped at 12 (visual tile grid unchanged)', () => {
+    // Assert the LIMIT 12 still lives on the cards_by_set branch.
+    const bySet = MIGRATION_531.slice(MIGRATION_531.indexOf("'cards_by_set'")).slice(0, 2000)
+    expect(bySet).toMatch(/LIMIT 12/)
+  })
+
+  it('page.tsx computes distinctSetCount from species.distinct_set_count with bySet.length fallback', () => {
+    expect(PAGE).toMatch(/const distinctSetCount = sp\?\.distinct_set_count \?\? bySet\.length/)
+  })
+
+  it('page.tsx subtitle uses distinctSetCount (not the capped bySet.length)', () => {
+    // The subtitle prose must reference distinctSetCount so a
+    // 134-set Pikachu doesn't render as "12 sets".
+    expect(PAGE).toMatch(/All \$\{sp\.total_cards\} \$\{displayName\} cards across \$\{distinctSetCount \|\| sp\.total_cards\} sets/)
+    // Anti-regression: no remaining `bySet.length` reference on the
+    // subtitle line itself.
+    expect(PAGE).not.toMatch(/cards across \$\{bySet\.length \|\|/)
+  })
+
+  it('page.tsx prose, FAQ, dossier and stats tile all consume the un-capped count', () => {
+    // These four call-sites previously used bySet.length and would
+    // similarly under-report for wide-set Pokémon.
+    expect(PAGE).toMatch(/across \$\{distinctSetCount \|\| 'multiple'\} sets since first being printed/)
+    expect(PAGE).toMatch(/uniqueSets:\s*distinctSetCount/)
+    expect(PAGE).toMatch(/uniqueSetCount=\{distinctSetCount\}/)
+    expect(PAGE).toMatch(/<StatTile label="Sets featured in" value=\{\(distinctSetCount \|\| 0\)\.toString\(\)\} \/>/)
+  })
+
+  it('the "Explore by Set" section still uses bySet.length as its render guard (12-tile grid)', () => {
+    // The tile grid render is intentionally capped at 12 — the
+    // conditional guard for the section must remain bySet.length,
+    // not distinctSetCount, so the section renders whenever ANY
+    // set tiles are available (which the RPC returns up to 12 of).
+    expect(PAGE).toMatch(/\{bySet\.length > 0 && \(/)
+  })
+
+  it('SpeciesRow type declares the new optional fields', () => {
+    expect(PAGE).toMatch(/distinct_set_count\?:\s*number/)
+    expect(PAGE).toMatch(/en_distinct_set_count\?:\s*number/)
+    expect(PAGE).toMatch(/jp_distinct_set_count\?:\s*number/)
+  })
+})
+
+// ── 53A.1 Nidoran gender-marker behaviour ───────────
+
+describe('53A.1 — Nidoran ♀/♂ handling by the existing extraction', () => {
+  // The block spec calls out Nidoran♀/♂ as the deterministic fix
+  // candidate. The existing extractor already normalises the
+  // gender symbols to " f" / " m" via .replace('♀', ' f') and
+  // .replace('♂', ' m'). Live audit at block time found:
+  //   * 4 JP Nidoran cards with ♂ symbol — all 4 already
+  //     allocated (0 unallocated with-symbol).
+  //   * 48 JP Nidoran cards WITHOUT a gender symbol — genuinely
+  //     unmappable ("Nidoran #29" from Japanese Carddass could
+  //     be either sex depending on set convention).
+  //
+  // Lock in the extractor's behaviour on symbol-bearing names so
+  // a future refactor can't silently break the working path.
+  it('normalizes Nidoran♀ to a "nidoran f"-matchable token', async () => {
+    // Read the JS port used by the 53A backfill script.
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const backfill = readFileSync(join(process.cwd(), 'scripts', 'backfill-japanese-pokemon-slug.mjs'), 'utf8')
+    expect(backfill).toMatch(/replace\(\/♀\/g, ' f'\)/)
+    expect(backfill).toMatch(/replace\(\/♂\/g, ' m'\)/)
+  })
+
+  it('the JP audit script identifies unmarked Nidoran cards as unfixable (no gender knowledge)', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const audit = readFileSync(join(process.cwd(), 'scripts', 'audit-unassigned-japanese-cards.mjs'), 'utf8')
+    // The audit categorises them into a dedicated bucket and
+    // documents WHY they can't be auto-mapped.
+    expect(audit).toMatch(/Nidoran \(no gender marker\)/)
+    expect(audit).toMatch(/mapped deterministically to nidoran-f vs nidoran-m/)
+  })
+
+  it('Trainer and Energy JP cards remain unassigned by design', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const audit = readFileSync(join(process.cwd(), 'scripts', 'audit-unassigned-japanese-cards.mjs'), 'utf8')
+    expect(audit).toMatch(/Trainer \(generic\)/)
+    expect(audit).toMatch(/Named Trainer/)
+    expect(audit).toMatch(/'Energy':\s*0/)
+    expect(audit).toMatch(/'Item':\s*0/)
   })
 })
 
