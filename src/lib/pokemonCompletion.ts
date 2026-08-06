@@ -89,7 +89,7 @@ export function computePercentage(owned: number, total: number): number {
  * semantic without a live DB round trip.
  */
 export function aggregateOwnedByLanguage(
-  ownedSlugs: Iterable<string>,
+  ownedSlugs: readonly string[],
   slugLanguage: Record<string, 'en' | 'jp' | null | undefined>,
 ): { en: Set<string>; jp: Set<string> } {
   const en = new Set<string>()
@@ -173,7 +173,7 @@ export async function loadPokemonCompletion(
   }
   if (ownedSlugs.length === 0) return null
 
-  const uniqueOwned = [...new Set(ownedSlugs)]
+  const uniqueOwned = Array.from(new Set(ownedSlugs))
 
   // Intersect owned slugs against the species membership table.
   // `card_pokemon` PK is (card_slug, species_slug) so at most one
@@ -185,7 +185,7 @@ export async function loadPokemonCompletion(
     .eq('species_slug', pokemonSlug)
     .in('card_slug', uniqueOwned)
   if (membershipErr) return null
-  const ownedInSpecies = [...new Set((membershipRows ?? []).map(r => r.card_slug).filter(Boolean))]
+  const ownedInSpecies = Array.from(new Set((membershipRows ?? []).map(r => r.card_slug).filter(Boolean)))
   if (ownedInSpecies.length === 0) return null
 
   // Resolve language for those specific slugs. is_sealed=false

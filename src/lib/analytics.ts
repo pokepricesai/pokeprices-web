@@ -76,6 +76,9 @@ export type EventMap = {
   ai_card_clicked:           { card_slug?: string; query_type?: string; source_component?: string }
   ai_ebay_clicked:           { card_slug?: string; marketplace?: Marketplace; intent?: AffiliateIntent; source_component?: string }
   ai_error:                  { failure_stage?: string; response_status?: string }
+  // Block 5A-W-52A.3 — user picked one card from the ambiguous-
+  // match candidate selection UI in InlineChat.
+  ai_candidate_selected:     { source_component?: string }
 
   // Affiliate — grading_company widened to string so the central engine
   // (which normalises any company name to upper-case) can spread its

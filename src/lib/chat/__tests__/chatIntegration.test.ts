@@ -127,14 +127,12 @@ describe('smart-endpoint — 52A.2 retrieval priority', () => {
 
   it('composite priorities count candidates and never select data[0] unguarded', () => {
     // Every `structuredCard = data![0]` line must sit inside a count===1 branch.
-    const acceptLines = SMART_EP.matchAll(/structuredCard = data!\[0\]/g)
-    let n = 0
+    const acceptLines = Array.from(SMART_EP.matchAll(/structuredCard = data!\[0\]/g))
     for (const m of acceptLines) {
-      n++
       const before = SMART_EP.slice(Math.max(0, m.index! - 400), m.index!)
       expect(before).toMatch(/count === 1/)
     }
-    expect(n).toBeGreaterThanOrEqual(2)
+    expect(acceptLines.length).toBeGreaterThanOrEqual(2)
   })
 
   it('fails closed when no structured record can be loaded', () => {

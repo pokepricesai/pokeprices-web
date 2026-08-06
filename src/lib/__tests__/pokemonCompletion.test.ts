@@ -36,8 +36,8 @@ describe('aggregateOwnedByLanguage', () => {
       'pc-4': 'jp',
     }
     const { en, jp } = aggregateOwnedByLanguage(slugs, lang)
-    expect([...en].sort()).toEqual(['pc-1', 'pc-3'])
-    expect([...jp].sort()).toEqual(['pc-2', 'pc-4'])
+    expect(Array.from(en).sort()).toEqual(['pc-1', 'pc-3'])
+    expect(Array.from(jp).sort()).toEqual(['pc-2', 'pc-4'])
   })
 
   it('counts a card owned in both raw and graded form only once (Set semantics)', () => {
@@ -138,7 +138,7 @@ describe('loadPokemonCompletion — 53A.1 membership via card_pokemon', () => {
     const { readFileSync } = await import('node:fs')
     const { join } = await import('node:path')
     const src = readFileSync(join(process.cwd(), 'src', 'lib', 'pokemonCompletion.ts'), 'utf8')
-    expect(src).toMatch(/\[\.\.\.new Set\(\(membershipRows \?\? \[\]\)\.map\(r => r\.card_slug\)/)
+    expect(src).toMatch(/Array\.from\(new Set\(\(membershipRows \?\? \[\]\)\.map\(r => r\.card_slug\)/)
   })
 })
 
