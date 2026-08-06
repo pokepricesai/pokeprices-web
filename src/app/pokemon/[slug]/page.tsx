@@ -114,6 +114,12 @@ const fetchSpeciesDetail = cache(async (slug: string): Promise<SpeciesDetail | n
       apikey: SUPABASE_ANON,
       Authorization: `Bearer ${SUPABASE_ANON}`,
       'Content-Type': 'application/json',
+      // Block 5A-W-53A.1 — bumping this on any RPC-shape change
+      // forces Vercel's data cache (which persists across
+      // deployments) to treat the request as a new cache key so
+      // the first render after deploy fetches the fresh RPC
+      // response instead of serving the pre-migration one.
+      'X-PokePrices-Cache-Version': 'rpc-2026-08-06-distinct-set-count',
     },
     body: JSON.stringify({ p_slug: slug }),
     next: { revalidate: 3600 },
