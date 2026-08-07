@@ -357,7 +357,21 @@ CONTENT RULES
 
 Raw means ungraded. Never say raw PSA 10 - that is a contradiction.
 
-If PSA 10 is more than 3x PSA 9, mention that PSA 9 is usually better value.
+===========================================================================
+GRADING QUERIES (deterministic — Block 5A-W-52B)
+===========================================================================
+
+When the user turn ends with a "GRADING ANALYSIS" block, follow its Response format section verbatim. Explain the numbers in prose. Do NOT recalculate, invent grading fees, quote a preferred grade from your own knowledge, or contradict the recommendation_code.
+
+The recommendation_code drives the verdict sentence:
+LIKELY_NEGATIVE — grading likely loses money.
+LIKELY_POSITIVE — grading likely profits at the estimated grade.
+CONDITION_DEPENDENT — profit depends on the grade awarded; show scenarios.
+INSUFFICIENT_DATA — refuse to give a strong yes or no; ask one clarifying condition question.
+
+Banned phrases for grading answers: "sweet spot", "grading floor", "nearly doubles", plus any percentage or dollar/pound figure not present in the analysis block. Do not describe a positive grade premium as profit if the analysis reports negative incremental profit — even when a personal collection could still be a valid non-financial reason to grade.
+
+When NO grading analysis block is present (free-text grading question about a card that was not resolved to exact identity), refuse to give a recommendation and ask the user to open the card page or clarify which exact printing they mean.
 
 Budget rule: never recommend a card over the stated budget without flagging it explicitly.
 
@@ -1119,6 +1133,437 @@ function calcCost(
   ) / 1_000_000;
 }
 
+// ─── Block 5A-W-52B.2 — deterministic grading calculator ──
+//
+// Reference implementation lives at:
+//   src/lib/grading/gradingServiceProfiles.ts
+//   src/lib/grading/sellingProfiles.ts
+//   src/lib/grading/gradingCostConfig.ts
+//   src/lib/grading/currency.ts
+//   src/lib/grading/gradingAnalysis.ts
+//
+// This inline copy runs at the edge because Deno cannot import
+// the browser TypeScript module directly. Both must stay in sync.
+// When either changes, update the other and re-run:
+//   npx vitest run src/lib/grading
+
+// ─── Grading service profiles (verified Aug 2026) ──────
+// Source: https://www.psacard.com/services/tcggrading
+
+const PSA_REGULAR_DIRECT = {
+  id:                 "psa_regular_direct",
+  serviceName:        "PSA Regular (Direct)",
+  gradingFee:         7999,    // $79.99 USD
+  feeCurrency:        "USD",
+  maxInsuredValue:    150000,  // $1,500.00 USD
+  available:          true,
+  effectiveDate:      "2026-08-07",
+} as const;
+
+const PSA_VALUE_DIRECT_PAUSED = {
+  id:                 "psa_value_direct_paused",
+  serviceName:        "PSA Value (Direct) — paused",
+  gradingFee:         2500,
+  feeCurrency:        "USD",
+  maxInsuredValue:    49900,
+  available:          false,   // paused 2 June 2026
+  effectiveDate:      "2026-08-07",
+} as const;
+
+const PSA_EXPRESS_DIRECT = {
+  id:                 "psa_express_direct",
+  serviceName:        "PSA Express (Direct)",
+  gradingFee:         14900,   // $149 USD
+  feeCurrency:        "USD",
+  maxInsuredValue:    250000,  // $2,500 USD
+  available:          true,
+  effectiveDate:      "2026-08-07",
+} as const;
+
+const PSA_SUPER_EXPRESS_DIRECT = {
+  id:                 "psa_super_express_direct",
+  serviceName:        "PSA Super Express (Direct)",
+  gradingFee:         34900,   // $349 USD
+  feeCurrency:        "USD",
+  maxInsuredValue:    500000,  // $5,000 USD
+  available:          true,
+  effectiveDate:      "2026-08-07",
+} as const;
+
+const ORDERED_AVAILABLE_PSA_PROFILES = [
+  PSA_REGULAR_DIRECT,
+  PSA_EXPRESS_DIRECT,
+  PSA_SUPER_EXPRESS_DIRECT,
+] as const;
+
+// ─── Selling profiles ──────────────────────────────────
+
+const UK_EBAY_PRIVATE = {
+  id:                 "uk_ebay_private",
+  displayName:        "eBay UK — private seller",
+  sellerType:         "private",
+  marketplaceFeeRate: 0,       // eBay UK abolished 3 Oct 2024
+  regulatoryFeeRate:  0,
+  paymentFeeRate:     0,
+  fixedSellingFeeRule: { kind: "flat", flat: 0 } as const,
+} as const;
+
+const UK_EBAY_BUSINESS = {
+  id:                 "uk_ebay_business",
+  displayName:        "eBay UK — business seller (Collectables)",
+  sellerType:         "business",
+  marketplaceFeeRate: 0.109,   // 10.9% (Collectables)
+  regulatoryFeeRate:  0.0035,  // 0.35% regulatory operating fee
+  paymentFeeRate:     0,       // bundled into FVF
+  fixedSellingFeeRule: {
+    kind: "tiered_by_sale",
+    tiers: [
+      { maxSaleCents: 1000, feeCents: 30 },                      // ≤ £10 → £0.30
+      { maxSaleCents: Number.POSITIVE_INFINITY, feeCents: 40 },  // > £10 → £0.40
+    ],
+  } as const,
+  // eBay UK business fees are quoted excluding VAT. When the
+  // seller cannot reclaim VAT (default), the calculator grosses
+  // the aggregate fee amount by 20%.
+  feesExcludeVat:     true,
+  feeVatRate:         0.20,
+} as const;
+
+// FX rate provenance — matches src/lib/grading/currency.ts.
+// Every grading response carries `fx_rate_source: 'hardcoded_fallback'`
+// so audits know this isn't a live feed.
+const FALLBACK_USD_TO_GBP_RATE = {
+  rate: 0.79,
+  source: "hardcoded_fallback",
+  effectiveDate: "2026-08-07",
+} as const;
+
+/** Resolve tiered fixed per-order fee for a given sale value. */
+function resolveFixedSellingFee(rule: any, saleValueCents: number): number {
+  if (rule.kind === "flat") return rule.flat;
+  for (const tier of rule.tiers) {
+    if (saleValueCents <= tier.maxSaleCents) return tier.feeCents;
+  }
+  return rule.tiers[rule.tiers.length - 1]?.feeCents ?? 0;
+}
+
+/** Total selling deductions applied identically to raw + graded sides. */
+function calcAllSellingFees(price: number, sp: any, applyFeeVat: boolean): {
+  marketplaceFee: number; regulatoryFee: number; paymentFee: number; fixedSellingFee: number; feeVat: number; total: number;
+} {
+  const marketplaceFee = calcFeeCents(price, sp.marketplaceFeeRate);
+  const regulatoryFee  = calcFeeCents(price, sp.regulatoryFeeRate);
+  const paymentFee     = calcFeeCents(price, sp.paymentFeeRate);
+  const fixedSellingFee = price > 0 ? resolveFixedSellingFee(sp.fixedSellingFeeRule, price) : 0;
+  const baseTotal = marketplaceFee + regulatoryFee + paymentFee + fixedSellingFee;
+  const feeVatRate = sp.feeVatRate ?? 0;
+  const feeVat = applyFeeVat && feeVatRate > 0 && baseTotal > 0
+    ? Math.round(baseTotal * feeVatRate) : 0;
+  return {
+    marketplaceFee, regulatoryFee, paymentFee, fixedSellingFee, feeVat,
+    total: baseTotal + feeVat,
+  };
+}
+
+/** Piecewise break-even solver mirroring gradingAnalysis.ts. */
+function solveBreakEvenSalePrice(fixedGradingCosts: number, rawNet: number, feeRateSum: number, rule: any, vatMultiplier: number = 1): number {
+  const effectiveRateSum = feeRateSum * vatMultiplier;
+  if (effectiveRateSum >= 1) return Number.POSITIVE_INFINITY;
+  const tiers = rule.kind === "flat"
+    ? [{ maxSaleCents: Number.POSITIVE_INFINITY, feeCents: rule.flat }]
+    : rule.tiers;
+  let prevMax = 0;
+  let bestValid = Number.POSITIVE_INFINITY;
+  for (const t of tiers) {
+    const effectiveFixedFee = Math.round(t.feeCents * vatMultiplier);
+    const P = Math.ceil((fixedGradingCosts + rawNet + effectiveFixedFee) / (1 - effectiveRateSum));
+    if (P > prevMax && P <= t.maxSaleCents && P < bestValid) bestValid = P;
+    prevMax = t.maxSaleCents;
+  }
+  return bestValid;
+}
+
+// UK-first per CLAUDE.md — private seller is the current default.
+const DEFAULT_SELLING_PROFILE = UK_EBAY_PRIVATE;
+
+// ─── Ancillary GBP costs ───────────────────────────────
+
+const UK_ANCILLARY_COSTS_GBP = {
+  outboundShipping:   400,
+  returnShipping:     600,
+  insurance:          300,
+  otherCosts:         100,
+  effectiveDate:      "2026-08-07",
+} as const;
+
+function calcFeeCents(gross: number, rate: number): number {
+  if (gross <= 0 || rate <= 0) return 0;
+  return Math.round(gross * rate);
+}
+
+function volumeConfidence(sales30d: number | null | undefined): "high" | "medium" | "low" {
+  if (sales30d == null || sales30d <= 0) return "low";
+  if (sales30d < 3) return "low";
+  if (sales30d < 10) return "medium";
+  return "high";
+}
+
+/**
+ * Convert a USD-cents price to GBP-pence using the site's
+ * standard multiplier. Kept explicit so a reader can see the FX
+ * assumption in one place. Aligns with `GBP_RATE` above and the
+ * grading calculator's single-currency contract.
+ */
+function usdCentsToGbpPence(cents: number | null | undefined): number | null {
+  if (cents == null || cents <= 0) return null;
+  return Math.round(cents * GBP_RATE);
+}
+
+/** Pick the cheapest currently-available service whose value cap
+ * accommodates the target card value. `targetValueUsd` is
+ * integer cents in USD. Returns null when no available tier fits. */
+function pickPsaService(targetValueUsd: number) {
+  for (const p of ORDERED_AVAILABLE_PSA_PROFILES) {
+    if (!p.available) continue;
+    if (p.maxInsuredValue == null || targetValueUsd <= p.maxInsuredValue) return p;
+  }
+  return null;
+}
+
+async function runGradingAnalysis(structuredCard: any): Promise<{
+  block: string;
+  recommendationCode: string;
+  breakEvenGrade: number | null;
+  confidence: "high" | "medium" | "low";
+} | null> {
+  try {
+    const pcSlug = `pc-${structuredCard.card_slug}`;
+    const bareSlug = String(structuredCard.card_slug);
+    // Grab today's daily_prices row. If missing, fail closed —
+    // we won't invent prices. Also grab per-grade volume from
+    // card_volume for the confidence signal.
+    const [{ data: prices }, { data: volumes }] = await Promise.all([
+      supabase.from("daily_prices")
+        .select("raw_usd,psa7_usd,psa8_usd,psa9_usd,psa10_usd")
+        .eq("card_slug", pcSlug)
+        .order("date", { ascending: false })
+        .limit(1),
+      supabase.from("card_volume")
+        .select("grade,sales_30d")
+        .eq("card_slug", bareSlug)
+        .in("grade", ["Ungraded", "PSA 7", "PSA 8", "PSA 9", "PSA 10"]),
+    ]);
+    if (!prices || prices.length === 0) return null;
+    const p = prices[0];
+    const rawGbp = usdCentsToGbpPence(p.raw_usd);
+    const g7  = usdCentsToGbpPence(p.psa7_usd);
+    const g8  = usdCentsToGbpPence(p.psa8_usd);
+    const g9  = usdCentsToGbpPence(p.psa9_usd);
+    const g10 = usdCentsToGbpPence(p.psa10_usd);
+    // Volume by grade
+    const vol: Record<string, number | null> = {};
+    for (const v of volumes ?? []) {
+      if (v.grade === "Ungraded") vol.ungraded = v.sales_30d;
+      else if (v.grade === "PSA 7") vol.psa7 = v.sales_30d;
+      else if (v.grade === "PSA 8") vol.psa8 = v.sales_30d;
+      else if (v.grade === "PSA 9") vol.psa9 = v.sales_30d;
+      else if (v.grade === "PSA 10") vol.psa10 = v.sales_30d;
+    }
+
+    // ── 52B.1 service + selling profile selection ──
+    //
+    // Pick the cheapest PSA tier whose value cap accommodates the
+    // highest expected sale value (max of raw + graded). Convert
+    // fees + caps into GBP for the analyzer.
+    const gradeValuesGbp = [g7, g8, g9, g10].filter((v): v is number => v != null && v > 0);
+    const maxExpectedGbp = Math.max(rawGbp ?? 0, ...(gradeValuesGbp.length ? gradeValuesGbp : [0]));
+    // Convert the max expected GBP back to USD for cap comparison.
+    const maxExpectedUsd = Math.round(maxExpectedGbp / GBP_RATE);
+    const service = pickPsaService(maxExpectedUsd) ?? PSA_REGULAR_DIRECT;
+    const gradingFeeGbp = Math.round(service.gradingFee * GBP_RATE);
+    const serviceMaxValueGbp = service.maxInsuredValue != null
+      ? Math.round(service.maxInsuredValue * GBP_RATE)
+      : null;
+    const sp = DEFAULT_SELLING_PROFILE;
+    const anc = UK_ANCILLARY_COSTS_GBP;
+
+    const fixedGradingCosts = gradingFeeGbp
+      + anc.outboundShipping + anc.returnShipping
+      + anc.insurance + anc.otherCosts;
+    const feeRateSum = sp.marketplaceFeeRate + sp.regulatoryFeeRate + sp.paymentFeeRate;
+    // 52B VAT — until an ownership signal exists, default to the
+    // non-reclaimable case (safer bakes VAT into the numbers than
+    // silently claiming reclaim). The private profile has
+    // feesExcludeVat undefined so this is a no-op there.
+    const sellerCanReclaimFeeVat = false;
+    const applyFeeVat = !!(sp as any).feesExcludeVat && !sellerCanReclaimFeeVat;
+    const vatMultiplier = applyFeeVat ? 1 + ((sp as any).feeVatRate ?? 0) : 1;
+
+    const gradeInputs: Array<{ grade: 7|8|9|10; price: number | null; volume: number | null }> = [
+      { grade: 7,  price: g7,  volume: vol.psa7  ?? null },
+      { grade: 8,  price: g8,  volume: vol.psa8  ?? null },
+      { grade: 9,  price: g9,  volume: vol.psa9  ?? null },
+      { grade: 10, price: g10, volume: vol.psa10 ?? null },
+    ];
+    const missingGradeValues: number[] = [];
+    const lowVolumeGrades: number[] = [];
+    const gradesExceedServiceCap: number[] = [];
+    let extremeGradeMultiplierPresent = false;
+    type Scenario = {
+      grade: 7|8|9|10; gradedValue: number;
+      marketplaceFee: number; regulatoryFee: number; paymentFee: number; fixedSellingFee: number;
+      totalCosts: number; netProceeds: number;
+      incrementalProfit: number; roiPercent: number | null; breakEven: boolean;
+      breakEvenSalePrice: number;
+      salesVolume: number | null; confidence: "high"|"medium"|"low";
+      extremeGradeMultiplier: boolean; exceedsServiceCap: boolean;
+    };
+    const scenarios: Scenario[] = [];
+    const rawNet = rawGbp != null && rawGbp > 0
+      ? rawGbp - calcAllSellingFees(rawGbp, sp, applyFeeVat).total
+      : null;
+    for (const { grade, price, volume } of gradeInputs) {
+      if (price == null || price <= 0) { missingGradeValues.push(grade); continue; }
+      const fees = calcAllSellingFees(price, sp, applyFeeVat);
+      const totalCosts     = fixedGradingCosts + fees.total;
+      const netProceeds    = price - totalCosts;
+      const incrementalProfit = netProceeds - (rawNet ?? 0);
+      const investment = fixedGradingCosts + (rawNet ?? 0);
+      const roiPercent = investment > 0 ? Math.round((incrementalProfit / investment) * 1000) / 10 : null;
+      const breakEvenSalePrice = solveBreakEvenSalePrice(fixedGradingCosts, rawNet ?? 0, feeRateSum, sp.fixedSellingFeeRule, vatMultiplier);
+      const scenarioConfidence = volumeConfidence(volume);
+      if (scenarioConfidence === "low") lowVolumeGrades.push(grade);
+      const extreme = rawGbp != null && rawGbp > 0 ? price / rawGbp >= 10 : false;
+      if (extreme) extremeGradeMultiplierPresent = true;
+      const exceedsServiceCap = serviceMaxValueGbp != null && price > serviceMaxValueGbp;
+      if (exceedsServiceCap) gradesExceedServiceCap.push(grade);
+      scenarios.push({
+        grade, gradedValue: price,
+        marketplaceFee: fees.marketplaceFee, regulatoryFee: fees.regulatoryFee,
+        paymentFee: fees.paymentFee, fixedSellingFee: fees.fixedSellingFee,
+        totalCosts, netProceeds, incrementalProfit,
+        roiPercent, breakEven: incrementalProfit >= 0 && !exceedsServiceCap,
+        breakEvenSalePrice,
+        salesVolume: volume, confidence: scenarioConfidence,
+        extremeGradeMultiplier: extreme, exceedsServiceCap,
+      });
+    }
+    const missingRawValue = rawGbp == null;
+    let confidence: "high"|"medium"|"low" = "high";
+    if (missingRawValue || scenarios.length === 0) confidence = "low";
+    else if (lowVolumeGrades.length >= 2) confidence = "low";
+    else if (scenarios.length === 1 && lowVolumeGrades.length >= 1) confidence = "low";
+    else if (lowVolumeGrades.length === 1) confidence = "medium";
+    if (extremeGradeMultiplierPresent) {
+      if (lowVolumeGrades.length >= 1) confidence = "low";
+      else if (confidence === "high") confidence = "medium";
+    }
+    const eligible = scenarios.filter(s => !s.exceedsServiceCap);
+    const breakEvenGrade = eligible.filter(s => s.breakEven).sort((a, b) => a.grade - b.grade)[0]?.grade ?? null;
+    const bestFinancial  = eligible.slice().sort((a, b) => b.incrementalProfit - a.incrementalProfit || a.grade - b.grade)[0]?.grade ?? null;
+
+    let recommendationCode: string;
+    if (!service.available || eligible.length === 0) {
+      recommendationCode = "INSUFFICIENT_COST_DATA";
+    } else if (missingRawValue || scenarios.length === 0 || confidence === "low") {
+      recommendationCode = "INSUFFICIENT_DATA";
+    } else if (eligible.every(s => !s.breakEven)) {
+      recommendationCode = "LIKELY_NEGATIVE";
+    } else if (eligible.every(s => s.breakEven)) {
+      recommendationCode = "LIKELY_POSITIVE";
+    } else {
+      recommendationCode = "CONDITION_DEPENDENT";
+    }
+
+    // Build the prompt block — mirror of buildGradingPromptBlock
+    // in src/lib/grading/gradingAnalysis.ts.
+    const fmt = (cents: number) => `£${(cents / 100).toFixed(2)}`;
+    const lines: string[] = [];
+    lines.push(
+      `GRADING ANALYSIS (deterministic — you MUST NOT recalculate, invent fees, or contradict these numbers).`,
+      `recommendation_code=${recommendationCode}`,
+      `intended_use=resale`,
+      `comparison_basis=sell_raw`,
+      `overall_confidence=${confidence}`,
+      `break_even_grade=${breakEvenGrade ?? "none"}`,
+      `best_financial_grade=${bestFinancial ?? "none"}`,
+      `grading_service=${service.serviceName}${service.available ? "" : " (UNAVAILABLE)"}`,
+      `selling_profile=${sp.displayName}`,
+      `fx_rate=${FALLBACK_USD_TO_GBP_RATE.rate} (${FALLBACK_USD_TO_GBP_RATE.source})`,
+      `fee_vat_applied=${applyFeeVat}`,
+    );
+    for (const s of scenarios) {
+      lines.push(
+        `PSA_${s.grade}: value=${fmt(s.gradedValue)} net=${fmt(s.netProceeds)} ` +
+        `incremental=${s.incrementalProfit >= 0 ? "+" : ""}${fmt(s.incrementalProfit)} ` +
+        `roi=${s.roiPercent != null ? s.roiPercent.toFixed(1) + "%" : "n/a"} ` +
+        `break_even=${s.breakEven} volume_30d=${s.salesVolume ?? "unknown"} ` +
+        `confidence=${s.confidence}` +
+        (s.extremeGradeMultiplier ? " extreme_multiplier" : "") +
+        (s.exceedsServiceCap ? " exceeds_service_cap" : ""),
+      );
+    }
+    if (!service.available) lines.push(`WARNING: the grading service (${service.serviceName}) is not currently accepting new submissions — do NOT recommend booking it.`);
+    if (gradesExceedServiceCap.length > 0) lines.push(`WARNING: PSA ${gradesExceedServiceCap.join(", PSA ")} value(s) exceed the ${service.serviceName} declared-value cap — a higher tier is required for those grades.`);
+    if (missingRawValue) lines.push("WARNING: raw sale value is missing — do NOT quote an incremental-profit figure.");
+    if (missingGradeValues.length > 0) lines.push(`WARNING: no confirmed sale data for PSA ${missingGradeValues.join(", PSA ")} — do NOT interpolate.`);
+    if (lowVolumeGrades.length > 0) lines.push(`WARNING: thin sales volume on PSA ${lowVolumeGrades.join(", PSA ")} — label those figures as unreliable.`);
+    if (extremeGradeMultiplierPresent) lines.push("WARNING: an extreme graded-to-raw multiplier (>=10x) was detected — add a caution about survivorship / one-sale outliers.");
+
+    const shippingAndInsurance = ((anc.outboundShipping + anc.returnShipping + anc.insurance + anc.otherCosts) / 100).toFixed(2);
+    const rateHedge = (FALLBACK_USD_TO_GBP_RATE.source === "hardcoded_fallback" || FALLBACK_USD_TO_GBP_RATE.source === "test_fixture")
+      ? "assumed exchange rate"
+      : "current exchange rate";
+    let feePart: string;
+    const allZero = sp.marketplaceFeeRate === 0 && sp.regulatoryFeeRate === 0 && sp.paymentFeeRate === 0
+      && sp.fixedSellingFeeRule.kind === "flat" && (sp.fixedSellingFeeRule as any).flat === 0;
+    if (allZero) {
+      feePart = `${sp.displayName} with £0 seller fees`;
+    } else {
+      const parts: string[] = [];
+      if (sp.marketplaceFeeRate > 0) parts.push(`${(sp.marketplaceFeeRate * 100).toFixed(1)}% final-value fee`);
+      if (sp.regulatoryFeeRate > 0) parts.push(`${(sp.regulatoryFeeRate * 100).toFixed(2)}% regulatory fee`);
+      if (sp.paymentFeeRate > 0) parts.push(`${(sp.paymentFeeRate * 100).toFixed(1)}% payment fee`);
+      if (sp.fixedSellingFeeRule.kind === "flat" && (sp.fixedSellingFeeRule as any).flat > 0) {
+        parts.push(`£${((sp.fixedSellingFeeRule as any).flat / 100).toFixed(2)}/order`);
+      } else if (sp.fixedSellingFeeRule.kind === "tiered_by_sale") {
+        const t = (sp.fixedSellingFeeRule as any).tiers;
+        if (t.length === 2 && t[0].maxSaleCents === 1000 && t[0].feeCents === 30 && t[1].feeCents === 40) {
+          parts.push(`£0.30/order for orders ≤ £10, £0.40 above`);
+        } else {
+          parts.push(`tiered per-order fee`);
+        }
+      }
+      if ((sp as any).feesExcludeVat) {
+        const reclaimNote = applyFeeVat
+          ? "calculation assumes fee VAT is not reclaimable"
+          : "calculation assumes fee VAT is reclaimable";
+        parts.push(`excluding VAT; ${reclaimNote}`);
+      }
+      feePart = `${sp.displayName} ${parts.join(" + ")}`;
+    }
+    lines.push(`Assumptions: ${service.serviceName}, approximately £${(gradingFeeGbp/100).toFixed(2)}/card at the ${rateHedge}, £${shippingAndInsurance} shipping/insurance/supplies, ${feePart}.`);
+    lines.push(
+      `Response format (compact):`,
+      `  1. Verdict — one plain sentence matching recommendation_code. When comparison_basis=sell_raw, phrase it "Compared with selling the card raw today, ...".`,
+      `  2. Grade scenarios — per-grade one-liner using the numbers above.`,
+      `  3. Break-even point — cite the break_even_grade.`,
+      `  4. Assumptions — one line, verbatim from Assumptions above.`,
+      `  5. Data warning — only if a WARNING appears above.`,
+      `Do NOT use the phrases "sweet spot", "grading floor", "nearly doubles", or any percentage not present above.`,
+    );
+    return {
+      block: lines.join("\n"),
+      recommendationCode,
+      breakEvenGrade,
+      confidence,
+    };
+  } catch (e) {
+    console.error("grading analysis failed:", e);
+    return null;
+  }
+}
+
 // Block 5A-W-52A.2 — extended chat_logs row + legacy-shape fallback.
 //
 // Deployment order is: (1) migration → (2) edge function → (3)
@@ -1192,6 +1637,11 @@ function logChat(params: any) {
     requested_pc_product_id:  params.requested_pc_product_id ?? null,
     matched_card_record_id:   params.matched_card_record_id ?? null,
     matched_pc_product_id:    params.matched_pc_product_id ?? null,
+    // 52B grading-analysis telemetry.
+    grading_analysis_used:       params.grading_analysis_used ?? null,
+    grading_recommendation_code: params.grading_recommendation_code ?? null,
+    grading_break_even_grade:    params.grading_break_even_grade ?? null,
+    grading_data_confidence:     params.grading_data_confidence ?? null,
   };
   supabase.from("chat_logs").insert([extendedRow]).then(({ error }) => {
     if (!error) return;
@@ -1515,6 +1965,35 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // ── Block 5A-W-52B — deterministic grading analysis ───
+    //
+    // When the client sends intent='grade_card' AND we've loaded
+    // an exact structured card, compute the grading economics
+    // server-side and feed the result to the LLM as a structured
+    // prompt block. The LLM explains this result but MUST NOT
+    // recalculate or invent fees.
+    //
+    // The reference calculator lives in src/lib/grading/ (with
+    // 26 unit tests + regression fixtures). This edge function
+    // inlines an identical arithmetic implementation because Deno
+    // cannot import the browser-side TypeScript module directly.
+    // Keep the two in sync when either changes.
+    let gradingBlock: string | null = null;
+    let gradingRecommendationCode: string | null = null;
+    let gradingBreakEvenGrade: number | null = null;
+    let gradingDataConfidence: string | null = null;
+    let gradingAnalysisUsed = false;
+    if (intentIn === "grade_card" && structuredCard) {
+      const gradeRes = await runGradingAnalysis(structuredCard);
+      if (gradeRes) {
+        gradingBlock = gradeRes.block;
+        gradingRecommendationCode = gradeRes.recommendationCode;
+        gradingBreakEvenGrade = gradeRes.breakEvenGrade;
+        gradingDataConfidence = gradeRes.confidence;
+        gradingAnalysisUsed = true;
+      }
+    }
+
     // Build the LLM user turn. When we have a loaded exact card, embed
     // its identifiers so the LLM cannot substitute a different record.
     // Pre-routed intent adds a strong "answer with THIS card" directive.
@@ -1533,7 +2012,11 @@ Deno.serve(async (req: Request) => {
         ? ` The user's quick-action intent is "${intentIn}"; ` +
           `answer specifically about this card, do NOT ask which card they mean.`
         : "";
-      userContent = `${idBlock}${intentBlock} User question: ${message}`;
+      // Block 5A-W-52B — append the deterministic grading block
+      // when it was computed. The LLM must explain these numbers
+      // without recalculation.
+      const gradingSuffix = gradingBlock ? `\n\n${gradingBlock}` : "";
+      userContent = `${idBlock}${intentBlock} User question: ${message}${gradingSuffix}`;
     } else if (setContextIn && setContextIn.setName) {
       userContent = `Currently viewing on PokePrices: set "${setContextIn.setName}" ` +
         `(language="${setContextIn.language ?? "en"}"). User question: ${message}`;
@@ -1764,6 +2247,10 @@ Deno.serve(async (req: Request) => {
       exact_match_found: exactMatchFound,
       candidate_count: candidateCount,
       match_confidence: matchConfidence,
+      grading_analysis_used:       gradingAnalysisUsed,
+      grading_recommendation_code: gradingRecommendationCode,
+      grading_break_even_grade:    gradingBreakEvenGrade,
+      grading_data_confidence:     gradingDataConfidence,
     });
 
     // Block 5A-W-52A.3 — candidate-selection payload. Kept on the
@@ -1788,6 +2275,13 @@ Deno.serve(async (req: Request) => {
       matched_card_number_display: matchedCardNumberDisplay,
       matched_language: matchedLanguage,
       matched_variant: matchedVariant,
+      // Block 5A-W-52B — grading provenance on the response so the
+      // client can render its own UX cue when the LLM answers a
+      // grade_card intent from the deterministic calculator.
+      grading_analysis_used:       gradingAnalysisUsed,
+      grading_recommendation_code: gradingRecommendationCode,
+      grading_break_even_grade:    gradingBreakEvenGrade,
+      grading_data_confidence:     gradingDataConfidence,
     };
     if (ambiguousCandidates && !structuredCard) {
       const list = ambiguousCandidates.slice(0, 6).map((c: any) => {
