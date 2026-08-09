@@ -12,18 +12,20 @@ import {
   formatShowDate,
   EVENT_TYPE_LABEL,
   COUNTRY_LABEL,
+  CARD_SHOW_COUNTRIES,
   type CardShow,
+  type CardShowCountry,
 } from '@/data/cardShows'
 
 export const metadata: Metadata = {
   title: 'Pokémon Card Shows & TCG Events | PokePrices',
   description:
-    'Find upcoming Pokémon card shows, TCG fairs and collector events across the UK, US and Canada. Updated event listings for Pokémon card fans and vendors.',
+    'Find upcoming Pokémon card shows, TCG fairs and collector events across the UK, US, Canada, Australia and New Zealand. Updated event listings for Pokémon card fans and vendors.',
   alternates: { canonical: 'https://www.pokeprices.io/card-shows' },
   openGraph: {
     title: 'Pokémon Card Shows & TCG Events | PokePrices',
     description:
-      'Find upcoming Pokémon card shows, TCG fairs and collector events across the UK, US and Canada.',
+      'Find upcoming Pokémon card shows, TCG fairs and collector events across the UK, US, Canada, Australia and New Zealand.',
     url: 'https://www.pokeprices.io/card-shows',
     siteName: 'PokePrices',
     type: 'website',
@@ -33,9 +35,13 @@ export const metadata: Metadata = {
 export default function CardShowsLandingPage() {
   const upcoming = getUpcomingCardShows()
   const featured = getFeaturedCardShows()
-  const ukCount = upcoming.filter(s => s.country === 'uk').length
-  const usCount = upcoming.filter(s => s.country === 'us').length
-  const caCount = upcoming.filter(s => s.country === 'ca').length
+  // Block 5A-W-54A — country counts derived from the canonical list
+  // so adding a country in CARD_SHOW_COUNTRIES threads through here
+  // without a code change to the landing page.
+  const countsByCountry: Record<CardShowCountry, number> = {
+    uk: 0, us: 0, ca: 0, au: 0, nz: 0,
+  }
+  for (const s of upcoming) countsByCountry[s.country] += 1
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 24px' }}>
@@ -46,15 +52,15 @@ export default function CardShowsLandingPage() {
           Pokémon Card Shows &amp; TCG Events
         </h1>
         <p style={{ fontSize: 14, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, lineHeight: 1.6, maxWidth: 720 }}>
-          Find upcoming Pokémon card shows, TCG fairs, collector events and trading card conventions across the United Kingdom, United States and Canada.
+          Find upcoming Pokémon card shows, TCG fairs, collector events and trading card conventions across the United Kingdom, United States, Canada, Australia and New Zealand.
         </p>
       </header>
 
       {/* Country CTAs */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14, marginBottom: 36 }}>
-        <CountryCta country="uk" count={ukCount} />
-        <CountryCta country="us" count={usCount} />
-        <CountryCta country="ca" count={caCount} />
+        {CARD_SHOW_COUNTRIES.map(c => (
+          <CountryCta key={c} country={c} count={countsByCountry[c]} />
+        ))}
       </div>
 
       {/* Featured */}
@@ -116,9 +122,20 @@ export default function CardShowsLandingPage() {
   )
 }
 
-function CountryCta({ country, count }: { country: 'uk' | 'us' | 'ca'; count: number }) {
-  const flag = country === 'uk' ? '🇬🇧' : country === 'ca' ? '🇨🇦' : '🇺🇸'
-  const title = country === 'uk' ? 'UK Card Shows' : country === 'ca' ? 'Canada Card Shows' : 'US Card Shows'
+const COUNTRY_FLAG: Record<CardShowCountry, string> = {
+  uk: '🇬🇧', us: '🇺🇸', ca: '🇨🇦', au: '🇦🇺', nz: '🇳🇿',
+}
+const COUNTRY_CTA_TITLE: Record<CardShowCountry, string> = {
+  uk: 'UK Card Shows',
+  us: 'US Card Shows',
+  ca: 'Canada Card Shows',
+  au: 'Australia Card Shows',
+  nz: 'New Zealand Card Shows',
+}
+
+function CountryCta({ country, count }: { country: CardShowCountry; count: number }) {
+  const flag  = COUNTRY_FLAG[country]
+  const title = COUNTRY_CTA_TITLE[country]
   return (
     <Link href={`/card-shows/${country}`} style={{ textDecoration: 'none' }}>
       <div style={{

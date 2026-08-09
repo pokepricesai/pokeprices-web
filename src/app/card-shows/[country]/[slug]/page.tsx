@@ -6,15 +6,26 @@ import {
   formatShowDate,
   EVENT_TYPE_LABEL,
   COUNTRY_LABEL,
+  CARD_SHOW_COUNTRIES,
   type CardShow,
+  type CardShowCountry,
 } from '@/data/cardShows'
 import StarButton from '../../StarButton'
 import EventCountdown from '../../EventCountdown'
 
-type Country = 'uk' | 'us' | 'ca'
+type Country = CardShowCountry
 
 function isValidCountry(c: string): c is Country {
-  return c === 'uk' || c === 'us' || c === 'ca'
+  return (CARD_SHOW_COUNTRIES as readonly string[]).includes(c)
+}
+
+/** Short label used on the back link (e.g. "← Back to UK card shows"). */
+const BACK_LINK_LABEL: Record<Country, string> = {
+  uk: 'UK',
+  us: 'US',
+  ca: 'Canada',
+  au: 'Australia',
+  nz: 'New Zealand',
 }
 
 export async function generateMetadata(
@@ -116,7 +127,7 @@ export default async function CardShowDetailPage(
         color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif",
         textDecoration: 'none', marginBottom: 18,
       }}>
-        ← Back to {country === 'uk' ? 'UK' : country === 'ca' ? 'Canada' : 'US'} card shows
+        ← Back to {BACK_LINK_LABEL[country]} card shows
       </Link>
 
       {cancelled && (

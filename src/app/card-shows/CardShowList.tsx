@@ -15,6 +15,7 @@ import {
   formatShowDate,
   distanceKm,
   type CardShow,
+  type CardShowCountry,
 } from '@/data/cardShows'
 import { supabase } from '@/lib/supabase'
 import StarButton from './StarButton'
@@ -31,7 +32,7 @@ export default function CardShowList({
 }: {
   shows: CardShow[]
   regions: string[]
-  country: 'uk' | 'us' | 'ca'
+  country: CardShowCountry
 }) {
   // Filters
   const [query, setQuery] = useState('')
@@ -71,8 +72,15 @@ export default function CardShowList({
       // Nominatim: free, no API key, asks for a contact in User-Agent which
       // the browser sends automatically. Country bias the search so "Springfield"
       // stays in the right hemisphere.
-      // Nominatim wants ISO 3166-1 alpha-2 — UK is "gb", US is "us", Canada is "ca".
-      const cc = country === 'uk' ? 'gb' : country === 'ca' ? 'ca' : 'us'
+      // Nominatim wants ISO 3166-1 alpha-2. UK → gb, US → us, CA → ca,
+      // AU → au, NZ → nz. Falls back to us for safety (unreachable
+      // now that the type is a closed union).
+      const cc =
+          country === 'uk' ? 'gb'
+        : country === 'ca' ? 'ca'
+        : country === 'au' ? 'au'
+        : country === 'nz' ? 'nz'
+        :                    'us'
       const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1&countrycodes=${cc}`
       const res = await fetch(url, { headers: { 'Accept-Language': 'en' } })
       if (!res.ok) throw new Error('Lookup failed')
@@ -270,7 +278,7 @@ function ShowCard({
   show, country, distanceKm, metric, starred, onToggleLocal,
 }: {
   show: CardShow
-  country: 'uk' | 'us' | 'ca'
+  country: CardShowCountry
   distanceKm: number | null
   metric: boolean
   starred: boolean

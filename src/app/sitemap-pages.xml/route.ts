@@ -35,11 +35,13 @@ export async function GET() {
     { url: `${BASE_URL}/creators`,            priority: '0.7', changefreq: 'weekly'  },
     { url: `${BASE_URL}/vendors`,             priority: '0.7', changefreq: 'weekly'  },
 
-    // Card shows
+    // Card shows — Block 5A-W-54A added au + nz alongside uk / us / ca.
     { url: `${BASE_URL}/card-shows`,          priority: '0.7', changefreq: 'weekly'  },
     { url: `${BASE_URL}/card-shows/uk`,       priority: '0.6', changefreq: 'weekly'  },
     { url: `${BASE_URL}/card-shows/us`,       priority: '0.6', changefreq: 'weekly'  },
     { url: `${BASE_URL}/card-shows/ca`,       priority: '0.6', changefreq: 'weekly'  },
+    { url: `${BASE_URL}/card-shows/au`,       priority: '0.6', changefreq: 'weekly'  },
+    { url: `${BASE_URL}/card-shows/nz`,       priority: '0.6', changefreq: 'weekly'  },
 
     // About / project
     { url: `${BASE_URL}/roadmap`,             priority: '0.7', changefreq: 'weekly'  },

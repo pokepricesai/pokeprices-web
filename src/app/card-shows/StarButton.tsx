@@ -12,7 +12,10 @@ import { trackEvent } from '@/lib/analytics'
 function inferCountryFromShowId(showId: string | undefined | null): string | undefined {
   if (!showId) return undefined
   const head = showId.split('-')[0]
-  if (head === 'uk' || head === 'us' || head === 'ca') return head.toUpperCase()
+  // Block 5A-W-54A — au + nz added alongside uk / us / ca.
+  if (head === 'uk' || head === 'us' || head === 'ca' || head === 'au' || head === 'nz') {
+    return head.toUpperCase()
+  }
   return undefined
 }
 
