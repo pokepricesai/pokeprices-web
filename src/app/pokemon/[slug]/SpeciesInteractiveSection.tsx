@@ -189,9 +189,18 @@ export default function SpeciesInteractiveSection({
       )}
 
       {/* ── Header + filter + sort ─────────────────────────────── */}
+      {/* Block 5A-W-53B.1 — catalogue heading closes with "& Prices"
+          so the visible H2 matches "{Name} card prices" intent even
+          on the full-catalogue view. Language marker still lands
+          BEFORE "{Name} Cards" so "Japanese Pikachu cards" and
+          "English Pikachu cards" rank on the exact phrase. */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
         <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, margin: 0, color: 'var(--text)' }}>
-          All {sortedCards.length} {displayName} Cards{language !== 'all' ? ` (${language === 'en' ? 'English' : 'Japanese'})` : ''}
+          {language === 'jp'
+            ? `All ${sortedCards.length} Japanese ${displayName} Cards & Prices`
+            : language === 'en'
+            ? `All ${sortedCards.length} English ${displayName} Cards & Prices`
+            : `All ${sortedCards.length} ${displayName} Cards & Prices`}
         </h2>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {(['price_desc', 'price_asc', 'set', 'name'] as const).map(s => (

@@ -40,6 +40,16 @@ export type PokemonSummaryInput = {
   /** All cards for this species; used to derive a raw price range
    *  when the top-cards slice does not cover it. */
   allCards?:  ReadonlyArray<PokemonSummaryCardRow> | null
+  /**
+   * Block 5A-W-53B — un-capped distinct set count from the RPC.
+   * When present it is preferred over bySet.length for the
+   * "Represented sets" fact so wide-set Pokémon (Pikachu = 134
+   * sets) do not silently render "12 sets" (the RPC caps
+   * cards_by_set at 12 for the tile grid). Optional / backward
+   * compatible — callers that don't supply it fall back to
+   * bySet.length, matching pre-53B behaviour.
+   */
+  distinctSetCount?: number | null
 }
 
 export type PokemonSummaryFact = {
@@ -173,7 +183,15 @@ export function buildPokemonSummary(input: PokemonSummaryInput): PokemonSummaryO
   }
 
   // ── Fact 2: set count ──────────────────────────────────────────
-  const setCount = Array.isArray(input.bySet) ? input.bySet.length : 0
+  // Block 5A-W-53B — prefer the caller-supplied distinctSetCount
+  // (RPC-authoritative) over bySet.length (which is capped at 12
+  // for the tile grid). Falls back to the old behaviour when no
+  // count is provided so existing callers keep working.
+  const capped   = Array.isArray(input.bySet) ? input.bySet.length : 0
+  const distinct = typeof input.distinctSetCount === 'number' && input.distinctSetCount > 0
+    ? Math.floor(input.distinctSetCount)
+    : null
+  const setCount = distinct ?? capped
   if (setCount > 0) {
     facts.push({
       key:   'set_count',

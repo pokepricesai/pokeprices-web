@@ -243,12 +243,35 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const hasMovementData = [...risers, ...fallers].some(c =>
     typeof c.raw_pct_30d === 'number' && Number.isFinite(c.raw_pct_30d) && c.raw_pct_30d !== 0,
   )
+  // Block 5A-W-53B — feed Japanese-catalogue presence into the
+  // description so "Japanese {Name} cards" searches surface the
+  // page. Prefer the RPC's authoritative per-language total; fall
+  // back to scanning the payload when the field is absent.
+  const hasJapaneseCards =
+       (typeof sp.jp_total_cards === 'number' && sp.jp_total_cards > 0)
+    || allCards.some(c => c.language === 'jp')
+  // Block 5A-W-53B.1 — pass real per-language counts, distinct-set
+  // count and the current year so the title + description read
+  // "All 547 Pikachu cards across 134 sets, including 369 English
+  // and 178 Japanese cards" for the live 2026 title.
+  const enCountMeta = typeof sp.en_total_cards === 'number' && sp.en_total_cards > 0
+    ? sp.en_total_cards
+    : allCards.filter(c => (c.language ?? 'en') === 'en').length || null
+  const jpCountMeta = typeof sp.jp_total_cards === 'number' && sp.jp_total_cards > 0
+    ? sp.jp_total_cards
+    : allCards.filter(c => c.language === 'jp').length || null
+  const distinctSetCountMeta = sp.distinct_set_count ?? null
   const seo = getPokemonSeo({
     name,
     slug,
     totalCards: sp.total_cards,
     hasPsa10Data,
     hasMovementData,
+    hasJapaneseCards,
+    englishCards:     enCountMeta,
+    japaneseCards:    jpCountMeta,
+    distinctSetCount: distinctSetCountMeta,
+    year:             new Date().getFullYear(),
   })
   const title       = seo.title
   const description = seo.description
@@ -359,8 +382,21 @@ export default async function PokemonSpeciesPage({
   }
   const typeColor = (primaryType && typeColors[primaryType]) || { bg: 'var(--primary)', text: '#fff', light: 'rgba(26,95,173,0.08)' }
 
+  // Block 5A-W-53B.1 — derive hasJapaneseCards inside the render
+  // handler too. Same predicate as generateMetadata() but a
+  // separate binding since Server Components can't share locals
+  // across the two exported functions.
+  const hasJapaneseCards =
+       (typeof sp?.jp_total_cards === 'number' && sp.jp_total_cards > 0)
+    || cards.some(c => c.language === 'jp')
   // The brief's H1 + subtitle. SEO-targeted at price queries.
-  const h1 = `${displayName} Pokémon Cards — Prices & Values`
+  // Block 5A-W-53B.1 — human-readable H1 that leads with the
+  // catalogue-intent phrase ("All {Name} Cards") and closes with
+  // the price-guide qualifier. When Japanese cards exist we name
+  // both markets; otherwise we drop cleanly to "& Prices".
+  const h1 = hasJapaneseCards
+    ? `All ${displayName} Cards — English & Japanese Prices`
+    : `All ${displayName} Cards & Prices`
   // Block 5A-W-53A.1 — the RPC's cards_by_set is capped at 12 for
   // the tile layout, so bySet.length under-reports for Pokémon
   // that span more than 12 sets (Pikachu previously showed "12
@@ -368,9 +404,50 @@ export default async function PokemonSpeciesPage({
   // distinct_set_count field; fall back to bySet.length only when
   // the RPC hasn't been redeployed with the 53A.1 change yet.
   const distinctSetCount = sp?.distinct_set_count ?? bySet.length
+  // Block 5A-W-53B — subtitle names the total, distinct set count,
+  // and (when present) the Japanese subset so "Japanese {Name}
+  // cards" and "all {Name} cards" search intents both land on real
+  // on-page copy. Replaces the older "live prices" claim (values
+  // come from PriceCharting nightly, they are guide values not
+  // literal live listings) with the accurate "PriceCharting price
+  // guide" attribution.
+  const jpCount = (typeof sp?.jp_total_cards === 'number' && sp.jp_total_cards > 0)
+    ? sp.jp_total_cards
+    : null
+  const jpClause = jpCount != null
+    ? ` including ${jpCount} Japanese-language ${jpCount === 1 ? 'card' : 'cards'},`
+    : ''
   const subtitle = sp && sp.total_cards > 0
-    ? `All ${sp.total_cards} ${displayName} cards across ${distinctSetCount || sp.total_cards} sets, with live prices, PSA 10 values and rarity guide. Updated nightly.`
+    ? `All ${sp.total_cards} ${displayName} Pokémon cards across ${distinctSetCount || sp.total_cards} sets,${jpClause} with raw prices, PSA 10 values and rarity data from the PriceCharting price guide. Updated nightly.`
     : `${displayName} doesn't appear on any Pokémon TCG cards in our database yet — we'll add them as soon as new sets land.`
+
+  // Block 5A-W-53B.1 — per-language derivations used by the two
+  // server-rendered indexable sections (English + Japanese Card
+  // Prices). Data comes from the existing `all_cards` payload; no
+  // new RPC. Top-5 lists sort by combined visible value (raw +
+  // PSA 10) so the section leads with the cards a buyer would
+  // actually recognise.
+  const englishCards = cards.filter(c => (c.language ?? 'en') === 'en')
+  const japaneseCards = cards.filter(c => c.language === 'jp')
+  const enCount = (typeof sp?.en_total_cards === 'number' && sp.en_total_cards > 0)
+    ? sp.en_total_cards
+    : englishCards.length
+  const jpCountSection = (typeof sp?.jp_total_cards === 'number' && sp.jp_total_cards > 0)
+    ? sp.jp_total_cards
+    : japaneseCards.length
+  const enSets = (typeof sp?.en_distinct_set_count === 'number' && sp.en_distinct_set_count > 0)
+    ? sp.en_distinct_set_count
+    : new Set(englishCards.map(c => c.set_name)).size
+  const jpSets = (typeof sp?.jp_distinct_set_count === 'number' && sp.jp_distinct_set_count > 0)
+    ? sp.jp_distinct_set_count
+    : new Set(japaneseCards.map(c => c.set_name)).size
+  const rankByValue = (a: CardRow, b: CardRow) =>
+    ((b.current_psa10 ?? 0) + (b.current_raw ?? 0)) -
+    ((a.current_psa10 ?? 0) + (a.current_raw ?? 0))
+  const topEnglishCards = [...englishCards].sort(rankByValue).slice(0, 5)
+  const topJapaneseCards = [...japaneseCards].sort(rankByValue).slice(0, 5)
+  const showEnglishSection  = hasJapaneseCards && englishCards.length > 0
+  const showJapaneseSection = hasJapaneseCards && japaneseCards.length > 0
 
   // Programmatic prose — every sentence is conditional on real data presence.
   const proseParts: string[] = []
@@ -397,7 +474,11 @@ export default async function PokemonSpeciesPage({
     if (raw)   valueParts.push(`${fmtUsd(raw)} raw`)
     if (psa10) valueParts.push(`${fmtUsd(psa10)} in PSA 10`)
     const valueStr = valueParts.length ? ` — currently ${valueParts.join(' and ')}` : ''
-    proseParts.push(`The most valuable ${displayName} card by current sold-listing prices is the ${top.card_name} from ${top.set_name}${valueStr}. Vintage holos, full arts and special illustrations command the highest prices, while modern reprints sit closer to bulk.`)
+    // Block 5A-W-53B — the "current sold-listing prices" wording
+    // over-claimed: the underlying value is a PriceCharting guide
+    // price (aggregated / smoothed), not a literal recent sold
+    // listing. Corrected to reflect the true data source.
+    proseParts.push(`The most valuable ${displayName} card by current PriceCharting price guide value is the ${top.card_name} from ${top.set_name}${valueStr}. Vintage holos, full arts and special illustrations command the highest prices, while modern reprints sit closer to bulk.`)
   }
   if (sp?.most_recent_set && risers.length > 0) {
     const r = risers[0]
@@ -507,6 +588,10 @@ export default async function PokemonSpeciesPage({
           current_raw:   c.current_raw ?? null,
           current_psa10: c.current_psa10 ?? null,
         }))}
+        // Block 5A-W-53B — pass the RPC's un-capped distinct-set
+        // count so the "Represented sets" fact doesn't leak the
+        // 12-tile visual cap for Pokémon that span many more sets.
+        distinctSetCount={distinctSetCount}
       />
 
       {/* Pokédex hero — moved to TOP. Keeps type badges, base stats, flavor,
@@ -700,6 +785,27 @@ export default async function PokemonSpeciesPage({
         </section>
       )}
 
+      {/* Block 5A-W-53B.1 — server-rendered per-language sections.
+          Only rendered when both languages have data so single-market
+          Pokémon don't get an empty JP block. Uses existing
+          payload — no new RPC calls, no new URLs. */}
+      {showEnglishSection && (
+        <LanguageSection
+          heading={`English ${displayName} Card Prices`}
+          intro={`PokePrices tracks ${enCount} English ${displayName} card${enCount === 1 ? '' : 's'} across ${enSets} set${enSets === 1 ? '' : 's'}. Compare current raw and PSA values for English ${displayName} cards below.`}
+          cards={topEnglishCards}
+          accent={typeColor.bg}
+        />
+      )}
+      {showJapaneseSection && (
+        <LanguageSection
+          heading={`Japanese ${displayName} Card Prices`}
+          intro={`PokePrices tracks ${jpCountSection} Japanese ${displayName} card${jpCountSection === 1 ? '' : 's'} across ${jpSets} set${jpSets === 1 ? '' : 's'}. Browse Japanese ${displayName} cards with current raw and PSA price-guide values.`}
+          cards={topJapaneseCards}
+          accent={typeColor.bg}
+        />
+      )}
+
       {/* SECTION: All cards (sortable grid - client island).
           The id="all-cards" anchor target lives inside the component so
           the Jump-to-cards button at the top scrolls cleanly here. */}
@@ -821,6 +927,71 @@ function StatTile({ label, value, sub }: { label: string; value: string; sub?: s
       <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase', letterSpacing: 1 }}>{label}</div>
       {sub && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3, fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</div>}
     </div>
+  )
+}
+
+// Block 5A-W-53B.1 — compact server-rendered top-5 list used by the
+// English and Japanese sections. Card links are the existing crawl
+// path (`/set/{setName}/card/{cardUrlSlug}`) so no new URLs and no
+// duplicated content — this is a per-language SEO anchor into the
+// same catalogue.
+function LanguageSection({
+  heading,
+  intro,
+  cards,
+  accent,
+}: {
+  heading: string
+  intro:   string
+  cards:   CardRow[]
+  accent:  string
+}) {
+  return (
+    <section style={{ marginBottom: 24 }}>
+      <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, margin: '0 0 8px', color: 'var(--text)' }}>
+        {heading}
+      </h2>
+      <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 12px', lineHeight: 1.6, maxWidth: 720 }}>
+        {intro}
+      </p>
+      <ol style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 8, listStyle: 'none', padding: 0, margin: 0 }}>
+        {cards.map((c, i) => (
+          <li key={c.card_slug}>
+            <Link
+              href={`/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`}
+              style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, height: '100%', boxSizing: 'border-box' }}
+            >
+              <span style={{ fontSize: 14, fontWeight: 900, color: i < 3 ? accent : 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", minWidth: 22 }}>
+                {i + 1}
+              </span>
+              {c.image_url
+                ? <img src={c.image_url} alt={c.card_name} style={{ width: 36, height: 50, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} loading="lazy" />
+                : <div style={{ width: 36, height: 50, background: 'var(--bg-light)', borderRadius: 3, flexShrink: 0 }} />}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {c.card_name}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {c.set_name}
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1, minWidth: 76 }}>
+                {c.current_psa10 && c.current_psa10 > 0 && (
+                  <div style={{ fontSize: 12, fontWeight: 800, color: accent, fontFamily: "'Figtree', sans-serif" }}>
+                    {fmtUsdRaw(c.current_psa10)} <span style={{ fontSize: 8, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.7 }}>PSA 10</span>
+                  </div>
+                )}
+                {c.current_raw && c.current_raw > 0 && (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+                    {fmtUsdRaw(c.current_raw)} raw
+                  </div>
+                )}
+              </div>
+            </Link>
+          </li>
+        ))}
+      </ol>
+    </section>
   )
 }
 

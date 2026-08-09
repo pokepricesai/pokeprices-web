@@ -189,6 +189,32 @@ export type PokemonSeoInput = {
    *  (raw_pct_30d present + non-zero). Drives the conditional
    *  "recent movers" clause in the description. */
   hasMovementData?: boolean
+  /**
+   * Block 5A-W-53B — when at least one Japanese-language card is in
+   * the catalogue, splice an "English and Japanese releases" clause
+   * into the description so the page ranks for "Japanese {Name}
+   * cards" searches. Backward compatible: omit or set false and the
+   * description falls back to the 46E-Lite baseline template.
+   */
+  hasJapaneseCards?: boolean
+  /**
+   * Block 5A-W-53B.1 — real per-language totals + distinct-set count
+   * for the punchier description template. When both englishCards and
+   * japaneseCards are present, the description names both markets by
+   * count. When present, distinctSetCount replaces the older "and
+   * represented sets" clause with the actual "across N sets" number.
+   */
+  englishCards?:     number | null
+  japaneseCards?:    number | null
+  distinctSetCount?: number | null
+  /**
+   * Block 5A-W-53B.1 — freshness anchor for both title and
+   * description. Passed explicitly (rather than defaulted to
+   * `new Date().getFullYear()`) so the helper remains a pure
+   * function — server-side callers derive the year from their
+   * request context.
+   */
+  year?: number
   /** Kept for backwards compatibility with any surviving caller; the
    *  W46E-Lite description path does not reference it. */
   topCard?: {
@@ -205,61 +231,92 @@ export type PokemonSeo = {
 }
 
 /**
- * Block 5A-W-46E-Lite — shared search-intent Pokémon metadata.
+ * Block 5A-W-53B.1 — Pokémon species SEO helper, refreshed.
  *
- * Length-aware fallback ladder — species name renders whole, never
- * truncated, never ellipsised:
- *   1. `{Name} Pokémon Card Prices & Values | PokePrices` (primary)
- *   2. `{Name} Card Prices & Values | PokePrices`         (drops "Pokémon")
- *   3. `{Name} Card Prices | PokePrices`                  (drops "& Values")
- *   4. `{Name} Card Prices`                               (drops brand tail)
+ * Title template (dynamic year, English & Japanese where applicable):
+ *   Primary (JP cards exist):
+ *     `{Name} Card Prices — All English & Japanese Cards ({year}) | PokePrices`
+ *   Fallback (no JP cards):
+ *     `{Name} Card Prices — All Cards & Values ({year}) | PokePrices`
+ *   Length-aware — the " | PokePrices" tail drops first, then the
+ *   "({year})" drops second. Species name always renders whole,
+ *   never truncated, never ellipsised.
  *
- * Description:
- *   `See current prices for {N} {Name} Pokémon cards, including raw
- *    [and PSA 10 values], the most valuable cards[, recent movers]
- *    and represented sets.`
+ * Description template — programmatic, uses REAL per-language counts:
+ *   With JP: `See prices for all {N} {Name} cards across {S} sets,
+ *             including {enN} English and {jpN} Japanese cards. Compare
+ *             raw and PSA 10 values and track your collection.
+ *             Updated daily.`
+ *   Without JP: `See prices for all {N} {Name} cards across {S} sets.
+ *                Compare raw and PSA 10 values and track your
+ *                collection. Updated daily.`
  *
  * Rules baked in:
- *   * No year token.
- *   * No card count in the title.
- *   * No duplicated "Pokémon".
- *   * No raw/PSA keyword stuffing in the title.
- *   * PSA 10 clause only when `hasPsa10Data === true`.
- *   * Recent-movers clause only when `hasMovementData === true`.
- *   * Species name never truncated to fit the SERP budget.
+ *   * Species name is never truncated.
+ *   * "Pokémon" appears at most once (in the brand tail only).
+ *   * "PSA 10" mentioned in the description only when hasPsa10Data.
+ *   * No duplicated brand marker.
+ *   * When year is omitted the "({year})" bracket is dropped cleanly.
+ *   * When distinctSetCount is missing the "across N sets" clause is
+ *     dropped cleanly.
+ *   * When englishCards / japaneseCards are missing the description
+ *     falls back to the JP-clause-omitted variant.
  */
 export function getPokemonSeo(input: PokemonSeoInput): PokemonSeo {
   const safeName = input.name?.trim() || 'Pokémon'
   const total    = typeof input.totalCards === 'number' && input.totalCards > 0
     ? Math.floor(input.totalCards)
     : null
+  const setCount = typeof input.distinctSetCount === 'number' && input.distinctSetCount > 0
+    ? Math.floor(input.distinctSetCount)
+    : null
+  const enCount  = typeof input.englishCards === 'number' && input.englishCards > 0
+    ? Math.floor(input.englishCards)
+    : null
+  const jpCount  = typeof input.japaneseCards === 'number' && input.japaneseCards > 0
+    ? Math.floor(input.japaneseCards)
+    : null
+  const yearNum  = typeof input.year === 'number' && Number.isFinite(input.year) && input.year > 0
+    ? Math.floor(input.year)
+    : null
 
-  // Length-aware title. Optional tokens drop in order; species name
-  // is preserved intact at every step.
-  const t1 = `${safeName} Pokémon Card Prices & Values | PokePrices`
-  const t2 = `${safeName} Card Prices & Values | PokePrices`
-  const t3 = `${safeName} Card Prices | PokePrices`
-  const t4 = `${safeName} Card Prices`
+  // Title: length-aware fallback ladder. Body varies with whether
+  // any Japanese cards exist. Brand tail + year drop before the body
+  // is touched; the species name is preserved intact throughout.
+  const body = input.hasJapaneseCards
+    ? `${safeName} Card Prices — All English & Japanese Cards`
+    : `${safeName} Card Prices — All Cards & Values`
+  const yearTail = yearNum != null ? ` (${yearNum})` : ''
+  const t1 = `${body}${yearTail} | PokePrices`
+  const t2 = `${body}${yearTail}`
+  const t3 = `${body} | PokePrices`
+  const t4 = body
   const title =
       t1.length <= SERP_TITLE_MAX ? t1
     : t2.length <= SERP_TITLE_MAX ? t2
     : t3.length <= SERP_TITLE_MAX ? t3
     : t4
 
-  // Description assembly — every clause is conditional on real data.
-  const nounPhrase = total !== null
-    ? `${total} ${safeName} Pokémon card${total === 1 ? '' : 's'}`
-    : `${safeName} Pokémon cards`
-  const facts: string[] = []
-  if (input.hasPsa10Data)    facts.push('raw and PSA 10 values')
-  else                       facts.push('raw values')
-  facts.push('the most valuable cards')
-  if (input.hasMovementData) facts.push('recent movers')
-  facts.push('represented sets')
-  const factsJoined = facts.length > 1
-    ? facts.slice(0, -1).join(', ') + ' and ' + facts[facts.length - 1]
-    : facts[0]
-  let description = `See current prices for ${nounPhrase}, including ${factsJoined}.`
+  // Description — programmatic, uses real counts. Every clause is
+  // dropped cleanly when its source data is absent.
+  const totalClause = total != null
+    ? `all ${total} ${safeName} card${total === 1 ? '' : 's'}`
+    : `${safeName} cards`
+  const setClause = setCount != null
+    ? ` across ${setCount} set${setCount === 1 ? '' : 's'}`
+    : ''
+  let langClause = ''
+  if (input.hasJapaneseCards && enCount != null && jpCount != null) {
+    langClause = `, including ${enCount} English and ${jpCount} Japanese cards`
+  } else if (input.hasJapaneseCards) {
+    // We know JP exists but callers didn't provide counts — degrade
+    // gracefully rather than fabricating a number.
+    langClause = ', including English and Japanese releases'
+  }
+  const psaClause = input.hasPsa10Data
+    ? 'Compare raw and PSA 10 values and track your collection.'
+    : 'Compare raw values and track your collection.'
+  let description = `See prices for ${totalClause}${setClause}${langClause}. ${psaClause} Updated daily.`
   if (description.length > 300) description = description.slice(0, 297) + '…'
 
   const canonical = `${SITE}/pokemon/${input.slug}`

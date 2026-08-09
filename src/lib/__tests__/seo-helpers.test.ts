@@ -130,128 +130,191 @@ describe('getSetSeo', () => {
 
 // ── /pokemon/[slug] ────────────────────────────────────────────────
 
-describe('getPokemonSeo (W46E-Lite shared brand-tail template)', () => {
-  it('emits the primary "{Name} Pokémon Card Prices & Values | PokePrices" title', () => {
-    const seo = getPokemonSeo({ name: 'Greninja', slug: 'greninja', totalCards: 42, hasPsa10Data: true, hasMovementData: true })
-    expect(seo.title).toBe('Greninja Pokémon Card Prices & Values | PokePrices')
-  })
-  it('no card count in the title (moved to description)', () => {
-    const seo = getPokemonSeo({ name: 'Eevee', slug: 'eevee', totalCards: 74 })
-    expect(seo.title).not.toMatch(/74/)
-    expect(seo.title).not.toMatch(/\d+\s*Cards/)
-  })
-  it('no year token in the title or description', () => {
-    const seo = getPokemonSeo({ name: 'Eevee', slug: 'eevee', totalCards: 74 })
-    expect(seo.title).not.toMatch(/\b20\d\d\b/)
-    expect(seo.description).not.toMatch(/\b20\d\d\b/)
-  })
-  it('brand tail present in the title', () => {
-    const seo = getPokemonSeo({ name: 'Vaporeon', slug: 'vaporeon', totalCards: 30 })
-    expect(seo.title.endsWith('| PokePrices')).toBe(true)
-  })
-  it('"Pokémon" appears at most once in the title', () => {
-    const seo = getPokemonSeo({ name: 'Alakazam', slug: 'alakazam', totalCards: 40 })
-    const matches = (seo.title.match(/Pokémon/g) || []).length
-    expect(matches).toBeLessThanOrEqual(1)
-  })
-  it('no raw/PSA keyword stuffing in the title', () => {
-    const seo = getPokemonSeo({ name: 'Greninja', slug: 'greninja', totalCards: 42 })
-    expect(seo.title.toLowerCase()).not.toContain('psa 10')
-    expect(seo.title.toLowerCase()).not.toContain('raw')
+describe('getPokemonSeo (Block 5A-W-53B.1 rewrite — title + description)', () => {
+  // ── Title ────────────────────────────────────────────
+
+  it('primary title (with JP + year) matches the 53B.1 pinned template', () => {
+    const seo = getPokemonSeo({
+      name: 'Pikachu', slug: 'pikachu', totalCards: 547,
+      englishCards: 369, japaneseCards: 178, distinctSetCount: 134,
+      hasPsa10Data: true, hasMovementData: true, hasJapaneseCards: true,
+      year: 2026,
+    })
+    expect(seo.title).toBe(
+      'Pikachu Card Prices — All English & Japanese Cards (2026) | PokePrices',
+    )
   })
 
-  it('long-name fallback drops "Pokémon" first (still fits brand tail)', () => {
-    // 32-char name — primary (name + 42 = 74) blows past the 72-char
-    // budget; the "Pokémon"-dropping fallback (name + 34 = 66) fits.
-    const name = 'Thirtytwocharactersspeciesnameok'
-    expect(name.length).toBe(32)
-    const seo = getPokemonSeo({ name, slug: 'long-1' })
-    expect(seo.title).toBe(`${name} Card Prices & Values | PokePrices`)
-    expect(seo.title.endsWith('| PokePrices')).toBe(true)
+  it('fallback title (no JP) matches the 53B.1 pinned no-JP template', () => {
+    const seo = getPokemonSeo({
+      name: 'Zubat', slug: 'zubat', totalCards: 3, distinctSetCount: 2,
+      hasPsa10Data: false, hasMovementData: false, hasJapaneseCards: false,
+      year: 2026,
+    })
+    expect(seo.title).toBe(
+      'Zubat Card Prices — All Cards & Values (2026) | PokePrices',
+    )
   })
-  it('long-name fallback drops "& Values" second (still fits brand tail)', () => {
-    // Name length that fits t3 ("{Name} Card Prices | PokePrices" =
-    // name + 24) but not t2 (name + 34). 39..48 chars is the target.
-    const name = 'FortyTwoCharacterSpeciesNameOkOkOkOkOkOkOK'
-    expect(name.length).toBe(42)
-    const seo = getPokemonSeo({ name, slug: 'long-2' })
-    expect(seo.title).toBe(`${name} Card Prices | PokePrices`)
-    expect(seo.title.endsWith('| PokePrices')).toBe(true)
-  })
-  it('final fallback drops the brand tail only when nothing else fits (species name still whole)', () => {
-    const veryLong = 'Verylongspeciesnamethatdefinitelyexceedsseventytwochars extra'
-    const seo = getPokemonSeo({ name: veryLong, slug: 'long' })
-    expect(seo.title).toContain(veryLong)
-    expect(seo.title).toBe(`${veryLong} Card Prices`)
+
+  it('title drops the "| PokePrices" tail first when it would blow past the SERP budget', () => {
+    // A ~45-char species name pushes the full title past 72 chars.
+    // The length-aware ladder should drop "| PokePrices" first, then
+    // "(year)" second, keeping the species name intact.
+    const name = 'FortySixCharacterSpeciesNameOkOkOkOkOkOkOkOk!!' // 46 chars
+    const seo = getPokemonSeo({
+      name, slug: 'long-jp', totalCards: 30,
+      hasJapaneseCards: true, year: 2026,
+    })
+    expect(seo.title).toContain(name)
+    expect(seo.title).toContain('Card Prices — All English & Japanese Cards')
+    expect(seo.title.endsWith('| PokePrices')).toBe(false)
     expect(seo.title).not.toContain('…')
   })
-  it('species name is NEVER truncated or ellipsised, at any length', () => {
-    const cases = ['A', 'Verylongspeciesnamethatdefinitelyexceedsseventytwochars extra', 'X'.repeat(200)]
-    for (const name of cases) {
-      const seo = getPokemonSeo({ name, slug: 'x' })
+
+  it('title omits "(year)" cleanly when no year is supplied', () => {
+    const seo = getPokemonSeo({
+      name: 'Pikachu', slug: 'pikachu', totalCards: 547,
+      hasJapaneseCards: true,
+    })
+    expect(seo.title).toBe(
+      'Pikachu Card Prices — All English & Japanese Cards | PokePrices',
+    )
+    expect(seo.title).not.toMatch(/\(\)/)
+  })
+
+  it('title includes every priority query token (name, Card Prices, All, English & Japanese, year)', () => {
+    const seo = getPokemonSeo({
+      name: 'Charizard', slug: 'charizard', totalCards: 349,
+      englishCards: 221, japaneseCards: 128, distinctSetCount: 98,
+      hasPsa10Data: true, hasMovementData: true, hasJapaneseCards: true,
+      year: 2026,
+    })
+    expect(seo.title).toContain('Charizard')
+    expect(seo.title).toContain('Card Prices')
+    expect(seo.title).toContain('All')
+    expect(seo.title).toContain('English & Japanese')
+    expect(seo.title).toContain('(2026)')
+  })
+
+  it('species name is never truncated or ellipsised, at any length', () => {
+    for (const name of ['A', 'X'.repeat(200), 'Verylongspeciesnamethatdefinitelyexceedsseventytwochars extra']) {
+      const seo = getPokemonSeo({ name, slug: 'x', totalCards: 1, hasJapaneseCards: true, year: 2026 })
       expect(seo.title).not.toContain('…')
       expect(seo.title).toContain(name)
     }
   })
 
-  it('description contains the real card count', () => {
-    const seo = getPokemonSeo({ name: 'Greninja', slug: 'greninja', totalCards: 42, hasPsa10Data: true, hasMovementData: true })
-    expect(seo.description).toContain('42')
-    expect(seo.description).toContain('Greninja Pokémon cards')
+  it('never emits a doubled brand marker', () => {
+    for (const name of ['Eevee', 'Charizard', 'Mr. Mime']) {
+      const seo = getPokemonSeo({ name, slug: name.toLowerCase(), totalCards: 50, hasJapaneseCards: true, year: 2026 })
+      expect(seo.title).not.toMatch(/PokePrices.*PokePrices/i)
+    }
   })
-  it('description grammar matches the pinned template with full data', () => {
-    const seo = getPokemonSeo({ name: 'Greninja', slug: 'greninja', totalCards: 42, hasPsa10Data: true, hasMovementData: true })
+
+  // ── Description ─────────────────────────────────────
+
+  it('description matches the 53B.1 pinned template with real per-language counts', () => {
+    const seo = getPokemonSeo({
+      name: 'Pikachu', slug: 'pikachu', totalCards: 547,
+      englishCards: 369, japaneseCards: 178, distinctSetCount: 134,
+      hasPsa10Data: true, hasJapaneseCards: true, year: 2026,
+    })
     expect(seo.description).toBe(
-      'See current prices for 42 Greninja Pokémon cards, including raw and PSA 10 values, the most valuable cards, recent movers and represented sets.',
+      'See prices for all 547 Pikachu cards across 134 sets, including 369 English and 178 Japanese cards. Compare raw and PSA 10 values and track your collection. Updated daily.',
     )
   })
-  it('description omits PSA 10 when hasPsa10Data is false', () => {
-    const seo = getPokemonSeo({ name: 'Zubat', slug: 'zubat', totalCards: 3, hasPsa10Data: false, hasMovementData: false })
+
+  it('description drops the Japanese clause cleanly for species without JP cards', () => {
+    const seo = getPokemonSeo({
+      name: 'Zubat', slug: 'zubat', totalCards: 3, distinctSetCount: 2,
+      hasPsa10Data: true, hasJapaneseCards: false, year: 2026,
+    })
+    expect(seo.description.toLowerCase()).not.toContain('japanese')
+    expect(seo.description).toBe(
+      'See prices for all 3 Zubat cards across 2 sets. Compare raw and PSA 10 values and track your collection. Updated daily.',
+    )
+  })
+
+  it('description omits PSA 10 wording when hasPsa10Data is false', () => {
+    const seo = getPokemonSeo({
+      name: 'Zubat', slug: 'zubat', totalCards: 3, distinctSetCount: 2,
+      hasPsa10Data: false, hasJapaneseCards: false, year: 2026,
+    })
     expect(seo.description.toLowerCase()).not.toContain('psa 10')
-    expect(seo.description).toBe(
-      'See current prices for 3 Zubat Pokémon cards, including raw values, the most valuable cards and represented sets.',
-    )
+    expect(seo.description).toContain('raw values')
   })
-  it('description omits recent-movers when hasMovementData is false', () => {
-    const seo = getPokemonSeo({ name: 'Zubat', slug: 'zubat', totalCards: 3, hasPsa10Data: true, hasMovementData: false })
-    expect(seo.description.toLowerCase()).not.toContain('recent movers')
+
+  it('description gracefully degrades when JP is present but per-language counts are missing', () => {
+    const seo = getPokemonSeo({
+      name: 'Bulbasaur', slug: 'bulbasaur', totalCards: 109, distinctSetCount: 47,
+      hasPsa10Data: true, hasJapaneseCards: true, year: 2026,
+      // englishCards / japaneseCards omitted
+    })
+    expect(seo.description).toContain('English and Japanese releases')
+    expect(seo.description).not.toContain('undefined')
+    expect(seo.description).not.toContain('NaN')
   })
-  it('description falls back gracefully without a card count', () => {
-    const seo = getPokemonSeo({ name: 'Farfetch’d', slug: 'farfetchd', totalCards: null })
-    expect(seo.description).toContain('Pokémon cards')
+
+  it('description drops the "across N sets" clause when distinctSetCount is missing', () => {
+    const seo = getPokemonSeo({
+      name: 'Farfetch’d', slug: 'farfetchd', totalCards: 45,
+      hasPsa10Data: true, hasJapaneseCards: false,
+    })
+    expect(seo.description).not.toMatch(/across\s+0\s+sets/)
     expect(seo.description).not.toMatch(/\bnull\b/)
-    expect(seo.description).not.toMatch(/across\s+0/)
+    expect(seo.description).toContain('Farfetch’d')
   })
+
+  it('description falls back gracefully without a card count (no "all null")', () => {
+    const seo = getPokemonSeo({ name: 'Farfetch’d', slug: 'farfetchd', totalCards: null })
+    expect(seo.description).toContain('Farfetch’d cards')
+    expect(seo.description).not.toMatch(/all\s+null/)
+    expect(seo.description).not.toMatch(/all\s+0/)
+  })
+
+  it('description length stays under Google\'s SERP cut-off + buffer', () => {
+    const seo = getPokemonSeo({
+      name: 'Pikachu', slug: 'pikachu', totalCards: 547,
+      englishCards: 369, japaneseCards: 178, distinctSetCount: 134,
+      hasPsa10Data: true, hasJapaneseCards: true, year: 2026,
+    })
+    expect(seo.description.length).toBeLessThanOrEqual(300)
+    expect(seo.description).not.toContain('…')
+  })
+
   it('does not use live-prices, investment or grading-advice language', () => {
-    const seo = getPokemonSeo({ name: 'Greninja', slug: 'greninja', totalCards: 42, hasPsa10Data: true, hasMovementData: true })
-    for (const banned of ['live prices', 'guaranteed', 'invest', 'flip', 'profit', 'undervalued', 'evolves from', 'legendary']) {
+    const seo = getPokemonSeo({
+      name: 'Pikachu', slug: 'pikachu', totalCards: 547,
+      englishCards: 369, japaneseCards: 178, distinctSetCount: 134,
+      hasPsa10Data: true, hasJapaneseCards: true, year: 2026,
+    })
+    for (const banned of ['live prices', 'guaranteed', 'invest', 'flip', 'profit', 'undervalued']) {
       expect(seo.title.toLowerCase()).not.toContain(banned)
       expect(seo.description.toLowerCase()).not.toContain(banned)
     }
   })
+
+  it('treats zero-or-negative totalCards as no-count', () => {
+    const seo = getPokemonSeo({ name: 'Eevee', slug: 'eevee', totalCards: 0 })
+    expect(seo.description).not.toMatch(/all\s+0\s+Eevee/)
+  })
+
+  // ── Canonical ───────────────────────────────────────
+
   it('canonical uses the URL slug and is unchanged (never the display name)', () => {
     const seo = getPokemonSeo({ name: 'Mr. Mime', slug: 'mr-mime' })
     expect(seo.canonical).toBe('https://www.pokeprices.io/pokemon/mr-mime')
   })
+
   it('canonical unchanged for a Farfetch\'d-shaped input', () => {
     const seo = getPokemonSeo({ name: 'Farfetch’d', slug: 'farfetchd' })
     expect(seo.canonical).toBe('https://www.pokeprices.io/pokemon/farfetchd')
   })
+
   it('handles missing name gracefully', () => {
     const seo = getPokemonSeo({ name: '', slug: 'unknown' })
     expect(seo.title.length).toBeGreaterThan(0)
     expect(seo.description.length).toBeGreaterThan(0)
-  })
-  it('never emits a doubled brand marker', () => {
-    for (const name of ['Eevee', 'Charizard', 'Mr. Mime']) {
-      const seo = getPokemonSeo({ name, slug: name.toLowerCase(), totalCards: 50 })
-      expect(seo.title).not.toMatch(/PokePrices.*PokePrices/i)
-    }
-  })
-  it('treats zero-or-negative totalCards as no-count', () => {
-    const seo = getPokemonSeo({ name: 'Eevee', slug: 'eevee', totalCards: 0 })
-    expect(seo.description).not.toMatch(/across\s+0\s+cards/i)
-    expect(seo.description).not.toMatch(/0 Eevee/)
   })
 })
 
@@ -305,33 +368,59 @@ describe('pokeApiEnglishDisplayName (W46E-Lite-FIX1)', () => {
   })
 })
 
-describe('W46E-Lite-FIX1 — authoritative name flows through getPokemonSeo', () => {
-  it('produces the correct Mr. Mime title when the authoritative name is passed', () => {
+describe('Special-name preservation flows through the 53B.1 template', () => {
+  it('produces the correct Mr. Mime title with the 53B.1 template', () => {
     const seo = getPokemonSeo({
       name: pokeApiEnglishDisplayName({ names: [{ language: { name: 'en' }, name: 'Mr. Mime' }] }) as string,
-      slug: 'mr-mime', totalCards: 71, hasPsa10Data: true, hasMovementData: true,
+      slug: 'mr-mime', totalCards: 71,
+      englishCards: 40, japaneseCards: 31, distinctSetCount: 51,
+      hasPsa10Data: true, hasJapaneseCards: true, year: 2026,
     })
-    expect(seo.title).toBe('Mr. Mime Pokémon Card Prices & Values | PokePrices')
-    expect(seo.description).toContain('Mr. Mime Pokémon cards')
+    expect(seo.title).toBe(
+      'Mr. Mime Card Prices — All English & Japanese Cards (2026) | PokePrices',
+    )
+    expect(seo.description).toContain('Mr. Mime cards')
     expect(seo.canonical).toBe('https://www.pokeprices.io/pokemon/mr-mime')
   })
-  it('produces the correct Farfetch’d title (curly apostrophe preserved)', () => {
+
+  it('produces the correct Farfetch’d title (curly apostrophe preserved; brand tail drops per length ladder)', () => {
+    // "Farfetch’d …" with the brand tail is 73 chars — one over the
+    // 72-char SERP budget — so t2 (brand-tail dropped) wins. Curly
+    // apostrophe and — em-dash both preserved intact.
     const seo = getPokemonSeo({
-      name: 'Farfetch’d', slug: 'farfetchd', totalCards: 45, hasPsa10Data: true, hasMovementData: true,
+      name: 'Farfetch’d', slug: 'farfetchd', totalCards: 45,
+      hasPsa10Data: true, hasJapaneseCards: true, year: 2026,
     })
-    expect(seo.title).toBe('Farfetch’d Pokémon Card Prices & Values | PokePrices')
+    expect(seo.title).toBe(
+      'Farfetch’d Card Prices — All English & Japanese Cards (2026)',
+    )
+    expect(seo.title).toContain('Farfetch’d')
+    expect(seo.title.length).toBeLessThanOrEqual(72)
     expect(seo.canonical).toBe('https://www.pokeprices.io/pokemon/farfetchd')
   })
+
   it('produces the correct Ho-Oh title (hyphen preserved)', () => {
-    const seo = getPokemonSeo({ name: 'Ho-Oh', slug: 'ho-oh', totalCards: 60, hasPsa10Data: true, hasMovementData: true })
-    expect(seo.title).toBe('Ho-Oh Pokémon Card Prices & Values | PokePrices')
+    const seo = getPokemonSeo({
+      name: 'Ho-Oh', slug: 'ho-oh', totalCards: 60,
+      hasPsa10Data: true, hasJapaneseCards: true, year: 2026,
+    })
+    expect(seo.title).toBe(
+      'Ho-Oh Card Prices — All English & Japanese Cards (2026) | PokePrices',
+    )
     expect(seo.canonical).toBe('https://www.pokeprices.io/pokemon/ho-oh')
   })
+
   it('produces the correct Nidoran♀ title (gender symbol preserved)', () => {
-    const seo = getPokemonSeo({ name: 'Nidoran♀', slug: 'nidoran-f', totalCards: 8, hasPsa10Data: true, hasMovementData: true })
-    expect(seo.title).toBe('Nidoran♀ Pokémon Card Prices & Values | PokePrices')
+    const seo = getPokemonSeo({
+      name: 'Nidoran♀', slug: 'nidoran-f', totalCards: 8,
+      hasPsa10Data: true, hasJapaneseCards: true, year: 2026,
+    })
+    expect(seo.title).toBe(
+      'Nidoran♀ Card Prices — All English & Japanese Cards (2026) | PokePrices',
+    )
     expect(seo.canonical).toBe('https://www.pokeprices.io/pokemon/nidoran-f')
   })
+
   it('canonical URL uses the slug (never the display name)', () => {
     for (const [name, slug] of [
       ['Mr. Mime',       'mr-mime'],
@@ -343,16 +432,6 @@ describe('W46E-Lite-FIX1 — authoritative name flows through getPokemonSeo', ()
       const seo = getPokemonSeo({ name, slug, totalCards: 1 })
       expect(seo.canonical).toBe(`https://www.pokeprices.io/pokemon/${slug}`)
     }
-  })
-  it('templates approved in W46E-Lite remain unchanged (regression pin)', () => {
-    // Full-data path — string equality with the W46E-Lite pinned template.
-    const seo = getPokemonSeo({
-      name: 'Greninja', slug: 'greninja', totalCards: 42, hasPsa10Data: true, hasMovementData: true,
-    })
-    expect(seo.title).toBe('Greninja Pokémon Card Prices & Values | PokePrices')
-    expect(seo.description).toBe(
-      'See current prices for 42 Greninja Pokémon cards, including raw and PSA 10 values, the most valuable cards, recent movers and represented sets.',
-    )
   })
 })
 

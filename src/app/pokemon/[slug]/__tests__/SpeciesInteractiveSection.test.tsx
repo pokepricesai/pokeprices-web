@@ -198,8 +198,11 @@ describe('53A.1 — distinct_set_count returned by RPC + consumed by page', () =
 
   it('page.tsx subtitle uses distinctSetCount (not the capped bySet.length)', () => {
     // The subtitle prose must reference distinctSetCount so a
-    // 134-set Pikachu doesn't render as "12 sets".
-    expect(PAGE).toMatch(/All \$\{sp\.total_cards\} \$\{displayName\} cards across \$\{distinctSetCount \|\| sp\.total_cards\} sets/)
+    // 134-set Pikachu doesn't render as "12 sets". 53B extended
+    // the phrasing to "{N} {Name} Pokémon cards across …" and added
+    // an optional Japanese-count clause; the distinctSetCount slot
+    // is still the piece under test here.
+    expect(PAGE).toMatch(/All \$\{sp\.total_cards\} \$\{displayName\} Pokémon cards across \$\{distinctSetCount \|\| sp\.total_cards\} sets/)
     // Anti-regression: no remaining `bySet.length` reference on the
     // subtitle line itself.
     expect(PAGE).not.toMatch(/cards across \$\{bySet\.length \|\|/)

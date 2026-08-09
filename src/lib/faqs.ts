@@ -185,9 +185,12 @@ export function getPokemonFaqItems({
   const withPrice = cards.filter(c => c.raw_usd && c.raw_usd > 0)
 
   // 1. How many cards exist?
+  // Block 5A-W-53B — replaces "recent sold listings" wording
+  // where the underlying value is a PriceCharting price-guide
+  // number, not a literal sold listing.
   items.push({
     question: `How many ${name} Pokémon cards are there?`,
-    answer: `PokePrices tracks ${cards.length} ${name} cards across ${uniqueSets} ${uniqueSets === 1 ? 'set' : 'different sets'} of the Pokémon TCG. ${withPrice.length} have current price data from recent sold listings.`,
+    answer: `PokePrices tracks ${cards.length} ${name} cards across ${uniqueSets} ${uniqueSets === 1 ? 'set' : 'different sets'} of the Pokémon TCG. ${withPrice.length} have current price guide data via PriceCharting.`,
   })
 
   // 2. What is the most valuable card?
@@ -199,7 +202,7 @@ export function getPokemonFaqItems({
       : ''
     items.push({
       question: `What is the most valuable ${name} card?`,
-      answer: `The most valuable ${name} card by current raw price is ${top.card_name} from ${top.set_name} at ${fmtUsd(top.raw_usd)} based on recent sold listings.${psa10Bit}`,
+      answer: `The most valuable ${name} card by current raw price is ${top.card_name} from ${top.set_name} at ${fmtUsd(top.raw_usd)} in the PriceCharting price guide.${psa10Bit}`,
     })
   }
 
@@ -228,7 +231,7 @@ export function getPokemonFaqItems({
       : ''
     items.push({
       question: `Are ${name} cards a good investment?`,
-      answer: `It depends entirely on the specific card. Vintage holos and graded copies of cards like ${top.card_name} have appreciated significantly, while modern reprints typically sit near bulk. Card values can fall as well as rise.${riserBit} Always check current sold listings and not financial advice.`,
+      answer: `It depends entirely on the specific card. Vintage holos and graded copies of cards like ${top.card_name} have appreciated significantly, while modern reprints typically sit near bulk. Card values can fall as well as rise.${riserBit} Always cross-check current eBay sold listings before deciding, and this is not financial advice.`,
     })
   }
 
