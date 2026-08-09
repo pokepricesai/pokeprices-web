@@ -159,6 +159,8 @@ export default function CardShowList({
           placeholder={
             country === 'uk' ? 'e.g. Manchester or SW1A 1AA'
             : country === 'ca' ? 'e.g. Toronto or M5V 2T6'
+            : country === 'au' ? 'e.g. Sydney or 2000'
+            : country === 'nz' ? 'e.g. Auckland or 1010'
             : 'e.g. Atlanta GA or 90210'
           }
           style={{
@@ -249,7 +251,7 @@ export default function CardShowList({
               show={s}
               country={country}
               distanceKm={s._km ?? null}
-              metric={country === 'uk' || country === 'ca'}
+              metric={country === 'uk' || country === 'ca' || country === 'au' || country === 'nz'}
               starred={starredIds.has(s.id)}
               onToggleLocal={(nowStarred: boolean) => {
                 setStarredIds(prev => {
@@ -363,9 +365,17 @@ function ShowCard({
         <div style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 8 }}>
           {show.city}{show.region ? ` · ${show.region}` : ''}{show.venue ? ` · ${show.venue}` : ''}
         </div>
+        {/* Block 5A-W-54B — line-clamp the description to 3 lines so
+            rows scan cleanly. Full description still renders on the
+            event-detail page. Falls back gracefully in browsers that
+            do not support -webkit-line-clamp. */}
         <div style={{
           fontSize: 13, color: 'var(--text)', fontFamily: "'Figtree', sans-serif",
-          lineHeight: 1.6, marginBottom: 10,
+          lineHeight: 1.55, marginBottom: 10,
+          display: '-webkit-box' as any,
+          WebkitLineClamp: 3 as any,
+          WebkitBoxOrient: 'vertical' as any,
+          overflow: 'hidden',
         }}>
           {show.description}
         </div>

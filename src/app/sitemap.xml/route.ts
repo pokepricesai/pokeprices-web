@@ -22,6 +22,8 @@ const SUB_SITEMAPS = [
   // from the W48D bulk import) are discoverable by search engines.
   'sitemap-cards-5.xml',
   'sitemap-insights.xml',
+  // Block 5A-W-54B — per-event card-show URLs (upcoming + non-cancelled).
+  'sitemap-card-shows.xml',
 ]
 
 export async function GET() {
