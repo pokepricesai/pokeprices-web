@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { supabase, formatPct } from '@/lib/supabase'
@@ -376,24 +376,10 @@ export default function CardPageClient({
         ? Promise.resolve({ data: null })
         : supabase.rpc('get_card_trends_detail', { slug })
 
-      const [trendRes, metricsRes, histRes, insightRes, volRes] = await Promise.all([
-        trendPromise,
-        supabase.rpc('get_card_metrics', { card_slug: cardData.card_slug }),
-        supabase.rpc('get_card_price_history', { slug }),
-        supabase.rpc('get_card_insight', { slug }),
-        supabase.from('card_volume').select('volume_label, sales_30d').eq('card_slug', slug).eq('grade', 'Ungraded').maybeSingle(),
-      ])
-
-      if (trendRes.data)   setTrend(trendRes.data)
-      if (metricsRes.data) {
-        const m = Array.isArray(metricsRes.data) ? metricsRes.data[0] : metricsRes.data
-        setMetrics(m)
-      }
-      if (histRes.data)    setPriceHistory(histRes.data)
-      if (insightRes.data) setInsight(insightRes.data)
-      if (volRes.data?.volume_label) setVolumeLabel(volRes.data.volume_label)
-
-      // PSA population
+      // Block 5A-W-55A — build the PSA population query up-front so we
+      // can fire it in parallel with the RPC/table batch below. It was
+      // previously chained AFTER `Promise.all` completed, costing one
+      // extra sequential round-trip for no reason.
       const baseName    = cardData.card_name.split('[')[0].split('#')[0].trim()
       const variant     = extractVariant(cardData.card_name)
       const setNameClean = cardData.set_name.replace(/^Pokemon /, '')
@@ -410,13 +396,31 @@ export default function CardPageClient({
       } else if (cardData.card_number) {
         popQuery = popQuery.eq('card_number', String(cardData.card_number))
       }
+      const popPromise = popQuery.order('total_graded', { ascending: false }).limit(1)
 
-      const { data: popData } = await popQuery.order('total_graded', { ascending: false }).limit(1)
-      if (popData && popData.length > 0) setPsaPop(popData[0])
+      const [trendRes, metricsRes, histRes, insightRes, volRes, popRes] = await Promise.all([
+        trendPromise,
+        supabase.rpc('get_card_metrics', { card_slug: cardData.card_slug }),
+        supabase.rpc('get_card_price_history', { slug }),
+        supabase.rpc('get_card_insight', { slug }),
+        supabase.from('card_volume').select('volume_label, sales_30d').eq('card_slug', slug).eq('grade', 'Ungraded').maybeSingle(),
+        popPromise,
+      ])
+
+      if (trendRes.data)   setTrend(trendRes.data)
+      if (metricsRes.data) {
+        const m = Array.isArray(metricsRes.data) ? metricsRes.data[0] : metricsRes.data
+        setMetrics(m)
+      }
+      if (histRes.data)    setPriceHistory(histRes.data)
+      if (insightRes.data) setInsight(insightRes.data)
+      if (volRes.data?.volume_label) setVolumeLabel(volRes.data.volume_label)
+      if (popRes.data && popRes.data.length > 0) setPsaPop(popRes.data[0])
 
       setLoading(false)
     }
     loadCard()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setName, cardUrlSlug])
 
   if (loading) return (
@@ -955,13 +959,47 @@ export default function CardPageClient({
   )
 }
 
+// ── Lazy-fetch helper (Block 5A-W-55A) ────────────────────────────────────────
+// Delays a below-the-fold fetch until its sentinel element approaches the
+// viewport. The Explore-More sections previously fetched immediately on
+// mount even though they sit hundreds of pixels below the price ladder,
+// competing with the useful RPCs that feed the hero + chart.
+function useVisibleOnce(rootMargin = '600px'): [React.MutableRefObject<HTMLDivElement | null>, boolean] {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const [visible, setVisible] = useState(false)
+  useEffect(() => {
+    if (visible) return
+    if (typeof window === 'undefined' || typeof IntersectionObserver === 'undefined') {
+      // Fallback: no IO → fire immediately (matches pre-55A behaviour).
+      setVisible(true)
+      return
+    }
+    const el = ref.current
+    if (!el) return
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          setVisible(true)
+          io.disconnect()
+          break
+        }
+      }
+    }, { rootMargin })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [visible, rootMargin])
+  return [ref, visible]
+}
+
 // ── Explore More: same species ────────────────────────────────────────────────
 
 function ExploreMoreSpecies({ speciesSlug, currentUrlSlug, setName }: { speciesSlug: string; currentUrlSlug: string; setName: string }) {
   const [cards, setCards] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [sentinelRef, visible] = useVisibleOnce()
 
   useEffect(() => {
+    if (!visible) return
     const displayName = speciesSlug.charAt(0).toUpperCase() + speciesSlug.slice(1)
     const namePatterns = [
       `card_name.eq.${displayName}`,
@@ -975,9 +1013,14 @@ function ExploreMoreSpecies({ speciesSlug, currentUrlSlug, setName }: { speciesS
       .or(namePatterns).eq('is_sealed', false).neq('card_url_slug', currentUrlSlug)
       .order('set_name').limit(24)
       .then(({ data }) => { if (data) setCards(data); setLoading(false) })
-  }, [speciesSlug, currentUrlSlug])
+  }, [visible, speciesSlug, currentUrlSlug])
 
-  if (loading || cards.length === 0) return null
+  // Always render the sentinel so IntersectionObserver has an element to
+  // observe; render an empty box until we're near the viewport.
+  if (!visible || loading) {
+    return <div ref={sentinelRef} aria-hidden style={{ minHeight: 1 }} />
+  }
+  if (cards.length === 0) return <div ref={sentinelRef} aria-hidden style={{ minHeight: 1 }} />
   const label = speciesSlug.charAt(0).toUpperCase() + speciesSlug.slice(1)
 
   return (
@@ -1011,15 +1054,20 @@ function ExploreMoreSpecies({ speciesSlug, currentUrlSlug, setName }: { speciesS
 function ExploreMoreSet({ setName, currentUrlSlug }: { setName: string; currentUrlSlug: string }) {
   const [cards, setCards] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [sentinelRef, visible] = useVisibleOnce()
 
   useEffect(() => {
+    if (!visible) return
     supabase.from('cards').select('card_name, set_name, card_url_slug, image_url, card_number, card_number_display, set_printed_total')
       .eq('set_name', setName).eq('is_sealed', false).neq('card_url_slug', currentUrlSlug)
       .order('card_number').limit(24)
       .then(({ data }) => { if (data) setCards(data); setLoading(false) })
-  }, [setName, currentUrlSlug])
+  }, [visible, setName, currentUrlSlug])
 
-  if (loading || cards.length === 0) return null
+  if (!visible || loading) {
+    return <div ref={sentinelRef} aria-hidden style={{ minHeight: 1 }} />
+  }
+  if (cards.length === 0) return <div ref={sentinelRef} aria-hidden style={{ minHeight: 1 }} />
 
   return (
     <div style={{ background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)', padding: '18px 20px', marginTop: 20 }}>

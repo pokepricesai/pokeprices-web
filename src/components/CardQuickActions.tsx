@@ -57,6 +57,14 @@ const GRADE_GROUPS: { company: string; types: HoldingType[] }[] = (() => {
 export default function CardQuickActions({ card }: { card: Card }) {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
+  // Block 5A-W-55A — track auth-check completion separately from the
+  // user object so we don't render the logged-out shell (which
+  // routes to /login on click) BEFORE we know whether the visitor is
+  // actually signed in. Fixes the "click twice / bounces to login"
+  // race where a signed-in user's first click lands during the
+  // supabase.auth.getSession() window and gets sent to /login (which
+  // instantly redirects back), forcing a second click.
+  const [authChecked, setAuthChecked] = useState(false)
   const { plan } = useUserPlan(user?.id ?? null)
   const [watchId, setWatchId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -70,9 +78,11 @@ export default function CardQuickActions({ card }: { card: Card }) {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null)
+      setAuthChecked(true)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
       setUser(session?.user ?? null)
+      setAuthChecked(true)
     })
     return () => subscription.unsubscribe()
   }, [])
@@ -347,6 +357,26 @@ export default function CardQuickActions({ card }: { card: Card }) {
       </p>
     </div>
   )
+
+  // Block 5A-W-55A — while the initial auth check is still in flight
+  // we render a stable pending shell so the first click can't hit a
+  // stale logged-out anchor and get bounced through /login. eBay
+  // chips render immediately below since they never depend on auth.
+  if (!authChecked) {
+    return (
+      <>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button disabled style={{ ...baseBtn, opacity: 0.55, cursor: 'progress' }} aria-busy="true">
+            <span>👁</span> Watch
+          </button>
+          <button disabled style={{ ...baseBtn, opacity: 0.55, cursor: 'progress' }} aria-busy="true">
+            <span>📊</span> Add to portfolio
+          </button>
+        </div>
+        {ebayBox}
+      </>
+    )
+  }
 
   if (!user) {
     // Build a returnTo for portfolio-add that drops the user back here.
