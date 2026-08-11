@@ -572,12 +572,55 @@ export default function BrowsePageClient() {
       </p>
 
       <a href="#set-list"
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 20, padding: '6px 16px', textDecoration: 'none', color: 'var(--text)', fontSize: 12, fontFamily: "'Figtree', sans-serif", fontWeight: 600, marginBottom: 28, transition: 'border-color 0.15s' }}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 20, padding: '6px 16px', textDecoration: 'none', color: 'var(--text)', fontSize: 12, fontFamily: "'Figtree', sans-serif", fontWeight: 600, marginBottom: 20, transition: 'border-color 0.15s' }}
         onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--primary)'}
         onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)'}
       >
         🃏 Jump to Set List
       </a>
+
+      {/* Block 5A-W-56A — Deep Card Search feature tile. Sits above
+          conventional browse so users looking for a specific card by
+          budget / grade / movement land there first. */}
+      <Link href="/cards/search"
+        style={{
+          display: 'block', marginBottom: 28, textDecoration: 'none',
+          background: 'linear-gradient(135deg, rgba(26,95,173,0.10) 0%, rgba(230,138,64,0.10) 100%)',
+          border: '1px solid var(--border)', borderRadius: 16,
+          padding: '18px 22px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <div style={{
+              fontSize: 10, fontWeight: 800, textTransform: 'uppercase',
+              letterSpacing: 1.6, color: 'var(--primary)', marginBottom: 6,
+              fontFamily: "'Figtree', sans-serif",
+            }}>PokePrices Tool · NEW</div>
+            <div style={{
+              fontFamily: "'Outfit', sans-serif", fontSize: 22, fontWeight: 800,
+              color: 'var(--text)', marginBottom: 4, letterSpacing: -0.2,
+            }}>
+              Deep Card Search
+            </div>
+            <div style={{
+              fontSize: 13, color: 'var(--text-muted)',
+              fontFamily: "'Figtree', sans-serif", lineHeight: 1.55,
+            }}>
+              Search every Pokémon card by price, grade, set, age and movement.
+            </div>
+          </div>
+          <div style={{
+            padding: '10px 18px', borderRadius: 10,
+            background: 'var(--primary)', color: '#fff',
+            fontSize: 13, fontWeight: 800,
+            fontFamily: "'Figtree', sans-serif",
+            whiteSpace: 'nowrap',
+          }}>
+            Open Deep Card Search →
+          </div>
+        </div>
+      </Link>
 
       {!loading && trendingSets && (trendingSets.rising.length > 0 || trendingSets.falling.length > 0) && (
         <TrendingSetsPanel data={trendingSets} />

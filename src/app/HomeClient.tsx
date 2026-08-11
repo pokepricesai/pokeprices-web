@@ -61,6 +61,15 @@ type Insight = {
 // gradient block + bold title now carry the visual weight alone,
 // matching the premium/data-market feel from the W40 design brief.
 const FEATURED_TOOLS = [
+  // Block 5A-W-56A — Deep Card Search featured first because it
+  // covers the primary user question ("which card matches my
+  // budget?") that everything else on the site indirectly supports.
+  {
+    title: 'Deep Card Search',
+    blurb: 'Search all English and Japanese Pokémon cards by price, PSA grade, Pokémon, set and market movement.',
+    href: '/cards/search',
+    accent: 'linear-gradient(135deg, #1a5fad 0%, #e68a40 100%)',
+  },
   {
     title: 'Grading Calculator',
     blurb: 'PSA / CGC / BGS landed cost vs. graded uplift. Break-even at a glance.',

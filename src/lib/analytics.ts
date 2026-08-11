@@ -104,6 +104,15 @@ export type EventMap = {
   onboarding_email_skipped:     { template_key?: string; step?: string; reason?: string }
   onboarding_completed:         { last_step?: string }
   onboarding_cancelled:         { reason?: string; source_component?: string }
+
+  // Deep Card Search (Block 5A-W-56A)
+  deep_search_view:              { has_initial_filters?: string }
+  deep_search_manual_filter:     { filter_keys?: string; source?: string }
+  deep_search_ai_submit:         Record<string, never>
+  deep_search_ai_success:        { filter_keys?: string; unsupported?: string }
+  deep_search_ai_unsupported:    { reason?: string }
+  deep_search_result_click:      { card_slug?: string; set_slug?: string }
+  deep_search_ebay_click:        { card_slug?: string; set_slug?: string }
 }
 
 export type EventName = keyof EventMap

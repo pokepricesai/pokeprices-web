@@ -26,6 +26,13 @@ const CATEGORIES: Category[] = [
     hint: 'Free, no login. Open data, open math.',
     tools: [
       {
+        title: 'Deep Card Search',
+        blurb: 'Search every English and Japanese Pokémon card by price, PSA grade, Pokémon, set and market movement.',
+        href: '/cards/search',
+        accent: 'linear-gradient(135deg, #1a5fad 0%, #e68a40 100%)',
+        emoji: '🔎',
+      },
+      {
         title: 'Grading Calculator',
         blurb: 'PSA / CGC / BGS landed cost vs. graded uplift. See break-even and ROI for every card.',
         href: '/dashboard/grading',

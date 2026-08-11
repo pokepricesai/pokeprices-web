@@ -10,6 +10,7 @@ export async function GET() {
     // Core
     { url: BASE_URL,                          priority: '1.0', changefreq: 'daily'   },
     { url: `${BASE_URL}/browse`,              priority: '0.9', changefreq: 'daily'   },
+    { url: `${BASE_URL}/cards/search`,        priority: '0.9', changefreq: 'daily'   },
     { url: `${BASE_URL}/pokemon`,             priority: '0.9', changefreq: 'weekly'  },
     { url: `${BASE_URL}/insights`,            priority: '0.8', changefreq: 'weekly'  },
 
