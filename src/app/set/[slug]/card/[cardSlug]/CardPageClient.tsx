@@ -285,6 +285,31 @@ function VolumePill({ label }: { label: string }) {
   )
 }
 
+// Renders the main card image with an intentional 🃏 fallback whenever
+// image_url is missing OR the browser fails to load the remote image
+// (the 57A audit found 3,060 cards with broken image_url values —
+// without onError, users saw the browser's broken-image icon instead
+// of the fallback).
+export function CardHeroImage({ src, alt }: { src?: string | null; alt: string }) {
+  const [failed, setFailed] = useState(false)
+  const showFallback = !src || failed
+  if (showFallback) {
+    return (
+      <div style={{ width: 220, height: 308, background: 'var(--bg)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 40, border: '1px solid var(--border)' }} aria-label={alt} role="img">🃏</div>
+    )
+  }
+  return (
+    <img
+      src={src as string}
+      alt={alt}
+      fetchPriority="high"
+      loading="eager"
+      onError={() => setFailed(true)}
+      style={{ width: 220, borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.15)' }}
+    />
+  )
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 // Block 5A-W-46C / W46C-FIX1 / W46D — CardPageClient props:
@@ -689,11 +714,10 @@ export default function CardPageClient({
       {/* Hero: image + core data */}
       <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         <div style={{ flex: '0 0 auto' }}>
-          {card.image_url ? (
-            <img src={card.image_url} alt={`${card.card_name} Pokémon card from ${card.set_name}`} fetchPriority="high" loading="eager" style={{ width: 220, borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.15)' }} />
-          ) : (
-            <div style={{ width: 220, height: 308, background: 'var(--bg)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 40, border: '1px solid var(--border)' }}>🃏</div>
-          )}
+          <CardHeroImage
+            src={card.image_url}
+            alt={`${card.card_name} Pokémon card from ${card.set_name}`}
+          />
         </div>
 
         <div style={{ flex: 1, minWidth: 280 }}>
