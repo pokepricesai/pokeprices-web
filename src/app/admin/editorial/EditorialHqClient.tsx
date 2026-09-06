@@ -25,6 +25,7 @@ import type { EditorialContext, EditorialContextArticle } from '@/lib/editorial/
 import type { ReleaseItem } from '@/lib/editorial/releaseContext'
 import type { Opportunity, OpportunityRadar } from '@/lib/editorial/opportunityRadar'
 import type { StrategistRecommendation, StrategistResponse } from '@/lib/editorial/strategistPrompt'
+import { computeActivePlan, mergeRecommendations, type ActivePlan, type ChatTurn } from '@/lib/editorial/activePlan'
 import {
   EDITORIAL_ARTICLE_TYPES,
   EDITORIAL_STATUSES,
@@ -1306,20 +1307,16 @@ function PlanOpportunityInline({ onSubmit }: { onSubmit: (iso: string) => Promis
 // AI Editorial Strategist (Block 5)
 // ─────────────────────────────────────────────────────────────────
 
-type ChatTurn = {
-  role:  'user' | 'assistant'
-  content: string       // full text (JSON or plain)
-  ts:    string
-  parsed?: StrategistResponse
-  usage?: { input_tokens: number; output_tokens: number; cost_usd: number; latency_ms: number }
-}
-
 type StrategistSession = {
   sessionId:        string
   history:          ChatTurn[]
   rejectedRadarIds: string[]
-  currentRecs?:     { summary: string; primary: StrategistRecommendation[]; alternatives: StrategistRecommendation[] }
   totalCostUsd:     number
+  // Block 5 final — the visible plan is DERIVED from history via
+  // computeActivePlan() (see @/lib/editorial/activePlan). It is not
+  // stored on the session so it can never drift out of sync with
+  // what the assistant actually said. Any earlier `currentRecs`
+  // field on a persisted session is ignored on load.
 }
 
 const STRATEGIST_SESSION_STORAGE_KEY = 'eic:strategist:session'
@@ -1329,9 +1326,17 @@ function loadSession(): StrategistSession {
   try {
     const raw = sessionStorage.getItem(STRATEGIST_SESSION_STORAGE_KEY)
     if (!raw) return newSession()
-    const parsed = JSON.parse(raw) as StrategistSession
+    const parsed = JSON.parse(raw) as any
     if (!parsed?.sessionId) return newSession()
-    return parsed
+    // Discard any legacy `currentRecs` on the persisted blob so the
+    // derived-from-history contract holds regardless of what older
+    // versions of this client wrote to sessionStorage.
+    return {
+      sessionId:        String(parsed.sessionId),
+      history:          Array.isArray(parsed.history) ? parsed.history : [],
+      rejectedRadarIds: Array.isArray(parsed.rejectedRadarIds) ? parsed.rejectedRadarIds : [],
+      totalCostUsd:     typeof parsed.totalCostUsd === 'number' ? parsed.totalCostUsd : 0,
+    }
   } catch { return newSession() }
 }
 function saveSession(s: StrategistSession): void {
@@ -1418,6 +1423,9 @@ function EditorialStrategistPanel({
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight
   }, [session.history.length, loading])
 
+  // Block 5 final — single source of truth for the visible plan.
+  const activePlan = useMemo(() => computeActivePlan(session.history), [session.history])
+
   const runRecommend = useCallback(async () => {
     setLoading('recommend'); setError(null)
     const res = await callStrategist({
@@ -1437,7 +1445,6 @@ function EditorialStrategistPanel({
         ...prev,
         sessionId:    res.sessionId,
         history:      nextHistory,
-        currentRecs:  res.response.recommendations ?? prev.currentRecs,
         totalCostUsd: prev.totalCostUsd + res.usage.cost_usd,
       }
     })
@@ -1454,7 +1461,7 @@ function EditorialStrategistPanel({
       mode: 'chat', sessionId: session.sessionId,
       history: session.history, userMessage: msg.trim(),
       rejectedRadarIds: session.rejectedRadarIds,
-      currentPlan: session.currentRecs,
+      currentPlan: activePlan,
     })
     setLoading(null)
     if (!res.ok) { setError(res.error); return }
@@ -1467,16 +1474,10 @@ function EditorialStrategistPanel({
         ...prev,
         sessionId:    res.sessionId,
         history:      [...historyWithUser, assistantTurn],
-        // Block 5C — mergeRecommendations preserves previously-set
-        // primary items whose headline text is unchanged from the
-        // strategist's returned pack. Prevents the "did not recommend
-        // any primary article" flash when the assistant only wanted
-        // to swap alternatives.
-        currentRecs:  mergeRecommendations(prev.currentRecs, res.response.recommendations),
         totalCostUsd: prev.totalCostUsd + res.usage.cost_usd,
       }
     })
-  }, [session])
+  }, [session, activePlan])
 
   const resetSession = useCallback(() => {
     if (!confirm('Start a new strategist session? The current conversation and rejected-idea memory will be cleared.')) return
@@ -1491,15 +1492,17 @@ function EditorialStrategistPanel({
       if (prev.rejectedRadarIds.includes(id)) return prev
       return { ...prev, rejectedRadarIds: [...prev.rejectedRadarIds, id] }
     })
-    // Block 5C — explicit about slot preservation so the strategist
-    // does not blank the other primary item.
-    const which = session.currentRecs?.primary?.findIndex(p => p.headline === rec.headline)
+    // Explicit about slot preservation so the strategist does not
+    // blank the other primary item. Read from the derived plan so
+    // the position number is always consistent with what the panel
+    // currently shows.
+    const which = activePlan?.primary?.findIndex(p => p.headline === rec.headline)
     const primaryPosition = typeof which === 'number' && which >= 0 ? which + 1 : null
     const msg = primaryPosition
       ? `Rejecting primary recommendation #${primaryPosition} ("${rec.headline}"). Do not re-recommend it in this session. In your response, KEEP the other primary recommendation unchanged, then either promote a suitable alternative into the vacated slot or leave it empty and explain why (per the primary-recommendation quality gate). Update the "recommendations" block accordingly.`
       : `Rejecting alternative "${rec.headline}". Do not re-recommend it in this session. Keep the primary recommendations unchanged. Replace this alternative with a stronger candidate if one exists. Update the "recommendations" block accordingly.`
     void runChat(msg)
-  }, [runChat, session.currentRecs])
+  }, [runChat, activePlan])
 
   const planRec = useCallback(async (rec: StrategistRecommendation, targetDate: string) => {
     const payload: Partial<EditorialProject> = {
@@ -1529,8 +1532,9 @@ function EditorialStrategistPanel({
 
   const saveAsIdea = useCallback((rec: StrategistRecommendation) => planRec(rec, ''), [planRec])
 
-  // Latest recs shown come from currentRecs (updated on every strategist reply that includes them).
-  const recs = session.currentRecs
+  // Single source of truth for what the panel renders — computed
+  // from history, never mutated separately.
+  const recs = activePlan
 
   return (
     <div style={{ display: 'grid', gap: 12 }}>
@@ -1836,28 +1840,5 @@ function ConfidenceBadge({ s }: { s: 'high' | 'medium' | 'low' }) {
   return <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: c }}>{s} confidence</span>
 }
 
-// Block 5C — merge strategist response into the existing plan so a
-// chat turn that only refreshes alternatives does not accidentally
-// blank the primary slots.
-//
-// Rules:
-//   * If the strategist did not return a recommendations block at
-//     all, keep the existing plan unchanged.
-//   * If it returned one, take its arrays as authoritative for the
-//     slots they cover but preserve the existing summary when the
-//     new one is empty.
-//   * If it returned an empty primary array but the existing plan
-//     had primaries, keep the existing primaries. This is the
-//     defensive fix for the "did not recommend any primary article"
-//     regression from Block 5B.
-function mergeRecommendations(
-  prev: undefined | { summary: string; primary: StrategistRecommendation[]; alternatives: StrategistRecommendation[] },
-  next: undefined | { summary: string; primary: StrategistRecommendation[]; alternatives: StrategistRecommendation[] },
-): typeof prev {
-  if (!next) return prev
-  if (!prev) return next
-  const primary      = next.primary.length      > 0 ? next.primary      : prev.primary
-  const alternatives = next.alternatives.length > 0 ? next.alternatives : prev.alternatives
-  const summary      = next.summary?.trim()     || prev.summary
-  return { summary, primary, alternatives }
-}
+// mergeRecommendations / computeActivePlan now live in
+// @/lib/editorial/activePlan (pure module, unit tested).
