@@ -22,7 +22,7 @@ import AdminToolHeader from '@/components/admin/AdminToolHeader'
 import type {
   EditorialResearchRow, EvidencePack, ResearchAnalysis,
   Warning, DataTable, VerifiedFact, DerivedFinding,
-  ExternalSource, ResearchNote,
+  ExternalSource, ResearchNote, QuarantineEntry,
 } from '@/lib/editorial/research/types'
 
 type ProjectRow = {
@@ -156,6 +156,7 @@ export default function ResearchRoomClient({ project, initialResearch, chosenRec
               <VerifiedEvidence pack={pack} />
               <DataTables pack={pack} />
               <Warnings pack={pack} />
+              <Quarantined pack={pack} />
               <ResearchGaps pack={pack} />
               <ExternalSources pack={pack} projectUrl={url} onUpdated={setResearch} busy={busy} setBusy={setBusy} setError={setError} />
               <ResearchNotes    pack={pack} projectUrl={url} onUpdated={setResearch} busy={busy} setBusy={setBusy} setError={setError} />
@@ -336,6 +337,42 @@ function Warnings({ pack }: { pack: EvidencePack }) {
 }
 function sevColor(sev: string): string {
   return sev === 'critical' ? '#991b1b' : sev === 'major' ? '#b45309' : sev === 'minor' ? '#334155' : '#64748b'
+}
+
+function Quarantined({ pack }: { pack: EvidencePack }) {
+  const rows = pack.quarantinedRows ?? []
+  if (rows.length === 0) return null
+  // Union of every rowSnapshot key so the table shows every column
+  // any quarantined row provides (data tables differ per recipe).
+  const keys = Array.from(new Set(rows.flatMap(r => Object.keys(r.rowSnapshot))))
+  return (
+    <div style={{ ...S.section, background: '#fff7ed', border: '1px solid #fdba74' }}>
+      <h2 style={S.h2}>Quarantined rows ({rows.length})</h2>
+      <p style={S.body}>These rows were considered by the recipe but excluded from every publishable table because they failed a deterministic integrity check. They are shown here so reviewers can see what was removed and why. A row is only restored after manual verification.</p>
+      {rows.map((q: QuarantineEntry) => (
+        <div key={q.id} style={{ padding: 12, marginBottom: 10, background: 'white', border: '1px solid #fed7aa', borderRadius: 6 }}>
+          <div style={{ fontWeight: 700, color: sevColor(q.severity) }}>
+            [{q.reason}] · {q.severity}{q.contaminatesPublishable ? ' · CONTAMINATES PUBLISHABLE (blocks approval)' : ' · isolated'}
+          </div>
+          <div style={{ ...S.body, marginTop: 4 }}>{q.message}</div>
+          <div style={{ overflowX: 'auto', marginTop: 8 }}>
+            <table style={S.table}>
+              <thead><tr>{keys.map(k => <th key={k} style={S.th}>{k}</th>)}</tr></thead>
+              <tbody>
+                <tr>
+                  {keys.map(k => {
+                    const v = q.rowSnapshot[k]
+                    return <td key={k} style={S.td}>{v == null || v === '' ? '—' : String(v)}</td>
+                  })}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div style={S.muted}>Would have joined: {q.wouldHaveJoined}</div>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function ResearchGaps({ pack }: { pack: EvidencePack }) {

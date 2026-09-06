@@ -33,7 +33,7 @@ import { getSupabaseServiceClient } from '@/lib/supabaseService'
 import { fetchAllPages } from '../pageFetch'
 import type {
   EvidencePack, VerifiedFact, DerivedFinding, DataTable, Warning,
-  InternalSource, PackQuality, PackProjectRef,
+  InternalSource, PackQuality, PackProjectRef, QuarantineEntry,
 } from './types'
 import {
   checkPopulationRow, isEditoriallyMeaningfulPopRow, popDedupKey,
@@ -259,12 +259,55 @@ export async function runPopulationScarcityRecipe(
     return false
   })
 
-  priceEligible.sort((a, b) => {
+  // ── Block 6B — quarantine population/price contradictions ─────
+  //
+  // A candidate that reports zero PSA 10 copies in the (stale)
+  // population snapshot but a positive PSA 10 sale price is
+  // logically incoherent. Either a PSA 10 emerged since the last
+  // pop scrape and we should not claim "0 exist", or the price
+  // observation is misattributed. Either way, do not include the
+  // row in a publishable scarcity ranking. Isolate it so a
+  // reviewer can see what was excluded and why.
+  const quarantinedRows: QuarantineEntry[] = []
+  const publishable: typeof priceEligible = []
+  for (const c of priceEligible) {
+    const isZeroPopWithPrice = (c.psa10 === 0) && (c.psa10Cents ?? 0) > 0
+    if (isZeroPopWithPrice) {
+      quarantinedRows.push({
+        id: `q-zero-pop-${c.psaSpecId ?? `${c.setName}-${c.cardNumber}-${c.variant ?? ''}`}`,
+        wouldHaveJoined: 'population-scarcity-top20',
+        reason: 'zero_pop_with_price',
+        severity: 'major',
+        message: `${trimName(c.cardName)} #${c.cardNumber} (${c.setName}) reports 0 PSA 10 copies in the psa_population snapshot (scraped ${c.scrapedDate ?? 'unknown'}) but a $${((c.psa10Cents ?? 0)/CENTS_PER_USD).toFixed(2)} PSA 10 sale price (${c.priceAsOf ?? 'today'}). Contradiction — either a PSA 10 has been graded since the last scrape or the price is misattributed. Excluded from the publishable ranking.`,
+        rowSnapshot: {
+          setName:         c.setName,
+          cardName:        c.cardName,
+          cardNumber:      c.cardNumber,
+          variant:         c.variant ?? '',
+          psa10:           c.psa10 ?? 0,
+          totalGraded:     c.totalGraded,
+          gemRate:         c.gemRate,
+          rawUsd:          c.rawCents  != null ? Number((c.rawCents  / CENTS_PER_USD).toFixed(2)) : null,
+          psa9Usd:         c.psa9Cents != null ? Number((c.psa9Cents / CENTS_PER_USD).toFixed(2)) : null,
+          psa10Usd:        c.psa10Cents!= null ? Number((c.psa10Cents/ CENTS_PER_USD).toFixed(2)) : null,
+          populationAsOf:  c.scrapedDate ?? '',
+          priceAsOf:       c.priceAsOf  ?? '',
+        },
+        // Passive contaminant — the article can still ship if the
+        // reviewer accepts that this specific card is not in the ranking.
+        contaminatesPublishable: false,
+      })
+      continue
+    }
+    publishable.push(c)
+  }
+
+  publishable.sort((a, b) => {
     const p = (a.psa10 ?? Number.MAX_SAFE_INTEGER) - (b.psa10 ?? Number.MAX_SAFE_INTEGER)
     if (p !== 0) return p
     return (b.psa10Cents ?? 0) - (a.psa10Cents ?? 0)
   })
-  const shortlist = priceEligible.slice(0, topN)
+  const shortlist = publishable.slice(0, topN)
   const finalCount = shortlist.length
 
   // Add warnings for candidates missing prices
@@ -318,30 +361,34 @@ export async function runPopulationScarcityRecipe(
       source: 'psa_population + cards + card_latest_prices',
       asOf:   latestScrape ?? today,
       columns: [
-        { key: 'setName',      label: 'Set' },
-        { key: 'cardName',     label: 'Card' },
-        { key: 'cardNumber',   label: '#',                        align: 'right' },
-        { key: 'variant',      label: 'Variant' },
-        { key: 'psa10',        label: 'PSA 10 pop',               align: 'right' },
-        { key: 'totalGraded',  label: 'Total graded',             align: 'right' },
-        { key: 'gemRate',      label: 'Gem rate %',               align: 'right' },
-        { key: 'rawUsd',       label: 'Raw ($)',                  align: 'right' },
-        { key: 'psa9Usd',      label: 'PSA 9 ($)',                align: 'right' },
-        { key: 'psa10Usd',     label: 'PSA 10 ($)',               align: 'right' },
-        { key: 'urlSlug',      label: 'PokePrices slug' },
+        { key: 'setName',        label: 'Set' },
+        { key: 'cardName',       label: 'Card' },
+        { key: 'cardNumber',     label: '#',                     align: 'right' },
+        { key: 'variant',        label: 'Variant' },
+        { key: 'psa10',          label: 'PSA 10 pop',            align: 'right' },
+        { key: 'totalGraded',    label: 'Total graded',          align: 'right' },
+        { key: 'gemRate',        label: 'Gem rate %',            align: 'right' },
+        { key: 'rawUsd',         label: 'Raw ($)',               align: 'right' },
+        { key: 'psa9Usd',        label: 'PSA 9 ($)',             align: 'right' },
+        { key: 'psa10Usd',       label: 'PSA 10 ($)',            align: 'right' },
+        { key: 'populationAsOf', label: 'Pop as of' },
+        { key: 'priceAsOf',      label: 'Price as of' },
+        { key: 'urlSlug',        label: 'PokePrices slug' },
       ],
       rows: shortlist.map(c => ({
-        setName:     c.setName,
-        cardName:    c.cardName,
-        cardNumber:  c.cardNumber,
-        variant:     c.variant ?? '',
-        psa10:       c.psa10   ?? 0,
-        totalGraded: c.totalGraded,
-        gemRate:     c.gemRate,
-        rawUsd:      c.rawCents  != null ? Number((c.rawCents / CENTS_PER_USD).toFixed(2)) : null,
-        psa9Usd:     c.psa9Cents != null ? Number((c.psa9Cents / CENTS_PER_USD).toFixed(2)) : null,
-        psa10Usd:    c.psa10Cents!= null ? Number((c.psa10Cents/ CENTS_PER_USD).toFixed(2)) : null,
-        urlSlug:     c.urlSlug ?? '',
+        setName:        c.setName,
+        cardName:       c.cardName,
+        cardNumber:     c.cardNumber,
+        variant:        c.variant ?? '',
+        psa10:          c.psa10   ?? 0,
+        totalGraded:    c.totalGraded,
+        gemRate:        c.gemRate,
+        rawUsd:         c.rawCents  != null ? Number((c.rawCents / CENTS_PER_USD).toFixed(2)) : null,
+        psa9Usd:        c.psa9Cents != null ? Number((c.psa9Cents / CENTS_PER_USD).toFixed(2)) : null,
+        psa10Usd:       c.psa10Cents!= null ? Number((c.psa10Cents/ CENTS_PER_USD).toFixed(2)) : null,
+        populationAsOf: c.scrapedDate ?? '',
+        priceAsOf:      c.priceAsOf  ?? '',
+        urlSlug:        c.urlSlug ?? '',
       })),
     },
   ]
@@ -383,8 +430,40 @@ export async function runPopulationScarcityRecipe(
   if (finalCount < CANDIDATE_MIN) gaps.push(`Only ${finalCount} candidates clear all gates. An article promising 20 cards needs at least ${CANDIDATE_MIN}.`)
   if (unmatchedPop > 0)           gaps.push(`Improve psa_population → cards matching (${unmatchedPop} rows failed to attach a canonical URL).`)
   if (noPriceCount > 0)           gaps.push(`Extend card_latest_prices coverage to include ${noPriceCount} otherwise-qualifying cards.`)
+  if (quarantinedRows.length > 0) gaps.push(`${quarantinedRows.length} rows quarantined for zero-pop-with-price contradictions. See Quarantined rows.`)
 
-  const quality: PackQuality = computeQuality({ shortlistSize: finalCount, warnings, dataAsOf: latestScrape ?? today, today, minSample: CANDIDATE_MIN })
+  const popDaysOld = latestScrape ? daysBetween(latestScrape, today) : 0
+  const populationIsStale = latestScrape ? popDaysOld > PSA_FRESHNESS_STALE_DAYS : true
+
+  // Block 6B — stale-population framing rules.
+  //
+  // When the PSA snapshot is materially stale, the study can still
+  // be published but only if it explicitly frames the population
+  // figures as "PSA population as of <scrape date>" and avoids
+  // current-state wording like "these are the rarest PSA 10s today".
+  const rejectedClaims = [
+    { claim: 'These are the 20 rarest Pokémon cards.',                        reason: 'The sample is bounded by our psa_population coverage (157 sets, ~33k rows). "Rarest overall" would require every set PSA has graded, not just those we track.' },
+    { claim: 'Gem rate below 5% means the card is impossible to grade well.', reason: 'Low gem rate reflects submitter selection and print quality; it does not imply future gem rates will match. Preserve as "historical gem rate" only.' },
+  ] as Array<{ claim: string; reason: string }>
+  if (populationIsStale) rejectedClaims.push({
+    claim: 'Only <N> PSA 10 copies exist today.',
+    reason: `Population data is ${popDaysOld} days old (snapshot: ${latestScrape ?? 'unknown'}). New PSA 10s may exist. Article must attribute counts to the snapshot date, not to "today".`,
+  })
+
+  const requiredCaveats: string[] = []
+  if (populationIsStale) requiredCaveats.push(`Article must frame every PSA 10 population figure as "PSA population as of ${latestScrape}". Do not write "currently" or "today" against the population numbers.`)
+  if (quarantinedRows.length > 0) requiredCaveats.push(`${quarantinedRows.length} rows were quarantined for zero-pop-with-price contradictions and are NOT in the ranking. The reviewer must not restore them without independent verification.`)
+
+  const quality: PackQuality = computeQuality({
+    shortlistSize:   finalCount,
+    warnings,
+    dataAsOf:        latestScrape ?? today,
+    today,
+    minSample:       CANDIDATE_MIN,
+    populationIsStale,
+    quarantinedCount: quarantinedRows.length,
+    requiredCaveats,
+  })
 
   const pack: EvidencePack = {
     version:     1,
@@ -424,11 +503,9 @@ export async function runPopulationScarcityRecipe(
     ],
     warnings,
     researchGaps: gaps,
-    rejectedClaims: [
-      { claim: 'These are the 20 rarest Pokémon cards.', reason: 'The sample is bounded by our psa_population coverage (157 sets, ~33k rows). "Rarest overall" would require every set PSA has graded, not just those we track.' },
-      { claim: 'Gem rate below 5% means the card is impossible to grade well.', reason: 'Low gem rate reflects submitter selection and print quality; it does not imply future gem rates will match. Preserve as "historical gem rate" only.' },
-    ],
+    rejectedClaims,
     notes: [],
+    quarantinedRows,
     quality,
   }
 
@@ -453,29 +530,41 @@ function slugifySet(s: string): string { return normalizeSetName(s).toLowerCase(
 function sumExcluded(m: Map<string, number>): number { let n = 0; for (const v of Array.from(m.values())) n += v; return n }
 
 function computeQuality(inp: {
-  shortlistSize: number
-  warnings:      Warning[]
-  dataAsOf:      string
-  today:         string
-  minSample:     number
+  shortlistSize:    number
+  warnings:         Warning[]
+  dataAsOf:         string
+  today:            string
+  minSample:        number
+  populationIsStale: boolean
+  quarantinedCount: number
+  requiredCaveats:  readonly string[]
 }): PackQuality {
   const daysOld = daysBetween(inp.dataAsOf, inp.today)
-  const isStale = daysOld > PSA_FRESHNESS_STALE_DAYS
+  const isStale = inp.populationIsStale
   const critical = inp.warnings.some(w => w.severity === 'critical')
+  // Publishable ONLY when no critical warnings, sample meets bar, and
+  // the pack is not held back by unresolved contradictions in the
+  // published set. Quarantined rows are cleanly isolated (they are
+  // NOT in the top-N shortlist), so their existence does not by
+  // itself block publishability — but the reviewer must accept the
+  // required caveats. Staleness pushes status to needs_review, which
+  // the Analyst guardrail already downgrades ready -> ready_with_caveats.
   const publishable = !critical && inp.shortlistSize >= inp.minSample
   const reasons: string[] = []
   if (critical)                            reasons.push('One or more critical data-quality warnings must be resolved.')
   if (inp.shortlistSize < inp.minSample)   reasons.push(`Shortlist has only ${inp.shortlistSize} cards — the article template needs at least ${inp.minSample}.`)
-  if (isStale)                             reasons.push(`Underlying PSA snapshot is ${daysOld} days old.`)
+  if (isStale)                             reasons.push(`PSA snapshot is ${daysOld} days old. Article can ship ONLY if population figures are framed as "PSA population as of ${inp.dataAsOf}" (see required caveats).`)
+  if (inp.quarantinedCount > 0)            reasons.push(`${inp.quarantinedCount} rows quarantined for population/price contradictions. Isolated from the ranking, but the reviewer must NOT restore them without independent verification.`)
   if (reasons.length === 0)                reasons.push('All gates cleared.')
+  for (const caveat of inp.requiredCaveats) reasons.push(`Required caveat: ${caveat}`)
   const status: PackQuality['status'] =
-    critical                              ? 'blocked'
-    : inp.shortlistSize < inp.minSample   ? 'blocked'
-    : isStale                             ? 'needs_review'
+      critical                              ? 'blocked'
+    : inp.shortlistSize < inp.minSample     ? 'blocked'
+    : isStale                               ? 'needs_review'
     : 'ok'
   const dataStrength: PackQuality['dataStrength'] =
-    inp.shortlistSize >= 15 && !isStale ? 'strong'
-    : inp.shortlistSize >= 10           ? 'medium'
+      inp.shortlistSize >= 15 && !isStale ? 'strong'
+    : inp.shortlistSize >= 10             ? 'medium'
     : 'weak'
   return {
     status,

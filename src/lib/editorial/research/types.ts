@@ -53,7 +53,41 @@ export type EvidencePack = {
   rejectedClaims:      RejectedClaim[]
   notes:               ResearchNote[]
 
+  /** Block 6B — rows the recipe considered but excluded from every
+   *  publishable table because they fail a deterministic integrity
+   *  check (contradiction between data sources, implausible movement,
+   *  identity mismatch). Kept in the pack so reviewers can see what
+   *  was removed and why. Never enters `dataTables[].rows`. */
+  quarantinedRows:     QuarantineEntry[]
+
   quality:             PackQuality
+}
+
+export type QuarantineReason =
+  | 'zero_pop_with_price'
+  | 'extreme_monthly_move'
+  | 'identity_unverified'
+  | 'other'
+
+export type QuarantineEntry = {
+  id:                     string
+  /** Which data table this row would have belonged to. Reviewers use
+   *  this to locate what the row is meant to say. */
+  wouldHaveJoined:        string
+  reason:                 QuarantineReason
+  severity:               'critical' | 'major' | 'minor'
+  /** Human-readable one-liner shown in the UI. */
+  message:                string
+  /** The row itself as it would have appeared, so the reviewer can
+   *  see the actual numbers without having to re-run the recipe. */
+  rowSnapshot:            Record<string, string | number | null>
+  /** When TRUE, an approved pack that intends to use this table CAN
+   *  still ship because the row was cleanly isolated. When FALSE, the
+   *  approval gate refuses until the contradiction is resolved. Set
+   *  by the recipe based on whether the row is a passive contaminant
+   *  (top-mover artifact) or a load-bearing contradiction (identity
+   *  collision on a card the article names). */
+  contaminatesPublishable: boolean
 }
 
 export type PackProjectRef = {

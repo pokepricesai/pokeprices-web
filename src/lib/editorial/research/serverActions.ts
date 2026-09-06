@@ -186,6 +186,15 @@ export async function approveResearch(projectId: number, adminEmail: string): Pr
   if (pack.quality.status === 'blocked')      throw new Error('pack is blocked — resolve quality issues before approving')
   if (!pack.quality.publishable)              throw new Error('pack is not publishable — see quality.reasons')
   if (pack.warnings.some(w => w.severity === 'critical')) throw new Error('pack has critical warnings — resolve them before approving')
+  // Block 6B — refuse approval when a quarantined row is load-bearing
+  // (identity collision on a card the article names, for example).
+  // Passive contaminants (extreme monthly-mover outliers isolated
+  // from the top-N tables) do NOT block approval — the philosophy
+  // is "isolate bad evidence, don't let it contaminate the claim".
+  const loadBearing = (pack.quarantinedRows ?? []).filter(q => q.contaminatesPublishable)
+  if (loadBearing.length > 0) {
+    throw new Error(`${loadBearing.length} quarantined row(s) contaminate a publishable claim and must be resolved before approval: ${loadBearing.map(q => q.message).join('; ').slice(0, 500)}`)
+  }
 
   const supa = getSupabaseServiceClient()
   const { data, error } = await supa

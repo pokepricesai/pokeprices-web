@@ -33,7 +33,7 @@ import { getSupabaseServiceClient } from '@/lib/supabaseService'
 import { fetchAllPages } from '../pageFetch'
 import type {
   EvidencePack, VerifiedFact, DerivedFinding, DataTable, Warning,
-  InternalSource, PackQuality, PackProjectRef,
+  InternalSource, PackQuality, PackProjectRef, QuarantineEntry,
 } from './types'
 import { CENTS_PER_USD, daysBetween } from './qualityChecks'
 
@@ -41,6 +41,17 @@ const MIN_ROWS_PER_ENDPOINT      = 30_000  // full daily_prices snapshot is ~62k
 const MIN_INTERSECTION           = 20_000  // must have this many cards on BOTH endpoints
 const TOP_MOVER_MIN_START_CENTS  = 500     // $5 minimum start price so % moves are meaningful
 const TOP_MOVER_LIMIT            = 10
+
+// Block 6B — extreme-mover quarantine rule (derived from the live
+// 2026-08 distribution: 22,071 movers with start >= $5; 21 had
+// pct >= 500% and 3 exceeded 3,000%). A month-over-month raw price
+// move of 500% or more is almost always a scraper artifact (raw/PSA
+// cross-attribution, listing floor bounce, or delisting). A move of
+// 200%+ combined with a $5,000+ absolute change catches the extreme
+// price-swap cases even when the pct alone would be plausible.
+const QUARANTINE_ABS_PCT              = 500    // |pct| >= 500%
+const QUARANTINE_BIG_PCT              = 200    // 200%+ combined ...
+const QUARANTINE_BIG_ABS_CHANGE_CENTS = 500_000 // ... with $5,000 absolute change
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
@@ -163,13 +174,28 @@ export async function runMonthlyMarketReportRecipe(
 
   // Top movers (need meaningful start price)
   const meaningfulRaw = bothPricedRaw.filter(d => (d.startRawCents ?? 0) >= TOP_MOVER_MIN_START_CENTS)
-  const topRisers  = [...meaningfulRaw].sort((a, b) => (b.rawPct! - a.rawPct!)).slice(0, TOP_MOVER_LIMIT)
-  const topFallers = [...meaningfulRaw].sort((a, b) => (a.rawPct! - b.rawPct!)).slice(0, TOP_MOVER_LIMIT)
 
-  // Join top movers to cards for names + slugs.
+  // Block 6B — split meaningful movers into publishable + quarantined
+  // BEFORE ranking, so implausible artifacts do not sit at the top of
+  // the "biggest riser" list masquerading as real market moves.
+  const isExtremeMove = (d: MonthlyDelta): boolean => {
+    if (d.rawPct == null || d.startRawCents == null || d.endRawCents == null) return false
+    const absPct = Math.abs(d.rawPct)
+    const absChange = Math.abs(d.endRawCents - d.startRawCents)
+    if (absPct >= QUARANTINE_ABS_PCT) return true
+    if (absPct >= QUARANTINE_BIG_PCT && absChange >= QUARANTINE_BIG_ABS_CHANGE_CENTS) return true
+    return false
+  }
+  const quarantinedMovers = meaningfulRaw.filter(isExtremeMove)
+  const publishableMovers = meaningfulRaw.filter(d => !isExtremeMove(d))
+
+  const topRisers  = [...publishableMovers].sort((a, b) => (b.rawPct! - a.rawPct!)).slice(0, TOP_MOVER_LIMIT)
+  const topFallers = [...publishableMovers].sort((a, b) => (a.rawPct! - b.rawPct!)).slice(0, TOP_MOVER_LIMIT)
+
+  // Join top movers + quarantined movers to cards for names + slugs.
   // daily_prices.card_slug uses "pc-<numeric>"; cards.card_slug is bare
   // (see CLAUDE.md). Strip the prefix for the cards lookup.
-  const moverSlugs    = Array.from(new Set([...topRisers, ...topFallers].map(m => m.cardSlug)))
+  const moverSlugs    = Array.from(new Set([...topRisers, ...topFallers, ...quarantinedMovers].map(m => m.cardSlug)))
   const moverSlugsBare = moverSlugs.map(s => String(s).replace(/^pc-/, ''))
   const moverCards = moverSlugsBare.length === 0
     ? { rows: [] as any[], pagesFetched: 0, truncated: false }
@@ -200,6 +226,35 @@ export async function runMonthlyMarketReportRecipe(
   }
   const topRisersRows  = topRisers.map(enrichMover)
   const topFallersRows = topFallers.map(enrichMover)
+
+  // Block 6B — quarantine entries for the extreme movers.
+  const quarantinedRows: QuarantineEntry[] = quarantinedMovers.map(d => {
+    const en = enrichMover(d)
+    const startCents = d.startRawCents ?? 0
+    const endCents   = d.endRawCents ?? 0
+    const absChangeUsd = Math.abs(endCents - startCents) / CENTS_PER_USD
+    return {
+      id: `q-mover-${d.cardSlug}`,
+      wouldHaveJoined: `mover-risers-${year}-${String(month).padStart(2,'0')} or fallers`,
+      reason: 'extreme_monthly_move',
+      severity: 'major',
+      message: `${en.cardName || d.cardSlug} moved ${fmtSignedPct(d.rawPct!)} in ${monthLabel} ($${en.startUsd} to $${en.endUsd}, absolute change $${absChangeUsd.toFixed(2)}). Above the |${QUARANTINE_ABS_PCT}%| quarantine threshold. Excluded from the publishable mover ranking.`,
+      rowSnapshot: {
+        cardSlug:   d.cardSlug,
+        cardName:   en.cardName,
+        cardNumber: en.cardNumber,
+        setName:    en.setName,
+        startUsd:   en.startUsd,
+        endUsd:     en.endUsd,
+        pct:        d.rawPct,
+        absChangeUsd: Number(absChangeUsd.toFixed(2)),
+      },
+      // Passive contaminant. The monthly-report claim ("market moved
+      // X%") is aggregate over 62k cards; a handful of quarantined
+      // outliers don't change that. Reviewer can still ship.
+      contaminatesPublishable: false,
+    }
+  })
 
   // ── Step 5: sources + tables ───────────────────────────────────
   const internalSources: InternalSource[] = [
@@ -286,6 +341,9 @@ export async function runMonthlyMarketReportRecipe(
   if (bothPricedPsa10.length < 5_000) {
     gaps.push(`PSA 10 coverage across both endpoints is ${bothPricedPsa10.length} cards — enough for anecdotal callouts but not for a graded-market claim.`)
   }
+  if (quarantinedRows.length > 0) {
+    gaps.push(`${quarantinedRows.length} extreme monthly movers quarantined (|pct| >= ${QUARANTINE_ABS_PCT}% or |pct| >= ${QUARANTINE_BIG_PCT}% with $${QUARANTINE_BIG_ABS_CHANGE_CENTS/CENTS_PER_USD}+ absolute change). See Quarantined rows. Investigate before restoring any into the published lists.`)
+  }
 
   const quality = computeQuality({
     intersection:      bothPricedRaw.length,
@@ -336,10 +394,12 @@ export async function runMonthlyMarketReportRecipe(
     warnings,
     researchGaps: gaps,
     rejectedClaims: [
-      { claim: `The Pokémon market moved X% in ${monthLabel}.`, reason: 'The sample is our tracked catalogue on daily_prices, not the entire Pokémon TCG market. Attribute movement to "cards tracked by PokePrices".' },
-      { claim: 'PSA 10 prices moved X% in ${monthLabel}.', reason: 'Only ' + bothPricedPsa10.length + ' cards have PSA 10 prices on both endpoints — not the full sample. Keep PSA 10 callouts anecdotal unless coverage grows.' },
+      { claim: `The Pokémon market moved X% in ${monthLabel}.`,   reason: 'The sample is our tracked catalogue on daily_prices, not the entire Pokémon TCG market. Attribute movement to "cards tracked by PokePrices".' },
+      { claim: `PSA 10 prices moved X% in ${monthLabel}.`,        reason: `Only ${bothPricedPsa10.length} cards have PSA 10 prices on both endpoints — not the full sample. Keep PSA 10 callouts anecdotal unless coverage grows.` },
+      { claim: `Card X gained N,NNN% in ${monthLabel}.`,          reason: `Any card with a monthly move of >= ${QUARANTINE_ABS_PCT}% is quarantined for review. If the reviewer restores such a row it must ship with a data-provenance note explaining why the observation is trustworthy.` },
     ],
     notes: [],
+    quarantinedRows,
     quality,
   }
 }

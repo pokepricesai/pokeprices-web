@@ -125,6 +125,7 @@ export async function runGenericFallbackRecipe(
     researchGaps: gaps,
     rejectedClaims: [],
     notes: [],
+    quarantinedRows: [],
     quality,
   }
 }

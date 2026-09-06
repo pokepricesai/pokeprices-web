@@ -23,7 +23,7 @@ function packWithQuality(overrides: Partial<EvidencePack['quality']> = {}, warni
     methodology: { summary: 's', filters: [], excludedGroups: [], dedupKey: 'k' },
     verifiedFacts: [], derivedFindings: [], dataTables: [],
     internalSources: [], externalSources: [], internalLinks: [], visualOpportunities: [],
-    warnings, researchGaps: [], rejectedClaims: [], notes: [],
+    warnings, researchGaps: [], rejectedClaims: [], notes: [], quarantinedRows: [],
     quality: {
       status: 'ok', dataStrength: 'strong', sampleSize: 100,
       freshness: { asOf: '2026-09-06', daysOld: 0, isStale: false },
