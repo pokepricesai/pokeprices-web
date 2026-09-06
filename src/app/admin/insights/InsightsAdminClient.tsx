@@ -48,7 +48,91 @@ const THEMES = [
   { value: 'community',  label: 'Community'            },
 ]
 
-const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'pokeprices2024'
+// ── Server-side admin API client ─────────────────────────────────────
+//
+// EIC Block 0B — every privileged article op now goes through
+// authenticated /api/admin/insights/* endpoints. The client no longer
+// touches Supabase directly for insights rows or storage. The Bearer
+// token is pulled from the browser's live Supabase session (installed
+// by Block 0's real server-side auth gate on /admin/insights).
+
+async function authHeader(): Promise<Record<string, string>> {
+  const { data: sess } = await supabase.auth.getSession()
+  const token = sess.session?.access_token
+  if (!token) throw new Error('You must be signed in as an admin.')
+  return { authorization: `Bearer ${token}` }
+}
+
+async function apiFetchJson<T = any>(path: string, init: RequestInit = {}): Promise<T> {
+  const auth = await authHeader()
+  const res = await fetch(path, {
+    ...init,
+    headers: {
+      ...(init.headers || {}),
+      ...auth,
+      ...(init.body ? { 'content-type': 'application/json' } : {}),
+    },
+  })
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`
+    try { const j = await res.json(); if (j?.error) msg = j.error } catch {}
+    throw new Error(msg)
+  }
+  return res.json() as Promise<T>
+}
+
+async function apiListArticles(): Promise<Article[]> {
+  const j = await apiFetchJson<{ articles: Article[] }>('/api/admin/insights')
+  return Array.isArray(j.articles) ? j.articles : []
+}
+async function apiCreateArticle(payload: Partial<Article>): Promise<Article> {
+  const j = await apiFetchJson<{ article: Article }>('/api/admin/insights', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  return j.article
+}
+async function apiUpdateArticle(id: string, payload: Partial<Article>): Promise<Article> {
+  const j = await apiFetchJson<{ article: Article }>(`/api/admin/insights/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+  return j.article
+}
+async function apiDeleteArticle(id: string): Promise<void> {
+  await apiFetchJson(`/api/admin/insights/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+/** Ask the server for a scoped signed-upload URL, upload the file
+ *  straight to Supabase Storage via PUT, then return the resulting
+ *  public URL. The browser never chooses the bucket, folder or path. */
+async function apiUploadImage(file: File, purpose: 'hero' | 'body'): Promise<string> {
+  const auth = await authHeader()
+  const initRes = await fetch('/api/admin/insights/upload', {
+    method: 'POST',
+    headers: { ...auth, 'content-type': 'application/json' },
+    body: JSON.stringify({ purpose, contentType: file.type, size: file.size }),
+  })
+  if (!initRes.ok) {
+    let msg = `Upload init failed (${initRes.status})`
+    try { const j = await initRes.json(); if (j?.error) msg = j.error } catch {}
+    throw new Error(msg)
+  }
+  const { signedUrl, publicUrl } = await initRes.json() as { signedUrl: string; publicUrl: string }
+  if (!signedUrl || !publicUrl) throw new Error('Upload init returned no URL')
+
+  // Supabase signed upload URLs accept a PUT with the raw bytes.
+  const putRes = await fetch(signedUrl, {
+    method: 'PUT',
+    headers: { 'content-type': file.type, 'x-upsert': 'false' },
+    body: file,
+  })
+  if (!putRes.ok) {
+    const detail = await putRes.text().catch(() => '')
+    throw new Error(`Storage upload failed: ${putRes.status} ${detail.slice(0, 200)}`)
+  }
+  return publicUrl
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -112,58 +196,36 @@ function blocksToPlainText(blocks: readonly ArticleBlock[]): string {
 }
 
 
-// ── AI Writing Assistant (calls Claude via Anthropic API) ─────────────────────
+// ── AI Writing Assistant (server-side via /api/admin/insights/ai-assist) ─────
+//
+// EIC Block 0 — moved off the browser. The endpoint owns the model,
+// system prompt and per-kind prompt template; the client only sends
+// the inputs and the caller's Supabase access token. No Anthropic
+// credential ever reaches the browser.
 
-async function generateWithAI(prompt: string, system: string): Promise<string> {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      system,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  })
-  const data = await res.json()
-  return data.content?.[0]?.text || ''
-}
+type AiAssistKind = 'intro' | 'body' | 'meta'
 
-// ── Login Screen ──────────────────────────────────────────────────────────────
-
-function LoginScreen({ onLogin }: { onLogin: () => void }) {
-  const [pw, setPw] = useState('')
-  const [err, setErr] = useState(false)
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (pw === ADMIN_PASSWORD) { onLogin() }
-    else { setErr(true); setPw('') }
+async function callAiAssist(kind: AiAssistKind, headline: string, themeLabel: string, intro?: string): Promise<string> {
+  const { data: sess } = await supabase.auth.getSession()
+  const token = sess.session?.access_token
+  if (!token) {
+    throw new Error('You must be signed in as an admin to use AI assist.')
   }
-
-  return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
-      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 20, padding: '40px 48px', width: 360, textAlign: 'center' }}>
-        <div style={{ fontSize: 32, marginBottom: 8 }}>🔒</div>
-        <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, margin: '0 0 4px', color: 'var(--text)' }}>Insights Admin</h1>
-        <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '0 0 28px' }}>PokePrices content management</p>
-        <form onSubmit={handleSubmit}>
-          <input
-            type="password"
-            value={pw}
-            onChange={e => { setPw(e.target.value); setErr(false) }}
-            placeholder="Password"
-            autoFocus
-            style={{ width: '100%', padding: '11px 14px', fontSize: 14, borderRadius: 10, border: `1px solid ${err ? '#ef4444' : 'var(--border)'}`, background: 'var(--bg-light)', color: 'var(--text)', fontFamily: "'Figtree', sans-serif", outline: 'none', boxSizing: 'border-box', marginBottom: 12 }}
-          />
-          {err && <p style={{ fontSize: 12, color: '#ef4444', fontFamily: "'Figtree', sans-serif", margin: '0 0 12px' }}>Incorrect password</p>}
-          <button type="submit" style={{ width: '100%', padding: '11px', borderRadius: 10, border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 14, fontWeight: 700, fontFamily: "'Figtree', sans-serif", cursor: 'pointer' }}>
-            Enter
-          </button>
-        </form>
-      </div>
-    </div>
-  )
+  const res = await fetch('/api/admin/insights/ai-assist', {
+    method: 'POST',
+    headers: {
+      'content-type':  'application/json',
+      'authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify({ kind, headline, theme_label: themeLabel, intro }),
+  })
+  if (!res.ok) {
+    let msg = `AI assist failed (${res.status})`
+    try { const j = await res.json(); if (j?.error) msg = j.error } catch {}
+    throw new Error(msg)
+  }
+  const data = await res.json()
+  return typeof data?.text === 'string' ? data.text : ''
 }
 
 // ── Article Editor ────────────────────────────────────────────────────────────
@@ -213,13 +275,14 @@ function ArticleEditor({ article, onSave, onBack }: {
   async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    const validationErr = validateArticleImageFile(file)
+    if (validationErr) { alert(validationErr); return }
     setImageUploading(true)
-    const ext = file.name.split('.').pop()
-    const path = `insights/${Date.now()}.${ext}`
-    const { error } = await supabase.storage.from('creator-images').upload(path, file, { upsert: true })
-    if (!error) {
-      const { data: urlData } = supabase.storage.from('creator-images').getPublicUrl(path)
-      update('image_url', urlData.publicUrl)
+    try {
+      const publicUrl = await apiUploadImage(file, 'hero')
+      update('image_url', publicUrl)
+    } catch (err: any) {
+      alert('Hero upload failed — ' + (err?.message || 'unknown'))
     }
     setImageUploading(false)
   }
@@ -228,31 +291,16 @@ function ArticleEditor({ article, onSave, onBack }: {
     if (!form.headline) { alert('Add a headline first'); return }
     setAiLoading(type)
 
-    const system = `You are a writer for PokePrices.io — a UK-focused Pokémon TCG price and market intelligence site. 
-Write in a knowledgeable, direct, collector-friendly tone. No hype, no waffle, no AI-sounding preamble. 
-Write as if a well-informed collector is talking to other collectors. 
-Use UK English. Never say "delve", "realm", "embark", "unleash", or similar AI clichés.`
-
     try {
+      const text = await callAiAssist(
+        type,
+        form.headline || '',
+        form.theme_label || '',
+        form.intro || undefined,
+      )
       if (type === 'intro') {
-        const text = await generateWithAI(
-          `Write a 2-3 sentence introduction for an article titled "${form.headline}" about ${form.theme_label}. 
-           Hook the reader with a specific, concrete observation. Don't start with "In the world of".`,
-          system
-        )
         update('intro', text.trim())
-
       } else if (type === 'body') {
-        const text = await generateWithAI(
-          `Write a full article body for "${form.headline}".
-           Theme: ${form.theme_label}.
-           ${form.intro ? `Intro already written: "${form.intro}"` : ''}
-
-           Write 400-600 words. Structure with 3-4 clear sections. Each section should have a short bold heading followed by 2-3 paragraphs.
-           Focus on practical, actionable information for collectors. Use specific examples where possible.
-           Format: use ## for section headings, regular paragraphs otherwise. No bullet points.`,
-          system
-        )
         // W47A: AI output is markdown-ish plain text. Split on \n\n
         // and classify headings so the result appears as separate
         // blocks in the editor. The admin can then style / rewrite
@@ -263,24 +311,14 @@ Use UK English. Never say "delve", "realm", "embark", "unleash", or similar AI c
             : { type: 'paragraph', text: chunk } as ArticleBlock
         ))
         setBlocks(generated)
-
-      } else if (type === 'meta') {
-        const text = await generateWithAI(
-          `Write SEO meta title and description for: "${form.headline}"
-           Theme: ${form.theme_label}
-           
-           Return ONLY this format (no other text):
-           TITLE: [60 char max title]
-           DESC: [155 char max description]`,
-          system
-        )
+      } else {
         const titleMatch = text.match(/TITLE:\s*(.+)/i)
         const descMatch  = text.match(/DESC:\s*(.+)/i)
         if (titleMatch) update('meta_title', titleMatch[1].trim())
         if (descMatch)  update('meta_description', descMatch[1].trim())
       }
-    } catch (e) {
-      alert('AI generation failed — check your API key')
+    } catch (e: any) {
+      alert('AI generation failed — ' + (e?.message || 'unknown error'))
     }
     setAiLoading(null)
   }
@@ -534,8 +572,12 @@ function ArticleList({ onNew, onEdit }: { onNew: () => void; onEdit: (a: Article
   const [deleting, setDeleting] = useState<string | null>(null)
 
   async function load() {
-    const { data } = await supabase.from('insights').select('*').order('created_at', { ascending: false })
-    if (data) setArticles(data)
+    try {
+      const data = await apiListArticles()
+      setArticles(data)
+    } catch (e: any) {
+      alert('Load failed — ' + (e?.message || 'unknown'))
+    }
     setLoading(false)
   }
 
@@ -544,17 +586,25 @@ function ArticleList({ onNew, onEdit }: { onNew: () => void; onEdit: (a: Article
   async function handleDelete(id: string, headline: string) {
     if (!confirm(`Delete "${headline}"? This cannot be undone.`)) return
     setDeleting(id)
-    await supabase.from('insights').delete().eq('id', id)
-    setArticles(a => a.filter(x => x.id !== id))
+    try {
+      await apiDeleteArticle(id)
+      setArticles(a => a.filter(x => x.id !== id))
+    } catch (e: any) {
+      alert('Delete failed — ' + (e?.message || 'unknown'))
+    }
     setDeleting(null)
   }
 
   async function handleToggleStatus(article: Article) {
     const newStatus = article.status === 'published' ? 'draft' : 'published'
-    const updates: any = { status: newStatus }
+    const updates: Partial<Article> = { status: newStatus }
     if (newStatus === 'published' && !article.published_at) updates.published_at = new Date().toISOString()
-    await supabase.from('insights').update(updates).eq('id', article.id)
-    setArticles(a => a.map(x => x.id === article.id ? { ...x, ...updates } : x))
+    try {
+      const next = await apiUpdateArticle(article.id, updates)
+      setArticles(a => a.map(x => x.id === article.id ? { ...x, ...next } : x))
+    } catch (e: any) {
+      alert('Status update failed — ' + (e?.message || 'unknown'))
+    }
   }
 
   const filtered = articles.filter(a => filter === 'all' || a.status === filter)
@@ -943,25 +993,13 @@ function ImageBlockEditor({
     setError(null)
     setUploading(true)
     try {
-      const ext = (file!.name.split('.').pop() || 'jpg').toLowerCase()
-      const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
-      const path = `insights/body/${filename}`
-      const { error: upErr } = await supabase.storage.from('creator-images').upload(path, file!, {
-        upsert: false,
-        contentType: file!.type,
-      })
-      if (upErr) {
-        setError('Upload failed: ' + upErr.message)
-        setUploading(false)
-        return
-      }
-      const { data: urlData } = supabase.storage.from('creator-images').getPublicUrl(path)
-      if (!urlData?.publicUrl || !isSafeArticleImageSrc(urlData.publicUrl)) {
+      const publicUrl = await apiUploadImage(file!, 'body')
+      if (!isSafeArticleImageSrc(publicUrl)) {
         setError('Uploaded file has an invalid URL.')
         setUploading(false)
         return
       }
-      onChange({ ...block, src: urlData.publicUrl })
+      onChange({ ...block, src: publicUrl })
     } catch (e: any) {
       setError('Upload failed: ' + (e?.message || 'unknown'))
     }
@@ -1049,55 +1087,54 @@ function ImageBlockEditor({
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
+//
+// EIC Block 0B — the LoginScreen, sessionStorage 'admin_authed' check
+// and NEXT_PUBLIC_ADMIN_PASSWORD reference have been removed from this
+// route. Server-side authentication (installed by Block 0's
+// requireAdminPage on src/app/admin/insights/page.tsx) is now the
+// authoritative gate — the client bundle only loads for an
+// authenticated allow-listed admin, and every mutation flows through
+// /api/admin/insights/* which re-verifies the same allow-list.
+//
+// Scope note: the shared sessionStorage 'admin_authed' key remains in
+// use by the sibling admin tools (AdminDashboardClient, VendorsAdmin,
+// NewsletterStudio, ContentStudio) and is untouched here.
 
 export default function InsightsAdminClient() {
-  const [authed, setAuthed]     = useState(false)
-  const [view, setView]         = useState<'list' | 'edit'>('list')
-  const [editing, setEditing]   = useState<Partial<Article> | null>(null)
-  const [articles, setArticles] = useState<Article[]>([])
-
-  // Check session storage for auth
-  useEffect(() => {
-    if (typeof window !== 'undefined' && sessionStorage.getItem('admin_authed') === '1') setAuthed(true)
-  }, [])
-
-  function handleLogin() {
-    sessionStorage.setItem('admin_authed', '1')
-    setAuthed(true)
-  }
+  const [view, setView]       = useState<'list' | 'edit'>('list')
+  const [editing, setEditing] = useState<Partial<Article> | null>(null)
 
   function handleNew() { setEditing(null); setView('edit') }
   function handleEdit(a: Article) { setEditing(a); setView('edit') }
   function handleBack() { setView('list'); setEditing(null) }
 
   async function handleSave(data: Partial<Article>) {
-    if (data.id) {
-      const { id, created_at, ...updates } = data as any
-      const { error } = await supabase.from('insights').update(updates).eq('id', id)
-      if (error) { alert('Save failed: ' + error.message); return }
-    } else {
-      const { error } = await supabase.from('insights').insert([data])
-      if (error) { alert('Save failed: ' + error.message); return }
+    try {
+      if (data.id) {
+        const { id, created_at, ...updates } = data as any
+        await apiUpdateArticle(id, updates as Partial<Article>)
+      } else {
+        await apiCreateArticle(data)
+      }
+      handleBack()
+    } catch (e: any) {
+      alert('Save failed: ' + (e?.message || 'unknown'))
     }
-    handleBack()
   }
 
-  if (!authed) return <LoginScreen onLogin={handleLogin} />
-
-  // FIX1 — wrap the authenticated view in a Fragment with the shared
-  // admin header on top so every authenticated Insights view carries
-  // the "Admin Home" / "Return to site" links without disturbing
-  // the editor or list layout below.
+  // FIX1 — wrap each view in a Fragment with the shared admin header
+  // on top so every Insights view carries the "Admin Home" / "Return
+  // to site" links without disturbing the editor / list layout below.
   if (view === 'edit') return (
     <>
-      <AdminToolHeader toolName="Insights (Articles)" />
+      <AdminToolHeader toolName="Insights (Articles)" extraLinks={[{ href: '/admin/editorial', label: 'Editorial HQ' }]} />
       <ArticleEditor article={editing} onSave={handleSave} onBack={handleBack} />
     </>
   )
 
   return (
     <>
-      <AdminToolHeader toolName="Insights (Articles)" />
+      <AdminToolHeader toolName="Insights (Articles)" extraLinks={[{ href: '/admin/editorial', label: 'Editorial HQ' }]} />
       <ArticleList onNew={handleNew} onEdit={handleEdit} />
     </>
   )

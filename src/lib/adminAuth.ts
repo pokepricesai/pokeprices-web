@@ -11,6 +11,9 @@
 
 import 'server-only'
 import { createClient } from '@supabase/supabase-js'
+import { notFound, redirect } from 'next/navigation'
+import { getSupabaseServerClient } from './supabaseServer'
+import { safeReturnTo } from './returnTo'
 
 // Flat result type with all fields always present. Avoids reliance on TS
 // discriminated-union narrowing, which is not consistently available when
@@ -76,4 +79,35 @@ export async function requireAdmin(req: Request): Promise<AdminAuthResult> {
   }
 
   return { ok: true, userId: data.user.id, email, status: 200, error: '' }
+}
+
+/**
+ * Page-level counterpart to requireAdmin(). Verifies the caller's
+ * Supabase session (cookie-based, via the App Router server client)
+ * and enforces the same ADMIN_ALLOWED_EMAILS allow-list.
+ *
+ * Behaviour:
+ *   * Not signed in                      → redirect to /dashboard/login
+ *                                          with a safe returnTo.
+ *   * Signed in but not on the allow-list → notFound() (surface hidden,
+ *                                          same fail-closed posture as
+ *                                          requireAdmin's 403).
+ *   * ADMIN_ALLOWED_EMAILS not configured → notFound() (fail-closed).
+ *
+ * Reuses the same env var and parsing as requireAdmin so there is a
+ * single source of truth for who is an admin.
+ */
+export async function requireAdminPage(returnTo: string): Promise<{ userId: string; email: string }> {
+  const supa = await getSupabaseServerClient()
+  const { data, error } = await supa.auth.getUser()
+  if (error || !data?.user) {
+    const safe = safeReturnTo(returnTo) || '/'
+    redirect(`/dashboard/login?returnTo=${encodeURIComponent(safe)}`)
+  }
+  const email = (data.user.email ?? '').toLowerCase()
+  const allow = parseAllowList()
+  if (allow.size === 0 || !email || !allow.has(email)) {
+    notFound()
+  }
+  return { userId: data.user.id, email }
 }

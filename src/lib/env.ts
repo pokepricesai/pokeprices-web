@@ -173,7 +173,7 @@ export const ENV_CATALOGUE: ReadonlyArray<EnvVarSpec> = [
     name:        'CLAUDE_API_KEY',
     scope:       'server',
     required:    false,
-    description: 'Anthropic API key. Read by edge functions smart-endpoint, content-studio-generate, scan-card. Not read by the Next app.',
+    description: 'Anthropic API key. Read by edge functions smart-endpoint, content-studio-generate, scan-card, and by the Next app route /api/admin/insights/ai-assist (falls back to ANTHROPIC_API_KEY).',
   },
   {
     name:        'OPENAI_API_KEY',
