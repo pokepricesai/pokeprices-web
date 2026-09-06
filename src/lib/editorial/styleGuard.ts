@@ -138,6 +138,27 @@ export function auditStrategistStyle(response: unknown): StyleAudit {
   return { hasViolations: violations.length > 0, violations }
 }
 
+/** Public helper so other AI-role audits (Block 6 Research Analyst,
+ *  future Writer) can lint their own JSON shapes without duplicating
+ *  the phrase/spelling lists. Returns a fresh array; does not mutate. */
+export function auditText(text: string, where: string): StyleViolation[] {
+  const out: StyleViolation[] = []
+  if (typeof text === 'string' && text.length > 0) collectViolations(text, where, out)
+  return out
+}
+
+/** Audits a flat map of `where -> string | string[]` fields, one pass
+ *  per string. Suitable for JSON shapes whose text fields are known
+ *  ahead of time. */
+export function auditFieldMap(fields: Record<string, string | readonly string[] | undefined>): StyleAudit {
+  const violations: StyleViolation[] = []
+  for (const [where, val] of Object.entries(fields)) {
+    if (typeof val === 'string') collectViolations(val, where, violations)
+    else if (Array.isArray(val)) val.forEach((s, i) => { if (typeof s === 'string') collectViolations(s, `${where}[${i}]`, violations) })
+  }
+  return { hasViolations: violations.length > 0, violations }
+}
+
 function collectViolations(text: string, where: string, out: StyleViolation[]): void {
   if (text.includes(EM_DASH)) {
     let n = 0; for (const ch of text) if (ch === EM_DASH) n++

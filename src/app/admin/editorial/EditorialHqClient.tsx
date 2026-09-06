@@ -42,7 +42,12 @@ import {
 
 // ── Props ────────────────────────────────────────────────────────
 
-type Props = { context: EditorialContext; radar: OpportunityRadar }
+type Props = {
+  context: EditorialContext
+  radar:   OpportunityRadar
+  /** Block 6 — map from project.id -> editorial_research.status. */
+  researchStatusById?: Record<string, string>
+}
 
 // ── Admin-API helpers (same pattern as InsightsAdminClient) ─────
 
@@ -182,6 +187,27 @@ function TypeBadge({ type }: { type: string }) {
     </span>
   )
 }
+// Block 6 — small pill linking to the project's Research Room with
+// the current editorial_research.status. Defaults to "Research" when
+// no research row exists yet.
+function ResearchChip({ projectId, status }: { projectId: number; status?: string }) {
+  const s = status ?? 'not_started'
+  const styles: Record<string, { bg: string; fg: string; label: string }> = {
+    not_started:     { bg: '#f1f5f9', fg: '#334155', label: 'Research: none' },
+    gathering:       { bg: '#e0f2fe', fg: '#0369a1', label: 'Research: gathering' },
+    review_required: { bg: '#fef3c7', fg: '#92400e', label: 'Research: review' },
+    blocked:         { bg: '#fee2e2', fg: '#991b1b', label: 'Research: blocked' },
+    approved:        { bg: '#dcfce7', fg: '#166534', label: 'Research: approved' },
+  }
+  const st = styles[s] ?? styles.not_started
+  return (
+    <Link href={`/admin/editorial/research/${projectId}`} style={{ textDecoration: 'none' }}>
+      <span title="Open Research Room" style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 10, background: st.bg, color: st.fg, fontSize: 10, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', border: `1px solid ${st.fg}22`, cursor: 'pointer' }}>
+        {st.label}
+      </span>
+    </Link>
+  )
+}
 
 // ── Common style bits ────────────────────────────────────────────
 
@@ -217,7 +243,8 @@ function contextProjectToRow(p: EditorialContext['projects'][number]): Editorial
 // Main component
 // ────────────────────────────────────────────────────────────────
 
-export default function EditorialHqClient({ context, radar }: Props) {
+export default function EditorialHqClient({ context, radar, researchStatusById }: Props) {
+  const getResearchStatus = useCallback((id: number): string => researchStatusById?.[String(id)] ?? 'not_started', [researchStatusById])
   const [projects, setProjects] = useState<EditorialProject[]>(() => context.projects.map(contextProjectToRow))
   const [releases, setReleases] = useState<readonly ReleaseItem[]>(() => [...context.release.recent, ...context.release.upcoming])
   const [error, setError] = useState<string | null>(null)
@@ -363,8 +390,8 @@ export default function EditorialHqClient({ context, radar }: Props) {
         <section style={{ marginBottom: 32 }}>
           <SectionHeader title="This Week" subtitle="Two publication slots. Anything with a target date in this week fills a slot." />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 14 }}>
-            <SlotCard index={1} project={thisWeekProjects[0]} week={week} onUpdate={onUpdate} onArchive={onArchive} onCreate={onCreate} radarSuggestion={radar.opportunities[0]} />
-            <SlotCard index={2} project={thisWeekProjects[1]} week={week} onUpdate={onUpdate} onArchive={onArchive} onCreate={onCreate} radarSuggestion={radar.opportunities[1] ?? radar.opportunities[0]} />
+            <SlotCard index={1} project={thisWeekProjects[0]} week={week} onUpdate={onUpdate} onArchive={onArchive} onCreate={onCreate} radarSuggestion={radar.opportunities[0]} researchStatus={thisWeekProjects[0] ? getResearchStatus(thisWeekProjects[0].id) : undefined} />
+            <SlotCard index={2} project={thisWeekProjects[1]} week={week} onUpdate={onUpdate} onArchive={onArchive} onCreate={onCreate} radarSuggestion={radar.opportunities[1] ?? radar.opportunities[0]} researchStatus={thisWeekProjects[1] ? getResearchStatus(thisWeekProjects[1].id) : undefined} />
           </div>
           {thisWeekProjects.length > 2 && (
             <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
@@ -383,7 +410,7 @@ export default function EditorialHqClient({ context, radar }: Props) {
             <SectionHeader title="Pipeline" subtitle="Planned or in progress, outside this week." />
             <div style={{ display: 'grid', gap: 8 }}>
               {activeNotThisWeek.map(p => (
-                <ProjectRow key={p.id} project={p} onUpdate={onUpdate} onArchive={onArchive} onDelete={onDelete} />
+                <ProjectRow key={p.id} project={p} onUpdate={onUpdate} onArchive={onArchive} onDelete={onDelete} researchStatus={getResearchStatus(p.id)} />
               ))}
             </div>
           </section>
@@ -392,7 +419,7 @@ export default function EditorialHqClient({ context, radar }: Props) {
         {/* Backlog */}
         <section style={{ marginBottom: 32 }}>
           <SectionHeader title="Idea Backlog" subtitle="Raw ideas without a target date. Later blocks will let the AI populate this." />
-          <BacklogSection projects={backlogProjects} onCreate={onCreate} onUpdate={onUpdate} onArchive={onArchive} onDelete={onDelete} />
+          <BacklogSection projects={backlogProjects} onCreate={onCreate} onUpdate={onUpdate} onArchive={onArchive} onDelete={onDelete} getResearchStatus={getResearchStatus} />
         </section>
 
         {/* Content Library — Block 3 */}
@@ -445,7 +472,7 @@ function StatCard({ label, value, sub }: { label: string; value: number; sub?: s
 // ── This-week slot ──────────────────────────────────────────────
 
 function SlotCard({
-  index, project, week, onUpdate, onArchive, onCreate, radarSuggestion,
+  index, project, week, onUpdate, onArchive, onCreate, radarSuggestion, researchStatus,
 }: {
   index: 1 | 2
   project: EditorialProject | undefined
@@ -454,6 +481,7 @@ function SlotCard({
   onArchive: (p: EditorialProject) => Promise<any>
   onCreate: (payload: Partial<EditorialProject>) => Promise<any>
   radarSuggestion?: Opportunity
+  researchStatus?: string
 }) {
   const [editing, setEditing] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -506,8 +534,9 @@ function SlotCard({
         <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
           Slot {index} · {project.target_publish_at ? fmtDayOfWeek(project.target_publish_at) : 'no date'}
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <StatusBadge status={project.status} />
+          <ResearchChip projectId={project.id} status={researchStatus} />
           <PriorityDot priority={project.priority} />
         </div>
       </div>
@@ -542,11 +571,12 @@ function SlotCard({
 
 // ── Pipeline row + Backlog ──────────────────────────────────────
 
-function ProjectRow({ project, onUpdate, onArchive, onDelete }: {
+function ProjectRow({ project, onUpdate, onArchive, onDelete, researchStatus }: {
   project: EditorialProject
   onUpdate: (id: number, patch: Partial<EditorialProject>) => Promise<any>
   onArchive: (p: EditorialProject) => Promise<any>
   onDelete: (id: number, title: string) => Promise<any>
+  researchStatus?: string
 }) {
   const [editing, setEditing] = useState(false)
   if (editing) {
@@ -568,6 +598,7 @@ function ProjectRow({ project, onUpdate, onArchive, onDelete }: {
       </div>
       <TypeBadge type={project.article_type} />
       <StatusBadge status={project.status} />
+      <ResearchChip projectId={project.id} status={researchStatus} />
       <PriorityDot priority={project.priority} />
       <div style={{ display: 'flex', gap: 6 }}>
         <button style={btnGhost} onClick={() => setEditing(true)}>Edit</button>
@@ -578,12 +609,13 @@ function ProjectRow({ project, onUpdate, onArchive, onDelete }: {
   )
 }
 
-function BacklogSection({ projects, onCreate, onUpdate, onArchive, onDelete }: {
+function BacklogSection({ projects, onCreate, onUpdate, onArchive, onDelete, getResearchStatus }: {
   projects: EditorialProject[]
   onCreate: (payload: Partial<EditorialProject>) => Promise<any>
   onUpdate: (id: number, patch: Partial<EditorialProject>) => Promise<any>
   onArchive: (p: EditorialProject) => Promise<any>
   onDelete: (id: number, title: string) => Promise<any>
+  getResearchStatus: (id: number) => string
 }) {
   const [creating, setCreating] = useState(false)
   return (
@@ -605,18 +637,19 @@ function BacklogSection({ projects, onCreate, onUpdate, onArchive, onDelete }: {
         </div>
       ) : (
         <div style={{ display: 'grid', gap: 8 }}>
-          {projects.map(p => <BacklogRow key={p.id} project={p} onUpdate={onUpdate} onArchive={onArchive} onDelete={onDelete} />)}
+          {projects.map(p => <BacklogRow key={p.id} project={p} onUpdate={onUpdate} onArchive={onArchive} onDelete={onDelete} researchStatus={getResearchStatus(p.id)} />)}
         </div>
       )}
     </div>
   )
 }
 
-function BacklogRow({ project, onUpdate, onArchive, onDelete }: {
+function BacklogRow({ project, onUpdate, onArchive, onDelete, researchStatus }: {
   project: EditorialProject
   onUpdate: (id: number, patch: Partial<EditorialProject>) => Promise<any>
   onArchive: (p: EditorialProject) => Promise<any>
   onDelete: (id: number, title: string) => Promise<any>
+  researchStatus?: string
 }) {
   const [editing, setEditing] = useState(false)
   const [planning, setPlanning] = useState(false)
@@ -636,6 +669,7 @@ function BacklogRow({ project, onUpdate, onArchive, onDelete }: {
         {project.angle && <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.4, marginTop: 2 }}>{project.angle}</div>}
       </div>
       <TypeBadge type={project.article_type} />
+      <ResearchChip projectId={project.id} status={researchStatus} />
       <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{fmtDate(project.created_at)}</span>
       <div style={{ display: 'flex', gap: 6 }}>
         {planning ? (
