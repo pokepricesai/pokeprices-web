@@ -5,7 +5,7 @@
 // parsed strategist response.
 
 import { describe, it, expect } from 'vitest'
-import { auditStrategistStyle, buildStyleRepairUserTurn, FORBIDDEN_TROPE_PHRASES } from '../styleGuard'
+import { auditStrategistStyle, buildStyleRepairUserTurn, FORBIDDEN_TROPE_PHRASES, BRITISH_SPELLING_PATTERNS } from '../styleGuard'
 
 function baseResponse(overrides: any = {}) {
   return {
@@ -122,6 +122,35 @@ describe('auditStrategistStyle', () => {
     expect(() => auditStrategistStyle(undefined)).not.toThrow()
     expect(() => auditStrategistStyle('a string')).not.toThrow()
     expect(auditStrategistStyle(null).hasViolations).toBe(false)
+  })
+
+  // Block 5D
+  it('flags "Short answer:" as a trope', () => {
+    const audit = auditStrategistStyle(baseResponse({
+      assistantMessage: 'Short answer: no strong Charizard signal in the current sample.',
+    }))
+    expect(audit.violations.some(v => v.kind === 'trope' && v.match === 'Short answer')).toBe(true)
+  })
+
+  it('flags each British spelling and suggests the American form', () => {
+    for (const { british, american } of BRITISH_SPELLING_PATTERNS) {
+      const audit = auditStrategistStyle(baseResponse({
+        assistantMessage: `The ${british} data is thin.`,
+      }))
+      const hit = audit.violations.find(v => v.kind === 'british_spelling' && v.match === british)
+      expect(hit, `should flag "${british}"`).toBeTruthy()
+      expect(hit!.suggest).toBe(american)
+    }
+  })
+
+  it('is case-insensitive for British spellings but only matches whole words', () => {
+    const yes = auditStrategistStyle(baseResponse({ assistantMessage: 'The Catalogue is huge.' }))
+    expect(yes.violations.some(v => v.kind === 'british_spelling' && v.match === 'catalogue')).toBe(true)
+
+    // Whole-word: "cataloguer" contains "catalogue" as a substring
+    // but not as a whole word.
+    const no = auditStrategistStyle(baseResponse({ assistantMessage: 'The cataloguer is offline.' }))
+    expect(no.violations.some(v => v.kind === 'british_spelling' && v.match === 'catalogue')).toBe(false)
   })
 })
 

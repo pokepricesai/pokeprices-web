@@ -1642,7 +1642,23 @@ function EditorialStrategistPanel({
 
 function ChatBubble({ turn }: { turn: ChatTurn }) {
   const isUser = turn.role === 'user'
-  const displayText = isUser ? turn.content : (turn.parsed?.assistantMessage || turn.content)
+  const [showRaw, setShowRaw] = useState(false)
+
+  // Block 5D — never fall back to the raw content in the normal UI.
+  // If the parser could not extract a prose assistantMessage, show a
+  // clear placeholder rather than dumping a JSON blob into the chat.
+  // Raw content stays available behind the "View raw response" toggle
+  // for debugging and audit.
+  let displayText: string
+  if (isUser) {
+    // Trim the internal MODE=chat / plan-preamble scaffolding so the
+    // user's bubble shows what they actually typed.
+    displayText = extractUserVisibleMessage(turn.content)
+  } else {
+    const prose = turn.parsed?.assistantMessage?.trim() ?? ''
+    displayText = prose || '(Recommendations updated. See panel above.)'
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start' }}>
       <div style={{
@@ -1654,13 +1670,52 @@ function ChatBubble({ turn }: { turn: ChatTurn }) {
         fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap',
         border: isUser ? 'none' : '1px solid var(--border)',
       }}>{displayText}</div>
-      {!isUser && turn.usage && (
-        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
-          {turn.usage.input_tokens} in · {turn.usage.output_tokens} out · ${turn.usage.cost_usd.toFixed(4)} · {(turn.usage.latency_ms / 1000).toFixed(1)}s
+      {!isUser && (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 3, flexWrap: 'wrap' }}>
+          {turn.usage && (
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+              {turn.usage.input_tokens} in · {turn.usage.output_tokens} out · ${turn.usage.cost_usd.toFixed(4)} · {(turn.usage.latency_ms / 1000).toFixed(1)}s
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowRaw(v => !v)}
+            style={{ fontSize: 10, color: 'var(--text-muted)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textDecoration: 'underline' }}
+          >
+            {showRaw ? 'Hide raw response' : 'View raw response'}
+          </button>
         </div>
+      )}
+      {!isUser && showRaw && (
+        <pre style={{
+          maxWidth: '85%', marginTop: 6, padding: 10,
+          background: 'var(--card)', border: '1px dashed var(--border)', borderRadius: 8,
+          fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        }}>{turn.content}</pre>
       )}
     </div>
   )
+}
+
+/** Strip internal scaffolding (MODE=chat, CURRENT ACTIVE EDITORIAL
+ *  PLAN preambles the client sends up) so the user's bubble shows
+ *  only what they actually typed. */
+function extractUserVisibleMessage(raw: string): string {
+  if (!raw) return ''
+  // Look for the first blank line after "MODE=chat" or the plan
+  // preamble; text after that is the human message. Fall back to
+  // stripping just the mode marker.
+  const modeChatIdx = raw.indexOf('MODE=chat')
+  if (modeChatIdx !== -1) {
+    // If a plan preamble was included, it lives inside a fenced
+    // ```json block. Take everything after the closing fence + blank line.
+    const afterFence = raw.match(/```\s*\n\n([\s\S]+)$/)
+    if (afterFence) return afterFence[1].trim()
+    return raw.slice(modeChatIdx + 'MODE=chat'.length).trim()
+  }
+  if (raw.startsWith('MODE=recommend')) return '(Generate recommendations)'
+  return raw
 }
 
 function RecommendationCard({

@@ -144,9 +144,14 @@ An opportunity is only eligible for the primary recommendation slot (max 2 per w
   * the evidence required to actually write the article exists NOW in the supplied context
   * the Radar's overlap verdict is "low" or "possible", never "strong"
 
-If a high-scoring or high-timeliness opportunity fails this gate (for example: release-driven with dataStrength=weak, cardCount=0, an unconfirmed release date, or grading_spread with researchRequired=true because the raw side of the sample is a listing floor), classify it as an alternative or as a "research first" item, not a primary. It is acceptable, and often correct, to return only ONE primary recommendation and to tell Luke:
+If a high-scoring or high-timeliness opportunity fails this gate (for example: release-driven with dataStrength=weak, cardCount=0, an unconfirmed release date, grading_spread with researchRequired=true because the raw side of the sample is a listing floor, or set_momentum with researchRequired=true because the tracked-cards sample is below the primary bar), classify it as an alternative or as a "research first" item, not a primary. It is acceptable, and often correct, to return only ONE primary recommendation and to tell Luke:
   * "I only have one strong recommendation this week. For the second slot the options are: research X first, or use an evergreen data study."
 Quality is more important than quota. Never promote a weak-data opportunity to a primary slot merely because timing looks attractive.
+
+REJECTION DOES NOT LOWER THE BAR
+When the user rejects one of your primary recommendations and asks for a replacement, the same quality gate above applies. You do NOT get to promote a previously-ineligible opportunity to primary just because a slot opened up. If no remaining opportunity clears the gate, say so explicitly:
+  * "No remaining opportunity currently clears the primary quality gate. I can offer these as alternatives, or you can hold the slot for an evergreen piece."
+Fill the vacated primary slot only when a specific opportunity genuinely meets every requirement. Do not narrate your reasoning in past tense ("I initially said X was too thin"). Just say what the current answer is.
 
 HOW TO USE THE RADAR
 The Opportunity Radar gives you deterministic signals with scores. Scores are inputs, not commands. You may recommend a lower-scoring opportunity over a higher-scoring one when the editorial case is stronger, but explain the reason. You may recommend against a high-scoring Radar item if the evidence base is too thin or coverage overlaps existing content.
@@ -380,11 +385,27 @@ export function parseStrategistResponse(rawText: string): StrategistResponse {
           }
         : undefined
       const actions = Array.isArray(parsed.actions) ? parsed.actions.filter(isValidAction) : undefined
-      return { assistantMessage: msg || rawText.replace(/```json[\s\S]*?```/, '').trim(), recommendations: recs, actions }
+      // Block 5D — assistantMessage must never leak a JSON fence or
+      // any raw JSON body into the UI. Prefer the explicit field
+      // from the parsed object; otherwise strip every ``` block from
+      // the raw text and trim.
+      const cleaned = msg || stripAllFences(rawText)
+      return { assistantMessage: cleaned, recommendations: recs, actions }
     }
   } catch { /* fall through */ }
   // No parsable JSON — treat the whole thing as an assistant message.
-  return { assistantMessage: rawText.trim() }
+  return { assistantMessage: stripAllFences(rawText) }
+}
+
+/** Remove every fenced code block (```json ... ``` and generic ```
+ *  ... ``` variants) plus any bare {"assistantMessage" object that
+ *  slipped in without a fence, then trim. Never re-throws. */
+function stripAllFences(raw: string): string {
+  if (typeof raw !== 'string') return ''
+  let out = raw.replace(/```[a-zA-Z]*[\s\S]*?```/g, '').trim()
+  // If what remains still starts with a bare JSON object, drop it.
+  if (/^\{[\s\S]*"assistantMessage"[\s\S]*\}\s*$/.test(out)) return ''
+  return out
 }
 
 function sanitiseRecs(raw: unknown): StrategistRecommendation[] {

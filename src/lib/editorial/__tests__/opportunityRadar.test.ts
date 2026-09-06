@@ -186,6 +186,42 @@ describe('buildOpportunityRadar', () => {
     expect(sm!.headlineSuggestion).toContain('Vivid Voltage')
   })
 
+  // Block 5D — small-sample set momentum must not be primary-eligible
+  it('flags set-momentum with <8 tracked cards as researchRequired (primary-ineligible)', async () => {
+    for (let i = 0; i < 5; i++) {
+      tables.card_trends.push({
+        card_slug: String(9000 + i), card_name: `Bulk ${i}`, set_name: 'Promo',
+        current_raw: 1500, current_psa9: 0, current_psa10: 0,
+        raw_pct_7d: 3, raw_pct_30d: -20, raw_pct_90d: 5,
+        psa10_pct_30d: null, psa10_pct_90d: null, trend_quality: 'ok', as_of: '2026-09-06',
+      })
+      tables.card_volume.push({ card_slug: String(9000 + i), grade: 'Ungraded', confidence: 'high', sales_30d: 20, sales_90d: 60 })
+    }
+    const radar = await buildOpportunityRadar(baseContext(), { now: TODAY, includeMonthly: false })
+    const sm = radar.opportunities.find(o => o.kind === 'set_momentum')
+    expect(sm).toBeTruthy()
+    expect(sm!.researchRequired).toBe(true)
+    expect(sm!.dataStrength).toBe('weak')
+    expect(sm!.citationPotential).toBe('low')
+    expect(sm!.researchReason).toMatch(/sample/i)
+  })
+
+  it('does not flag set-momentum with >=8 tracked cards as researchRequired', async () => {
+    for (let i = 0; i < 10; i++) {
+      tables.card_trends.push({
+        card_slug: String(9500 + i), card_name: `Bulk ${i}`, set_name: 'Base Set',
+        current_raw: 2000, current_psa9: 0, current_psa10: 0,
+        raw_pct_7d: 3, raw_pct_30d: -15, raw_pct_90d: 5,
+        psa10_pct_30d: null, psa10_pct_90d: null, trend_quality: 'ok', as_of: '2026-09-06',
+      })
+      tables.card_volume.push({ card_slug: String(9500 + i), grade: 'Ungraded', confidence: 'high', sales_30d: 20, sales_90d: 60 })
+    }
+    const radar = await buildOpportunityRadar(baseContext(), { now: TODAY, includeMonthly: false })
+    const sm = radar.opportunities.find(o => o.kind === 'set_momentum')
+    expect(sm).toBeTruthy()
+    expect(sm!.researchRequired ?? false).toBe(false)
+  })
+
   it('emits grading_spread as weak + researchRequired when raw prices are below the $10 meaningful floor', async () => {
     // Block 5C: 25 cards at $5 raw fall under the meaningful-raw gate.
     // The detector still emits (so the admin sees the problem), but

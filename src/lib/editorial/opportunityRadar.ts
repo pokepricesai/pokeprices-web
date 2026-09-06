@@ -120,6 +120,12 @@ const MIN_PCT_ABS_MOVER              = 8      // suppress trivial ±<8% moves
 const MIN_HEADLINE_MOVERS            = 3      // suppress "top movers" if fewer than N survive gates
 const MIN_SET_MOMENTUM_CARDS         = 4      // suppress set momentum on <4 tracked cards
 const MIN_SET_MOMENTUM_DIRECTION_PCT = 60     // >=60% of the set's tracked cards must move same direction
+// Block 5D: a set-momentum story on a 4-card sample is fine as a
+// backlog note but must NOT be eligible for a primary weekly slot.
+// The detector still emits below this threshold, but flags the
+// opportunity researchRequired so the strategist quality gate
+// blocks primary promotion.
+const MIN_SET_MOMENTUM_PRIMARY_CARDS = 8      // primary-eligible only at this sample size
 const MIN_POP_TOTAL                  = 100    // psa_population sample must be >= 100 graded
 const MIN_GRADING_SPREAD_CARDS       = 20     // grading-spread study needs >= N cards
 // Block 5C: the *headline* ratio is only editorially meaningful when the
@@ -449,20 +455,26 @@ function detectSetMomentum(trends: TrendRow[], overlapArticles: OverlapArt[], co
       timelinessBoost: 10,
       overlapPenalty:  overlapPenalty(overlap),
     })
+    // Block 5D — small-sample gate. A set-momentum story on 4-7
+    // tracked cards is fine as a backlog note or callout but not
+    // primary-eligible. Flag researchRequired so the strategist gate
+    // blocks primary promotion regardless of user rejection cycles.
+    const primaryEligibleSample = g.total >= MIN_SET_MOMENTUM_PRIMARY_CARDS
     out.push({
       id: `set-momentum-${slugify(setName)}`,
       kind: 'set_momentum',
       headlineSuggestion: headline,
       angle,
-      whyNow: `${Math.round(Math.max(risingPct, fallingPct))}% of the ${g.total} tracked ${setName} cards are ${direction === 'outperforming' ? 'rising' : 'falling'} — a statistically visible cluster in the current 30-day data.`,
+      whyNow: `${Math.round(Math.max(risingPct, fallingPct))}% of the ${g.total} tracked ${setName} cards are ${direction === 'outperforming' ? 'rising' : 'falling'}. A visible cluster in the current 30-day data.`,
       score,
       scoreReasons: [
         `${g.total} tracked cards in the set`,
         `${Math.round(Math.max(risingPct, fallingPct))}% same-direction`,
         `avg move ${fmtPct(avgPct)}`,
+        primaryEligibleSample ? 'sample size meets the primary-recommendation bar' : `sample size (${g.total}) below the primary bar of ${MIN_SET_MOMENTUM_PRIMARY_CARDS}`,
       ],
-      dataStrength: g.total >= 8 ? 'strong' : 'medium',
-      citationPotential: g.total >= 8 ? 'medium' : 'low',
+      dataStrength: primaryEligibleSample ? (g.total >= 12 ? 'strong' : 'medium') : 'weak',
+      citationPotential: primaryEligibleSample ? (g.total >= 12 ? 'medium' : 'low') : 'low',
       suggestedArticleType: 'market_analysis',
       suggestedTiming: 'this week',
       relatedSets: [setName],
@@ -473,11 +485,18 @@ function detectSetMomentum(trends: TrendRow[], overlapArticles: OverlapArt[], co
         { label: 'Average 30d move', value: fmtPct(avgPct) },
       ],
       evidenceSummary: [
-        `Grouped card_trends by set_name, filtered to sets with ≥${MIN_SET_MOMENTUM_CARDS} tracked cards.`,
-        `Direction threshold: ≥${MIN_SET_MOMENTUM_DIRECTION_PCT}% same-direction moves.`,
+        `Grouped card_trends by set_name, filtered to sets with at least ${MIN_SET_MOMENTUM_CARDS} tracked cards.`,
+        `Direction threshold: at least ${MIN_SET_MOMENTUM_DIRECTION_PCT}% same-direction moves.`,
+        primaryEligibleSample
+          ? `Primary-recommendation bar: sample of ${g.total} tracked cards meets the ${MIN_SET_MOMENTUM_PRIMARY_CARDS}-card minimum.`
+          : `Primary-recommendation bar: this ${g.total}-card sample is below the ${MIN_SET_MOMENTUM_PRIMARY_CARDS}-card minimum, so this can only be a callout or alternative, not a standalone weekly article.`,
       ],
       overlap: { verdict: overlap.verdict, topMatchSlug: overlap.matches[0]?.slug ?? null, topMatchHeadline: overlap.matches[0]?.headline ?? null },
       visuals: ['ranking_table', 'set_comparison', 'price_history_chart'],
+      researchRequired: !primaryEligibleSample,
+      researchReason: primaryEligibleSample
+        ? undefined
+        : `Set-momentum sample is only ${g.total} tracked cards. A standalone weekly article needs at least ${MIN_SET_MOMENTUM_PRIMARY_CARDS} same-direction cards in the same set to support the headline claim.`,
     })
   }
   return out
