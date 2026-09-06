@@ -20,9 +20,10 @@ const tables: Record<string, Row[]> = {
 
 function makeQuery(rows: Row[]) {
   // A minimal Supabase-js query-builder double: supports select, eq,
-  // neq, gte, lte, order, limit and the terminal thenable that returns
-  // { data, error }.
-  const state = { rows: rows.slice(), thened: false }
+  // neq, gte, lte, order, limit, range, and the terminal thenable
+  // that returns { data, error }. `.range()` support was added in
+  // Block 5B so paged fetches work under test.
+  const state = { rows: rows.slice(), thened: false, rangeFrom: null as number | null, rangeTo: null as number | null }
   const chain: any = {
     select() { return chain },
     eq(col: string, val: any) { state.rows = state.rows.filter(r => r[col] === val); return chain },
@@ -31,9 +32,12 @@ function makeQuery(rows: Row[]) {
     lte(col: string, val: any) { state.rows = state.rows.filter(r => r[col] != null && r[col] <= val); return chain },
     order() { return chain },
     limit() { return chain },
+    range(from: number, to: number) { state.rangeFrom = from; state.rangeTo = to; return chain },
     then(resolve: (v: any) => any) {
       state.thened = true
-      return Promise.resolve({ data: state.rows, error: null }).then(resolve)
+      let out = state.rows
+      if (state.rangeFrom != null && state.rangeTo != null) out = out.slice(state.rangeFrom, state.rangeTo + 1)
+      return Promise.resolve({ data: out, error: null }).then(resolve)
     },
   }
   return chain

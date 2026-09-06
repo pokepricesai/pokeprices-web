@@ -19,6 +19,7 @@
 import 'server-only'
 import { getSupabaseServiceClient } from '@/lib/supabaseService'
 import { bodyJsonToPlainText, normaliseSetName, tokeniseForSearch } from './plainText'
+import { fetchAllPages } from './pageFetch'
 
 // ── Constants ────────────────────────────────────────────────────
 
@@ -167,13 +168,19 @@ export async function fetchReleaseContext(now = new Date()): Promise<ReleaseCont
   const backCut    = isoDate(shiftDays(now, -WINDOW_DAYS_BACK))
   const forwardCut = isoDate(shiftDays(now,  WINDOW_DAYS_FORWARD))
 
-  // Three parallel fetches — none depends on the others.
-  const [cardsRes, rcRes, insightsRes, projectsRes] = await Promise.all([
-    supa.from('cards')
-      .select('set_name, set_release_date')
-      .gte('set_release_date', backCut)
-      .lte('set_release_date', forwardCut)
-      .limit(20000),
+  // Four parallel fetches. The `cards` prefetch is paged defensively
+  // because PostgREST silently caps responses at db-max-rows (1000 on
+  // Supabase-managed defaults). A window today returns 0 cards, but
+  // the catalogue grows and we must not silently truncate. The other
+  // three fetches are already well below the cap.
+  const [cardsPaged, rcRes, insightsRes, projectsRes] = await Promise.all([
+    fetchAllPages<{ set_name: string; set_release_date: string }>(
+      () => supa.from('cards')
+        .select('set_name, set_release_date')
+        .gte('set_release_date', backCut)
+        .lte('set_release_date', forwardCut),
+      { hardMaxRows: 20_000 },
+    ),
     supa.from('release_calendar')
       .select('id, set_name, set_code, release_date, region, jp_release_date, confirmed, notes')
       .gte('release_date', backCut)
@@ -189,12 +196,11 @@ export async function fetchReleaseContext(now = new Date()): Promise<ReleaseCont
       .neq('status', 'archived')
       .limit(500),
   ])
-  if (cardsRes.error)    throw new Error(`releaseContext: cards ${cardsRes.error.message}`)
   if (rcRes.error)       throw new Error(`releaseContext: release_calendar ${rcRes.error.message}`)
   if (insightsRes.error) throw new Error(`releaseContext: insights ${insightsRes.error.message}`)
   if (projectsRes.error) throw new Error(`releaseContext: editorial_projects ${projectsRes.error.message}`)
 
-  const cardRows = (cardsRes.data ?? []) as { set_name: string; set_release_date: string }[]
+  const cardRows = cardsPaged.rows
   const rcRows   = (rcRes.data ?? []) as RcLite[]
   const insights = (insightsRes.data ?? []) as InsightLite[]
   const projects = (projectsRes.data ?? []) as ProjectLite[]

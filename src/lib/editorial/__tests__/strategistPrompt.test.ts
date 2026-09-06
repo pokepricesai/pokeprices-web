@@ -10,6 +10,8 @@ import { describe, it, expect } from 'vitest'
 import {
   buildStrategistSystemPrompt,
   parseStrategistResponse,
+  POKEPRICES_EDITORIAL_PROFILE,
+  STRATEGIST_ROLE_RULES,
 } from '../strategistPrompt'
 
 const emptyContext = {
@@ -39,7 +41,7 @@ describe('buildStrategistSystemPrompt', () => {
   it('includes the today date and non-invention rule in the system prompt', () => {
     const { system } = buildStrategistSystemPrompt(emptyContext as any, emptyRadar as any)
     expect(system).toContain('2026-09-06')
-    expect(system).toContain('Do NOT invent')
+    expect(system).toContain('Do not invent')
     expect(system).toContain('two exceptional articles per week')
   })
 
@@ -51,6 +53,55 @@ describe('buildStrategistSystemPrompt', () => {
     const round = JSON.parse(contextJson)
     expect(round.today).toBe('2026-09-06')
     expect(round.weeklyGoal).toContain('two')
+  })
+
+  // Block 5B — style + gate assertions
+  it('does not contain any em dash characters in the prose portion of the prompt', () => {
+    // Guard against future edits reintroducing em dashes. The context
+    // JSON block can legitimately include user data with em dashes,
+    // so we only check the prose (everything before the JSON fence).
+    const { system, contextJson } = buildStrategistSystemPrompt(emptyContext as any, emptyRadar as any)
+    const prose = system.replace(contextJson, '').replace(/```[\s\S]*?```/g, '')
+    expect(prose.includes('—')).toBe(false)
+  })
+
+  it('mandates American English in the writing style rules', () => {
+    const { system } = buildStrategistSystemPrompt(emptyContext as any, emptyRadar as any)
+    expect(system).toMatch(/American English/i)
+    expect(system).toMatch(/behavior.*not.*behaviour/i)
+  })
+
+  it('lists the AI-trope patterns the model must avoid', () => {
+    const { system } = buildStrategistSystemPrompt(emptyContext as any, emptyRadar as any)
+    for (const trope of [
+      'Honest answer:',
+      "I'm going to push back",
+      "In the world of",
+      'not just X, but Y',
+    ]) expect(system).toContain(trope)
+  })
+
+  it('states the primary-recommendation data-quality gate', () => {
+    const { system } = buildStrategistSystemPrompt(emptyContext as any, emptyRadar as any)
+    expect(system).toContain('PRIMARY-RECOMMENDATION QUALITY GATE')
+    expect(system).toMatch(/never .*weak/i)
+    expect(system).toMatch(/Quality is more important than quota/i)
+  })
+
+  it('does not describe PokePrices as UK-only', () => {
+    const { system } = buildStrategistSystemPrompt(emptyContext as any, emptyRadar as any)
+    expect(system).not.toMatch(/UK-focused/i)
+    expect(system).not.toMatch(/UK TCG market/i)
+  })
+
+  it('exposes POKEPRICES_EDITORIAL_PROFILE + STRATEGIST_ROLE_RULES for reuse', () => {
+    expect(typeof POKEPRICES_EDITORIAL_PROFILE).toBe('string')
+    expect(POKEPRICES_EDITORIAL_PROFILE.length).toBeGreaterThan(400)
+    expect(typeof STRATEGIST_ROLE_RULES).toBe('string')
+    expect(STRATEGIST_ROLE_RULES.length).toBeGreaterThan(400)
+    // Neither should contain em dashes.
+    expect(POKEPRICES_EDITORIAL_PROFILE.includes('—')).toBe(false)
+    expect(STRATEGIST_ROLE_RULES.includes('—')).toBe(false)
   })
 
   it('excludes rejected radar opportunities from the compact context', () => {

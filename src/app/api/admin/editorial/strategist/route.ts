@@ -173,17 +173,19 @@ function buildRecommendUserTurn(rejected: readonly string[]): string {
   const lines = [
     'MODE=recommend',
     '',
-    'Give me your recommended two articles for this week.',
+    'Recommend the strongest articles for this week.',
     '',
     'Rules:',
-    '• Prioritise citeable data-led work.',
-    '• Quality over quota — if only one strong opportunity exists, return one and say so.',
-    '• Preserve every qualifier the Radar provides. Do not invent PokePrices figures.',
-    '• Reference existing published articles by slug when overlap is a factor.',
-    '• Include up to five alternatives.',
+    '  * Prioritize citable data-led work.',
+    '  * Quality over quota. Return one primary if only one clears the data-quality gate, and say so.',
+    '  * Do not promote weak-data or unconfirmed-release opportunities to primary. Classify them as alternatives or "research first".',
+    '  * Preserve every qualifier the Radar provides. Do not invent PokePrices figures.',
+    '  * Reference existing published articles by slug when overlap is a factor.',
+    '  * Include up to five alternatives.',
+    '  * Follow all writing-style rules in the editorial profile (American English, no em dashes, no AI tropes).',
   ]
   if (rejected.length) {
-    lines.push('', `The following Radar opportunity IDs were rejected earlier in this conversation and must not be re-recommended: ${rejected.join(', ')}.`)
+    lines.push('', `The following Radar opportunity ids were rejected earlier in this conversation and must not be re-recommended: ${rejected.join(', ')}.`)
   }
   return lines.join('\n')
 }

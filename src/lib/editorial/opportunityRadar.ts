@@ -33,6 +33,7 @@ import { getSupabaseServiceClient } from '@/lib/supabaseService'
 import type { EditorialContext } from './context'
 import type { ReleaseItem } from './releaseContext'
 import { computeOverlap, type OverlapReport } from './overlap'
+import { fetchAllPages } from './pageFetch'
 
 // ─────────────────────────────────────────────────────────────────
 // Public output shape
@@ -138,33 +139,62 @@ export async function buildOpportunityRadar(
   const detectorsRun:        OpportunityKind[] = []
   const detectorsSuppressed: OpportunityRadar['meta']['detectorsSuppressed'][number][] = []
 
-  // Fetch every raw signal we need up-front, in parallel. This is the
-  // full data budget: <10 queries per Radar run regardless of how many
-  // opportunities we produce.
-  const [trendsRes, volumeRes, popRes, freshRes] = await Promise.all([
+  // Fetch card_trends first (a bounded, single-page query today — 196
+  // rows in prod). Every downstream fetch is derived from these slugs
+  // + set names, so it is safe to do the other three in a second
+  // parallel batch. This ordering matters: pre-Block-5B we naïvely
+  // asked for `.limit(200000)` on card_volume, but PostgREST silently
+  // caps every response at `db-max-rows` (Supabase managed default is
+  // 1000). That truncated the trusted-trend join to ~5% coverage and
+  // suppressed grading_spread + population_scarcity in prod even when
+  // the underlying data supported them. Fix: targeted `.in(...)` on
+  // volume (bounded by trend size), and paged fetch on psa_population.
+  const [trendsRes, freshRes] = await Promise.all([
     supa.from('card_trends')
       .select('card_slug, card_name, set_name, current_raw, current_psa9, current_psa10, raw_pct_7d, raw_pct_30d, raw_pct_90d, psa10_pct_30d, psa10_pct_90d, trend_quality, as_of')
       .not('current_raw', 'is', null)
       .limit(2000),
-    supa.from('card_volume')
-      .select('card_slug, confidence, sales_30d, sales_90d')
-      .eq('grade', 'Ungraded')
-      .in('confidence', ['high', 'medium'])
-      .limit(200_000),
-    supa.from('psa_population')
-      .select('set_name, card_name, card_number, psa_9, psa_10, total_graded')
-      .gte('total_graded', MIN_POP_TOTAL)
-      .limit(20_000),
     supa.from('card_trends').select('as_of').order('as_of', { ascending: false }).limit(1),
   ])
   if (trendsRes.error) throw new Error(`radar: card_trends ${trendsRes.error.message}`)
-  if (volumeRes.error) throw new Error(`radar: card_volume ${volumeRes.error.message}`)
-  if (popRes.error)    throw new Error(`radar: psa_population ${popRes.error.message}`)
-
   const trends = trendsRes.data ?? []
-  const volume = volumeRes.data ?? []
-  const pop    = popRes.data ?? []
   const trendsAsOf = ((freshRes.data ?? [])[0]?.as_of as string | undefined) ?? null
+
+  const trendSlugs    = Array.from(new Set(trends.map((t: any) => String(t.card_slug)).filter(Boolean)))
+  const trendSetNames = Array.from(new Set(trends.map((t: any) => String(t.set_name || '')).filter(Boolean)))
+  // psa_population uses "Pokemon <SetName>" for many sets; check both.
+  const popSetCandidates = Array.from(new Set([
+    ...trendSetNames,
+    ...trendSetNames.map(s => `Pokemon ${s}`),
+  ]))
+
+  const [volumeResult, popResult] = await Promise.all([
+    // Volume: targeted by slug — always <= trendSlugs.length rows,
+    // therefore always <= 1000 in current prod, therefore no cap risk.
+    trendSlugs.length === 0
+      ? Promise.resolve({ rows: [] as any[], pagesFetched: 0, truncated: false })
+      : fetchAllPages<any>(
+          () => supa.from('card_volume')
+            .select('card_slug, confidence, sales_30d, sales_90d')
+            .eq('grade', 'Ungraded')
+            .in('confidence', ['high', 'medium'])
+            .in('card_slug', trendSlugs),
+        ),
+    // Population: bounded to sets that intersect our tracked-trend set,
+    // plus the grade/total_graded thresholds, then paged. 3.8k rows in
+    // current prod → ~4 pages.
+    popSetCandidates.length === 0
+      ? Promise.resolve({ rows: [] as any[], pagesFetched: 0, truncated: false })
+      : fetchAllPages<any>(
+          () => supa.from('psa_population')
+            .select('set_name, card_name, card_number, psa_9, psa_10, total_graded')
+            .gte('total_graded', MIN_POP_TOTAL)
+            .in('set_name', popSetCandidates),
+          { hardMaxRows: 20_000 },
+        ),
+  ])
+  const volume = volumeResult.rows
+  const pop    = popResult.rows
 
   // Volume index (bare-slug keyed) for cheap confidence lookups.
   const volumeBySlug = new Map<string, { confidence: string; sales_30d: number | null; sales_90d: number | null }>()

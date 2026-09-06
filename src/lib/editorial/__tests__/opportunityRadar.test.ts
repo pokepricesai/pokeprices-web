@@ -16,7 +16,7 @@ const tables: Record<string, Row[]> = {
 }
 
 function makeQuery(rows: Row[]) {
-  const state = { rows: rows.slice() }
+  const state = { rows: rows.slice(), rangeFrom: 0 as number | null, rangeTo: null as number | null }
   const chain: any = {
     select() { return chain },
     eq(col: string, val: any) { state.rows = state.rows.filter(r => r[col] === val); return chain },
@@ -27,7 +27,12 @@ function makeQuery(rows: Row[]) {
     neq(col: string, val: any) { state.rows = state.rows.filter(r => r[col] !== val); return chain },
     order() { return chain },
     limit() { return chain },
-    then(resolve: (v: any) => any) { return Promise.resolve({ data: state.rows, error: null }).then(resolve) },
+    range(from: number, to: number) { state.rangeFrom = from; state.rangeTo = to; return chain },
+    then(resolve: (v: any) => any) {
+      let out = state.rows
+      if (state.rangeFrom != null && state.rangeTo != null) out = out.slice(state.rangeFrom, state.rangeTo + 1)
+      return Promise.resolve({ data: out, error: null }).then(resolve)
+    },
   }
   return chain
 }
