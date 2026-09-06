@@ -186,11 +186,14 @@ describe('buildOpportunityRadar', () => {
     expect(sm!.headlineSuggestion).toContain('Vivid Voltage')
   })
 
-  it('detects a grading-spread study when >= 20 cards have raw+PSA10 prices', async () => {
+  it('emits grading_spread as weak + researchRequired when raw prices are below the $10 meaningful floor', async () => {
+    // Block 5C: 25 cards at $5 raw fall under the meaningful-raw gate.
+    // The detector still emits (so the admin sees the problem), but
+    // flags it primary-ineligible.
     for (let i = 0; i < 25; i++) {
       tables.card_trends.push({
         card_slug: String(3000 + i), card_name: `Cool ${i}`, set_name: 'Team Rocket',
-        current_raw: 500, current_psa9: 2500, current_psa10: 8000, // 16× multiple
+        current_raw: 500, current_psa9: 2500, current_psa10: 8000,
         raw_pct_7d: null, raw_pct_30d: null, raw_pct_90d: null,
         psa10_pct_30d: null, psa10_pct_90d: null, trend_quality: 'ok', as_of: '2026-09-06',
       })
@@ -199,7 +202,27 @@ describe('buildOpportunityRadar', () => {
     const radar = await buildOpportunityRadar(baseContext(), { now: TODAY, includeMonthly: false })
     const g = radar.opportunities.find(o => o.kind === 'grading_spread')
     expect(g).toBeTruthy()
-    expect(g!.citationPotential).toBe('medium') // 25 cards -> medium
-    expect(g!.metrics.some(m => m.label.includes('Median'))).toBe(true)
+    expect(g!.researchRequired).toBe(true)
+    expect(g!.dataStrength).toBe('weak')
+    expect(g!.citationPotential).toBe('low')
+    expect(g!.headlineSuggestion).toMatch(/research required/i)
+  })
+
+  it('emits a full grading_spread study when >= 20 cards clear the $10 meaningful floor', async () => {
+    for (let i = 0; i < 25; i++) {
+      tables.card_trends.push({
+        card_slug: String(4000 + i), card_name: `Cool ${i}`, set_name: 'Team Rocket',
+        current_raw: 1500, current_psa9: 6000, current_psa10: 24000, // 16x, raw $15
+        raw_pct_7d: null, raw_pct_30d: null, raw_pct_90d: null,
+        psa10_pct_30d: null, psa10_pct_90d: null, trend_quality: 'ok', as_of: '2026-09-06',
+      })
+      tables.card_volume.push({ card_slug: String(4000 + i), grade: 'Ungraded', confidence: 'high', sales_30d: 5, sales_90d: 15 })
+    }
+    const radar = await buildOpportunityRadar(baseContext(), { now: TODAY, includeMonthly: false })
+    const g = radar.opportunities.find(o => o.kind === 'grading_spread')
+    expect(g).toBeTruthy()
+    expect(g!.researchRequired ?? false).toBe(false)
+    expect(g!.citationPotential).toBe('medium')
+    expect(g!.headlineSuggestion).not.toMatch(/research required/i)
   })
 })

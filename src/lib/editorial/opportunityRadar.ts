@@ -90,6 +90,14 @@ export type Opportunity = {
   evidenceSummary:     readonly string[]
   overlap:             { verdict: OverlapReport['verdict']; topMatchSlug: string | null; topMatchHeadline: string | null }
   visuals:             readonly OpportunityVisual[]
+  /** Block 5C — when true, the underlying data has a known integrity
+   *  problem (sample composition, coverage, or freshness) that must
+   *  be resolved before this can be treated as a primary weekly
+   *  recommendation. The Strategist's quality gate treats this as
+   *  automatically primary-ineligible. */
+  researchRequired?:   boolean
+  /** Human-readable reason attached when researchRequired = true. */
+  researchReason?:     string
 }
 
 export type OpportunityRadar = {
@@ -114,6 +122,16 @@ const MIN_SET_MOMENTUM_CARDS         = 4      // suppress set momentum on <4 tra
 const MIN_SET_MOMENTUM_DIRECTION_PCT = 60     // >=60% of the set's tracked cards must move same direction
 const MIN_POP_TOTAL                  = 100    // psa_population sample must be >= 100 graded
 const MIN_GRADING_SPREAD_CARDS       = 20     // grading-spread study needs >= N cards
+// Block 5C: the *headline* ratio is only editorially meaningful when the
+// raw side of the comparison is a real market, not a listing-floor
+// artifact. When every card in the sample sits at $1-$3 raw (which is
+// the current live state — see audit in the Block 5C report), the
+// ratios are mechanically large without saying anything readers can
+// use. Below this raw-price threshold the detector still emits the
+// opportunity but flags it as weak+research_required so the 5B
+// primary-recommendation gate blocks it.
+const MIN_GRADING_SPREAD_MEANINGFUL_RAW_CENTS = 1000  // $10
+const MIN_GRADING_SPREAD_MEANINGFUL_COUNT     = 20    // need N cards at or above the raw floor
 const MIN_RELEASE_CARD_COUNT_RETRO   = 50     // release retrospective needs cataloged cards
 const CLUSTER_MIN_REPEAT             = 3      // >=N repeated entities in movers list = cluster
 const MAX_OPPORTUNITIES              = 30
@@ -471,28 +489,54 @@ function detectGradingSpread(trends: TrendRow[], overlapArticles: OverlapArt[], 
   const usable = trends.filter(t => (t.current_raw ?? 0) > 0 && (t.current_psa10 ?? 0) > 0)
   if (usable.length < MIN_GRADING_SPREAD_CARDS) return null
 
+  // Block 5C — meaningful-raw filter. A card whose raw side is a
+  // couple of dollars is not evidence of a "grading premium"; it is
+  // evidence of a listing floor. Editorial claims about the grading
+  // multiple must come from cards where the raw market is a real
+  // market. The 135-card sample in prod today has ZERO cards over
+  // $5 raw, so this branch fires and downgrades the opportunity.
+  const meaningful = usable.filter(t => (t.current_raw ?? 0) >= MIN_GRADING_SPREAD_MEANINGFUL_RAW_CENTS)
+  const meaningfulEnough = meaningful.length >= MIN_GRADING_SPREAD_MEANINGFUL_COUNT
+
+  // Statistics always computed on the FULL usable set so the diagnostic
+  // is honest about the state of the data. The reason field explains
+  // why the number is not necessarily editorial gold.
   const ratios = usable.map(t => (t.current_psa10! / t.current_raw!)).filter(r => Number.isFinite(r) && r > 0)
   const median = medianOf(ratios)
   const p90    = percentile(ratios, 0.9)
   const over10x = usable.filter(t => (t.current_psa10! / t.current_raw!) >= 10).length
-
-  const headline = `The PSA 10 premium across ${usable.length} PokePrices tracked cards`
-  const angle = `Analysis of the raw-to-PSA-10 price multiple across ${usable.length} cards with reliable pricing on both grades. Median multiple, top 10%, and the outliers where grading really matters.`
-  const whyNow = `${over10x} of the ${usable.length} tracked cards command a PSA 10 price of 10× raw or more — a strong dataset for a citeable study.`
+  const rawMedianUsd = medianOf(usable.map(t => (t.current_raw ?? 0) / 100))
+  const rawMaxUsd    = Math.max(...usable.map(t => (t.current_raw ?? 0) / 100))
 
   const topOutliers = usable
     .map(t => ({ ...t, mult: (t.current_psa10! / t.current_raw!) }))
     .sort((a, b) => b.mult - a.mult)
     .slice(0, 8)
 
+  const headline = meaningfulEnough
+    ? `The PSA 10 premium across ${meaningful.length} PokePrices tracked cards`
+    : `Grading multiple in the current PokePrices tracked sample: research required`
+  const angle = meaningfulEnough
+    ? `Analysis of the raw-to-PSA-10 price multiple across ${meaningful.length} cards where the raw market itself is meaningful (raw >= $${MIN_GRADING_SPREAD_MEANINGFUL_RAW_CENTS / 100}). Median multiple, top decile, and the outliers where grading really matters.`
+    : `The current tracked sample has ${usable.length} cards with both raw and PSA 10 prices, but every one sits at $${rawMedianUsd.toFixed(2)} raw or below (max $${rawMaxUsd.toFixed(2)}). Any raw-to-PSA-10 ratio in this sample reflects listing-floor pricing on common cards, not a grading premium the reader can act on.`
+  const whyNow = meaningfulEnough
+    ? `${over10x} of the ${meaningful.length} qualifying cards command a PSA 10 price of at least 10x raw.`
+    : `The mechanical median multiple across the ${usable.length} tracked cards is ${median.toFixed(1)}x, but the underlying raw prices are all $1 to $${rawMaxUsd.toFixed(2)}. This is a data-composition artifact. Extend tracked-card coverage to higher-value raw markets before publishing.`
+
   const overlap = computeOverlap({ title: headline, angle, theme: 'grading' }, overlapArticles)
-  const score = scoreOpportunity({
-    baseline:        70,
-    dataBoost:       Math.min(15, usable.length / 10),
-    magnitudeBoost:  Math.min(10, over10x / 5),
-    timelinessBoost: 5,     // evergreen — not time-sensitive
-    overlapPenalty:  overlapPenalty(overlap),
-  })
+  const score = meaningfulEnough
+    ? scoreOpportunity({
+        baseline:        70,
+        dataBoost:       Math.min(15, meaningful.length / 10),
+        magnitudeBoost:  Math.min(10, over10x / 5),
+        timelinessBoost: 5,
+        overlapPenalty:  overlapPenalty(overlap),
+      })
+    : scoreOpportunity({
+        // Not zero, so it still appears in the Radar for planning.
+        baseline: 30, dataBoost: 0, magnitudeBoost: 0, timelinessBoost: 0,
+        overlapPenalty: overlapPenalty(overlap),
+      })
 
   return {
     id: 'grading-spread-study',
@@ -501,31 +545,55 @@ function detectGradingSpread(trends: TrendRow[], overlapArticles: OverlapArt[], 
     angle,
     whyNow,
     score,
-    scoreReasons: [
-      `${usable.length}-card sample with raw + PSA 10 prices`,
-      `median multiple ${median.toFixed(1)}×`,
-      `${over10x} cards ≥10× raw`,
-      overlap.verdict === 'low' ? 'no direct competitor article' : `${overlap.verdict} overlap`,
-    ],
-    dataStrength: usable.length >= 100 ? 'strong' : usable.length >= 50 ? 'medium' : 'weak',
-    citationPotential: usable.length >= 100 ? 'high' : 'medium',
+    scoreReasons: meaningfulEnough
+      ? [
+          `${meaningful.length}-card sample with raw>=$${MIN_GRADING_SPREAD_MEANINGFUL_RAW_CENTS / 100} and PSA 10 prices`,
+          `median multiple ${median.toFixed(1)}x`,
+          `${over10x} cards >=10x raw`,
+          overlap.verdict === 'low' ? 'no direct competitor article' : `${overlap.verdict} overlap`,
+        ]
+      : [
+          `${usable.length} cards match the raw+PSA10 join`,
+          `only ${meaningful.length} of those have raw >= $${MIN_GRADING_SPREAD_MEANINGFUL_RAW_CENTS / 100}`,
+          `research required: sample composition unfit for a citable grading study`,
+        ],
+    dataStrength: meaningfulEnough
+      ? (meaningful.length >= 100 ? 'strong' : meaningful.length >= 50 ? 'medium' : 'weak')
+      : 'weak',
+    citationPotential: meaningfulEnough
+      ? (meaningful.length >= 100 ? 'high' : 'medium')
+      : 'low',
     suggestedArticleType: 'data_study',
     suggestedTiming: null,
     relatedSets: Array.from(new Set(topOutliers.map(t => t.set_name))).slice(0, 5),
     relatedCards: topOutliers.map(t => ({ slug: String(t.card_slug), name: t.card_name, setName: t.set_name, urlSlug: null })),
     metrics: [
-      { label: 'Cards in study', value: String(usable.length) },
-      { label: 'Median PSA 10 / raw multiple', value: `${median.toFixed(1)}×` },
-      { label: '90th-percentile multiple', value: `${p90.toFixed(1)}×` },
-      { label: '≥10× multiple', value: String(over10x) },
+      { label: 'Cards with raw + PSA 10', value: String(usable.length) },
+      { label: `Cards at raw >= $${MIN_GRADING_SPREAD_MEANINGFUL_RAW_CENTS / 100}`, value: String(meaningful.length) },
+      { label: 'Median raw price', value: `$${rawMedianUsd.toFixed(2)}` },
+      { label: 'Maximum raw price', value: `$${rawMaxUsd.toFixed(2)}` },
+      { label: 'Median PSA 10 / raw multiple (whole sample)', value: `${median.toFixed(1)}x` },
+      { label: '90th-percentile multiple (whole sample)', value: `${p90.toFixed(1)}x` },
+      { label: '>=10x multiple (whole sample)', value: String(over10x) },
     ],
-    evidenceSummary: [
-      'Joined card_trends filtered by high/medium confidence card_volume.',
-      'Computed current_psa10 / current_raw per card, filtered to positive finite values.',
-      'Reported median, 90th percentile and count of ≥10× outliers.',
-    ],
+    evidenceSummary: meaningfulEnough
+      ? [
+          'Joined card_trends filtered by high or medium confidence card_volume.',
+          'Filtered to cards where raw side is a meaningful market (raw >= $10).',
+          'Reported median, 90th percentile, and count of >=10x outliers.',
+        ]
+      : [
+          `Joined card_trends filtered by high/medium confidence card_volume: ${usable.length} cards.`,
+          `Every card in the sample has raw price between $${(Math.min(...usable.map(t => (t.current_raw ?? 0) / 100))).toFixed(2)} and $${rawMaxUsd.toFixed(2)}.`,
+          'Ratio statistics are mathematically correct but semantically weak: dividing a listing-floor raw price by a real graded market price mechanically produces large multiples.',
+          'A citable grading-spread study needs cards where the raw market itself is meaningful (raw at least $10, ideally higher). Waiting on broader tracked-card coverage.',
+        ],
     overlap: { verdict: overlap.verdict, topMatchSlug: overlap.matches[0]?.slug ?? null, topMatchHeadline: overlap.matches[0]?.headline ?? null },
     visuals: ['raw_psa9_psa10_comparison', 'ranking_table', 'large_stat_callout'],
+    researchRequired: !meaningfulEnough,
+    researchReason:   meaningfulEnough
+      ? undefined
+      : `The 135-card tracked sample has zero cards at raw >= $${MIN_GRADING_SPREAD_MEANINGFUL_RAW_CENTS / 100}. Any headline ratio is a listing-floor artifact, not a grading premium.`,
   }
 }
 

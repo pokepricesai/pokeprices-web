@@ -26,6 +26,7 @@ import { checkAdminRateLimit } from '@/lib/adminRateLimit'
 import { buildEditorialContext } from '@/lib/editorial/context'
 import { buildOpportunityRadar } from '@/lib/editorial/opportunityRadar'
 import { buildStrategistSystemPrompt, parseStrategistResponse, type StrategistResponse } from '@/lib/editorial/strategistPrompt'
+import { auditStrategistStyle, buildStyleRepairUserTurn } from '@/lib/editorial/styleGuard'
 import { callAnthropicAndLog, type AnthropicMessage } from '@/lib/ai/anthropic'
 
 export const runtime = 'nodejs'
@@ -54,6 +55,7 @@ type Body = {
   history?:           unknown
   userMessage?:       unknown
   rejectedRadarIds?:  unknown
+  currentPlan?:       unknown   // Block 5C — active editorial plan the strategist should preserve
 }
 
 function isRole(v: unknown): v is 'user' | 'assistant' {
@@ -74,6 +76,19 @@ function cleanHistory(raw: unknown): AnthropicMessage[] {
 function cleanRejectedIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return []
   return raw.filter(x => typeof x === 'string' && x.length < 200).slice(0, 100) as string[]
+}
+
+function extractCurrentPlan(raw: unknown): { summary?: string; primary?: any[]; alternatives?: any[] } | null {
+  if (!raw || typeof raw !== 'object') return null
+  const p = raw as any
+  const hasPrimary      = Array.isArray(p.primary)
+  const hasAlternatives = Array.isArray(p.alternatives)
+  if (!hasPrimary && !hasAlternatives) return null
+  return {
+    summary:      typeof p.summary === 'string' ? p.summary.slice(0, 400) : undefined,
+    primary:      hasPrimary      ? p.primary.slice(0, 4)      : [],
+    alternatives: hasAlternatives ? p.alternatives.slice(0, 8) : [],
+  }
 }
 
 // ── Handler ──────────────────────────────────────────────────────
@@ -101,6 +116,7 @@ export async function POST(req: Request) {
 
   const history = cleanHistory(body.history)
   const rejectedRadarIds = cleanRejectedIds(body.rejectedRadarIds)
+  const currentPlan = extractCurrentPlan(body.currentPlan)
 
   let userMessage = ''
   if (mode === 'chat') {
@@ -133,7 +149,12 @@ export async function POST(req: Request) {
     })
   } else {
     messages.push(...history)
-    messages.push({ role: 'user', content: `MODE=chat\n\n${userMessage}` })
+    // Block 5C — surface the current plan to the strategist so it
+    // knows what to preserve vs what to change.
+    const planPreamble = currentPlan
+      ? `CURRENT ACTIVE EDITORIAL PLAN (preserve unless the user's message explicitly changes it):\n\`\`\`json\n${JSON.stringify(currentPlan, null, 2)}\n\`\`\`\n\nWhen you return an updated "recommendations" block, keep any primary or alternative item the user did not ask to change. Change only what this turn's message asks to change.\n\n`
+      : ''
+    messages.push({ role: 'user', content: `MODE=chat\n\n${planPreamble}${userMessage}` })
   }
 
   const result = await callAnthropicAndLog({
@@ -151,19 +172,68 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: result.error, detail: result.detail, status: result.status }, { status: result.status || 502 })
   }
 
-  const parsed: StrategistResponse = parseStrategistResponse(result.text)
+  let parsed: StrategistResponse = parseStrategistResponse(result.text)
+  let rawText = result.text
+  let styleRepairFired = false
+  let totalCostUsd = result.cost_usd
+  let totalInput   = result.usage.input_tokens
+  let totalOutput  = result.usage.output_tokens
+
+  // Block 5C — one bounded style-repair pass. If the audit finds
+  // any em dash or forbidden trope phrase, ask the model to rewrite
+  // its own reply preserving facts and JSON. Max one repair call.
+  const audit = auditStrategistStyle(parsed)
+  if (audit.hasViolations) {
+    const repairMessages: AnthropicMessage[] = [
+      ...messages,
+      { role: 'assistant', content: result.text },
+      { role: 'user',      content: buildStyleRepairUserTurn(result.text, audit) },
+    ]
+    const repair = await callAnthropicAndLog({
+      feature:     mode === 'recommend' ? 'editorial_strategist_recommend_repair' : 'editorial_strategist_chat_repair',
+      model:       MODEL,
+      system,
+      messages:    repairMessages,
+      max_tokens:  MAX_TOKENS,
+      temperature: 0.2,   // more deterministic for a mechanical rewrite
+      cacheSystem: true,
+      adminEmail:  admin.email,
+      sessionId,
+    })
+    if (repair.ok) {
+      const repaired = parseStrategistResponse(repair.text)
+      const secondAudit = auditStrategistStyle(repaired)
+      styleRepairFired = true
+      totalCostUsd += repair.cost_usd
+      totalInput   += repair.usage.input_tokens
+      totalOutput  += repair.usage.output_tokens
+      // Only accept the repair if it removed at least one violation
+      // and didn't destroy the response shape. Otherwise fall back
+      // to the original so we never regress the reply.
+      const repairImproved = !secondAudit.hasViolations
+        || secondAudit.violations.length < audit.violations.length
+      const stillHasContent = typeof repaired.assistantMessage === 'string' && repaired.assistantMessage.length > 0
+      if (repairImproved && stillHasContent) {
+        parsed = repaired
+        rawText = repair.text
+      }
+    }
+  }
+
   return NextResponse.json({
     ok:          true,
     sessionId,
     response:    parsed,
-    rawText:     result.text,          // for debugging / audit; small
+    rawText,
+    styleRepairFired,
+    styleViolationsBefore: audit.violations,
     usage: {
       model:                 result.model,
-      input_tokens:          result.usage.input_tokens,
-      output_tokens:         result.usage.output_tokens,
+      input_tokens:          totalInput,
+      output_tokens:         totalOutput,
       cache_creation_tokens: result.usage.cache_creation_tokens,
       cache_read_tokens:     result.usage.cache_read_tokens,
-      cost_usd:              result.cost_usd,
+      cost_usd:              totalCostUsd,
       latency_ms:            result.latency_ms,
     },
   })

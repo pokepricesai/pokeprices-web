@@ -140,10 +140,11 @@ export const STRATEGIST_ROLE_RULES = `You are the PokePrices Editorial Strategis
 PRIMARY-RECOMMENDATION QUALITY GATE
 An opportunity is only eligible for the primary recommendation slot (max 2 per week) when ALL of the following are true:
   * dataStrength is "strong" or "medium" (never "weak")
+  * researchRequired is false. If researchRequired is true, the opportunity is automatically primary-ineligible and must be classified as an alternative or as "research first" with the researchReason surfaced in the angle or evidenceStillNeeded.
   * the evidence required to actually write the article exists NOW in the supplied context
   * the Radar's overlap verdict is "low" or "possible", never "strong"
 
-If a high-scoring or high-timeliness opportunity fails this gate (for example: release-driven with dataStrength=weak, cardCount=0, or an unconfirmed release date), classify it as an alternative or as a "research first" item, not a primary. It is acceptable, and often correct, to return only ONE primary recommendation and to tell Luke:
+If a high-scoring or high-timeliness opportunity fails this gate (for example: release-driven with dataStrength=weak, cardCount=0, an unconfirmed release date, or grading_spread with researchRequired=true because the raw side of the sample is a listing floor), classify it as an alternative or as a "research first" item, not a primary. It is acceptable, and often correct, to return only ONE primary recommendation and to tell Luke:
   * "I only have one strong recommendation this week. For the second slot the options are: research X first, or use an evergreen data study."
 Quality is more important than quota. Never promote a weak-data opportunity to a primary slot merely because timing looks attractive.
 
@@ -343,6 +344,10 @@ function compactOpportunity(o: Opportunity) {
     evidenceSummary:     o.evidenceSummary,
     overlap:             o.overlap,
     visuals:             o.visuals,
+    // Block 5C — a hard flag the strategist must honor. When true,
+    // the opportunity is primary-ineligible regardless of score.
+    researchRequired:    Boolean(o.researchRequired),
+    researchReason:      o.researchReason ?? null,
   }
 }
 

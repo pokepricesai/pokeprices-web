@@ -1361,6 +1361,7 @@ async function callStrategist(body: {
   history: ChatTurn[]
   userMessage?: string
   rejectedRadarIds: string[]
+  currentPlan?: { summary: string; primary: StrategistRecommendation[]; alternatives: StrategistRecommendation[] }
 }): Promise<StrategistCallResult> {
   const emptyUsage = { input_tokens: 0, output_tokens: 0, cost_usd: 0, latency_ms: 0, model: '' }
   try {
@@ -1372,6 +1373,7 @@ async function callStrategist(body: {
         history: body.history.map(t => ({ role: t.role, content: t.content })),
         userMessage: body.userMessage,
         rejectedRadarIds: body.rejectedRadarIds,
+        currentPlan: body.currentPlan ?? null,
       }),
     })
     return {
@@ -1452,6 +1454,7 @@ function EditorialStrategistPanel({
       mode: 'chat', sessionId: session.sessionId,
       history: session.history, userMessage: msg.trim(),
       rejectedRadarIds: session.rejectedRadarIds,
+      currentPlan: session.currentRecs,
     })
     setLoading(null)
     if (!res.ok) { setError(res.error); return }
@@ -1464,7 +1467,12 @@ function EditorialStrategistPanel({
         ...prev,
         sessionId:    res.sessionId,
         history:      [...historyWithUser, assistantTurn],
-        currentRecs:  res.response.recommendations ?? prev.currentRecs,
+        // Block 5C — mergeRecommendations preserves previously-set
+        // primary items whose headline text is unchanged from the
+        // strategist's returned pack. Prevents the "did not recommend
+        // any primary article" flash when the assistant only wanted
+        // to swap alternatives.
+        currentRecs:  mergeRecommendations(prev.currentRecs, res.response.recommendations),
         totalCostUsd: prev.totalCostUsd + res.usage.cost_usd,
       }
     })
@@ -1483,9 +1491,15 @@ function EditorialStrategistPanel({
       if (prev.rejectedRadarIds.includes(id)) return prev
       return { ...prev, rejectedRadarIds: [...prev.rejectedRadarIds, id] }
     })
-    // Then automatically ask the strategist for an alternative.
-    void runChat(`I'm rejecting "${rec.headline}" — please replace it in the recommended pack (do not suggest it again in this session). If it was in the primary two, promote an alternative or propose a new one.`)
-  }, [runChat])
+    // Block 5C — explicit about slot preservation so the strategist
+    // does not blank the other primary item.
+    const which = session.currentRecs?.primary?.findIndex(p => p.headline === rec.headline)
+    const primaryPosition = typeof which === 'number' && which >= 0 ? which + 1 : null
+    const msg = primaryPosition
+      ? `Rejecting primary recommendation #${primaryPosition} ("${rec.headline}"). Do not re-recommend it in this session. In your response, KEEP the other primary recommendation unchanged, then either promote a suitable alternative into the vacated slot or leave it empty and explain why (per the primary-recommendation quality gate). Update the "recommendations" block accordingly.`
+      : `Rejecting alternative "${rec.headline}". Do not re-recommend it in this session. Keep the primary recommendations unchanged. Replace this alternative with a stronger candidate if one exists. Update the "recommendations" block accordingly.`
+    void runChat(msg)
+  }, [runChat, session.currentRecs])
 
   const planRec = useCallback(async (rec: StrategistRecommendation, targetDate: string) => {
     const payload: Partial<EditorialProject> = {
@@ -1765,4 +1779,30 @@ function RecommendationCard({
 function ConfidenceBadge({ s }: { s: 'high' | 'medium' | 'low' }) {
   const c = s === 'high' ? '#15803d' : s === 'medium' ? '#a16207' : '#64748b'
   return <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: c }}>{s} confidence</span>
+}
+
+// Block 5C — merge strategist response into the existing plan so a
+// chat turn that only refreshes alternatives does not accidentally
+// blank the primary slots.
+//
+// Rules:
+//   * If the strategist did not return a recommendations block at
+//     all, keep the existing plan unchanged.
+//   * If it returned one, take its arrays as authoritative for the
+//     slots they cover but preserve the existing summary when the
+//     new one is empty.
+//   * If it returned an empty primary array but the existing plan
+//     had primaries, keep the existing primaries. This is the
+//     defensive fix for the "did not recommend any primary article"
+//     regression from Block 5B.
+function mergeRecommendations(
+  prev: undefined | { summary: string; primary: StrategistRecommendation[]; alternatives: StrategistRecommendation[] },
+  next: undefined | { summary: string; primary: StrategistRecommendation[]; alternatives: StrategistRecommendation[] },
+): typeof prev {
+  if (!next) return prev
+  if (!prev) return next
+  const primary      = next.primary.length      > 0 ? next.primary      : prev.primary
+  const alternatives = next.alternatives.length > 0 ? next.alternatives : prev.alternatives
+  const summary      = next.summary?.trim()     || prev.summary
+  return { summary, primary, alternatives }
 }
