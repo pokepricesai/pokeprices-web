@@ -27,6 +27,8 @@ import { studioDocumentToInsightBody } from '@/lib/studio/adapter'
 import { StudioPreview } from './StudioPreview'
 import { DataBlockNode } from './DataBlockNode'
 import { InsertDataBlockMenu } from './InsertDataBlockMenu'
+import type { WriterMetadata, FactCheckResult } from '@/lib/editorial/writer/types'
+import { GenerateAndFactCheckPanel } from './WriterPanel'
 
 type ProjectRow = {
   id: number
@@ -39,9 +41,10 @@ type ProjectRow = {
 }
 
 type Props = {
-  project:      ProjectRow
-  initialDoc:   StudioDocument
-  research:     EditorialResearchRow | null
+  project:       ProjectRow
+  initialDoc:    StudioDocument
+  research:      EditorialResearchRow | null
+  initialWriter: WriterMetadata | null
 }
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
@@ -55,14 +58,16 @@ async function authHeader(): Promise<Record<string, string>> {
 
 const AUTOSAVE_DEBOUNCE_MS = 1200
 
-export default function StudioClient({ project, initialDoc, research }: Props) {
+export default function StudioClient({ project, initialDoc, research, initialWriter }: Props) {
   const [doc, setDoc] = useState<StudioDocument>(initialDoc)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(initialDoc.updatedAt || null)
   const [lastError, setLastError] = useState<string | null>(null)
-  const [tab, setTab] = useState<'research' | 'seo' | 'settings'>('research')
+  const [tab, setTab] = useState<'research' | 'seo' | 'settings' | 'writer'>('research')
   const [previewOpen, setPreviewOpen] = useState(false)
   const [insertOpen, setInsertOpen]   = useState(false)
+  const [writer, setWriter] = useState<WriterMetadata | null>(initialWriter)
+  const [factCheckStale, setFactCheckStale] = useState(false)
 
   const dirtyRef = useRef(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -89,6 +94,7 @@ export default function StudioClient({ project, initialDoc, research }: Props) {
     },
     onUpdate: ({ editor }) => {
       dirtyRef.current = true
+      setFactCheckStale(true)
       const json = editor.getJSON()
       setDoc(prev => ({ ...prev, bodyDoc: json }))
       scheduleSave()
@@ -146,6 +152,7 @@ export default function StudioClient({ project, initialDoc, research }: Props) {
   // marks dirty + triggers autosave via the same path.
   const mutate = useCallback((patch: Partial<StudioDocument> | ((prev: StudioDocument) => Partial<StudioDocument>)) => {
     dirtyRef.current = true
+    setFactCheckStale(true)
     setDoc(prev => {
       const p = typeof patch === 'function' ? (patch as any)(prev) : patch
       return { ...prev, ...p }
@@ -175,6 +182,7 @@ export default function StudioClient({ project, initialDoc, research }: Props) {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <SaveIndicator state={saveState} lastSavedAt={lastSavedAt} error={lastError} />
+            <FactCheckPill writer={writer} stale={factCheckStale} onOpen={() => setTab('writer')} />
             <button style={S.btnGhost} onClick={explicitSave}>Save now</button>
             <button style={S.btnPrimary} onClick={() => setPreviewOpen(true)}>Preview</button>
           </div>
@@ -209,10 +217,33 @@ export default function StudioClient({ project, initialDoc, research }: Props) {
           <div style={S.sidebar}>
             <div style={S.tabRow}>
               <TabButton active={tab === 'research'} onClick={() => setTab('research')}>Research</TabButton>
+              <TabButton active={tab === 'writer'}   onClick={() => setTab('writer')}>Writer</TabButton>
               <TabButton active={tab === 'seo'}      onClick={() => setTab('seo')}>SEO</TabButton>
               <TabButton active={tab === 'settings'} onClick={() => setTab('settings')}>Settings</TabButton>
             </div>
             {tab === 'research' && <ResearchSidebar project={project} research={research} pack={pack} />}
+            {tab === 'writer'   && (
+              <GenerateAndFactCheckPanel
+                projectId={project.id}
+                researchStatus={research?.status ?? 'not_started'}
+                hasMeaningfulBody={hasMeaningfulBodyClient(doc)}
+                writer={writer}
+                factCheckStale={factCheckStale}
+                onWriterResult={(nextWriter, nextStudio) => {
+                  setWriter(nextWriter)
+                  if (nextStudio) {
+                    setDoc(nextStudio)
+                    if (editor) editor.commands.setContent(nextStudio.bodyDoc as any, false)
+                  }
+                  setFactCheckStale(false)
+                  setLastError(null)
+                }}
+                onFactCheckResult={(fc) => {
+                  setWriter(prev => prev ? { ...prev, factCheck: fc, checkedStudioHash: fc.checkedStudioHash } : prev)
+                  setFactCheckStale(false)
+                }}
+              />
+            )}
             {tab === 'seo'      && <SeoPanel doc={doc} mutate={mutate} />}
             {tab === 'settings' && <SettingsPanel project={project} doc={doc} mutate={mutate} />}
           </div>
@@ -315,6 +346,34 @@ function Sep() { return <span style={S.tbSep}>|</span> }
 // ─────────────────────────────────────────────────────────────────
 // Save indicator
 // ─────────────────────────────────────────────────────────────────
+
+function hasMeaningfulBodyClient(doc: StudioDocument): boolean {
+  const b: any = doc.bodyDoc
+  if (!b || !Array.isArray(b.content)) return (doc.headline?.trim().length ?? 0) > 0 || (doc.intro?.trim().length ?? 0) > 0
+  const anyRealNode = b.content.some((n: any) => {
+    if (n?.type === 'heading' || n?.type === 'dataBlock') return true
+    if (n?.type === 'paragraph' && Array.isArray(n.content)) return n.content.some((c: any) => typeof c?.text === 'string' && c.text.trim().length > 0)
+    return false
+  })
+  return anyRealNode || (doc.headline?.trim().length ?? 0) > 0 || (doc.intro?.trim().length ?? 0) > 0
+}
+
+function FactCheckPill({ writer, stale, onOpen }: { writer: WriterMetadata | null; stale: boolean; onOpen: () => void }) {
+  const fc = writer?.factCheck
+  let label = 'Fact check: not run'
+  let bg = '#f1f5f9', fg = '#64748b'
+  if (fc) {
+    if (stale) { label = 'Fact check: Out of date'; bg = '#fef3c7'; fg = '#92400e' }
+    else if (fc.status === 'pass')            { label = 'Fact check: pass';           bg = '#dcfce7'; fg = '#166534' }
+    else if (fc.status === 'review_required') { label = 'Fact check: review required'; bg = '#fef3c7'; fg = '#92400e' }
+    else                                      { label = 'Fact check: fail';           bg = '#fee2e2'; fg = '#991b1b' }
+  }
+  return (
+    <button onClick={onOpen} style={{ padding: '4px 10px', borderRadius: 12, fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase' as any, border: 'none', cursor: 'pointer', background: bg, color: fg, fontFamily: "'Figtree', sans-serif" }}>
+      {label}
+    </button>
+  )
+}
 
 function SaveIndicator({ state, lastSavedAt, error }: { state: SaveState; lastSavedAt: string | null; error: string | null }) {
   let label: string

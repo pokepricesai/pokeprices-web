@@ -27,7 +27,7 @@ export default async function StudioPage({ params }: { params: Promise<{ project
   const supa = getSupabaseServiceClient()
   const { data: project, error } = await supa
     .from('editorial_projects')
-    .select('id, title, angle, article_type, status, priority, target_publish_at, notes, insights_id, studio_json, created_at, updated_at')
+    .select('id, title, angle, article_type, status, priority, target_publish_at, notes, insights_id, studio_json, writer_json, created_at, updated_at')
     .eq('id', projectId)
     .maybeSingle()
   if (error || !project) notFound()
@@ -51,6 +51,7 @@ export default async function StudioPage({ params }: { params: Promise<{ project
       }}
       initialDoc={initialDoc}
       research={research}
+      initialWriter={((project as any).writer_json ?? null)}
     />
   )
 }
