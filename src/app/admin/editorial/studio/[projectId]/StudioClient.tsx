@@ -25,6 +25,8 @@ import type { EditorialResearchRow, EvidencePack } from '@/lib/editorial/researc
 import type { StudioDocument, StudioHeroImage } from '@/lib/studio/types'
 import { studioDocumentToInsightBody } from '@/lib/studio/adapter'
 import { StudioPreview } from './StudioPreview'
+import { DataBlockNode } from './DataBlockNode'
+import { InsertDataBlockMenu } from './InsertDataBlockMenu'
 
 type ProjectRow = {
   id: number
@@ -60,6 +62,7 @@ export default function StudioClient({ project, initialDoc, research }: Props) {
   const [lastError, setLastError] = useState<string | null>(null)
   const [tab, setTab] = useState<'research' | 'seo' | 'settings'>('research')
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [insertOpen, setInsertOpen]   = useState(false)
 
   const dirtyRef = useRef(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -75,6 +78,7 @@ export default function StudioClient({ project, initialDoc, research }: Props) {
       TiptapLink.configure({ openOnClick: false, autolink: false, HTMLAttributes: { rel: 'noopener noreferrer' } }),
       Image.configure({ inline: false, allowBase64: false }),
       Placeholder.configure({ placeholder: 'Write the article body here.' }),
+      DataBlockNode,
     ],
     content: (doc.bodyDoc as any) ?? { type: 'doc', content: [{ type: 'paragraph' }] },
     editorProps: {
@@ -196,7 +200,7 @@ export default function StudioClient({ project, initialDoc, research }: Props) {
               maxLength={4000}
               rows={3}
             />
-            <EditorToolbar editor={editor} />
+            <EditorToolbar editor={editor} onOpenInsert={() => setInsertOpen(true)} />
             <div style={S.editorSurface}>
               <EditorContent editor={editor} />
             </div>
@@ -215,6 +219,14 @@ export default function StudioClient({ project, initialDoc, research }: Props) {
         </div>
 
         {previewOpen && <PreviewModal doc={doc} project={project} onClose={() => setPreviewOpen(false)} />}
+        {insertOpen && (
+          <InsertDataBlockMenu
+            editor={editor}
+            pack={pack}
+            analysis={research?.analyst_json ?? null}
+            onClose={() => setInsertOpen(false)}
+          />
+        )}
       </div>
     </>
   )
@@ -224,7 +236,7 @@ export default function StudioClient({ project, initialDoc, research }: Props) {
 // Editor toolbar
 // ─────────────────────────────────────────────────────────────────
 
-function EditorToolbar({ editor }: { editor: Editor | null }) {
+function EditorToolbar({ editor, onOpenInsert }: { editor: Editor | null; onOpenInsert: () => void }) {
   if (!editor) return <div style={{ ...S.toolbar, opacity: 0.5 }}>Loading editor…</div>
 
   const [imageBusy, setImageBusy] = useState(false)
@@ -279,6 +291,8 @@ function EditorToolbar({ editor }: { editor: Editor | null }) {
       <Sep />
       <ToolbarBtn onClick={() => editor.chain().focus().undo().run()} disabled={!editor.can().undo()}>Undo</ToolbarBtn>
       <ToolbarBtn onClick={() => editor.chain().focus().redo().run()} disabled={!editor.can().redo()}>Redo</ToolbarBtn>
+      <Sep />
+      <ToolbarBtn onClick={onOpenInsert}>+ Data block</ToolbarBtn>
     </div>
   )
 }

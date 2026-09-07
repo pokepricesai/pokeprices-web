@@ -12,6 +12,7 @@ import {
   isSafeArticleImageSrc,
   type ParagraphSegment,
 } from '@/lib/insights/richText'
+import { DataBlockRenderer } from '@/components/insights/DataBlockRenderer'
 
 const THEME_COLOURS: Record<string, string> = {
   grading:    '#a78bfa',
@@ -231,23 +232,11 @@ function Block({ block }: { block: any }) {
     return <hr style={{ border: 0, borderTop: '1px solid var(--border)', margin: '28px 0' }} />
   }
 
-  // Block 7 — placeholder for future data blocks. Renders a
-  // recognisable notice until Block 8 ships block-specific renderers.
+  // Block 8 — data blocks. Dispatch to the shared DataBlockRenderer.
+  // Legacy articles never emit `data_block` so this branch is
+  // completely additive.
   if (block.type === 'data_block') {
-    return (
-      <div style={{
-        margin: '20px 0 24px',
-        padding: '10px 14px',
-        background: 'var(--bg-light)',
-        border: '1px dashed var(--border)',
-        borderRadius: 8,
-        fontSize: 12,
-        color: 'var(--text-muted)',
-        fontFamily: "'Figtree', sans-serif",
-      }}>
-        [{block.variant || 'data block'}] — renderer for this block type is not yet implemented.
-      </div>
-    )
+    return <DataBlockRenderer variant={block.variant} payload={block.payload} />
   }
 
   if (block.type === 'paragraph' || block.type === 'text') {

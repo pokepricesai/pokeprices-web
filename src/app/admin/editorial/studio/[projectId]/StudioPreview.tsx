@@ -9,6 +9,7 @@
 import React from 'react'
 import type { StudioDocument } from '@/lib/studio/types'
 import type { InsightBody, ExtendedParagraphSegment } from '@/lib/studio/adapter'
+import { DataBlockRenderer } from '@/components/insights/DataBlockRenderer'
 
 export function StudioPreview({ doc, body }: { doc: StudioDocument; body: InsightBody }) {
   return (
@@ -83,7 +84,7 @@ function PreviewBlock({ block }: { block: any }) {
     )
   }
   if (block.type === 'data_block') {
-    return <div style={{ margin: '20px 0 24px', padding: '10px 14px', background: '#f1f5f9', border: '1px dashed #cbd5e1', borderRadius: 8, fontSize: 12, color: '#64748b' }}>[{block.variant}] — data block placeholder (Block 8)</div>
+    return <DataBlockRenderer variant={block.variant} payload={block.payload} />
   }
   return null
 }
