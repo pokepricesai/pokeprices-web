@@ -1,25 +1,22 @@
 // src/lib/editorial/writer/writerActions.ts
 //
-// EIC Block 9 — server-side orchestrator for the AI Writer + Fact
+// EIC Block 9 + 9B — server orchestrator for the AI Writer + Fact
 // Checker pipeline.
 //
-// Pipeline:
-//   1. Research approval gate — refuse unless status = 'approved'
-//   2. Build Writer inputs (compacted pack + analysis + trimmed
-//      editorial context) and call the Writer
-//   3. Assemble StudioDocument from the WriterDraft via Block 8
-//      factories
-//   4. Run the shared style guard against the assembled draft; if
-//      violations exist, ONE bounded repair pass
-//   5. Deterministic numeric audit
-//   6. Fact Checker pass (auto)
-//   7. If Fact Checker returns actionable issues AND no repair has
-//      run yet, ONE bounded Writer repair pass, then re-audit +
-//      re-check
-//   8. Save studio_json + writer_json + nudge project.status ->
-//      'drafting'
+// Block 9B refactors the single-request pipeline (which blew past
+// Vercel's synchronous HTTP ceiling on the first real Preview run,
+// 504) into a resumable stage machine. Each stage does AT MOST one
+// Claude call. Studio polls the same POST endpoint; each call runs
+// the next stage and returns updated run state. No queues, no
+// workers — just a stateful column and idempotent stage functions.
 //
-// Callable through /api/admin/editorial/studio/[projectId]/write.
+// Stages (see types.GenerationStage):
+//   queued → writer → style → fact_check → [repair → finalize] → complete
+//
+// State survives crashes: writer_json.currentRun carries the raw
+// Writer output between calls; studio_json is written as soon as
+// the first Studio-ready draft exists, so a browser refresh mid-run
+// still shows the article being assembled.
 
 import 'server-only'
 import { getSupabaseServiceClient } from '@/lib/supabaseService'
@@ -29,7 +26,6 @@ import { fetchProject, fetchResearch } from '../research/serverActions'
 import { buildEditorialContext } from '../context'
 import type { EditorialContext } from '../context'
 import type { StudioDocument } from '@/lib/studio/types'
-import { emptyStudioDocument } from '@/lib/studio/types'
 import { auditFieldMap, buildStyleRepairUserTurn } from '../styleGuard'
 import type { CardIdentity } from '@/lib/studio/dataBlocks/types'
 
@@ -40,12 +36,12 @@ import { FACT_CHECKER_SYSTEM_PROMPT, buildFactCheckerUserTurn, parseFactCheckerR
 import { hashStudioBody } from './hash'
 import type {
   WriterDraft, WriterMetadata, WriterUsage, WriterClaimTrace, BlockIntent,
-  FactCheckResult,
+  FactCheckResult, GenerationRun, GenerationStage, NumericAuditResult,
 } from './types'
 import { WRITER_METADATA_VERSION } from './types'
 
-const WRITER_MODEL      = 'claude-sonnet-4-6'
-const WRITER_MAX_TOKENS = 8000
+const WRITER_MODEL       = 'claude-sonnet-4-6'
+const WRITER_MAX_TOKENS  = 8000
 const CHECKER_MAX_TOKENS = 4000
 
 // ─────────────────────────────────────────────────────────────────
@@ -53,24 +49,87 @@ const CHECKER_MAX_TOKENS = 4000
 // ─────────────────────────────────────────────────────────────────
 
 export type GenerateOptions = {
-  today?:            string
-  /** True when the caller has already acknowledged overwriting an
-   *  existing meaningful draft. Without confirmation the API
-   *  refuses to overwrite. */
+  today?:             string
   overwriteExisting?: boolean
 }
 
-export type GenerateResult = {
-  ok:            true
-  studio:        StudioDocument
-  writer:        WriterMetadata
-  factCheck:     FactCheckResult
-  wroteToDb:     boolean
-  overwriteWarned?: boolean
+export type GenerateStartResult = {
+  ok:        true
+  writer:    WriterMetadata
+  studio:    StudioDocument | null
+  factCheck: FactCheckResult | null
 }
 
-export async function generateArticleForProject(projectId: number, adminEmail: string, opts: GenerateOptions = {}): Promise<GenerateResult> {
-  // 1. Gate.
+/**
+ * Start (or restart) a generation. Creates the run, does the
+ * approval gate, and returns immediately. The client then polls
+ * runNextStage() until stage is 'complete' or 'failed'.
+ */
+export async function startGeneration(projectId: number, adminEmail: string, opts: GenerateOptions = {}): Promise<GenerateStartResult> {
+  const project = await fetchProject(projectId)
+  if (!project) throw new Error('project not found')
+  const research = await fetchResearch(projectId)
+  ensureResearchApproved(research)
+
+  const supa = getSupabaseServiceClient()
+  const { data: pRow } = await supa.from('editorial_projects').select('studio_json, writer_json').eq('id', projectId).maybeSingle()
+  const existingStudio = ((pRow as any)?.studio_json ?? null) as StudioDocument | null
+  const prevWriter    = ((pRow as any)?.writer_json ?? null) as WriterMetadata | null
+
+  const inFlight = prevWriter?.currentRun && prevWriter.currentRun.stage !== 'complete' && prevWriter.currentRun.stage !== 'failed'
+  if (inFlight && !opts.overwriteExisting) {
+    // Resume the existing in-progress run instead of double-starting.
+    return { ok: true, writer: prevWriter!, studio: existingStudio, factCheck: prevWriter!.factCheck ?? null }
+  }
+
+  const isMeaningful = hasMeaningfulBody(existingStudio)
+  if (isMeaningful && !opts.overwriteExisting) {
+    throw new Error('existing draft has meaningful content; call with overwriteExisting=true to replace')
+  }
+
+  const run: GenerationRun = {
+    id:        `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    startedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    stage:     'writer',
+    stageLabel: 'Writing draft',
+    usage:     emptyUsage(),
+    styleRepairFired: false,
+    repairFired: false,
+    stageTimings: {},
+  }
+
+  const nextWriter: WriterMetadata = {
+    version:              WRITER_METADATA_VERSION,
+    generatedAt:          new Date().toISOString(),
+    model:                WRITER_MODEL,
+    researchId:           Number(research!.id),
+    researchGeneratedAt:  (research!.evidence_json as EvidencePack).generatedAt,
+    packRecipe:           (research!.evidence_json as EvidencePack).recipe,
+    claimTrace:           [],
+    blockIntents:         [],
+    assemblyWarnings:     [],
+    generationCost:       emptyUsage(),
+    currentRun:           run,
+  }
+
+  await supa.from('editorial_projects').update({
+    writer_json: nextWriter,
+    updated_at:  new Date().toISOString(),
+  }).eq('id', projectId)
+
+  return { ok: true, writer: nextWriter, studio: existingStudio, factCheck: null }
+}
+
+/**
+ * Run one stage of the in-flight generation and return the updated
+ * writer metadata. Callers (Studio) POST this repeatedly until
+ * stage is 'complete' or 'failed'. Each invocation makes AT MOST
+ * one Claude call so any Vercel plan can serve it.
+ */
+export async function runNextStage(projectId: number, adminEmail: string): Promise<GenerateStartResult> {
+  const supa = getSupabaseServiceClient()
+
   const project = await fetchProject(projectId)
   if (!project) throw new Error('project not found')
   const research = await fetchResearch(projectId)
@@ -78,174 +137,57 @@ export async function generateArticleForProject(projectId: number, adminEmail: s
   const pack = research!.evidence_json as EvidencePack
   const analysis = (research!.analyst_json ?? null) as ResearchAnalysis | null
 
-  const supa = getSupabaseServiceClient()
-
-  // 1b. Existing-draft guard.
-  const existingDoc = (project as any).studio_json as StudioDocument | null
-  const isMeaningful = hasMeaningfulBody(existingDoc)
-  if (isMeaningful && !opts.overwriteExisting) {
-    throw new Error('existing draft has meaningful content; call with overwriteExisting=true to replace')
+  const { data: pRow } = await supa.from('editorial_projects').select('studio_json, writer_json').eq('id', projectId).maybeSingle()
+  const currentStudio = ((pRow as any)?.studio_json ?? null) as StudioDocument | null
+  let writer = ((pRow as any)?.writer_json ?? null) as WriterMetadata | null
+  if (!writer?.currentRun) throw new Error('no active generation — call start first')
+  if (writer.currentRun.stage === 'complete' || writer.currentRun.stage === 'failed') {
+    return { ok: true, writer, studio: currentStudio, factCheck: writer.factCheck ?? null }
   }
 
-  // 2. Writer call.
-  const context = await buildEditorialContext()
-  const cardIndex = buildCardIndex(pack, context)
-
-  const inputBundle = {
-    project: { id: Number(project.id), title: String(project.title), angle: project.angle ?? null, articleType: String(project.article_type), targetPublishAt: project.target_publish_at ?? null },
-    pack, analysis, context,
-  }
-
-  const writerUser = buildWriterUserTurn(inputBundle)
-  const initialMessages: AnthropicMessage[] = [{ role: 'user', content: writerUser }]
-
-  const first = await callAnthropicAndLog({
-    feature:     'editorial_writer_generate',
-    model:       WRITER_MODEL,
-    system:      WRITER_SYSTEM_PROMPT,
-    messages:    initialMessages,
-    max_tokens:  WRITER_MAX_TOKENS,
-    temperature: 0.4,
-    cacheSystem: true,
-    adminEmail,
-    sessionId:   `writer-${projectId}-${Date.now()}`,
-  })
-  if (!first.ok) throw new Error(`writer call failed: ${first.error}`)
-
-  let draft = parseWriterResponse(first.text)
-  if (!draft) throw new Error('writer produced no parsable draft')
-
-  // 3. Assemble.
-  let assembly = assembleStudioFromDraft({
-    draft, pack, context, cardIndex,
-    themeKey:   pack.recipe === 'monthly_market_report' ? 'market' : pack.recipe === 'population_scarcity' ? 'grading' : 'market',
-    themeLabel: pack.recipe === 'monthly_market_report' ? 'Market' : pack.recipe === 'population_scarcity' ? 'Grading' : 'Market',
-    today:      opts.today,
-  })
-
-  const usage: WriterUsage = { input_tokens: first.usage.input_tokens, output_tokens: first.usage.output_tokens, cache_creation_tokens: first.usage.cache_creation_tokens, cache_read_tokens: first.usage.cache_read_tokens, cost_usd: first.cost_usd, latency_ms: first.latency_ms }
-
-  // 4. Style guard against the writer's own prose (paragraphs +
-  //    headline + intro + SEO fields). This is the same tooling the
-  //    Strategist uses.
-  const styleAudit1 = auditFieldMap(styleAuditFields(draft))
-  let styleRepairFired = false
-  let rawWriterText = first.text
-  if (styleAudit1.hasViolations) {
-    const repairPrompt = buildStyleRepairUserTurn(first.text, styleAudit1)
-    const styleRepair = await callAnthropicAndLog({
-      feature:    'editorial_writer_style_repair',
-      model:      WRITER_MODEL,
-      system:     WRITER_SYSTEM_PROMPT,
-      messages:   [...initialMessages, { role: 'assistant', content: first.text }, { role: 'user', content: repairPrompt }],
-      max_tokens: WRITER_MAX_TOKENS,
-      temperature: 0.2,
-      cacheSystem: true,
-      adminEmail,
-      sessionId:  `writer-${projectId}-style-${Date.now()}`,
-    })
-    if (styleRepair.ok) {
-      const repaired = parseWriterResponse(styleRepair.text)
-      const secondAudit = repaired ? auditFieldMap(styleAuditFields(repaired)) : { hasViolations: true, violations: [] as any[] }
-      styleRepairFired = true
-      addUsage(usage, styleRepair)
-      if (repaired && !secondAudit.hasViolations) {
-        draft = repaired
-        rawWriterText = styleRepair.text
-        assembly = assembleStudioFromDraft({
-          draft, pack, context, cardIndex,
-          themeKey: assembly.studio.themeKey, themeLabel: assembly.studio.themeLabel, today: opts.today,
-        })
-      }
+  const stageStartMs = Date.now()
+  try {
+    switch (writer.currentRun.stage) {
+      case 'queued':
+        writer = advance(writer, 'writer', 'Writing draft', stageStartMs)
+        break
+      case 'writer':
+        writer = await stageWriter(writer, project, pack, analysis, adminEmail, stageStartMs)
+        break
+      case 'style':
+        writer = await stageStyleAndAssemble(writer, project, pack, adminEmail, stageStartMs)
+        break
+      case 'fact_check':
+        writer = await stageFactCheck(writer, projectId, pack, adminEmail, stageStartMs)
+        break
+      case 'repair':
+        writer = await stageRepair(writer, project, pack, adminEmail, stageStartMs)
+        break
+      case 'finalize':
+        writer = await stageFinalize(writer, projectId, pack, adminEmail, stageStartMs)
+        break
     }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'unknown'
+    writer = fail(writer, message)
   }
 
-  // 5. Numeric audit.
-  let numericAudit = auditStudioNumerics(assembly.studio, pack, assembly.blocksBuilt)
-
-  // 6. Fact Check (auto).
-  let studioHash = hashStudioBody(assembly.studio.bodyDoc)
-  let factCheck  = await runFactChecker(pack, assembly.studio, draft.evidenceTrace, assembly.blocksBuilt, numericAudit, { checkedStudioHash: studioHash, autoCheck: true, adminEmail, sessionId: `factcheck-${projectId}-${Date.now()}`, usage })
-
-  // 7. One bounded repair pass if the Fact Checker or numeric audit
-  //    reports actionable issues.
-  let repairFired = false
-  const actionable = factCheck.issues.filter(i => i.severity !== 'minor').length > 0 || numericAudit.issues.length > 0
-  if (actionable) {
-    const factSummary = factCheck.issues.map((i, k) => `  ${k + 1}. [${i.severity}] ${i.kind} — ${i.claim} :: ${i.reason}${i.suggestedCorrection ? ` (suggest: ${i.suggestedCorrection})` : ''}`).join('\n') || '  (none)'
-    const numSummary  = numericAudit.issues.map((i, k) => `  ${k + 1}. "${i.token.raw}" at ${i.token.location}${i.nearest ? ` — nearest allowed ${i.nearest.value} (${i.nearest.source})` : ''}`).join('\n') || '  (none)'
-    const repairPrompt = buildWriterRepairUserTurn(rawWriterText, factSummary, numSummary)
-    const rep = await callAnthropicAndLog({
-      feature:     'editorial_writer_repair',
-      model:       WRITER_MODEL,
-      system:      WRITER_SYSTEM_PROMPT,
-      messages:    [...initialMessages, { role: 'assistant', content: rawWriterText }, { role: 'user', content: repairPrompt }],
-      max_tokens:  WRITER_MAX_TOKENS,
-      temperature: 0.3,
-      cacheSystem: true,
-      adminEmail,
-      sessionId:   `writer-${projectId}-repair-${Date.now()}`,
-    })
-    if (rep.ok) {
-      const repDraft = parseWriterResponse(rep.text)
-      repairFired = true
-      addUsage(usage, rep)
-      if (repDraft) {
-        const repAssembly = assembleStudioFromDraft({
-          draft: repDraft, pack, context, cardIndex,
-          themeKey: assembly.studio.themeKey, themeLabel: assembly.studio.themeLabel, today: opts.today,
-        })
-        const repAudit = auditStudioNumerics(repAssembly.studio, pack, repAssembly.blocksBuilt)
-        const repHash  = hashStudioBody(repAssembly.studio.bodyDoc)
-        const repCheck = await runFactChecker(pack, repAssembly.studio, repDraft.evidenceTrace, repAssembly.blocksBuilt, repAudit, { checkedStudioHash: repHash, autoCheck: true, adminEmail, sessionId: `factcheck-${projectId}-repair-${Date.now()}`, usage })
-        // Accept the repair only if it did not regress the issue count.
-        const totalBefore = factCheck.issues.length + numericAudit.issues.length
-        const totalAfter  = repCheck.issues.length  + repAudit.issues.length
-        if (totalAfter <= totalBefore) {
-          draft = repDraft
-          rawWriterText = rep.text
-          assembly = repAssembly
-          numericAudit = repAudit
-          factCheck = repCheck
-          studioHash = repHash
-        }
-      }
-    }
-  }
-
-  // 8. Save.
-  const nextStatus = (project.status === 'idea' || project.status === 'planned') ? 'drafting' : project.status
-  const meta: WriterMetadata = {
-    version:              WRITER_METADATA_VERSION,
-    generatedAt:          new Date().toISOString(),
-    model:                WRITER_MODEL,
-    researchId:           Number(research!.id),
-    researchGeneratedAt:  pack.generatedAt,
-    packRecipe:           pack.recipe,
-    claimTrace:           draft.evidenceTrace,
-    blockIntents:         assembly.blocksBuilt,
-    assemblyWarnings:     assembly.warnings,
-    factCheck,
-    checkedStudioHash:    studioHash,
-    generationCost:       usage,
-    styleRepairFired,
-    repairFired,
-  }
-  const { error } = await supa.from('editorial_projects').update({
-    studio_json: assembly.studio,
-    writer_json: meta,
-    status:      nextStatus,
+  await supa.from('editorial_projects').update({
+    writer_json: writer,
     updated_at:  new Date().toISOString(),
   }).eq('id', projectId)
-  if (error) throw new Error(`save failed: ${error.message}`)
 
-  return { ok: true, studio: assembly.studio, writer: meta, factCheck, wroteToDb: true }
+  // Fetch the possibly-updated studio_json (stages may write it).
+  const { data: pAfter } = await supa.from('editorial_projects').select('studio_json').eq('id', projectId).maybeSingle()
+  const studioAfter = ((pAfter as any)?.studio_json ?? null) as StudioDocument | null
+  return { ok: true, writer, studio: studioAfter, factCheck: writer.factCheck ?? null }
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Standalone fact check (called by Studio "Run fact check" action)
-// ─────────────────────────────────────────────────────────────────
-
+/**
+ * Standalone manual fact check (Studio "Run fact check" button).
+ * Runs against the current studio_json + research evidence and
+ * updates writer_json.factCheck + checkedStudioHash.
+ */
 export async function factCheckCurrentDraft(projectId: number, adminEmail: string): Promise<FactCheckResult> {
   const project = await fetchProject(projectId)
   if (!project) throw new Error('project not found')
@@ -258,30 +200,312 @@ export async function factCheckCurrentDraft(projectId: number, adminEmail: strin
   const supa = getSupabaseServiceClient()
   const { data: pRow } = await supa.from('editorial_projects').select('writer_json').eq('id', projectId).maybeSingle()
   const prevWriter = (pRow as any)?.writer_json as WriterMetadata | null
-  const claimTrace: WriterClaimTrace[]     = prevWriter?.claimTrace   ?? []
-  const blocksBuilt: BlockIntent[]         = prevWriter?.blockIntents ?? []
+  const claimTrace: WriterClaimTrace[] = prevWriter?.claimTrace   ?? []
+  const blocksBuilt: BlockIntent[]     = prevWriter?.blockIntents ?? []
 
   const numericAudit = auditStudioNumerics(studio, pack, blocksBuilt)
-  const usage: WriterUsage = { input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0, cost_usd: 0, latency_ms: 0 }
+  const usage = emptyUsage()
   const studioHash = hashStudioBody(studio.bodyDoc)
-  const factCheck = await runFactChecker(pack, studio, claimTrace, blocksBuilt, numericAudit, { checkedStudioHash: studioHash, autoCheck: false, adminEmail, sessionId: `factcheck-${projectId}-manual-${Date.now()}`, usage })
+  const factCheck  = await runFactChecker(pack, studio, claimTrace, blocksBuilt, numericAudit, { checkedStudioHash: studioHash, autoCheck: false, adminEmail, sessionId: `factcheck-${projectId}-manual-${Date.now()}`, usage })
 
   const nextMeta: WriterMetadata = {
     ...(prevWriter ?? {
-      version: WRITER_METADATA_VERSION, generatedAt: new Date().toISOString(), model: 'manual', claimTrace: [], blockIntents: [], assemblyWarnings: [], generationCost: { input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0, cost_usd: 0, latency_ms: 0 },
+      version: WRITER_METADATA_VERSION, generatedAt: new Date().toISOString(), model: 'manual',
+      claimTrace: [], blockIntents: [], assemblyWarnings: [],
+      generationCost: emptyUsage(),
     }),
     factCheck,
     checkedStudioHash: studioHash,
   } as WriterMetadata
-  // Merge the new usage into whatever was already recorded.
   nextMeta.generationCost = mergeUsage(nextMeta.generationCost, usage)
   await supa.from('editorial_projects').update({ writer_json: nextMeta, updated_at: new Date().toISOString() }).eq('id', projectId)
   return factCheck
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Internals
+// Stage handlers — each is idempotent for its stage and advances
+// the currentRun.stage to the next value on success.
 // ─────────────────────────────────────────────────────────────────
+
+async function stageWriter(writer: WriterMetadata, project: any, pack: EvidencePack, analysis: ResearchAnalysis | null, adminEmail: string, stageStartMs: number): Promise<WriterMetadata> {
+  const context = await buildEditorialContext()
+  const bundle = {
+    project: { id: Number(project.id), title: String(project.title), angle: project.angle ?? null, articleType: String(project.article_type), targetPublishAt: project.target_publish_at ?? null },
+    pack, analysis, context,
+  }
+  const userTurn = buildWriterUserTurn(bundle)
+  const call = await callAnthropicAndLog({
+    feature: 'editorial_writer_generate',
+    model: WRITER_MODEL, system: WRITER_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: userTurn }],
+    max_tokens: WRITER_MAX_TOKENS, temperature: 0.4, cacheSystem: true,
+    adminEmail, sessionId: `writer-${project.id}-${Date.now()}`,
+  })
+  if (!call.ok) throw new Error(`writer call failed: ${call.error || 'unknown'}`)
+  const parsed = parseWriterResponse(call.text)
+  if (!parsed) throw new Error('writer produced no parsable draft')
+  const usage = mergeCallUsage(writer.currentRun!.usage, call)
+  const run: GenerationRun = {
+    ...writer.currentRun!,
+    stage: 'style', stageLabel: 'Applying house style',
+    rawWriterText: call.text,
+    usage, updatedAt: new Date().toISOString(),
+    stageTimings: { ...writer.currentRun!.stageTimings, writer: Date.now() - stageStartMs },
+  }
+  return { ...writer, generationCost: usage, currentRun: run }
+}
+
+async function stageStyleAndAssemble(writer: WriterMetadata, project: any, pack: EvidencePack, adminEmail: string, stageStartMs: number): Promise<WriterMetadata> {
+  const rawText = writer.currentRun!.rawWriterText
+  if (!rawText) throw new Error('style stage: missing rawWriterText')
+  let draft = parseWriterResponse(rawText)
+  if (!draft) throw new Error('style stage: previous Writer output failed to reparse')
+
+  const usage = writer.currentRun!.usage
+  let styleRepairFired = writer.currentRun!.styleRepairFired
+  let workingRaw = rawText
+
+  const audit = auditFieldMap(styleAuditFields(draft))
+  if (audit.hasViolations) {
+    const repair = await callAnthropicAndLog({
+      feature: 'editorial_writer_style_repair',
+      model: WRITER_MODEL, system: WRITER_SYSTEM_PROMPT,
+      messages: [
+        { role: 'user', content: 'MODE=generate\nOriginal generation was rejected by the style guard. Reproduce your JSON in full but with every style violation fixed.' },
+        { role: 'assistant', content: rawText },
+        { role: 'user', content: buildStyleRepairUserTurn(rawText, audit) },
+      ],
+      max_tokens: WRITER_MAX_TOKENS, temperature: 0.2, cacheSystem: true,
+      adminEmail, sessionId: `writer-${project.id}-style-${Date.now()}`,
+    })
+    if (repair.ok) {
+      const repaired = parseWriterResponse(repair.text)
+      const second   = repaired ? auditFieldMap(styleAuditFields(repaired)) : { hasViolations: true, violations: [] as any[] }
+      styleRepairFired = true
+      addCallUsage(usage, repair)
+      if (repaired && !second.hasViolations) {
+        draft = repaired
+        workingRaw = repair.text
+      }
+    }
+  }
+
+  const cardIndex = buildCardIndex(pack)
+  const assembly = assembleStudioFromDraft({
+    draft, pack, cardIndex,
+    themeKey: pack.recipe === 'monthly_market_report' ? 'market' : pack.recipe === 'population_scarcity' ? 'grading' : 'market',
+    themeLabel: pack.recipe === 'monthly_market_report' ? 'Market' : pack.recipe === 'population_scarcity' ? 'Grading' : 'Market',
+  })
+  const numericAudit = auditStudioNumerics(assembly.studio, pack, assembly.blocksBuilt)
+
+  // Persist the first Studio-ready draft immediately so a browser
+  // refresh mid-run sees the article. Save studio_json alongside
+  // the writer_json update in the caller.
+  const supa = getSupabaseServiceClient()
+  await supa.from('editorial_projects').update({ studio_json: assembly.studio }).eq('id', project.id)
+
+  const run: GenerationRun = {
+    ...writer.currentRun!,
+    stage: 'fact_check', stageLabel: 'Checking facts',
+    rawWriterText: workingRaw,
+    styleRepairFired,
+    usage,
+    updatedAt: new Date().toISOString(),
+    stageTimings: { ...writer.currentRun!.stageTimings, style: Date.now() - stageStartMs },
+  }
+  const nextMeta: WriterMetadata = {
+    ...writer,
+    claimTrace:       draft.evidenceTrace,
+    blockIntents:     assembly.blocksBuilt,
+    assemblyWarnings: assembly.warnings,
+    generationCost:   usage,
+    styleRepairFired,
+    currentRun:       run,
+  }
+  // Numeric audit lives on the factCheck at fact_check stage; we
+  // stash it via a temporary field on currentRun? No — recompute in
+  // fact_check from the persisted studio_json. Cheap + deterministic.
+  return nextMeta
+}
+
+async function stageFactCheck(writer: WriterMetadata, projectId: number, pack: EvidencePack, adminEmail: string, stageStartMs: number): Promise<WriterMetadata> {
+  const supa = getSupabaseServiceClient()
+  const { data: pRow } = await supa.from('editorial_projects').select('studio_json').eq('id', projectId).maybeSingle()
+  const studio = ((pRow as any)?.studio_json ?? null) as StudioDocument | null
+  if (!studio) throw new Error('fact_check stage: no studio_json to check')
+
+  const numericAudit = auditStudioNumerics(studio, pack, writer.blockIntents)
+  const usage = writer.currentRun!.usage
+  const studioHash = hashStudioBody(studio.bodyDoc)
+  const factCheck  = await runFactChecker(pack, studio, writer.claimTrace, writer.blockIntents, numericAudit, {
+    checkedStudioHash: studioHash, autoCheck: true, adminEmail,
+    sessionId: `factcheck-${projectId}-${Date.now()}`, usage,
+  })
+
+  const actionable = factCheck.issues.some(i => i.severity !== 'minor') || numericAudit.issues.length > 0
+  const canRepair  = !writer.currentRun!.repairFired
+  const nextStage: GenerationStage = actionable && canRepair ? 'repair' : 'complete'
+  const nextLabel  = nextStage === 'repair' ? 'Repairing draft' : 'Saving draft'
+
+  const run: GenerationRun = {
+    ...writer.currentRun!,
+    stage: nextStage, stageLabel: nextLabel,
+    usage, updatedAt: new Date().toISOString(),
+    stageTimings: { ...writer.currentRun!.stageTimings, fact_check: Date.now() - stageStartMs },
+  }
+  const nextMeta: WriterMetadata = {
+    ...writer,
+    factCheck,
+    checkedStudioHash: studioHash,
+    generationCost:    usage,
+    currentRun:        run,
+  }
+  if (nextStage === 'complete') return maybeFinalize(nextMeta, projectId)
+  return nextMeta
+}
+
+async function stageRepair(writer: WriterMetadata, project: any, pack: EvidencePack, adminEmail: string, stageStartMs: number): Promise<WriterMetadata> {
+  const supa = getSupabaseServiceClient()
+  const rawText = writer.currentRun!.rawWriterText
+  if (!rawText) throw new Error('repair stage: missing rawWriterText')
+
+  const { data: pRow } = await supa.from('editorial_projects').select('studio_json').eq('id', project.id).maybeSingle()
+  const studio = ((pRow as any)?.studio_json ?? null) as StudioDocument | null
+  if (!studio) throw new Error('repair stage: no studio_json')
+
+  const numericAudit = auditStudioNumerics(studio, pack, writer.blockIntents)
+  const factCheck    = writer.factCheck
+  if (!factCheck) throw new Error('repair stage: no factCheck to repair against')
+
+  const factSummary = factCheck.issues.map((i, k) => `  ${k + 1}. [${i.severity}] ${i.kind} — ${i.claim} :: ${i.reason}${i.suggestedCorrection ? ` (suggest: ${i.suggestedCorrection})` : ''}`).join('\n') || '  (none)'
+  const numSummary  = numericAudit.issues.map((i, k) => `  ${k + 1}. "${i.token.raw}" at ${i.token.location}${i.nearest ? ` — nearest allowed ${i.nearest.value} (${i.nearest.source})` : ''}`).join('\n') || '  (none)'
+
+  const rep = await callAnthropicAndLog({
+    feature: 'editorial_writer_repair',
+    model: WRITER_MODEL, system: WRITER_SYSTEM_PROMPT,
+    messages: [
+      { role: 'user', content: 'MODE=generate\nInitial draft.' },
+      { role: 'assistant', content: rawText },
+      { role: 'user', content: buildWriterRepairUserTurn(rawText, factSummary, numSummary) },
+    ],
+    max_tokens: WRITER_MAX_TOKENS, temperature: 0.3, cacheSystem: true,
+    adminEmail, sessionId: `writer-${project.id}-repair-${Date.now()}`,
+  })
+  const usage = mergeCallUsage(writer.currentRun!.usage, rep)
+
+  const run: GenerationRun = {
+    ...writer.currentRun!,
+    stage: 'finalize', stageLabel: 'Saving draft',
+    rawWriterText: rep.ok ? rep.text : rawText,
+    repairFired: true,
+    usage,
+    updatedAt: new Date().toISOString(),
+    stageTimings: { ...writer.currentRun!.stageTimings, repair: Date.now() - stageStartMs },
+  }
+  return { ...writer, generationCost: usage, currentRun: run, repairFired: true }
+}
+
+async function stageFinalize(writer: WriterMetadata, projectId: number, pack: EvidencePack, adminEmail: string, stageStartMs: number): Promise<WriterMetadata> {
+  const supa = getSupabaseServiceClient()
+  const rawText = writer.currentRun!.rawWriterText
+  const repairedDraft = rawText ? parseWriterResponse(rawText) : null
+  const { data: pRow } = await supa.from('editorial_projects').select('studio_json').eq('id', projectId).maybeSingle()
+  const currentStudio = ((pRow as any)?.studio_json ?? null) as StudioDocument | null
+  if (!currentStudio) throw new Error('finalize stage: no studio_json')
+
+  let acceptedStudio = currentStudio
+  let acceptedFactCheck = writer.factCheck!
+  let acceptedNumericAudit = writer.factCheck!.numericAudit
+  let acceptedTrace = writer.claimTrace
+  let acceptedIntents = writer.blockIntents
+  let acceptedWarnings = writer.assemblyWarnings
+
+  if (repairedDraft) {
+    const cardIndex = buildCardIndex(pack)
+    const repAssembly = assembleStudioFromDraft({
+      draft: repairedDraft, pack, cardIndex,
+      themeKey: currentStudio.themeKey, themeLabel: currentStudio.themeLabel,
+    })
+    const repAudit  = auditStudioNumerics(repAssembly.studio, pack, repAssembly.blocksBuilt)
+    const repHash   = hashStudioBody(repAssembly.studio.bodyDoc)
+    const repCheck  = await runFactChecker(pack, repAssembly.studio, repairedDraft.evidenceTrace, repAssembly.blocksBuilt, repAudit, {
+      checkedStudioHash: repHash, autoCheck: true, adminEmail,
+      sessionId: `factcheck-${projectId}-final-${Date.now()}`, usage: writer.currentRun!.usage,
+    })
+    const before = writer.factCheck!.issues.length + writer.factCheck!.numericAudit.issues.length
+    const after  = repCheck.issues.length + repAudit.issues.length
+    if (after <= before) {
+      // Accept repair.
+      acceptedStudio = repAssembly.studio
+      acceptedFactCheck = repCheck
+      acceptedNumericAudit = repAudit
+      acceptedTrace = repairedDraft.evidenceTrace
+      acceptedIntents = repAssembly.blocksBuilt
+      acceptedWarnings = repAssembly.warnings
+      await supa.from('editorial_projects').update({ studio_json: acceptedStudio }).eq('id', projectId)
+    }
+    // else keep the previously-persisted studio + factCheck.
+  }
+
+  const usage = writer.currentRun!.usage
+  const nextStatus = await promoteProjectStatus(projectId)
+  const run: GenerationRun = {
+    ...writer.currentRun!,
+    stage: 'complete', stageLabel: 'Complete',
+    usage, updatedAt: new Date().toISOString(),
+    stageTimings: { ...writer.currentRun!.stageTimings, finalize: Date.now() - stageStartMs },
+  }
+  return {
+    ...writer,
+    claimTrace: acceptedTrace,
+    blockIntents: acceptedIntents,
+    assemblyWarnings: acceptedWarnings,
+    factCheck: acceptedFactCheck,
+    checkedStudioHash: hashStudioBody(acceptedStudio.bodyDoc),
+    generationCost: usage,
+    currentRun: run,
+  }
+}
+
+async function maybeFinalize(writer: WriterMetadata, projectId: number): Promise<WriterMetadata> {
+  await promoteProjectStatus(projectId)
+  const run: GenerationRun = {
+    ...writer.currentRun!,
+    stage: 'complete', stageLabel: 'Complete',
+    updatedAt: new Date().toISOString(),
+  }
+  return { ...writer, currentRun: run }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────
+
+function advance(writer: WriterMetadata, nextStage: GenerationStage, label: string, stageStartMs: number): WriterMetadata {
+  const run: GenerationRun = {
+    ...writer.currentRun!,
+    stage: nextStage, stageLabel: label,
+    updatedAt: new Date().toISOString(),
+    stageTimings: { ...writer.currentRun!.stageTimings, [writer.currentRun!.stage]: Date.now() - stageStartMs },
+  }
+  return { ...writer, currentRun: run }
+}
+function fail(writer: WriterMetadata | null, error: string): WriterMetadata {
+  const run: GenerationRun = writer?.currentRun ? {
+    ...writer.currentRun, stage: 'failed', stageLabel: 'Failed',
+    error, updatedAt: new Date().toISOString(),
+  } : {
+    id: `run_failed_${Date.now()}`, startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    stage: 'failed', stageLabel: 'Failed', error, usage: emptyUsage(),
+    styleRepairFired: false, repairFired: false, stageTimings: {},
+  }
+  return {
+    version: WRITER_METADATA_VERSION, generatedAt: new Date().toISOString(), model: WRITER_MODEL,
+    claimTrace: [], blockIntents: [], assemblyWarnings: [], generationCost: emptyUsage(),
+    ...(writer ?? {}),
+    currentRun: run,
+  }
+}
 
 function ensureResearchApproved(row: EditorialResearchRow | null): void {
   if (!row) throw new Error('approved research required')
@@ -313,13 +537,21 @@ function styleAuditFields(draft: WriterDraft): Record<string, string | string[]>
   }
 }
 
-function addUsage(base: WriterUsage, more: { usage: any; cost_usd: number; latency_ms: number }): void {
+function emptyUsage(): WriterUsage {
+  return { input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0, cost_usd: 0, latency_ms: 0 }
+}
+function addCallUsage(base: WriterUsage, more: { usage: any; cost_usd: number; latency_ms: number }): void {
   base.input_tokens          += more.usage.input_tokens          ?? 0
   base.output_tokens         += more.usage.output_tokens         ?? 0
   base.cache_creation_tokens += more.usage.cache_creation_tokens ?? 0
   base.cache_read_tokens     += more.usage.cache_read_tokens     ?? 0
   base.cost_usd              += more.cost_usd                    ?? 0
   base.latency_ms             = Math.max(base.latency_ms, more.latency_ms ?? 0)
+}
+function mergeCallUsage(base: WriterUsage, more: { usage: any; cost_usd: number; latency_ms: number }): WriterUsage {
+  const copy: WriterUsage = { ...base }
+  addCallUsage(copy, more)
+  return copy
 }
 function mergeUsage(a: WriterUsage, b: WriterUsage): WriterUsage {
   return {
@@ -332,45 +564,40 @@ function mergeUsage(a: WriterUsage, b: WriterUsage): WriterUsage {
   }
 }
 
+async function promoteProjectStatus(projectId: number): Promise<string> {
+  const supa = getSupabaseServiceClient()
+  const { data: p } = await supa.from('editorial_projects').select('status').eq('id', projectId).maybeSingle()
+  const cur = (p as any)?.status as string | undefined
+  const next = (cur === 'planned' || cur === 'idea') ? 'drafting' : (cur ?? 'drafting')
+  if (next !== cur) await supa.from('editorial_projects').update({ status: next }).eq('id', projectId)
+  return next
+}
+
 async function runFactChecker(
-  pack: EvidencePack, studio: StudioDocument, claimTrace: WriterClaimTrace[], blocksBuilt: BlockIntent[], numericAudit: ReturnType<typeof auditStudioNumerics>,
+  pack: EvidencePack, studio: StudioDocument, claimTrace: WriterClaimTrace[], blocksBuilt: BlockIntent[], numericAudit: NumericAuditResult,
   opts: { checkedStudioHash: string; autoCheck: boolean; adminEmail: string; sessionId: string; usage: WriterUsage },
 ): Promise<FactCheckResult> {
   const userTurn = buildFactCheckerUserTurn({ pack, studio, claimTrace, blocksBuilt, numericAudit })
   const call = await callAnthropicAndLog({
-    feature:     'editorial_writer_fact_check',
-    model:       WRITER_MODEL,
-    system:      FACT_CHECKER_SYSTEM_PROMPT,
-    messages:    [{ role: 'user', content: userTurn }],
-    max_tokens:  CHECKER_MAX_TOKENS,
-    temperature: 0.2,
-    cacheSystem: true,
-    adminEmail:  opts.adminEmail,
-    sessionId:   opts.sessionId,
+    feature:  'editorial_writer_fact_check',
+    model:    WRITER_MODEL, system: FACT_CHECKER_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: userTurn }],
+    max_tokens: CHECKER_MAX_TOKENS, temperature: 0.2, cacheSystem: true,
+    adminEmail: opts.adminEmail, sessionId: opts.sessionId,
   })
   if (!call.ok) {
-    // Never let a failed fact-check call block the write; degrade
-    // to a review_required result carrying the numeric audit + a
-    // synthetic issue so the reviewer sees it clearly.
     return {
-      version: 1,
-      status: numericAudit.issues.length > 0 ? 'review_required' : 'review_required',
-      checkedAt: new Date().toISOString(),
+      version: 1, status: 'review_required', checkedAt: new Date().toISOString(),
       packRecipe: pack.recipe,
       issues: [{ kind: 'other', severity: 'major', claim: 'Fact Checker call failed', reason: call.error ?? 'unknown', evidenceRefs: [] }],
-      numericAudit,
-      checkedStudioHash: opts.checkedStudioHash,
-      autoCheck: opts.autoCheck,
+      numericAudit, checkedStudioHash: opts.checkedStudioHash, autoCheck: opts.autoCheck,
     }
   }
-  addUsage(opts.usage, call)
+  addCallUsage(opts.usage, call)
   return parseFactCheckerResponse(call.text, pack, numericAudit, { checkedStudioHash: opts.checkedStudioHash, autoCheck: opts.autoCheck })
 }
 
-// Build a cardSlug -> CardIdentity index the assembler can resolve
-// against. Sources: dataTable rows (bare slug), pack.internalLinks,
-// pack card refs on stat callouts, etc. Bounded to avoid excess.
-function buildCardIndex(pack: EvidencePack, _context: EditorialContext | null): Map<string, CardIdentity> {
+function buildCardIndex(pack: EvidencePack): Map<string, CardIdentity> {
   const map = new Map<string, CardIdentity>()
   for (const t of pack.dataTables) {
     for (const row of t.rows) {
@@ -384,10 +611,8 @@ function buildCardIndex(pack: EvidencePack, _context: EditorialContext | null): 
       if (!key) continue
       if (!map.has(key)) map.set(key, {
         cardSlug: slug || (url ? url.replace(/^pc-/, '') : ''),
-        cardName: name,
-        setName:  setName || undefined,
-        cardNumber: num || undefined,
-        urlSlug:  url || undefined,
+        cardName: name, setName: setName || undefined,
+        cardNumber: num || undefined, urlSlug: url || undefined,
       })
     }
   }

@@ -109,6 +109,45 @@ export type WriterMetadata = {
   generationCost:        WriterUsage
   styleRepairFired?:     boolean
   repairFired?:          boolean
+  /** Block 9B — generation state machine.
+   *  When present and not in {complete, failed}, generation is
+   *  in progress and Studio should keep polling. When complete,
+   *  the other fields on WriterMetadata are the authoritative
+   *  final output. When failed, `run.error` explains why. */
+  currentRun?:           GenerationRun
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Block 9B — generation stage machine (resumable)
+// ─────────────────────────────────────────────────────────────────
+
+export type GenerationStage =
+  | 'queued'          // just created; next call transitions to 'writer'
+  | 'writer'          // pending: Writer Claude call
+  | 'style'           // pending: style guard + optional style repair + assemble + numeric audit
+  | 'fact_check'      // pending: Fact Checker Claude call
+  | 'repair'          // pending: Writer repair Claude call + reassemble + re-audit
+  | 'finalize'        // pending: Fact Checker on repaired doc + accept/revert repair
+  | 'complete'
+  | 'failed'
+
+export type GenerationRun = {
+  id:            string
+  startedAt:     string
+  updatedAt:     string
+  stage:         GenerationStage
+  stageLabel:    string
+  /** Non-null when stage === 'failed'. */
+  error?:        string
+  /** Preserved between stages so a poll can resume without redoing
+   *  the previous Claude calls. Raw Writer text is 10-40 KB JSON. */
+  rawWriterText?: string
+  usage:         WriterUsage
+  styleRepairFired: boolean
+  repairFired:      boolean
+  /** Per-stage timing telemetry so the report + UI can show real
+   *  numbers rather than cosmetic ones. Milliseconds. */
+  stageTimings:  Record<string, number>
 }
 
 // ─────────────────────────────────────────────────────────────────

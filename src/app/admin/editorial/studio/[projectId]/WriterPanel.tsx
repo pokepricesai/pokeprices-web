@@ -9,9 +9,9 @@
 // Progress UI shows the pipeline steps deterministically (no real
 // SSE — sufficient per spec).
 
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import type { WriterMetadata, FactCheckResult, FactCheckIssue } from '@/lib/editorial/writer/types'
+import type { WriterMetadata, FactCheckResult, FactCheckIssue, GenerationStage } from '@/lib/editorial/writer/types'
 import type { StudioDocument } from '@/lib/studio/types'
 
 async function authHeader(): Promise<Record<string, string>> {
@@ -31,50 +31,73 @@ type Props = {
   onFactCheckResult:  (result: FactCheckResult) => void
 }
 
-const PROGRESS_STEPS = [
-  'Preparing evidence',
-  'Writing draft',
-  'Building data blocks',
-  'Applying house style',
-  'Checking facts',
-  'Saving draft',
-] as const
+// Block 9B — real server stages. Progress UI reflects
+// writer.currentRun.stage returned from the last poll.
+const STAGE_ORDER: GenerationStage[] = ['queued', 'writer', 'style', 'fact_check', 'repair', 'finalize', 'complete']
+const STAGE_LABELS: Record<GenerationStage, string> = {
+  queued:     'Preparing',
+  writer:     'Writing draft',
+  style:      'Applying house style',
+  fact_check: 'Checking facts',
+  repair:     'Repairing draft',
+  finalize:   'Saving draft',
+  complete:   'Complete',
+  failed:     'Failed',
+}
+function stageIndex(s: GenerationStage): number { return STAGE_ORDER.indexOf(s) }
 
 export function GenerateAndFactCheckPanel(props: Props) {
   const { projectId, researchStatus, hasMeaningfulBody, writer, factCheckStale } = props
   const [busy, setBusy]           = useState<'generate' | 'fact-check' | null>(null)
-  const [stepIdx, setStepIdx]     = useState(0)
   const [error, setError]         = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
+  const [liveStage, setLiveStage] = useState<GenerationStage | null>(null)
+  const abortRef = useRef(false)
 
   const approved = researchStatus === 'approved'
 
+  // Block 9B — Stage-machine poller. Each POST advances one stage
+  // (≤1 Claude call) and returns updated writer state. Loop until
+  // the server says stage is 'complete' or 'failed'.
+  const runOneStage = useCallback(async (overwrite: boolean, mode: 'auto' | 'step'): Promise<{ writer: WriterMetadata; studio: StudioDocument | null; factCheck: FactCheckResult | null }> => {
+    const auth = await authHeader()
+    const res = await fetch(`/api/admin/editorial/studio/${projectId}/write`, {
+      method: 'POST',
+      headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ mode, overwriteExisting: overwrite }),
+    })
+    const j = await res.json().catch(() => ({}))
+    if (res.status === 409 && j?.needsOverwriteConfirmation) {
+      throw new Error('__NEEDS_OVERWRITE_CONFIRM__')
+    }
+    if (!res.ok || j?.ok === false) throw new Error(j?.error || `${res.status} ${res.statusText}`)
+    return { writer: j.writer as WriterMetadata, studio: (j.studio ?? null) as StudioDocument | null, factCheck: (j.factCheck ?? null) as FactCheckResult | null }
+  }, [projectId])
+
   const generate = useCallback(async (overwrite: boolean) => {
-    setError(null); setStepIdx(0); setBusy('generate')
-    // Cosmetic step animation: 1s per step until the request completes.
-    const timer = setInterval(() => setStepIdx(i => (i < PROGRESS_STEPS.length - 1 ? i + 1 : i)), 1200)
+    setError(null); setBusy('generate'); abortRef.current = false
     try {
-      const auth = await authHeader()
-      const res = await fetch(`/api/admin/editorial/studio/${projectId}/write`, {
-        method: 'POST',
-        headers: { ...auth, 'content-type': 'application/json' },
-        body: JSON.stringify({ overwriteExisting: overwrite }),
-      })
-      const j = await res.json().catch(() => ({}))
-      if (res.status === 409 && j?.needsOverwriteConfirmation) {
-        setConfirming(true)
-        return
+      // First call boots the run + advances one stage (auto mode).
+      let step = await runOneStage(overwrite, 'auto')
+      setLiveStage(step.writer.currentRun?.stage ?? null)
+      props.onWriterResult(step.writer, step.studio)
+      // Then loop, polling next stage every ~500ms + server work.
+      while (!abortRef.current && step.writer.currentRun && step.writer.currentRun.stage !== 'complete' && step.writer.currentRun.stage !== 'failed') {
+        await sleep(400)
+        step = await runOneStage(overwrite, 'step')
+        setLiveStage(step.writer.currentRun?.stage ?? null)
+        props.onWriterResult(step.writer, step.studio)
       }
-      if (!res.ok || j?.ok === false) throw new Error(j?.error || `${res.status} ${res.statusText}`)
-      setStepIdx(PROGRESS_STEPS.length - 1)
-      props.onWriterResult(j.writer as WriterMetadata, (j.studio ?? null) as StudioDocument | null)
       setConfirming(false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'unknown')
+      const msg = e instanceof Error ? e.message : 'unknown'
+      if (msg === '__NEEDS_OVERWRITE_CONFIRM__') { setConfirming(true); return }
+      setError(msg)
     } finally {
-      clearInterval(timer); setBusy(null)
+      setBusy(null)
+      setLiveStage(null)
     }
-  }, [projectId, props])
+  }, [runOneStage, props])
 
   const runFactCheck = useCallback(async () => {
     setError(null); setBusy('fact-check')
@@ -119,12 +142,34 @@ export function GenerateAndFactCheckPanel(props: Props) {
           <div style={S.progressBox}>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>Generating…</div>
             <ol style={S.progressList}>
-              {PROGRESS_STEPS.map((s, i) => (
-                <li key={i} style={{ ...S.progressStep, ...(i <= stepIdx ? S.progressStepActive : {}) }}>
-                  {i < stepIdx ? '✓' : i === stepIdx ? '→' : '·'} {s}
-                </li>
-              ))}
+              {STAGE_ORDER.filter(s => s !== 'queued').map((s, i, arr) => {
+                const cur = liveStage ?? writer?.currentRun?.stage ?? null
+                const curIdx = cur ? Math.max(0, arr.indexOf(cur as any)) : -1
+                const done = curIdx > i
+                const active = curIdx === i
+                return (
+                  <li key={s} style={{ ...S.progressStep, ...(done || active ? S.progressStepActive : {}) }}>
+                    {done ? '✓' : active ? '→' : '·'} {STAGE_LABELS[s]}
+                  </li>
+                )
+              })}
             </ol>
+          </div>
+        )}
+        {writer?.currentRun?.stage === 'failed' && (
+          <div style={S.error}>
+            Generation failed at stage <strong>{writer.currentRun.stageLabel || writer.currentRun.stage}</strong>: {writer.currentRun.error ?? 'unknown error'}.
+            <div style={{ marginTop: 6 }}>
+              <button style={S.btnPrimary} disabled={!!busy} onClick={() => generate(true)}>Retry</button>
+            </div>
+          </div>
+        )}
+        {writer?.currentRun && writer.currentRun.stage !== 'complete' && writer.currentRun.stage !== 'failed' && !busy && (
+          <div style={S.gateNotice}>
+            A generation is in progress at stage <strong>{writer.currentRun.stageLabel}</strong>. Reload safely — you can resume from this stage.
+            <div style={{ marginTop: 6 }}>
+              <button style={S.btnPrimary} onClick={() => generate(true)}>Resume</button>
+            </div>
           </div>
         )}
         {error && <div style={S.error}>{error}</div>}
@@ -199,6 +244,8 @@ function IssueRow({ issue }: { issue: FactCheckIssue }) {
     </span>
   )
 }
+
+function sleep(ms: number): Promise<void> { return new Promise(res => setTimeout(res, ms)) }
 
 const S: Record<string, React.CSSProperties> = {
   wrap:      { padding: 12 },
