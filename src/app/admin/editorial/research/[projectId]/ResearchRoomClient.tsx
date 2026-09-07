@@ -94,10 +94,13 @@ export default function ResearchRoomClient({ project, initialResearch, chosenRec
       <AdminToolHeader toolName="Research Room" />
       <div style={S.page}>
         <div style={S.container}>
-          <div style={S.crumbs}>
-            <Link href="/admin/editorial" style={S.crumbLink}>Editorial HQ</Link>
-            <span style={S.crumbSep}>/</span>
-            <span>Research Room</span>
+          <div style={{ ...S.crumbs, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <Link href="/admin/editorial" style={S.crumbLink}>Editorial HQ</Link>
+              <span style={S.crumbSep}>/</span>
+              <span>Research Room</span>
+            </div>
+            <Link href={`/admin/editorial/studio/${project.id}`} style={{ ...S.crumbLink, fontWeight: 700 }}>Open Studio →</Link>
           </div>
 
           <ProjectHeader project={project} chosenRecipe={chosenRecipe} research={research} />

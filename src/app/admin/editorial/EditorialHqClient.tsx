@@ -187,6 +187,16 @@ function TypeBadge({ type }: { type: string }) {
     </span>
   )
 }
+// Block 7 — small pill linking to the project's Article Studio.
+function StudioChip({ projectId }: { projectId: number }) {
+  return (
+    <Link href={`/admin/editorial/studio/${projectId}`} style={{ textDecoration: 'none' }}>
+      <span title="Open Article Studio" style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 10, background: '#fef3c7', color: '#92400e', fontSize: 10, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', border: '1px solid #fbbf24', cursor: 'pointer' }}>
+        Studio →
+      </span>
+    </Link>
+  )
+}
 // Block 6 — small pill linking to the project's Research Room with
 // the current editorial_research.status. Defaults to "Research" when
 // no research row exists yet.
@@ -537,6 +547,7 @@ function SlotCard({
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <StatusBadge status={project.status} />
           <ResearchChip projectId={project.id} status={researchStatus} />
+      <StudioChip projectId={project.id} />
           <PriorityDot priority={project.priority} />
         </div>
       </div>
@@ -599,6 +610,7 @@ function ProjectRow({ project, onUpdate, onArchive, onDelete, researchStatus }: 
       <TypeBadge type={project.article_type} />
       <StatusBadge status={project.status} />
       <ResearchChip projectId={project.id} status={researchStatus} />
+      <StudioChip projectId={project.id} />
       <PriorityDot priority={project.priority} />
       <div style={{ display: 'flex', gap: 6 }}>
         <button style={btnGhost} onClick={() => setEditing(true)}>Edit</button>
@@ -670,6 +682,7 @@ function BacklogRow({ project, onUpdate, onArchive, onDelete, researchStatus }: 
       </div>
       <TypeBadge type={project.article_type} />
       <ResearchChip projectId={project.id} status={researchStatus} />
+      <StudioChip projectId={project.id} />
       <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{fmtDate(project.created_at)}</span>
       <div style={{ display: 'flex', gap: 6 }}>
         {planning ? (
