@@ -193,7 +193,7 @@ describe('acceptance A: August 2026 market report Writer pipeline', () => {
     const h1 = hashStudioBody(studio.bodyDoc)
     const h2 = hashStudioBody(studio.bodyDoc)
     expect(h1).toBe(h2)
-    const differentBody = { ...studio.bodyDoc, content: [] }
+    const differentBody = { ...(studio.bodyDoc as any), content: [] }
     expect(hashStudioBody(differentBody)).not.toBe(h1)
   })
 })

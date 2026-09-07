@@ -29,6 +29,7 @@ import { DataBlockNode } from './DataBlockNode'
 import { InsertDataBlockMenu } from './InsertDataBlockMenu'
 import type { WriterMetadata, FactCheckResult } from '@/lib/editorial/writer/types'
 import { GenerateAndFactCheckPanel } from './WriterPanel'
+import { PublicationPanel } from './PublicationPanel'
 
 type ProjectRow = {
   id: number
@@ -63,7 +64,8 @@ export default function StudioClient({ project, initialDoc, research, initialWri
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(initialDoc.updatedAt || null)
   const [lastError, setLastError] = useState<string | null>(null)
-  const [tab, setTab] = useState<'research' | 'seo' | 'settings' | 'writer'>('research')
+  const [tab, setTab] = useState<'research' | 'seo' | 'settings' | 'writer' | 'publish'>('research')
+  const [projectRow, setProjectRow] = useState<ProjectRow>(project)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [insertOpen, setInsertOpen]   = useState(false)
   const [writer, setWriter] = useState<WriterMetadata | null>(initialWriter)
@@ -218,6 +220,7 @@ export default function StudioClient({ project, initialDoc, research, initialWri
             <div style={S.tabRow}>
               <TabButton active={tab === 'research'} onClick={() => setTab('research')}>Research</TabButton>
               <TabButton active={tab === 'writer'}   onClick={() => setTab('writer')}>Writer</TabButton>
+              <TabButton active={tab === 'publish'}  onClick={() => setTab('publish')}>Publish</TabButton>
               <TabButton active={tab === 'seo'}      onClick={() => setTab('seo')}>SEO</TabButton>
               <TabButton active={tab === 'settings'} onClick={() => setTab('settings')}>Settings</TabButton>
             </div>
@@ -244,8 +247,18 @@ export default function StudioClient({ project, initialDoc, research, initialWri
                 }}
               />
             )}
+            {tab === 'publish'  && (
+              <PublicationPanel
+                projectId={project.id}
+                projectStatus={projectRow.status}
+                projectTitle={projectRow.title}
+                insightsId={projectRow.insights_id}
+                onInsightsIdChange={(id) => setProjectRow(p => ({ ...p, insights_id: id }))}
+                onProjectStatusChange={(s) => setProjectRow(p => ({ ...p, status: s }))}
+              />
+            )}
             {tab === 'seo'      && <SeoPanel doc={doc} mutate={mutate} />}
-            {tab === 'settings' && <SettingsPanel project={project} doc={doc} mutate={mutate} />}
+            {tab === 'settings' && <SettingsPanel project={projectRow} doc={doc} mutate={mutate} />}
           </div>
         </div>
 

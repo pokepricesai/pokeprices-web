@@ -187,6 +187,27 @@ function TypeBadge({ type }: { type: string }) {
     </span>
   )
 }
+// Block 10 — small pill showing the project's publication state.
+// Colour-coded: draft/none = gray, ready = amber, published = green.
+// When the project has a linked insights_id and is published, also
+// links to the public article.
+function PublicationChip({ project }: { project: EditorialProject }) {
+  const status = project.status
+  let bg = '#f1f5f9', fg = '#334155', label = 'Not planned'
+  if (status === 'planned')   { bg = '#e0f2fe'; fg = '#0369a1'; label = 'Planned' }
+  if (status === 'drafting')  { bg = '#fef3c7'; fg = '#92400e'; label = 'Drafting' }
+  if (status === 'review')    { bg = '#fef3c7'; fg = '#92400e'; label = 'Review' }
+  if (status === 'ready')     { bg = '#fef3c7'; fg = '#92400e'; label = 'Ready' }
+  if (status === 'published') { bg = '#dcfce7'; fg = '#166534'; label = 'Published' }
+  if (status === 'archived')  { bg = '#f1f5f9'; fg = '#64748b'; label = 'Archived' }
+  const chip = (
+    <span title="Editorial project status" style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 10, background: bg, color: fg, fontSize: 10, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap', border: `1px solid ${fg}22` }}>
+      {label}
+    </span>
+  )
+  return chip
+}
+
 // Block 7 — small pill linking to the project's Article Studio.
 function StudioChip({ projectId }: { projectId: number }) {
   return (
@@ -548,6 +569,7 @@ function SlotCard({
           <StatusBadge status={project.status} />
           <ResearchChip projectId={project.id} status={researchStatus} />
       <StudioChip projectId={project.id} />
+      <PublicationChip project={project} />
           <PriorityDot priority={project.priority} />
         </div>
       </div>
@@ -611,6 +633,7 @@ function ProjectRow({ project, onUpdate, onArchive, onDelete, researchStatus }: 
       <StatusBadge status={project.status} />
       <ResearchChip projectId={project.id} status={researchStatus} />
       <StudioChip projectId={project.id} />
+      <PublicationChip project={project} />
       <PriorityDot priority={project.priority} />
       <div style={{ display: 'flex', gap: 6 }}>
         <button style={btnGhost} onClick={() => setEditing(true)}>Edit</button>
@@ -683,6 +706,7 @@ function BacklogRow({ project, onUpdate, onArchive, onDelete, researchStatus }: 
       <TypeBadge type={project.article_type} />
       <ResearchChip projectId={project.id} status={researchStatus} />
       <StudioChip projectId={project.id} />
+      <PublicationChip project={project} />
       <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{fmtDate(project.created_at)}</span>
       <div style={{ display: 'flex', gap: 6 }}>
         {planning ? (
