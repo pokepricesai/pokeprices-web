@@ -18,10 +18,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('server-only', () => ({}))
 
 // ─── Fake Anthropic (records calls, returns scripted responses) ──
+// Scripted responses provide the model output; feature/system/messages
+// are filled in by the fake call handler when the actual call fires.
 type FakeCall = {
-  feature: string
-  system:  string
-  messages: any
+  feature?:  string
+  system?:   string
+  messages?: any
   webSearch?: any
   text: string
   cost: number
@@ -123,14 +125,17 @@ describe('stage machine: advances exactly one stage per call', () => {
       { feature: 'supporting', text: 'Supporting prose. Retailer coverage [1].', cost: 0.10, searches: 3, citations: [
         { url: 'https://www.tcgplayer.com/product/xyz', title: 'Preorder listing' },
       ], webSearch: {} },
-      // Extractor emits structured JSON referring back to discovered ids.
+      // Extractor emits structured JSON referring back to discovered
+      // ids using the v4 STABLE src_NNN scheme that stageExtract
+      // remaps to. The persistent ids are translated back on the way
+      // out; v3-style persistent-id refs no longer work.
       { feature: 'extract', text: '```json\n' + JSON.stringify({
         researchQuestions: ['Is the release date confirmed?', 'What products are included?'],
         discoveredSources: [],
         verifiedFacts: [
-          { id: 'fact-official', statement: 'Set has an official expansion page.', status: 'confirmed', sourceTier: 1, evidenceRefs: ['__DISCOVERED_1__', '__DISCOVERED_2__'] },
-          { id: 'fact-preorder', statement: 'Preorders are live at TCGplayer.', status: 'reported', sourceTier: 2, evidenceRefs: ['__DISCOVERED_3__'] },
-          { id: 'fact-announced', statement: 'The Pokémon Company has announced the set.', status: 'confirmed', sourceTier: 1, evidenceRefs: ['__DISCOVERED_1__'] },
+          { id: 'fact-official', statement: 'Set has an official expansion page.', status: 'confirmed', sourceTier: 1, evidenceRefs: ['src_001', 'src_002'] },
+          { id: 'fact-preorder', statement: 'Preorders are live at TCGplayer.', status: 'reported', sourceTier: 2, evidenceRefs: ['src_003'] },
+          { id: 'fact-announced', statement: 'The Pokémon Company has announced the set.', status: 'confirmed', sourceTier: 1, evidenceRefs: ['src_001'] },
         ],
         contradictions: [],
         researchGaps: ['Exact card count not yet published.'],
@@ -162,14 +167,9 @@ describe('stage machine: advances exactly one stage per call', () => {
     expect(a3.run.searchesUsed).toBe(6)                    // budget ceiling
     expect(a3.run.supportingText).toBeTruthy()
 
-    // Now we know the actual discovered ids — patch the extractor
-    // script's fact refs to point at them.
-    const discIds = a3.run.discoveredSources.map(s => s.id)
-    scriptedResponses[0].text = scriptedResponses[0].text
-      .replace('__DISCOVERED_1__', discIds[0])
-      .replace('__DISCOVERED_2__', discIds[1])
-      .replace('__DISCOVERED_3__', discIds[2])
-      .replace('__DISCOVERED_1__', discIds[0])   // second occurrence
+    // No patching needed — the extractor script already uses
+    // src_001..src_003 which stageExtract translates back to the
+    // pack's persistent src-cite-... ids.
 
     // 4th advance: runs Stage C (extraction), lands on finalizing.
     const a4 = await advanceExternalResearchRun(PROJECT_ID, 'e@x')
@@ -311,6 +311,99 @@ describe('stage machine: manual sources survive staged run', () => {
 // ─────────────────────────────────────────────────────────────────
 // 6. Discovered source tiers preserved through stages
 // ─────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────
+// v4 — extractor uses stable src_NNN ids; facts survive translation
+// ─────────────────────────────────────────────────────────────────
+
+describe('stage machine v4: stable src_NNN ids let facts survive', () => {
+  it('extractor prompt uses src_NNN ids; parser translates refs back to persistent ids', async () => {
+    await seedPack()
+
+    // Discovery stages: 2 primary sources, 1 supporting source.
+    scriptedResponses.push(
+      { text: 'Primary prose citing Tier-1 and Tier-3.', cost: 0.10, searches: 3, citations: [
+        { url: 'https://www.pokemon.com/us/celebration', title: 'Official' },
+        { url: 'https://www.reddit.com/r/pokemontcg/x',  title: 'Community' },
+      ], webSearch: {} },
+      { text: 'Supporting prose citing Tier-2.', cost: 0.10, searches: 3, citations: [
+        { url: 'https://www.tcgplayer.com/product/xyz', title: 'Preorder' },
+      ], webSearch: {} },
+    )
+
+    await startExternalResearchRun(PROJECT_ID, 'e@x')
+    await advanceExternalResearchRun(PROJECT_ID, 'e@x') // queued → primary
+    await advanceExternalResearchRun(PROJECT_ID, 'e@x') // primary runs → supporting
+    await advanceExternalResearchRun(PROJECT_ID, 'e@x') // supporting runs → extracting
+
+    // Now Haiku returns facts using src_001/002/003 — exactly the
+    // ids v4 gives it. Extractor call is the next one in the queue.
+    scriptedResponses.push({
+      text: '```json\n' + JSON.stringify({
+        researchQuestions: ['Is it official?'],
+        verifiedFacts: [
+          { id: 'fact-official', statement: 'Officially announced.', status: 'confirmed', sourceTier: 1, evidenceRefs: ['src_001'] },
+          { id: 'fact-preorder', statement: 'Preorders live.',       status: 'reported',  sourceTier: 2, evidenceRefs: ['src_003'] },
+        ],
+        contradictions: [],
+        researchGaps: [],
+      }) + '\n```',
+      cost: 0.008, searches: 0,
+    })
+    const a4 = await advanceExternalResearchRun(PROJECT_ID, 'e@x')
+    expect(a4.run.stage).toBe('finalizing')
+    expect(a4.run.extractedFacts?.length).toBe(2)
+
+    // Refs were translated back from src_001/003 to the pack's
+    // persistent src-cite-... ids.
+    const extractedRefs = a4.run.extractedFacts!.flatMap(f => f.evidenceRefs)
+    expect(extractedRefs.some(r => r.startsWith('src-cite-'))).toBe(true)
+    expect(extractedRefs.every(r => !r.startsWith('src_'))).toBe(true)
+
+    // Diagnostics recorded.
+    expect(a4.run.extractionDiagnostics).toBeTruthy()
+    expect(a4.run.extractionDiagnostics!.extractorRawFactCount).toBe(2)
+    expect(a4.run.extractionDiagnostics!.extractorAcceptedFactCount).toBe(2)
+    expect(a4.run.extractionDiagnostics!.extractorRejectedFactCount).toBe(0)
+    expect(a4.run.extractionDiagnostics!.idMap.length).toBe(3)
+    // idMap first entry is src_001 → the first discovered source's persistent id.
+    expect(a4.run.extractionDiagnostics!.idMap[0].stableId).toBe('src_001')
+    expect(a4.run.extractionDiagnostics!.idMap[2].stableId).toBe('src_003')
+  })
+
+  it('diagnostics record rejections when Haiku mistypes a src_NNN id', async () => {
+    await seedPack()
+
+    scriptedResponses.push(
+      { text: 'P', cost: 0.05, searches: 3, citations: [
+        { url: 'https://www.pokemon.com/us/x', title: 'Official' },
+      ], webSearch: {} },
+      { text: 'S', cost: 0.05, searches: 3, citations: [], webSearch: {} },
+    )
+    await startExternalResearchRun(PROJECT_ID, 'e@x')
+    await advanceExternalResearchRun(PROJECT_ID, 'e@x')
+    await advanceExternalResearchRun(PROJECT_ID, 'e@x')
+    await advanceExternalResearchRun(PROJECT_ID, 'e@x')
+
+    // Model emits ONE valid fact + ONE fact with a bogus ref (src_099).
+    scriptedResponses.push({
+      text: '```json\n' + JSON.stringify({
+        verifiedFacts: [
+          { id: 'fact-ok',      statement: 'Real', status: 'confirmed', sourceTier: 1, evidenceRefs: ['src_001'] },
+          { id: 'fact-bad-ref', statement: 'Fake', status: 'confirmed', sourceTier: 1, evidenceRefs: ['src_099'] },
+        ],
+      }) + '\n```', cost: 0.008, searches: 0,
+    })
+    const a4 = await advanceExternalResearchRun(PROJECT_ID, 'e@x')
+    expect(a4.run.extractedFacts?.length).toBe(1)
+    const d = a4.run.extractionDiagnostics!
+    expect(d.extractorRawFactCount).toBe(2)
+    expect(d.extractorAcceptedFactCount).toBe(1)
+    expect(d.extractorRejectedFactCount).toBe(1)
+    expect(d.rejectionReasons[0].refs).toContain('src_099')
+    expect(d.rejectionReasons[0].reason).toMatch(/src_NNN mapping/)
+  })
+})
 
 describe('stage machine: source tiers preserved end-to-end', () => {
   it('tier assignments (via classifySourceTier) survive the finalize merge', async () => {

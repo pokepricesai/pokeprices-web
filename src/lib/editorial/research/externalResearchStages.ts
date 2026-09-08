@@ -41,11 +41,13 @@ import {
   buildExternalResearchFallbackUserTurn,
   parseExternalResearchResponse,
   mergeExternalResearchIntoPack,
+  renumberSourcesForExtractor,
 } from './externalResearchAnalyst'
 import {
   classifySourceTier, computeExternalQuality,
   buildExternalMethodology, domainOf,
 } from './externalResearch'
+import type { ExtractionDiagnostics } from './types'
 
 // ─────────────────────────────────────────────────────────────────
 // Configuration
@@ -319,11 +321,19 @@ async function stageSupporting(pack: EvidencePack, adminEmail: string, stageStar
 
 async function stageExtract(pack: EvidencePack, adminEmail: string, stageStartMs: number): Promise<EvidencePack> {
   const run = pack.externalResearchRun!
+
+  // External Research Fix v4 — remap arbitrary discovered ids to
+  // stable src_NNN ids for the extractor. Haiku must reproduce the
+  // ids verbatim in evidenceRefs; short, uniform ids drop mis-typing
+  // to near zero. After parsing, we translate refs BACK to the
+  // pack's persistent ids before validation and persistence.
+  const { remapped, idMap, toOriginal } = renumberSourcesForExtractor(run.discoveredSources)
+
   const userMessage = buildExternalResearchFallbackUserTurn({
     project:        pack.project,
     primaryText:    run.primaryText ?? '',
     supportingText: run.supportingText,
-    discovered:     run.discoveredSources,
+    discovered:     remapped,
   })
 
   const call = await callAnthropicAndLog({
@@ -339,28 +349,67 @@ async function stageExtract(pack: EvidencePack, adminEmail: string, stageStartMs
   })
   if (!call.ok) throw new Error(`extraction failed: ${call.error || 'unknown'}${call.detail ? ' - ' + call.detail : ''}`)
 
-  // The extractor's facts reference source ids from BOTH the pack's
-  // manual sources AND the run's already-discovered web sources.
-  // parseExternalResearchResponse's `knownManualSourceIds` is misnamed
-  // — it's actually "pre-known source ids the parser should trust
-  // without needing to see them in the JSON". Pass both here so the
-  // extractor's fact refs survive validation.
-  const knownIds = [
-    ...pack.externalSources.filter(s => (s.origin ?? 'manual') === 'manual').map(s => s.id),
-    ...run.discoveredSources.map(s => s.id),
-  ]
+  // Parse with the stable ids as the "known" set. The parser will
+  // filter refs to only known ids at ref-level; we still do a
+  // whole-fact validation below to build diagnostics on drops.
+  const manualPackIds = pack.externalSources.filter(s => (s.origin ?? 'manual') === 'manual').map(s => s.id)
+  const aliasesHit: string[] = []
+  const stableKnown = idMap.map(m => m.stableId)
   const parsed = parseExternalResearchResponse(call.text, {
-    knownManualSourceIds: knownIds,
-    citationsFromApi:     [],   // extractor may NOT invent sources
+    knownManualSourceIds: [...stableKnown, ...manualPackIds],
+    citationsFromApi:     [],
     now:                  new Date().toISOString(),
     adminEmail,
+    aliasesHit,
+    skipRefValidation:    true,   // we translate + validate below, feeds diagnostics
   })
 
-  const discoveredIds = new Set(run.discoveredSources.map(s => s.id))
-  const manualIds     = new Set(pack.externalSources.filter(s => (s.origin ?? 'manual') === 'manual').map(s => s.id))
-  const validIds      = new Set<string>([...Array.from(discoveredIds), ...Array.from(manualIds)])
-  const facts         = parsed.verifiedFacts.filter(f => f.evidenceRefs.every(r => validIds.has(r)))
-  const contradictions = parsed.contradictions.filter(c => c.positions.every(p => p.evidenceRefs.every(r => validIds.has(r))))
+  // Translate stable ids -> pack's persistent ids. Ref-level drops
+  // (unknown ids after alias tolerance) are attributed to rejectionReasons.
+  const rejectionReasons: ExtractionDiagnostics['rejectionReasons'] = []
+  const translateRefs = (factId: string | undefined, refs: readonly string[]): { keep: boolean; translated: string[] } => {
+    const translated: string[] = []
+    const missing: string[] = []
+    for (const r of refs) {
+      const orig = toOriginal.get(r) ?? (manualPackIds.includes(r) ? r : undefined)
+      if (orig) translated.push(orig)
+      else missing.push(r)
+    }
+    if (missing.length > 0) rejectionReasons.push({ factId, refs: Array.from(refs), reason: `evidenceRef(s) not in src_NNN mapping: ${missing.join(', ')}` })
+    return { keep: translated.length > 0, translated }
+  }
+
+  const rawFactCount = parsed.verifiedFacts.length
+  const facts = parsed.verifiedFacts.reduce<typeof parsed.verifiedFacts>((acc, f) => {
+    const { keep, translated } = translateRefs(f.id, f.evidenceRefs)
+    if (keep) acc.push({ ...f, evidenceRefs: translated })
+    return acc
+  }, [])
+
+  const contradictions = parsed.contradictions.reduce<typeof parsed.contradictions>((acc, c) => {
+    const positions = c.positions.map(p => {
+      const { keep, translated } = translateRefs(undefined, p.evidenceRefs)
+      return { ...p, evidenceRefs: translated, __keep: keep } as any
+    })
+    if (positions.every((p: any) => p.__keep)) {
+      acc.push({ ...c, positions: positions.map(({ __keep: _k, ...rest }: any) => rest) })
+    } else {
+      rejectionReasons.push({ factId: c.id, refs: c.positions.flatMap(p => Array.from(p.evidenceRefs)), reason: `contradiction dropped — at least one position had unresolved refs` })
+    }
+    return acc
+  }, [])
+
+  const diagnostics: ExtractionDiagnostics = {
+    timestamp:                  new Date().toISOString(),
+    extractorInputChars:        userMessage.length,
+    extractorRawFactCount:      rawFactCount,
+    extractorAcceptedFactCount: facts.length,
+    extractorRejectedFactCount: Math.max(0, rawFactCount - facts.length),
+    rejectionReasons:           rejectionReasons.slice(0, 40),
+    rawResponsePreview:         (call.text ?? '').slice(0, 20_000),
+    idMap,
+    fieldAliasesHit:            aliasesHit.length > 0 ? aliasesHit : undefined,
+  }
 
   const nextRun: ExternalResearchRun = {
     ...run,
@@ -377,6 +426,7 @@ async function stageExtract(pack: EvidencePack, adminEmail: string, stageStartMs
     extractedGaps:           parsed.researchGaps,
     stageTimings: { ...run.stageTimings, extracting: Date.now() - stageStartMs },
     updatedAt:   new Date().toISOString(),
+    extractionDiagnostics: diagnostics,
   }
   return { ...pack, externalResearchRun: nextRun }
 }
@@ -405,6 +455,10 @@ function stageFinalize(pack: EvidencePack, stageStartMs: number): EvidencePack {
     responsePreview: [run.primaryText ?? '', run.supportingText ?? ''].filter(Boolean).join('\n\n---\n\n').slice(0, PROSE_CAP),
     fallbackUsed:    true,
     fallbackModel:   EXTRACTOR_MODEL,
+    // External Research Fix v4 — mirror the run's extraction
+    // diagnostics onto webResearch so the Advanced panel can render
+    // them without needing to inspect the run subobject.
+    extractionDiagnostics: run.extractionDiagnostics,
   }
 
   const quality = computeExternalQuality({

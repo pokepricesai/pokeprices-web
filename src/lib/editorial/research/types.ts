@@ -152,6 +152,10 @@ export type ExternalResearchRun = {
   /** On failure, which stage broke + concise reason. */
   failedStage?: ExternalResearchStage
   error?:       string
+  /** External Research Fix v4 — extractor diagnostics from the most
+   *  recent extraction stage of THIS run. Mirrored onto
+   *  webResearch.extractionDiagnostics at finalize. */
+  extractionDiagnostics?: ExtractionDiagnostics
 }
 
 export type WebResearchMeta = {
@@ -172,6 +176,46 @@ export type WebResearchMeta = {
   fallbackCostUsd?: number
   /** External Research Fix v2 — Haiku model id used for fallback. */
   fallbackModel?: string
+  /** External Research Fix v4 — extractor diagnostics from the most
+   *  recent extraction pass (staged run or standalone re-extract).
+   *  Powers the Advanced diagnostics panel and turns "44 sources → 0
+   *  facts" into an inspectable dropout report. */
+  extractionDiagnostics?: ExtractionDiagnostics
+}
+
+// ─────────────────────────────────────────────────────────────────
+// External Research Fix v4 — extractor diagnostics
+// ─────────────────────────────────────────────────────────────────
+//
+// Persisted after every fact-extraction pass so a future "N sources
+// → 0 facts" failure is immediately explainable. Stable IDs (idMap)
+// are the biggest reliability lever — Haiku must reproduce them
+// exactly in evidenceRefs; drift-tolerant field aliases handle small
+// schema deviations that used to silently drop the whole result.
+
+export type ExtractionDiagnostics = {
+  /** ISO timestamp of when this extraction ran. */
+  timestamp:                  string
+  /** Character length of the user turn passed to the extractor. */
+  extractorInputChars:        number
+  /** Number of facts the extractor emitted in JSON before validation. */
+  extractorRawFactCount:      number
+  /** Facts that survived evidenceRef validation. */
+  extractorAcceptedFactCount: number
+  /** Facts dropped because at least one evidenceRef did not resolve
+   *  to a known source id. */
+  extractorRejectedFactCount: number
+  /** Per-fact rejection notes (bounded). */
+  rejectionReasons:           Array<{ factId?: string; refs: string[]; reason: string }>
+  /** Bounded raw text of the extractor response for admin inspection. */
+  rawResponsePreview:         string
+  /** The stable ids we passed in to the extractor, paired with the
+   *  original persistent source ids, so an admin can decode the
+   *  mapping when reading raw extractor output. */
+  idMap:                      Array<{ stableId: string; originalId: string; url: string }>
+  /** Which schema variants the parser accepted from the response, if
+   *  the model drifted from the canonical field names. */
+  fieldAliasesHit?:           string[]
 }
 
 export type ClaimContradiction = {

@@ -31,8 +31,10 @@ import {
   mergeExternalResearchIntoPack,
   EXTERNAL_RESEARCH_FALLBACK_SYSTEM_PROMPT,
   buildExternalResearchFallbackUserTurn,
+  renumberSourcesForExtractor,
 } from './externalResearchAnalyst'
 import { classifySourceTier, computeExternalQuality, buildExternalMethodology } from './externalResearch'
+import type { ExtractionDiagnostics } from './types'
 import type {
   EvidencePack, ResearchAnalysis, EditorialResearchRow,
   ResearchStatus, ExternalSource, ResearchNote, WebResearchMeta,
@@ -330,6 +332,7 @@ export async function researchWebForProject(projectId: number, adminEmail: strin
   // discovered sources. No web_search, no re-derivation.
   let fallbackCostUsd = 0
   let fallbackUsed = false
+  let fallbackDiagnostics: ExtractionDiagnostics | undefined
   const citationCount = (parsed.discoveredSources.length + (call.citations?.length ?? 0))
   if (parsed.verifiedFacts.length === 0 && citationCount >= 3 && call.text) {
     const fb = await runFactExtractionFallback({
@@ -349,6 +352,7 @@ export async function researchWebForProject(projectId: number, adminEmail: strin
       }
       fallbackCostUsd = fb.costUsd
       fallbackUsed = true
+      fallbackDiagnostics = fb.diagnostics
     }
   }
 
@@ -372,6 +376,7 @@ export async function researchWebForProject(projectId: number, adminEmail: strin
     fallbackUsed,
     fallbackCostUsd: fallbackUsed ? fallbackCostUsd : undefined,
     fallbackModel:   fallbackUsed ? EXTERNAL_RESEARCH_FALLBACK_MODEL : undefined,
+    extractionDiagnostics: fallbackDiagnostics,
   }
 
   // Recompute quality from the enriched pack.
@@ -435,20 +440,35 @@ type FallbackResult = {
   researchQuestions: string[]
   researchGaps:      string[]
   costUsd:           number
+  /** External Research Fix v4 — diagnostics from this extraction. */
+  diagnostics:       ExtractionDiagnostics
 }
 
 async function runFactExtractionFallback(args: {
-  project:       EvidencePack['project']
-  primaryText:   string
-  discovered:    readonly ExternalSource[]
-  adminEmail:    string
-  sessionSuffix: string
+  project:         EvidencePack['project']
+  primaryText:     string
+  supportingText?: string
+  discovered:      readonly ExternalSource[]
+  adminEmail:      string
+  sessionSuffix:   string
 }): Promise<FallbackResult | null> {
+  // External Research Fix v4 — remap discovered ids to stable src_NNN
+  // ids before prompting the extractor. Translate refs back on the
+  // way out. Same reliability lift as stageExtract.
+  const { remapped, idMap, toOriginal } = renumberSourcesForExtractor(args.discovered)
+
+  const userMessage = buildExternalResearchFallbackUserTurn({
+    project:        args.project,
+    primaryText:    args.primaryText,
+    supportingText: args.supportingText,
+    discovered:     remapped,
+  })
+
   const call = await callAnthropicAndLog({
     feature:     'editorial_external_research_fallback',
     model:       EXTERNAL_RESEARCH_FALLBACK_MODEL,
     system:      EXTERNAL_RESEARCH_FALLBACK_SYSTEM_PROMPT,
-    messages:    [{ role: 'user', content: buildExternalResearchFallbackUserTurn({ project: args.project, primaryText: args.primaryText, discovered: args.discovered }) }],
+    messages:    [{ role: 'user', content: userMessage }],
     max_tokens:  EXTERNAL_RESEARCH_FALLBACK_MAX_TOKENS,
     temperature: 0.1,
     cacheSystem: true,
@@ -459,24 +479,68 @@ async function runFactExtractionFallback(args: {
     console.warn('[external_research_fallback] call failed:', call.error, call.detail)
     return null
   }
+  const stableKnown = idMap.map(m => m.stableId)
+  const aliasesHit: string[] = []
   const parsed = parseExternalResearchResponse(call.text, {
-    knownManualSourceIds: [],
-    citationsFromApi:     [],   // fallback must not invent new sources
+    knownManualSourceIds: stableKnown,
+    citationsFromApi:     [],
     now:                  new Date().toISOString(),
     adminEmail:           args.adminEmail,
+    aliasesHit,
+    skipRefValidation:    true,   // we translate + validate below, feeds diagnostics
   })
-  // The parser will drop facts whose evidenceRefs don't exist. Rebuild
-  // the "known set" as {every discovered source id + any src-* the
-  // fallback minted} so facts against the primary sources survive.
-  const discoveredIds = new Set(args.discovered.map(s => s.id))
-  const survivingFacts = parsed.verifiedFacts.filter(f => f.evidenceRefs.every(r => discoveredIds.has(r)))
-  const survivingContradictions = parsed.contradictions.filter(c => c.positions.every(p => p.evidenceRefs.every(r => discoveredIds.has(r))))
+
+  const rejectionReasons: ExtractionDiagnostics['rejectionReasons'] = []
+  const translateRefs = (factId: string | undefined, refs: readonly string[]): { keep: boolean; translated: string[] } => {
+    const translated: string[] = []
+    const missing: string[] = []
+    for (const r of refs) {
+      const orig = toOriginal.get(r)
+      if (orig) translated.push(orig)
+      else missing.push(r)
+    }
+    if (missing.length > 0) rejectionReasons.push({ factId, refs: Array.from(refs), reason: `evidenceRef(s) not in src_NNN mapping: ${missing.join(', ')}` })
+    return { keep: translated.length > 0, translated }
+  }
+
+  const rawFactCount = parsed.verifiedFacts.length
+  const facts = parsed.verifiedFacts.reduce<typeof parsed.verifiedFacts>((acc, f) => {
+    const { keep, translated } = translateRefs(f.id, f.evidenceRefs)
+    if (keep) acc.push({ ...f, evidenceRefs: translated })
+    return acc
+  }, [])
+  const contradictions = parsed.contradictions.reduce<typeof parsed.contradictions>((acc, c) => {
+    const translatedPositions = c.positions.map(p => {
+      const { keep, translated } = translateRefs(undefined, p.evidenceRefs)
+      return { ...p, evidenceRefs: translated, __keep: keep } as any
+    })
+    if (translatedPositions.every((p: any) => p.__keep)) {
+      acc.push({ ...c, positions: translatedPositions.map(({ __keep: _k, ...rest }: any) => rest) })
+    } else {
+      rejectionReasons.push({ factId: c.id, refs: c.positions.flatMap(p => Array.from(p.evidenceRefs)), reason: 'contradiction dropped — position had unresolved refs' })
+    }
+    return acc
+  }, [])
+
+  const diagnostics: ExtractionDiagnostics = {
+    timestamp:                  new Date().toISOString(),
+    extractorInputChars:        userMessage.length,
+    extractorRawFactCount:      rawFactCount,
+    extractorAcceptedFactCount: facts.length,
+    extractorRejectedFactCount: Math.max(0, rawFactCount - facts.length),
+    rejectionReasons:           rejectionReasons.slice(0, 40),
+    rawResponsePreview:         (call.text ?? '').slice(0, 20_000),
+    idMap,
+    fieldAliasesHit:            aliasesHit.length > 0 ? aliasesHit : undefined,
+  }
+
   return {
-    verifiedFacts:     survivingFacts,
-    contradictions:    survivingContradictions,
+    verifiedFacts:     facts,
+    contradictions,
     researchQuestions: parsed.researchQuestions,
     researchGaps:      parsed.researchGaps,
     costUsd:           call.cost_usd,
+    diagnostics,
   }
 }
 
@@ -504,15 +568,25 @@ export async function reExtractFactsForProject(projectId: number, adminEmail: st
     throw new Error('no prior web research to re-extract from — click "Research web" first')
   }
 
-  const primaryText = pack.webResearch.responsePreview ?? ''
-  const discovered = pack.externalSources.filter(s => (s.origin ?? 'manual') === 'web')
+  // Prefer the run's own primary + supporting text when a completed
+  // staged run is still on the pack (that keeps the ORIGINAL cited
+  // prose intact instead of the "joined" version stored on
+  // webResearch.responsePreview).
+  const runOnPack = pack.externalResearchRun
+  const primaryText     = runOnPack?.primaryText    ?? pack.webResearch.responsePreview ?? ''
+  const supportingText  = runOnPack?.supportingText
+  // Prefer the run's discoveredSources (has ordering + tier hints
+  // preserved). Fall back to pack.externalSources filtered to web.
+  const discovered = runOnPack?.discoveredSources
+    ?? pack.externalSources.filter(s => (s.origin ?? 'manual') === 'web')
   if (discovered.length === 0) {
     throw new Error('no web-discovered sources on this pack; nothing to extract from')
   }
 
   const fb = await runFactExtractionFallback({
-    project:      pack.project,
+    project:       pack.project,
     primaryText,               // '' is fine — prompt handles it (URL-only mode)
+    supportingText,
     discovered,
     adminEmail,
     sessionSuffix: `external-research-${projectId}-reextract-${Date.now()}`,
@@ -534,6 +608,7 @@ export async function reExtractFactsForProject(projectId: number, adminEmail: st
     fallbackCostUsd: Number(((pack.webResearch.fallbackCostUsd ?? 0) + fb.costUsd).toFixed(6)),
     fallbackModel: EXTERNAL_RESEARCH_FALLBACK_MODEL,
     costUsd: Number(((pack.webResearch.costUsd ?? 0) + fb.costUsd).toFixed(6)),
+    extractionDiagnostics: fb.diagnostics,
   }
 
   const nextAllSources = pack.externalSources

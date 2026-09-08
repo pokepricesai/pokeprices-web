@@ -296,9 +296,35 @@ export function parseExternalResearchResponse(
     citationsFromApi:     readonly { url: string; title?: string; publisher?: string }[]
     now:                  string
     adminEmail:           string
+    /** External Research Fix v4 — filled in with the actual field
+     *  names the model used, so diagnostics can show whether an
+     *  alias saved the run. */
+    aliasesHit?:          string[]
+    /** External Research Fix v4 — when true, the parser SKIPS its
+     *  own evidenceRef validation and returns every fact + every
+     *  contradiction as-is. The caller must validate + translate
+     *  refs itself. Diagnostics need this to count raw-vs-accepted. */
+    skipRefValidation?:   boolean
   },
 ): ParsedExternalResearch {
   const parsed = extractJsonObject(rawText) ?? {}
+  // External Research Fix v4 — accept common field aliases the
+  // model may drift toward. Silently swapping "facts" for
+  // "verifiedFacts" (etc.) used to discard the entire result.
+  const factsArr    = readAliased(parsed, args.aliasesHit, 'verifiedFacts',    ['facts',    'extractedFacts',    'claims'])
+  const sourcesArr  = readAliased(parsed, args.aliasesHit, 'discoveredSources',['sources',  'newSources',        'citedSources'])
+  const contradArr  = readAliased(parsed, args.aliasesHit, 'contradictions',   ['disagreements', 'conflicts'])
+  const questArr    = readAliased(parsed, args.aliasesHit, 'researchQuestions',['questions','openQuestions',     'investigatedQuestions'])
+  const gapsArr     = readAliased(parsed, args.aliasesHit, 'researchGaps',     ['gaps',     'unknowns',          'openGaps'])
+  const manualArr   = readAliased(parsed, args.aliasesHit, 'recommendedManualCheck', ['manualCheck','followUp'])
+  // Rebuild parsed under the canonical names so the rest of the
+  // function reads a single shape.
+  ;(parsed as any).verifiedFacts          = factsArr
+  ;(parsed as any).discoveredSources      = sourcesArr
+  ;(parsed as any).contradictions         = contradArr
+  ;(parsed as any).researchQuestions      = questArr
+  ;(parsed as any).researchGaps           = gapsArr
+  ;(parsed as any).recommendedManualCheck = manualArr
 
   const manualIds = new Set(args.knownManualSourceIds)
   const known    = new Set<string>(args.knownManualSourceIds)
@@ -368,10 +394,14 @@ export function parseExternalResearchResponse(
       if (!f || typeof f !== 'object') continue
       const statement = clip(str(f.statement), 800)
       if (!statement) continue
-      const refs: string[] = Array.isArray(f.evidenceRefs)
-        ? f.evidenceRefs.filter((r: unknown): r is string => typeof r === 'string' && validSourceIds.has(r))
+      const rawRefs: string[] = Array.isArray(f.evidenceRefs)
+        ? f.evidenceRefs.filter((r: unknown): r is string => typeof r === 'string')
         : []
-      if (refs.length === 0) continue // Non-negotiable: no source → no fact
+      const refs: string[] = args.skipRefValidation
+        ? rawRefs
+        : rawRefs.filter(r => validSourceIds.has(r))
+      if (!args.skipRefValidation && refs.length === 0) continue // Non-negotiable: no source → no fact
+      if (args.skipRefValidation && rawRefs.length === 0) continue
       const status = coerceStatus(f.status)
       // Non-negotiable: rumor cannot become confirmation.
       let tierMax: SourceTier = 3
@@ -403,12 +433,15 @@ export function parseExternalResearchResponse(
       const claim = clip(str(c.claim), 400)
       if (!claim) continue
       const positions = Array.isArray(c.positions)
-        ? c.positions.slice(0, 6).map((p: any) => ({
-            statement:    clip(str(p?.statement), 500),
-            evidenceRefs: Array.isArray(p?.evidenceRefs)
-              ? p.evidenceRefs.filter((r: unknown) => typeof r === 'string' && validSourceIds.has(r))
-              : [],
-          })).filter((p: any) => p.statement && p.evidenceRefs.length > 0)
+        ? c.positions.slice(0, 6).map((p: any) => {
+            const rawPosRefs: string[] = Array.isArray(p?.evidenceRefs)
+              ? p.evidenceRefs.filter((r: unknown): r is string => typeof r === 'string')
+              : []
+            const posRefs = args.skipRefValidation
+              ? rawPosRefs
+              : rawPosRefs.filter(r => validSourceIds.has(r))
+            return { statement: clip(str(p?.statement), 500), evidenceRefs: posRefs }
+          }).filter((p: any) => p.statement && p.evidenceRefs.length > 0)
         : []
       if (positions.length < 2) continue // A contradiction needs two sides
       const rawId = str(c.id) || `contradiction-${contradictions.length + 1}`
@@ -485,8 +518,23 @@ export const EXTERNAL_RESEARCH_FALLBACK_SYSTEM_PROMPT = `You are a structured-ex
 INPUT
 
 You receive:
-  * The exact prose the research analyst produced (with inline citations to numbered sources).
-  * A list of numbered sources, each with an id, url, publisher, title, and sourceTier.
+  * The exact prose the research analyst produced (with inline citations).
+  * A list of AVAILABLE SOURCES. Every source begins with a stable ID of the form src_NNN (three-digit, zero-padded). Example: src_001, src_002, ..., src_044.
+
+SOURCE ID RULES — READ CAREFULLY
+
+Every "evidenceRefs" entry MUST be one of the src_NNN ids exactly as they appear in the input list.
+
+  * Copy the id CHARACTER-BY-CHARACTER. Do NOT abbreviate.
+  * Do NOT invent variations. src_1, src-001, source_001, [1], and https-based ids are ALL invalid.
+  * If you cannot find the exact src_NNN id for a claim, drop the claim.
+  * If in doubt, prefer fewer facts with correct ids over more facts with invented ids.
+
+Example correct usage:
+  "evidenceRefs": ["src_001", "src_005"]
+
+Example WRONG usage that would silently drop the fact:
+  "evidenceRefs": ["src-001", "1", "pokemon.com", "src_1", "SRC_001"]
 
 TASK
 
@@ -495,14 +543,15 @@ Extract the analyst's stated facts into a structured object.
 RULES
 
 1. A fact is included ONLY if the analyst's prose actually stated it. Do not invent claims.
-2. Every fact MUST cite at least one source id from the provided list. No source, no fact.
+2. Every fact MUST cite at least one src_NNN id from the AVAILABLE SOURCES list.
 3. Fact status:
    * "confirmed" — the prose treats it as fact AND at least one Tier-1 source (or two independent Tier-2 sources) supports it.
-   * "reported" — single Tier-2 source, prose treats it as reported news.
+   * "reported" — single Tier-2 source, or Tier-1 hedged as "reports that".
    * "rumored" — Tier-3 (community) or explicitly hedged as leak/rumor in the prose.
    * "unverified" — the prose flags it as uncertain or contradicted.
 4. Preserve every contradiction the prose surfaces — never silently pick one side.
 5. Preserve every explicit unknown/gap the prose mentions.
+6. If the prose contains 30+ cited facts, extract the 8-15 most editorially important ones. Do NOT try to enumerate everything.
 
 OUTPUT — MANDATORY FORMAT
 
@@ -511,13 +560,31 @@ Your ENTIRE reply must be ONE JSON code block and NOTHING else:
 \`\`\`json
 {
   "researchQuestions": string[],
-  "verifiedFacts": [ { "id": "fact-*", "statement": string, "status": "confirmed"|"reported"|"rumored"|"unverified", "sourceTier": 1|2|3, "evidenceRefs": ["src-*", ...] } ],
-  "contradictions": [ { "id": "contradiction-*", "claim": string, "positions": [ { "statement": string, "evidenceRefs": ["src-*"] }, { "statement": string, "evidenceRefs": ["src-*"] } ], "note": string|null } ],
+  "verifiedFacts": [
+    {
+      "id": "fact-*",
+      "statement": string,
+      "status": "confirmed"|"reported"|"rumored"|"unverified",
+      "sourceTier": 1|2|3,
+      "evidenceRefs": ["src_001", "src_005", ...]
+    }
+  ],
+  "contradictions": [
+    {
+      "id": "contradiction-*",
+      "claim": string,
+      "positions": [
+        { "statement": string, "evidenceRefs": ["src_001"] },
+        { "statement": string, "evidenceRefs": ["src_017"] }
+      ],
+      "note": string|null
+    }
+  ],
   "researchGaps": string[]
 }
 \`\`\`
 
-No prose outside the JSON block. No apologies. No summary. If you write prose the entire extraction is discarded.`
+No prose outside the JSON block. No apologies. No summary. If you write prose instead of JSON, or if you mistype src_NNN ids, the entire extraction is discarded.`
 
 export function buildExternalResearchFallbackUserTurn(args: {
   project:         PackProjectRef
@@ -526,11 +593,20 @@ export function buildExternalResearchFallbackUserTurn(args: {
    *  discovery stage. When present it's appended so the extractor
    *  sees both rounds of research at once. */
   supportingText?: string
+  /** External Research Fix v4 — sources already remapped to stable
+   *  src_NNN ids by the caller. See renumberSourcesForExtractor. */
   discovered:      readonly ExternalSource[]
 }): string {
+  // Format each source as a distinct "SOURCE src_NNN" block. This
+  // is the exact shape the extractor system prompt teaches the model
+  // to reproduce, and it makes typos far less likely than a
+  // one-line-per-source list.
   const sourceList = args.discovered.length === 0
     ? '(none)'
-    : args.discovered.map(s => `  * ${s.id} — [Tier ${s.sourceTier ?? 3}] ${s.title} (${s.publisher ?? domainOf(s.url)}) — ${s.url}`).join('\n')
+    : args.discovered.map(s => {
+        const publisher = s.publisher ?? domainOf(s.url)
+        return `SOURCE ${s.id}\n  TITLE: ${s.title}\n  PUBLISHER: ${publisher}\n  URL: ${s.url}\n  TIER: ${s.sourceTier ?? 3}`
+      }).join('\n\n')
 
   // Bound each stage's text so combined we never send more than
   // ~50KB to Haiku.
@@ -555,11 +631,36 @@ export function buildExternalResearchFallbackUserTurn(args: {
     `Article type: ${args.project.articleType}`,
     '',
     ...proseBlocks,
-    'Available sources:',
+    `AVAILABLE SOURCES (${args.discovered.length} total). Reference these by their src_NNN id EXACTLY as shown:`,
+    '',
     sourceList,
     '',
-    'Return the JSON object as instructed. NO PROSE OUTSIDE THE JSON BLOCK.',
+    'Return the JSON object as instructed. Use ONLY the src_NNN ids above in every evidenceRefs entry. Do not invent variations or abbreviate. NO PROSE OUTSIDE THE JSON BLOCK.',
   ].join('\n')
+}
+
+/** External Research Fix v4 — remap arbitrary source ids to stable
+ *  src_NNN ids for the extractor prompt. Returns the remapped source
+ *  list AND a bidirectional map so the caller can translate the
+ *  extractor's evidenceRefs back to the pack's persistent ids. */
+export function renumberSourcesForExtractor(sources: readonly ExternalSource[]): {
+  remapped: ExternalSource[]
+  idMap:    Array<{ stableId: string; originalId: string; url: string }>
+  toOriginal: Map<string, string>
+  toStable:   Map<string, string>
+} {
+  const remapped: ExternalSource[] = []
+  const idMap:    Array<{ stableId: string; originalId: string; url: string }> = []
+  const toOriginal = new Map<string, string>()
+  const toStable   = new Map<string, string>()
+  sources.forEach((s, i) => {
+    const stableId = `src_${String(i + 1).padStart(3, '0')}`
+    remapped.push({ ...s, id: stableId })
+    idMap.push({ stableId, originalId: s.id, url: s.url })
+    toOriginal.set(stableId, s.id)
+    toStable.set(s.id, stableId)
+  })
+  return { remapped, idMap, toOriginal, toStable }
 }
 
 function clipText(s: string, cap: number): string {
@@ -633,6 +734,21 @@ function safeParse(s: string): any {
 // ─────────────────────────────────────────────────────────────────
 
 function str(v: unknown): string { return typeof v === 'string' ? v : '' }
+
+/** External Research Fix v4 — read an array field from a parsed
+ *  object, preferring the canonical name but falling back to a list
+ *  of common aliases. When an alias fires, push its name into
+ *  `aliasesHit` so diagnostics can show what the model actually did. */
+function readAliased(parsed: any, aliasesHit: string[] | undefined, canonical: string, aliases: readonly string[]): any[] {
+  if (Array.isArray(parsed?.[canonical])) return parsed[canonical]
+  for (const alias of aliases) {
+    if (Array.isArray(parsed?.[alias])) {
+      if (aliasesHit) aliasesHit.push(`${alias}→${canonical}`)
+      return parsed[alias]
+    }
+  }
+  return []
+}
 function clip(s: string, n: number): string { return s.slice(0, n) }
 function coerceTier(v: unknown, fallback: SourceTier): SourceTier {
   if (v === 1 || v === 2 || v === 3) return v

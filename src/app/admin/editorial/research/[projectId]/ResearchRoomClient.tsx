@@ -255,6 +255,9 @@ export default function ResearchRoomClient({ project, initialResearch, chosenRec
           {advancedOpen && pack && (
             <div style={S.advancedBox}>
               <strong>Advanced</strong>
+              {isExternal && pack.webResearch?.extractionDiagnostics && (
+                <ExtractionDiagnosticsPanel d={pack.webResearch.extractionDiagnostics} />
+              )}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6, alignItems: 'center' }}>
                 {isExternal && pack.webResearch && (
                   <button style={S.btnLinkQuiet} disabled={!!busy} onClick={doReExtract} title="Re-run the Haiku fact-extractor on this pack's existing web-research response + discovered sources. No new web_search. Cheapest recovery path when a run yielded citations but 0 facts.">
@@ -785,6 +788,52 @@ function StatusBadge({ status }: { status?: FactStatus }) {
   }
   const s = map[status]
   return <span style={{ ...S.badgeBase, background: s.bg, color: s.fg }}>{status.toUpperCase()}</span>
+}
+
+function ExtractionDiagnosticsPanel({ d }: { d: NonNullable<EvidencePack['webResearch']>['extractionDiagnostics'] }) {
+  if (!d) return null
+  const [showRaw, setShowRaw] = useState(false)
+  const [showMap, setShowMap] = useState(false)
+  return (
+    <div style={{ marginTop: 8, padding: 10, background: 'white', border: '1px solid #cbd5e1', borderRadius: 6 }}>
+      <div style={{ fontWeight: 700, marginBottom: 6 }}>Extraction diagnostics</div>
+      <div style={S.qGrid}>
+        <div><strong>Raw facts:</strong> {d.extractorRawFactCount}</div>
+        <div><strong>Accepted:</strong> {d.extractorAcceptedFactCount}</div>
+        <div><strong>Rejected:</strong> {d.extractorRejectedFactCount}</div>
+        <div><strong>Prompt size:</strong> {(d.extractorInputChars / 1024).toFixed(1)} KB</div>
+        <div><strong>Sources mapped:</strong> {d.idMap.length}</div>
+        <div><strong>When:</strong> {new Date(d.timestamp).toLocaleString()}</div>
+      </div>
+      {d.fieldAliasesHit && d.fieldAliasesHit.length > 0 && (
+        <div style={{ ...S.muted, marginTop: 4 }}>Aliases hit: {d.fieldAliasesHit.join(', ')}</div>
+      )}
+      {d.rejectionReasons.length > 0 && (
+        <details style={{ marginTop: 8 }}>
+          <summary style={{ cursor: 'pointer' }}>Rejection reasons ({d.rejectionReasons.length})</summary>
+          <ul style={{ ...S.list, marginTop: 6 }}>
+            {d.rejectionReasons.slice(0, 20).map((r, i) => (
+              <li key={i}><code>{r.factId ?? '(no id)'}</code> — {r.reason} <span style={S.muted}>refs: [{r.refs.slice(0, 6).join(', ')}{r.refs.length > 6 ? '…' : ''}]</span></li>
+            ))}
+          </ul>
+        </details>
+      )}
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <button style={S.btnLinkQuiet} onClick={() => setShowMap(v => !v)}>{showMap ? 'Hide' : 'Show'} src_NNN → id map ({d.idMap.length})</button>
+        <button style={S.btnLinkQuiet} onClick={() => setShowRaw(v => !v)}>{showRaw ? 'Hide' : 'Show'} raw extractor response ({d.rawResponsePreview.length} chars)</button>
+      </div>
+      {showMap && (
+        <pre style={{ marginTop: 8, padding: 8, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 4, fontSize: 11, overflow: 'auto', maxHeight: 240 }}>
+          {d.idMap.map(m => `${m.stableId}  <->  ${m.originalId}\n    ${m.url}`).join('\n')}
+        </pre>
+      )}
+      {showRaw && (
+        <pre style={{ marginTop: 8, padding: 8, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 4, fontSize: 11, overflow: 'auto', maxHeight: 320 }}>
+          {d.rawResponsePreview}
+        </pre>
+      )}
+    </div>
+  )
 }
 
 function StageProgressCard({ run }: { run: ExternalResearchRun }) {

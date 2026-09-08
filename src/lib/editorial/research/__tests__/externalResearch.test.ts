@@ -17,7 +17,7 @@ vi.mock('@/lib/supabaseService', () => ({
   getSupabaseServiceClient: () => ({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) }) }),
 }))
 import { runExternalResearchRecipe, computeExternalQuality, classifySourceTier, buildExternalMethodology } from '../externalResearch'
-import { parseExternalResearchResponse, mergeExternalResearchIntoPack, extractJsonObject } from '../externalResearchAnalyst'
+import { parseExternalResearchResponse, mergeExternalResearchIntoPack, extractJsonObject, renumberSourcesForExtractor, buildExternalResearchFallbackUserTurn } from '../externalResearchAnalyst'
 import { mergeManualEvidenceIntoRebuiltPack } from '../serverActions'
 import type { EvidencePack, ExternalSource, VerifiedFact } from '../types'
 
@@ -523,6 +523,100 @@ describe('regression lock: manual source survives a full simulated cycle', () =>
     // source AND web-derived fact all need appropriate handling.
     const afterRebuild = await runExternalResearchRecipe(PROJECT, { today: TODAY, previous: afterWeb })
     expect(afterRebuild.externalSources.some(s => s.id === 'ext-manual-tcg')).toBe(true)   // regression lock
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────
+// v4 — parser field-alias tolerance + stable-ID roundtrip
+// ─────────────────────────────────────────────────────────────────
+
+describe('parser v4: field-alias tolerance', () => {
+  it('accepts "facts" as an alias for "verifiedFacts"', () => {
+    const aliasesHit: string[] = []
+    const parsed = parseExternalResearchResponse(
+      JSON.stringify({
+        facts: [   // wrong field name — should still work
+          { id: 'x', statement: 'X', status: 'confirmed', sourceTier: 1, evidenceRefs: ['src_001'] },
+        ],
+      }),
+      { knownManualSourceIds: ['src_001'], citationsFromApi: [], now: TODAY, adminEmail: 'e@x', aliasesHit },
+    )
+    expect(parsed.verifiedFacts).toHaveLength(1)
+    expect(aliasesHit).toContain('facts→verifiedFacts')
+  })
+  it('accepts "questions" as an alias for "researchQuestions"', () => {
+    const aliasesHit: string[] = []
+    const parsed = parseExternalResearchResponse(
+      JSON.stringify({ questions: ['q1', 'q2'] }),
+      { knownManualSourceIds: [], citationsFromApi: [], now: TODAY, adminEmail: 'e@x', aliasesHit },
+    )
+    expect(parsed.researchQuestions).toEqual(['q1', 'q2'])
+    expect(aliasesHit).toContain('questions→researchQuestions')
+  })
+  it('accepts "gaps" and "sources" as aliases', () => {
+    const aliasesHit: string[] = []
+    const parsed = parseExternalResearchResponse(
+      JSON.stringify({
+        gaps: ['unknown'],
+        sources: [{ id: 'src-web-1', url: 'https://pokemon.com/x', title: 'X', sourceTier: 1 }],
+      }),
+      { knownManualSourceIds: [], citationsFromApi: [], now: TODAY, adminEmail: 'e@x', aliasesHit },
+    )
+    expect(parsed.researchGaps).toEqual(['unknown'])
+    expect(parsed.discoveredSources).toHaveLength(1)
+    expect(aliasesHit).toContain('gaps→researchGaps')
+    expect(aliasesHit).toContain('sources→discoveredSources')
+  })
+  it('canonical field names take precedence over aliases when both exist', () => {
+    const aliasesHit: string[] = []
+    const parsed = parseExternalResearchResponse(
+      JSON.stringify({
+        verifiedFacts: [{ id: 'a', statement: 'A', status: 'confirmed', sourceTier: 1, evidenceRefs: ['src_001'] }],
+        facts:         [{ id: 'b', statement: 'B', status: 'confirmed', sourceTier: 1, evidenceRefs: ['src_001'] }],
+      }),
+      { knownManualSourceIds: ['src_001'], citationsFromApi: [], now: TODAY, adminEmail: 'e@x', aliasesHit },
+    )
+    expect(parsed.verifiedFacts).toHaveLength(1)
+    expect(parsed.verifiedFacts[0].statement).toBe('A')
+    expect(aliasesHit).toEqual([])
+  })
+})
+
+describe('parser v4: stable-ID roundtrip via renumberSourcesForExtractor', () => {
+  it('remaps arbitrary ids to zero-padded src_NNN and provides a reverse map', () => {
+    const sources = [
+      { id: 'src-cite-1-abc123', kind: 'external' as const, url: 'https://pokemon.com/a', title: 'A', addedAt: TODAY, origin: 'web' as const, sourceTier: 1 as const },
+      { id: 'src-cite-2-def456', kind: 'external' as const, url: 'https://tcgplayer.com/b', title: 'B', addedAt: TODAY, origin: 'web' as const, sourceTier: 2 as const },
+      { id: 'src-cite-3-ghi789', kind: 'external' as const, url: 'https://reddit.com/c', title: 'C', addedAt: TODAY, origin: 'web' as const, sourceTier: 3 as const },
+    ]
+    const { remapped, idMap, toOriginal, toStable } = renumberSourcesForExtractor(sources)
+    expect(remapped.map(s => s.id)).toEqual(['src_001', 'src_002', 'src_003'])
+    expect(idMap[0].stableId).toBe('src_001')
+    expect(idMap[0].originalId).toBe('src-cite-1-abc123')
+    expect(toOriginal.get('src_002')).toBe('src-cite-2-def456')
+    expect(toStable.get('src-cite-3-ghi789')).toBe('src_003')
+    // Original source objects retain their metadata (only id is renamed).
+    expect(remapped[1].url).toBe('https://tcgplayer.com/b')
+    expect(remapped[2].sourceTier).toBe(3)
+  })
+
+  it('extractor user prompt uses SOURCE src_NNN blocks (not the old inline list)', () => {
+    const sources = [
+      { id: 'src-cite-1-abc', kind: 'external' as const, url: 'https://www.pokemon.com/us/x', title: 'Official Announcement', publisher: 'The Pokémon Company', addedAt: TODAY, origin: 'web' as const, sourceTier: 1 as const },
+      { id: 'src-cite-2-def', kind: 'external' as const, url: 'https://tcgplayer.com/y',      title: 'Preorder',              publisher: 'TCGplayer',              addedAt: TODAY, origin: 'web' as const, sourceTier: 2 as const },
+    ]
+    const { remapped } = renumberSourcesForExtractor(sources)
+    const prompt = buildExternalResearchFallbackUserTurn({
+      project: { id: 1, title: 'X', angle: null, articleType: 'external_research', targetPublishAt: null },
+      primaryText: 'primary prose',
+      discovered: remapped,
+    })
+    expect(prompt).toMatch(/SOURCE src_001\n  TITLE: Official Announcement/)
+    expect(prompt).toMatch(/SOURCE src_002\n  TITLE: Preorder/)
+    expect(prompt).toMatch(/  TIER: 1/)
+    expect(prompt).toMatch(/  TIER: 2/)
+    // The old "src-cite-..." random ids must NOT leak into the prompt.
+    expect(prompt).not.toContain('src-cite-1-abc')
   })
 })
 
