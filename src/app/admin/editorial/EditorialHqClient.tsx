@@ -45,6 +45,11 @@ import {
 type Props = {
   context: EditorialContext
   radar:   OpportunityRadar
+  /** ISO datetime the currently-displayed radar was computed. Used
+   *  to show "Opportunities updated: <time>" and to reset the
+   *  local "just refreshed" hint when the page renders with a
+   *  newer timestamp. */
+  radarComputedAt?: string
   /** Block 6 — map from project.id -> editorial_research.status. */
   researchStatusById?: Record<string, string>
 }
@@ -210,6 +215,18 @@ function fmtDate(iso: string | null | undefined, opts?: Intl.DateTimeFormatOptio
   try { return new Date(iso).toLocaleDateString('en-GB', opts || { day: 'numeric', month: 'short', year: 'numeric' }) }
   catch { return iso }
 }
+/** Human-readable "Opportunities updated" label. Same-day radar
+ *  rows show "today at 14:32", older rows fall back to a date. */
+function fmtRadarComputedAt(iso: string): string {
+  try {
+    const d = new Date(iso)
+    const now = new Date()
+    const sameDay = d.toISOString().slice(0, 10) === now.toISOString().slice(0, 10)
+    const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+    if (sameDay) return `today at ${time}`
+    return `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} at ${time}`
+  } catch { return iso }
+}
 function fmtDateTime(iso: string | null | undefined): string {
   if (!iso) return '—'
   try { return new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) }
@@ -368,7 +385,8 @@ function contextProjectToRow(p: EditorialContext['projects'][number]): Editorial
 // Main component
 // ────────────────────────────────────────────────────────────────
 
-export default function EditorialHqClient({ context, radar, researchStatusById }: Props) {
+export default function EditorialHqClient(props: Props) {
+  const { context, radar, researchStatusById } = props
   const getResearchStatus = useCallback((id: number): string => researchStatusById?.[String(id)] ?? 'not_started', [researchStatusById])
   const [projects, setProjects] = useState<EditorialProject[]>(() => context.projects.map(contextProjectToRow))
   const [releases, setReleases] = useState<readonly ReleaseItem[]>(() => [...context.release.recent, ...context.release.upcoming])
@@ -508,7 +526,7 @@ export default function EditorialHqClient({ context, radar, researchStatusById }
             title="Opportunity Radar"
             subtitle={`Grounded editorial opportunities inferred from real PokePrices data. ${radar.opportunities.length} detected today.`}
           />
-          <OpportunityRadarPanel radar={radar} onCreate={onCreate} activeProjects={projects} />
+          <OpportunityRadarPanel radar={radar} onCreate={onCreate} activeProjects={projects} radarComputedAt={props.radarComputedAt} />
         </section>
 
         {/* THIS WEEK */}
@@ -1294,6 +1312,10 @@ function opportunityToProjectPayload(
   const evidence = o.evidenceSummary.map(e => `• ${e}`).join('\n')
   const metrics  = o.metrics.map(m => `• ${m.label}: ${m.value}${m.hint ? ` (${m.hint})` : ''}`).join('\n')
   const notes = [
+    // Marker line — read back by extractRadarOpportunityIdFromNotes
+    // to dedupe future Radar rounds against this actioned opportunity.
+    // Must always live on the first line so the parser can find it.
+    `[radar-opportunity: ${o.id}]`,
     `Radar score: ${o.score}/100 (${o.dataStrength} data, ${o.citationPotential} citation potential)`,
     `Why now: ${o.whyNow}`,
     o.suggestedTiming ? `Suggested timing: ${o.suggestedTiming}` : null,
@@ -1319,39 +1341,59 @@ function opportunityToProjectPayload(
   }
 }
 
+/** Parse the "[radar-opportunity: <id>]" marker written by
+ *  opportunityToProjectPayload. Returns null when the marker is
+ *  absent (project created manually or by an older code path). */
+export function extractRadarOpportunityIdFromNotes(notes: string | null | undefined): string | null {
+  if (!notes) return null
+  const m = notes.match(/\[radar-opportunity:\s*([^\]\r\n]+?)\s*\]/)
+  return m ? m[1].trim() : null
+}
+
 // ── Opportunity Radar panel ─────────────────────────────────────
 
 function OpportunityRadarPanel({
-  radar, onCreate, activeProjects,
+  radar, onCreate, activeProjects, radarComputedAt,
 }: {
   radar: OpportunityRadar
   onCreate: (payload: Partial<EditorialProject>) => Promise<any>
-  /** Live project list used for suggestion dedupe. When a project
-   *  already exists whose title matches an opportunity (case-
-   *  insensitive normalised containment), the opportunity is hidden
-   *  from the Radar list. Locally-created / acted-on suggestions
-   *  also hide immediately via `locallyDismissed`. */
+  /** Live project list used for suggestion dedupe. See dedupe rules
+   *  below — matches are EXACT (opportunity id or exact normalised
+   *  title). No substring/containment matching. */
   activeProjects?: readonly EditorialProject[]
+  /** ISO datetime of the currently-cached Radar. Shown to the admin
+   *  and used by the Refresh Opportunities button as a nice visual
+   *  signal. */
+  radarComputedAt?: string
 }) {
   const [expanded, setExpanded]           = useState<string | null>(null)
   const [locallyDismissed, setDismissed]  = useState<Set<string>>(new Set())
+  const [refreshing, setRefreshing]       = useState(false)
+  const [refreshError, setRefreshError]   = useState<string | null>(null)
 
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
-  const projectTitles = (activeProjects ?? []).map(p => norm(p.title))
 
-  // Dedupe: opportunity is hidden when a live project's normalised
-  // title contains (or is contained by) the opportunity's normalised
-  // headline. Handles both directions so slight rewording doesn't
-  // resurface an already-planned idea.
+  // Stable dedupe keys drawn from the current project set:
+  //   * radar-opportunity id parsed from the notes marker
+  //     "[radar-opportunity: <id>]" (persisted by opportunityToProjectPayload)
+  //   * exact normalised title as a legacy fallback
+  // Substring/containment matching is deliberately removed —
+  // "30th Celebration: Everything We Know" must not suppress
+  // "30th Celebration Prices After Release".
+  const claimedIds    = new Set<string>()
+  const claimedTitles = new Set<string>()
+  for (const p of activeProjects ?? []) {
+    const oppId = extractRadarOpportunityIdFromNotes(p.notes)
+    if (oppId) claimedIds.add(oppId)
+    claimedTitles.add(norm(p.title))
+  }
+
   const isAlreadyClaimed = (o: Opportunity): boolean => {
     if (locallyDismissed.has(o.id)) return true
-    const oNorm = norm(o.headlineSuggestion)
-    if (!oNorm) return false
-    for (const t of projectTitles) {
-      if (!t) continue
-      if (t === oNorm) return true
-      if (t.includes(oNorm) || oNorm.includes(t)) return true
-    }
+    if (o.id && claimedIds.has(o.id)) return true
+    // Exact normalised title fallback — same string modulo case /
+    // punctuation / whitespace. NEVER substring/containment.
+    if (claimedTitles.has(norm(o.headlineSuggestion))) return true
     return false
   }
 
@@ -1382,10 +1424,18 @@ function OpportunityRadarPanel({
     return result
   }
 
-  const onRefresh = () => {
-    // Radar is deterministic and re-runs on every page load.
-    // A hard reload is the simplest reliable refresh signal.
-    if (typeof window !== 'undefined') window.location.reload()
+  const onRefresh = async () => {
+    setRefreshing(true); setRefreshError(null)
+    try {
+      // Force a Radar recompute + update the daily cache row, so
+      // the subsequent page reload reads a fresh cached set rather
+      // than immediately re-recomputing.
+      await apiJson('/api/admin/editorial/opportunity-radar/refresh', { method: 'POST', body: '{}' })
+      if (typeof window !== 'undefined') window.location.reload()
+    } catch (e) {
+      setRefreshError(e instanceof Error ? e.message : 'unknown')
+      setRefreshing(false)
+    }
   }
 
   if (radar.opportunities.length === 0) {
@@ -1500,13 +1550,26 @@ function OpportunityRadarPanel({
   return (
     <div style={{ display: 'grid', gap: 14 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-          {visible.length} suggestion{visible.length === 1 ? '' : 's'} · {external.length} external · {internal.length} data
-          {(radar.opportunities.length - visible.length) > 0 && ` · ${radar.opportunities.length - visible.length} already saved / planned`}
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div>
+            {visible.length} suggestion{visible.length === 1 ? '' : 's'} · {external.length} external · {internal.length} data
+            {(radar.opportunities.length - visible.length) > 0 && ` · ${radar.opportunities.length - visible.length} already saved / planned`}
+          </div>
+          {radarComputedAt && (
+            <div>Opportunities updated: {fmtRadarComputedAt(radarComputedAt)}</div>
+          )}
         </div>
-        <button style={btnGhost} onClick={onRefresh} title="Recalculate suggestions from the latest PokePrices data + release calendar">
-          Refresh Opportunities
-        </button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
+          <button
+            style={btnGhost}
+            onClick={onRefresh}
+            disabled={refreshing}
+            title="Recalculate suggestions immediately from the latest PokePrices data + release calendar. Normally the Radar refreshes once per calendar day."
+          >
+            {refreshing ? 'Refreshing…' : 'Refresh Opportunities'}
+          </button>
+          {refreshError && <div style={{ fontSize: 11, color: '#b91c1c' }}>{refreshError}</div>}
+        </div>
       </div>
 
       {external.length + internal.length === 0 ? (
