@@ -31,6 +31,7 @@ import {
   addResearchNote, removeResearchNote,
   approveLargeMover, revokeLargeMover,
   researchWebForProject, clearDiscoveredSources,
+  reExtractFactsForProject,
 } from '@/lib/editorial/research/serverActions'
 import { chooseRecipe } from '@/lib/editorial/research/dispatch'
 
@@ -156,6 +157,17 @@ export async function POST(req: Request, ctx: Ctx) {
       case 'clear_discovered_sources': {
         const row = await clearDiscoveredSources(projectId)
         return NextResponse.json({ ok: true, research: row })
+      }
+      case 're_extract_facts': {
+        const r = await reExtractFactsForProject(projectId, admin.email)
+        return NextResponse.json({
+          ok: true,
+          research: r.row,
+          facts: r.facts,
+          contradictions: r.contradictions,
+          costUsd: r.costUsd,
+          usedPrimaryText: r.usedPrimaryText,
+        })
       }
       case 'approve_large_mover': {
         const cardSlug = strOrEmpty(body.cardSlug)

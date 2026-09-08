@@ -101,6 +101,18 @@ export type WebResearchMeta = {
   costUsd:      number
   model:        string
   latencyMs?:   number
+  /** External Research Fix v2 — bounded raw text of the primary
+   *  web-research call, so a later fact-extraction fallback can
+   *  re-parse without hitting the web again. Truncated to ~30KB. */
+  responsePreview?: string
+  /** External Research Fix v2 — true when the Haiku fact-extraction
+   *  fallback ran on top of the primary call. Adds a small extra
+   *  entry to costUsd. */
+  fallbackUsed?: boolean
+  /** External Research Fix v2 — cost of the fallback call, if any. */
+  fallbackCostUsd?: number
+  /** External Research Fix v2 — Haiku model id used for fallback. */
+  fallbackModel?: string
 }
 
 export type ClaimContradiction = {

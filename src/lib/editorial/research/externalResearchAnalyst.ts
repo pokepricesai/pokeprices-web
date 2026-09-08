@@ -44,9 +44,19 @@ NON-NEGOTIABLE RULES
 
 7. Search budget is bounded. Prefer targeted searches to open-ended ones. Do not waste searches restating a fact from a source you already have.
 
-OUTPUT FORMAT
+OUTPUT FORMAT — READ CAREFULLY
 
-Return ONE JSON object wrapped in a fenced code block tagged \`json\`. Schema (TypeScript):
+Your ENTIRE final message must be ONE fenced code block tagged \`json\` and NOTHING else. No prose introduction. No summary paragraph after the code block. No headings. No apologies. Any text outside the single \`\`\`json ... \`\`\` block will be discarded, so if you write prose instead of a JSON block your work is thrown away.
+
+You may reason internally, use the web_search tool, and cite sources inline. But the final message you emit must be exactly:
+
+\`\`\`json
+{ ... the JSON object described below ... }
+\`\`\`
+
+Do NOT wrap the JSON in explanation. Do NOT emit multiple code blocks. Do NOT emit prose alongside the block. If you finish thinking without a JSON block, the whole run is lost.
+
+Schema (TypeScript):
 
   {
     "researchQuestions": string[],       // 5-10 questions you actually investigated
@@ -162,11 +172,7 @@ export function parseExternalResearchResponse(
     adminEmail:           string
   },
 ): ParsedExternalResearch {
-  const fence = rawText.match(/```json\s*([\s\S]*?)\s*```/)
-  const jsonText = fence ? fence[1] : rawText
-  let parsed: any
-  try { parsed = JSON.parse(jsonText) } catch { parsed = {} }
-  if (!parsed || typeof parsed !== 'object') parsed = {}
+  const parsed = extractJsonObject(rawText) ?? {}
 
   const manualIds = new Set(args.knownManualSourceIds)
   const known    = new Set<string>(args.knownManualSourceIds)
@@ -335,6 +341,147 @@ export function mergeExternalResearchIntoPack(
     researchQuestions: parsed.researchQuestions.length > 0 ? parsed.researchQuestions : pack.researchQuestions,
     researchGaps:     gaps,
   }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Fact-extraction fallback (Haiku, no web_search, no new tokens
+// beyond the ones we've already paid for on the primary call)
+// ─────────────────────────────────────────────────────────────────
+//
+// Called when the primary web-research response yielded citations
+// but no parseable structured facts. The Haiku call receives ONLY
+// the primary prose + the already-discovered source list; it does
+// not hit the web again. Its sole job is to convert cited claims
+// into structured verifiedFacts + contradictions + researchQuestions.
+
+export const EXTERNAL_RESEARCH_FALLBACK_SYSTEM_PROMPT = `You are a structured-extraction utility for the PokePrices editorial pipeline. You do NOT do research. You do NOT browse the web. You do NOT invent facts.
+
+INPUT
+
+You receive:
+  * The exact prose the research analyst produced (with inline citations to numbered sources).
+  * A list of numbered sources, each with an id, url, publisher, title, and sourceTier.
+
+TASK
+
+Extract the analyst's stated facts into a structured object.
+
+RULES
+
+1. A fact is included ONLY if the analyst's prose actually stated it. Do not invent claims.
+2. Every fact MUST cite at least one source id from the provided list. No source, no fact.
+3. Fact status:
+   * "confirmed" — the prose treats it as fact AND at least one Tier-1 source (or two independent Tier-2 sources) supports it.
+   * "reported" — single Tier-2 source, prose treats it as reported news.
+   * "rumored" — Tier-3 (community) or explicitly hedged as leak/rumor in the prose.
+   * "unverified" — the prose flags it as uncertain or contradicted.
+4. Preserve every contradiction the prose surfaces — never silently pick one side.
+5. Preserve every explicit unknown/gap the prose mentions.
+
+OUTPUT — MANDATORY FORMAT
+
+Your ENTIRE reply must be ONE JSON code block and NOTHING else:
+
+\`\`\`json
+{
+  "researchQuestions": string[],
+  "verifiedFacts": [ { "id": "fact-*", "statement": string, "status": "confirmed"|"reported"|"rumored"|"unverified", "sourceTier": 1|2|3, "evidenceRefs": ["src-*", ...] } ],
+  "contradictions": [ { "id": "contradiction-*", "claim": string, "positions": [ { "statement": string, "evidenceRefs": ["src-*"] }, { "statement": string, "evidenceRefs": ["src-*"] } ], "note": string|null } ],
+  "researchGaps": string[]
+}
+\`\`\`
+
+No prose outside the JSON block. No apologies. No summary. If you write prose the entire extraction is discarded.`
+
+export function buildExternalResearchFallbackUserTurn(args: {
+  project:      PackProjectRef
+  primaryText:  string
+  discovered:   readonly ExternalSource[]
+}): string {
+  const sourceList = args.discovered.length === 0
+    ? '(none)'
+    : args.discovered.map(s => `  * ${s.id} — [Tier ${s.sourceTier ?? 3}] ${s.title} (${s.publisher ?? domainOf(s.url)}) — ${s.url}`).join('\n')
+
+  // Bound the primary text so we do not send 100KB back to Haiku.
+  const primary = args.primaryText.length > 30_000 ? args.primaryText.slice(0, 30_000) + '\n\n[…truncated…]' : args.primaryText
+
+  return [
+    'MODE=extract_facts_only',
+    '',
+    `Project: ${args.project.title}`,
+    `Article type: ${args.project.articleType}`,
+    '',
+    'Analyst prose (verbatim, may contain inline citations):',
+    '```',
+    primary || '(the primary analyst call returned no prose. Extract facts using ONLY what the source URLs and titles below directly support. If you cannot support a fact with a cited source, do not include it.)',
+    '```',
+    '',
+    'Available sources:',
+    sourceList,
+    '',
+    'Return the JSON object as instructed. NO PROSE OUTSIDE THE JSON BLOCK.',
+  ].join('\n')
+}
+
+/** Deterministic JSON extractor — tolerates unfenced JSON, JSON
+ *  inside `\`\`\`` blocks without a language tag, or prose with a
+ *  JSON object embedded. Returns null when nothing recognisable is
+ *  present. Never throws. */
+export function extractJsonObject(raw: string): any {
+  if (!raw || typeof raw !== 'string') return null
+
+  // 1) Explicit ```json fence.
+  const fenced = raw.match(/```json\s*([\s\S]*?)\s*```/i)
+  if (fenced) {
+    const j = safeParse(fenced[1])
+    if (j) return j
+  }
+
+  // 2) Unlabeled ``` fence with an object inside.
+  const anyFence = raw.match(/```\s*(\{[\s\S]*?\})\s*```/)
+  if (anyFence) {
+    const j = safeParse(anyFence[1])
+    if (j) return j
+  }
+
+  // 3) The whole thing IS JSON.
+  const wholeParsed = safeParse(raw.trim())
+  if (wholeParsed && typeof wholeParsed === 'object') return wholeParsed
+
+  // 4) Substring — first `{` to matching final `}` (balanced-brace scan).
+  const start = raw.indexOf('{')
+  if (start >= 0) {
+    let depth = 0
+    let inString = false
+    let escape  = false
+    for (let i = start; i < raw.length; i++) {
+      const ch = raw[i]
+      if (inString) {
+        if (escape) { escape = false; continue }
+        if (ch === '\\') { escape = true; continue }
+        if (ch === '"') { inString = false }
+        continue
+      }
+      if (ch === '"') { inString = true; continue }
+      if (ch === '{') depth += 1
+      else if (ch === '}') {
+        depth -= 1
+        if (depth === 0) {
+          const candidate = raw.slice(start, i + 1)
+          const j = safeParse(candidate)
+          if (j) return j
+          break
+        }
+      }
+    }
+  }
+
+  return null
+}
+
+function safeParse(s: string): any {
+  try { const v = JSON.parse(s); return (v && typeof v === 'object') ? v : null }
+  catch { return null }
 }
 
 // ─────────────────────────────────────────────────────────────────

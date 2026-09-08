@@ -138,20 +138,13 @@ export async function runExternalResearchRecipe(
     project,
     generatedAt,
     dataAsOf:    today,
-    methodology: {
-      summary: [
-        `External-research pack for "${project.title}". Facts must come from reputable external sources (official > specialist > community).`,
-        `Manual sources are preserved across rebuilds and used as seeds for web discovery. Web-discovered sources may be replaced by a fresh "Research web" run.`,
-      ].join(' '),
-      filters: [
-        { label: 'Article type',      value: project.articleType },
-        { label: 'Recipe',            value: 'external_research' },
-        { label: 'Preserved manual',  value: `${preservedManualSources.length} source(s), ${preservedNotes.length} note(s)` },
-        { label: 'Last web research', value: preservedWebResearch?.researchedAt ?? '(never)' },
-      ],
-      excludedGroups: [],
-      dedupKey: 'externalSource.url',
-    },
+    methodology: buildExternalMethodology({
+      project,
+      manualSources: preservedManualSources,
+      allSources:    preservedManualSources,     // rebuild-time snapshot; web sources come later
+      notes:         preservedNotes,
+      webResearch:   preservedWebResearch,
+    }),
     verifiedFacts,
     derivedFindings: [],
     dataTables,
@@ -172,6 +165,40 @@ export async function runExternalResearchRecipe(
     researchQuestions: preservedQuestions,
     contradictions: preservedContradictions,
     webResearch: preservedWebResearch,
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Methodology helper — reused after Research web / re-extract so the
+// pack's summary + filters stay current instead of freezing at
+// build-time state.
+// ─────────────────────────────────────────────────────────────────
+
+export function buildExternalMethodology(args: {
+  project:       PackProjectRef
+  manualSources: readonly ExternalSource[]
+  allSources:    readonly ExternalSource[]
+  notes:         readonly { id: string }[]
+  webResearch?:  { researchedAt: string; searchesUsed: number; costUsd: number } | undefined
+}) {
+  const discoveredCount = args.allSources.filter(s => (s.origin ?? 'manual') === 'web').length
+  const lastResearched = args.webResearch?.researchedAt
+    ? `${args.webResearch.researchedAt.slice(0, 10)} (${args.webResearch.searchesUsed} search${args.webResearch.searchesUsed === 1 ? '' : 'es'}, $${args.webResearch.costUsd.toFixed(4)})`
+    : '(never)'
+  return {
+    summary: [
+      `External-research pack for "${args.project.title}". Facts must come from reputable external sources (official > specialist > community).`,
+      `Manual sources are preserved across rebuilds and used as seeds for web discovery. Web-discovered sources may be replaced by a fresh "Research web" run.`,
+    ].join(' '),
+    filters: [
+      { label: 'Article type',       value: args.project.articleType },
+      { label: 'Recipe',             value: 'external_research' },
+      { label: 'Preserved manual',   value: `${args.manualSources.length} source(s), ${args.notes.length} note(s)` },
+      { label: 'Discovered (web)',   value: `${discoveredCount} source(s)` },
+      { label: 'Last web research',  value: lastResearched },
+    ],
+    excludedGroups: [],
+    dedupKey: 'externalSource.url',
   }
 }
 

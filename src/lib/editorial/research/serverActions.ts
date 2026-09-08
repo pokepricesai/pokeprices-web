@@ -29,8 +29,10 @@ import {
   buildExternalResearchUserTurn,
   parseExternalResearchResponse,
   mergeExternalResearchIntoPack,
+  EXTERNAL_RESEARCH_FALLBACK_SYSTEM_PROMPT,
+  buildExternalResearchFallbackUserTurn,
 } from './externalResearchAnalyst'
-import { classifySourceTier, computeExternalQuality } from './externalResearch'
+import { classifySourceTier, computeExternalQuality, buildExternalMethodology } from './externalResearch'
 import type {
   EvidencePack, ResearchAnalysis, EditorialResearchRow,
   ResearchStatus, ExternalSource, ResearchNote, WebResearchMeta,
@@ -41,6 +43,14 @@ const ANALYST_MAX_TOKENS = 3000
 const EXTERNAL_RESEARCH_MODEL = 'claude-sonnet-4-6'
 const EXTERNAL_RESEARCH_MAX_TOKENS = 6000
 const EXTERNAL_RESEARCH_MAX_SEARCHES = 6
+/** Fallback extractor uses the cheapest capable model. It never
+ *  calls web_search — it only structures the primary call's output. */
+const EXTERNAL_RESEARCH_FALLBACK_MODEL = 'claude-haiku-4-5'
+const EXTERNAL_RESEARCH_FALLBACK_MAX_TOKENS = 2500
+/** Cap the raw primary text we persist so the pack row stays small
+ *  in Postgres jsonb. Enough to re-extract from; not so much that
+ *  three back-to-back runs balloon storage. */
+const EXTERNAL_RESEARCH_RAW_TEXT_CAP = 30_000
 
 // ─────────────────────────────────────────────────────────────────
 // Fetch
@@ -307,12 +317,40 @@ export async function researchWebForProject(projectId: number, adminEmail: strin
   })
   if (!call.ok) throw new Error(`external research call failed: ${call.error || 'unknown'}${call.detail ? ' - ' + call.detail : ''}`)
 
-  const parsed = parseExternalResearchResponse(call.text, {
+  let parsed = parseExternalResearchResponse(call.text, {
     knownManualSourceIds: seedSources.map(s => s.id),
     citationsFromApi:     call.citations ?? [],
     now:                  new Date().toISOString(),
     adminEmail,
   })
+
+  // External Research Fix v2 — if the primary Sonnet call returned
+  // no structured facts but citations DID come through, fire a
+  // single bounded Haiku extraction pass on the primary prose +
+  // discovered sources. No web_search, no re-derivation.
+  let fallbackCostUsd = 0
+  let fallbackUsed = false
+  const citationCount = (parsed.discoveredSources.length + (call.citations?.length ?? 0))
+  if (parsed.verifiedFacts.length === 0 && citationCount >= 3 && call.text) {
+    const fb = await runFactExtractionFallback({
+      project:      pack.project,
+      primaryText:  call.text,
+      discovered:   parsed.discoveredSources,
+      adminEmail,
+      sessionSuffix: `external-research-${projectId}-fallback-${Date.now()}`,
+    })
+    if (fb) {
+      parsed = {
+        ...parsed,
+        verifiedFacts:     fb.verifiedFacts,
+        contradictions:    fb.contradictions.length > 0 ? fb.contradictions : parsed.contradictions,
+        researchQuestions: fb.researchQuestions.length > 0 ? fb.researchQuestions : parsed.researchQuestions,
+        researchGaps:      Array.from(new Set([...parsed.researchGaps, ...fb.researchGaps])),
+      }
+      fallbackCostUsd = fb.costUsd
+      fallbackUsed = true
+    }
+  }
 
   const packWithSeedTiers: EvidencePack = {
     ...pack,
@@ -327,9 +365,13 @@ export async function researchWebForProject(projectId: number, adminEmail: strin
   const webMeta: WebResearchMeta = {
     researchedAt: new Date().toISOString(),
     searchesUsed: call.webSearch?.searchesUsed ?? 0,
-    costUsd:      call.cost_usd,
+    costUsd:      Number((call.cost_usd + fallbackCostUsd).toFixed(6)),
     model:        call.model,
     latencyMs:    call.latency_ms,
+    responsePreview: (call.text ?? '').slice(0, EXTERNAL_RESEARCH_RAW_TEXT_CAP),
+    fallbackUsed,
+    fallbackCostUsd: fallbackUsed ? fallbackCostUsd : undefined,
+    fallbackModel:   fallbackUsed ? EXTERNAL_RESEARCH_FALLBACK_MODEL : undefined,
   }
 
   // Recompute quality from the enriched pack.
@@ -343,8 +385,19 @@ export async function researchWebForProject(projectId: number, adminEmail: strin
     webResearchedAt:  webMeta.researchedAt.slice(0, 10),
   })
 
+  // Methodology summary must reflect the post-web state, not the
+  // rebuild-time snapshot.
+  const methodology = buildExternalMethodology({
+    project:        pack.project,
+    manualSources:  nextManualSources,
+    allSources:     nextAllSources,
+    notes:          merged.notes,
+    webResearch:    webMeta,
+  })
+
   const nextPack: EvidencePack = {
     ...merged,
+    methodology,
     webResearch: webMeta,
     quality,
     warnings: merged.warnings.filter(w => w.id !== 'ext-no-sources'),
@@ -369,6 +422,167 @@ export async function researchWebForProject(projectId: number, adminEmail: strin
     facts:          parsed.verifiedFacts.length,
     contradictions: parsed.contradictions.length,
     cost:           webMeta,
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// External Research Fix v2 — fact-extraction helpers
+// ─────────────────────────────────────────────────────────────────
+
+type FallbackResult = {
+  verifiedFacts:     import('./types').VerifiedFact[]
+  contradictions:    import('./types').ClaimContradiction[]
+  researchQuestions: string[]
+  researchGaps:      string[]
+  costUsd:           number
+}
+
+async function runFactExtractionFallback(args: {
+  project:       EvidencePack['project']
+  primaryText:   string
+  discovered:    readonly ExternalSource[]
+  adminEmail:    string
+  sessionSuffix: string
+}): Promise<FallbackResult | null> {
+  const call = await callAnthropicAndLog({
+    feature:     'editorial_external_research_fallback',
+    model:       EXTERNAL_RESEARCH_FALLBACK_MODEL,
+    system:      EXTERNAL_RESEARCH_FALLBACK_SYSTEM_PROMPT,
+    messages:    [{ role: 'user', content: buildExternalResearchFallbackUserTurn({ project: args.project, primaryText: args.primaryText, discovered: args.discovered }) }],
+    max_tokens:  EXTERNAL_RESEARCH_FALLBACK_MAX_TOKENS,
+    temperature: 0.1,
+    cacheSystem: true,
+    adminEmail:  args.adminEmail,
+    sessionId:   args.sessionSuffix,
+  })
+  if (!call.ok) {
+    console.warn('[external_research_fallback] call failed:', call.error, call.detail)
+    return null
+  }
+  const parsed = parseExternalResearchResponse(call.text, {
+    knownManualSourceIds: [],
+    citationsFromApi:     [],   // fallback must not invent new sources
+    now:                  new Date().toISOString(),
+    adminEmail:           args.adminEmail,
+  })
+  // The parser will drop facts whose evidenceRefs don't exist. Rebuild
+  // the "known set" as {every discovered source id + any src-* the
+  // fallback minted} so facts against the primary sources survive.
+  const discoveredIds = new Set(args.discovered.map(s => s.id))
+  const survivingFacts = parsed.verifiedFacts.filter(f => f.evidenceRefs.every(r => discoveredIds.has(r)))
+  const survivingContradictions = parsed.contradictions.filter(c => c.positions.every(p => p.evidenceRefs.every(r => discoveredIds.has(r))))
+  return {
+    verifiedFacts:     survivingFacts,
+    contradictions:    survivingContradictions,
+    researchQuestions: parsed.researchQuestions,
+    researchGaps:      parsed.researchGaps,
+    costUsd:           call.cost_usd,
+  }
+}
+
+export type ReExtractResult = {
+  row:            EditorialResearchRow
+  pack:           EvidencePack
+  facts:          number
+  contradictions: number
+  costUsd:        number
+  usedPrimaryText: boolean
+}
+
+/** External Research Fix v2 — re-run the Haiku fact extractor
+ *  against the pack's already-persisted primary web-research prose +
+ *  discovered sources. No new web_search. This is what recovers the
+ *  facts from a run whose primary Sonnet call returned prose-only. */
+export async function reExtractFactsForProject(projectId: number, adminEmail: string): Promise<ReExtractResult> {
+  const existing = await fetchResearch(projectId)
+  if (!existing || !existing.evidence_json) throw new Error('no evidence pack — build research first')
+  const pack = existing.evidence_json as EvidencePack
+  if (pack.recipe !== 'external_research') {
+    throw new Error(`re_extract_facts is only available for external_research packs (this pack is ${pack.recipe})`)
+  }
+  if (!pack.webResearch) {
+    throw new Error('no prior web research to re-extract from — click "Research web" first')
+  }
+
+  const primaryText = pack.webResearch.responsePreview ?? ''
+  const discovered = pack.externalSources.filter(s => (s.origin ?? 'manual') === 'web')
+  if (discovered.length === 0) {
+    throw new Error('no web-discovered sources on this pack; nothing to extract from')
+  }
+
+  const fb = await runFactExtractionFallback({
+    project:      pack.project,
+    primaryText,               // '' is fine — prompt handles it (URL-only mode)
+    discovered,
+    adminEmail,
+    sessionSuffix: `external-research-${projectId}-reextract-${Date.now()}`,
+  })
+  if (!fb) throw new Error('fact-extraction fallback call failed')
+
+  // Keep existing facts that trace to manual sources; discard prior
+  // web-derived facts and replace with the new extraction.
+  const manualIds = new Set(pack.externalSources.filter(s => (s.origin ?? 'manual') === 'manual').map(s => s.id))
+  const survivingManualFacts = pack.verifiedFacts.filter(f => {
+    if (f.evidenceRefs.length === 0) return true
+    return f.evidenceRefs.every(r => manualIds.has(r))
+  })
+  const nextFacts = [...survivingManualFacts, ...fb.verifiedFacts]
+
+  const nextWebResearch: WebResearchMeta = {
+    ...pack.webResearch,
+    fallbackUsed: true,
+    fallbackCostUsd: Number(((pack.webResearch.fallbackCostUsd ?? 0) + fb.costUsd).toFixed(6)),
+    fallbackModel: EXTERNAL_RESEARCH_FALLBACK_MODEL,
+    costUsd: Number(((pack.webResearch.costUsd ?? 0) + fb.costUsd).toFixed(6)),
+  }
+
+  const nextAllSources = pack.externalSources
+  const nextManualSources = nextAllSources.filter(s => (s.origin ?? 'manual') === 'manual')
+  const quality = computeExternalQuality({
+    externalSources: nextAllSources,
+    verifiedFacts:   nextFacts,
+    hasWebResearch:  true,
+    today:           pack.dataAsOf,
+    webResearchedAt: pack.webResearch.researchedAt.slice(0, 10),
+  })
+  const methodology = buildExternalMethodology({
+    project:       pack.project,
+    manualSources: nextManualSources,
+    allSources:    nextAllSources,
+    notes:         pack.notes,
+    webResearch:   nextWebResearch,
+  })
+
+  const nextPack: EvidencePack = {
+    ...pack,
+    verifiedFacts:     nextFacts,
+    contradictions:    fb.contradictions.length > 0 ? fb.contradictions : pack.contradictions,
+    researchQuestions: fb.researchQuestions.length > 0 ? fb.researchQuestions : pack.researchQuestions,
+    researchGaps:      Array.from(new Set([...pack.researchGaps, ...fb.researchGaps])),
+    webResearch:       nextWebResearch,
+    methodology,
+    quality,
+  }
+
+  const supa = getSupabaseServiceClient()
+  const newStatus: ResearchStatus = quality.status === 'blocked' ? 'blocked'
+    : quality.status === 'needs_review' ? 'review_required'
+    : 'gathering'
+  const { data, error } = await supa
+    .from('editorial_research')
+    .update({ evidence_json: nextPack, status: newStatus, updated_at: new Date().toISOString() })
+    .eq('project_id', projectId)
+    .select('*')
+    .single()
+  if (error) throw new Error(`reExtractFacts persist: ${error.message}`)
+
+  return {
+    row:  data as any,
+    pack: nextPack,
+    facts:          fb.verifiedFacts.length,
+    contradictions: fb.contradictions.length,
+    costUsd:        fb.costUsd,
+    usedPrimaryText: primaryText.length > 100,
   }
 }
 

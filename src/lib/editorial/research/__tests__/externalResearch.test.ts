@@ -16,8 +16,8 @@ vi.mock('server-only', () => ({}))
 vi.mock('@/lib/supabaseService', () => ({
   getSupabaseServiceClient: () => ({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) }) }),
 }))
-import { runExternalResearchRecipe, computeExternalQuality, classifySourceTier } from '../externalResearch'
-import { parseExternalResearchResponse, mergeExternalResearchIntoPack } from '../externalResearchAnalyst'
+import { runExternalResearchRecipe, computeExternalQuality, classifySourceTier, buildExternalMethodology } from '../externalResearch'
+import { parseExternalResearchResponse, mergeExternalResearchIntoPack, extractJsonObject } from '../externalResearchAnalyst'
 import { mergeManualEvidenceIntoRebuiltPack } from '../serverActions'
 import type { EvidencePack, ExternalSource, VerifiedFact } from '../types'
 
@@ -405,6 +405,126 @@ describe('external_research recipe: build is deterministic', () => {
 // ─────────────────────────────────────────────────────────────────
 // Spec §17.10 — dispatch routes correctly
 // ─────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────
+// External Research Fix v2 — parser resilience against prose replies
+// ─────────────────────────────────────────────────────────────────
+
+describe('extractJsonObject: resilient JSON extraction', () => {
+  it('parses a fenced ```json block', () => {
+    expect(extractJsonObject('```json\n{"a": 1}\n```')).toEqual({ a: 1 })
+  })
+  it('parses an unlabeled ``` fence around an object', () => {
+    expect(extractJsonObject('```\n{"b": 2}\n```')).toEqual({ b: 2 })
+  })
+  it('parses whole-text JSON (no fence)', () => {
+    expect(extractJsonObject('{"c": 3}')).toEqual({ c: 3 })
+  })
+  it('parses a balanced object embedded in prose', () => {
+    expect(extractJsonObject('Sure, here is the object:\n{"d": 4}\nThat is the answer.')).toEqual({ d: 4 })
+  })
+  it('returns null when there is no object at all', () => {
+    expect(extractJsonObject('The set has been announced.')).toBeNull()
+  })
+  it('tolerates escaped quotes and nested braces', () => {
+    expect(extractJsonObject('preface\n{"x": {"y": "he said \\"hi\\""}}\nsuffix')).toEqual({ x: { y: 'he said "hi"' } })
+  })
+})
+
+describe('parseExternalResearchResponse: prose-only response yields empty facts (fallback trigger)', () => {
+  it('when the model writes cited prose without a JSON block, verifiedFacts = 0 and citations are captured', () => {
+    // Simulates the live-run bug: Claude wrote a summary with inline
+    // citations but no JSON code block. The parser used to hit this
+    // path and produce 0 sources, 0 facts.
+    const parsed = parseExternalResearchResponse(
+      'The Celebration set has been officially announced by The Pokémon Company [1]. TCGplayer is showing preorders live [2].',
+      {
+        knownManualSourceIds: [],
+        citationsFromApi: [
+          { url: 'https://www.pokemon.com/us/pokemon-news/celebration', title: 'Official announcement' },
+          { url: 'https://www.tcgplayer.com/product/xyz',                title: 'Preorder listing' },
+        ],
+        now: TODAY, adminEmail: 'e@x',
+      },
+    )
+    // No structured facts (the pre-v2 bug), but sources ARE captured
+    // via the API citations path — this pack is now ready for the
+    // Haiku fallback to extract facts without new web calls.
+    expect(parsed.verifiedFacts).toHaveLength(0)
+    expect(parsed.discoveredSources).toHaveLength(2)
+    expect(parsed.discoveredSources.every(s => s.origin === 'web')).toBe(true)
+  })
+})
+
+describe('buildExternalMethodology: reflects post-web state', () => {
+  it('"Last web research" shows the timestamp + searches + cost after a run', () => {
+    const meth = buildExternalMethodology({
+      project: { id: 12, title: 'Celebration', angle: null, articleType: 'upcoming_set', targetPublishAt: null },
+      manualSources: [manualSource({ id: 'ext-manual-1', origin: 'manual' })],
+      allSources: [
+        manualSource({ id: 'ext-manual-1', origin: 'manual' }),
+        { id: 'src-w-1', kind: 'external', url: 'https://pokemon.com/x', title: 'X', addedAt: TODAY, origin: 'web', sourceTier: 1 },
+      ],
+      notes: [{ id: 'note-1' }],
+      webResearch: { researchedAt: '2026-09-08T11:01:04.904Z', searchesUsed: 4, costUsd: 0.2573 },
+    })
+    const filters = meth.filters.reduce<Record<string, string>>((acc, f) => { acc[f.label] = f.value; return acc }, {})
+    expect(filters['Last web research']).toMatch(/2026-09-08.*4 searches.*0\.2573/)
+    expect(filters['Discovered (web)']).toBe('1 source(s)')
+    expect(filters['Preserved manual']).toBe('1 source(s), 1 note(s)')
+  })
+  it('"(never)" when webResearch is undefined', () => {
+    const meth = buildExternalMethodology({
+      project: { id: 12, title: 'Celebration', angle: null, articleType: 'upcoming_set', targetPublishAt: null },
+      manualSources: [],
+      allSources: [],
+      notes: [],
+      webResearch: undefined,
+    })
+    const filters = meth.filters.reduce<Record<string, string>>((acc, f) => { acc[f.label] = f.value; return acc }, {})
+    expect(filters['Last web research']).toBe('(never)')
+    expect(filters['Discovered (web)']).toBe('0 source(s)')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────
+// Regression lock (spec §6): manual → Research web → Rebuild → still
+// there
+// ─────────────────────────────────────────────────────────────────
+
+describe('regression lock: manual source survives a full simulated cycle', () => {
+  it('manual source + Research-web merge + Rebuild → manual still present', async () => {
+    // Step 1: bootstrap external pack.
+    const bootstrap = await runExternalResearchRecipe(PROJECT, { today: TODAY })
+    // Step 2: admin attaches a manual source.
+    const withManual: EvidencePack = {
+      ...bootstrap,
+      externalSources: [...bootstrap.externalSources, manualSource({ id: 'ext-manual-tcg', url: 'https://www.tcgplayer.com/content/x', title: 'TCG Buyer\'s Guide' })],
+    }
+    // Step 3: Research web merges in a fresh discovery.
+    const parsed = parseExternalResearchResponse(
+      '```json\n' + JSON.stringify({
+        researchQuestions: ['q1'],
+        discoveredSources: [
+          { id: 'src-w-official', url: 'https://www.pokemon.com/us/pokemon-news/celebration', title: 'Official announcement', publisher: 'The Pokémon Company', sourceTier: 1 },
+        ],
+        verifiedFacts: [
+          { id: 'fact-1', statement: 'Set officially announced.', status: 'confirmed', sourceTier: 1, evidenceRefs: ['src-w-official'] },
+        ],
+        contradictions: [],
+        researchGaps: [],
+      }) + '\n```',
+      { knownManualSourceIds: ['ext-manual-tcg'], citationsFromApi: [], now: TODAY, adminEmail: 'e@x' },
+    )
+    const afterWeb = mergeExternalResearchIntoPack(withManual, parsed)
+    expect(afterWeb.externalSources.some(s => s.id === 'ext-manual-tcg')).toBe(true)   // manual still present
+    // Step 4: admin clicks Rebuild evidence — recipe runs again with
+    // `previous = afterWeb`. Manual source AND web-discovered
+    // source AND web-derived fact all need appropriate handling.
+    const afterRebuild = await runExternalResearchRecipe(PROJECT, { today: TODAY, previous: afterWeb })
+    expect(afterRebuild.externalSources.some(s => s.id === 'ext-manual-tcg')).toBe(true)   // regression lock
+  })
+})
 
 describe('dispatch: article types that should route to external_research', () => {
   it.each([

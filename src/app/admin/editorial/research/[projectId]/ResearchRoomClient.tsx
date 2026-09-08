@@ -98,10 +98,17 @@ export default function ResearchRoomClient({ project, initialResearch, chosenRec
     if (j) {
       const cost = j.cost?.costUsd != null ? `$${Number(j.cost.costUsd).toFixed(4)}` : ''
       const searches = j.cost?.searchesUsed != null ? `${j.cost.searchesUsed} search${j.cost.searchesUsed === 1 ? '' : 'es'}` : ''
-      setNotice(`Research web complete — ${j.discovered ?? 0} sources, ${j.facts ?? 0} facts, ${j.contradictions ?? 0} contradiction(s). ${searches}${cost ? ` · ${cost}` : ''}`)
+      const fallback = j.cost?.fallbackUsed ? ' (Haiku fallback fired)' : ''
+      setNotice(`Research web complete — ${j.discovered ?? 0} sources, ${j.facts ?? 0} facts, ${j.contradictions ?? 0} contradiction(s). ${searches}${cost ? ` · ${cost}` : ''}${fallback}`)
     }
   }
   const doClearDiscovered = () => run('clear_discovered_sources', { action: 'clear_discovered_sources' })
+  const doReExtract = async () => {
+    const j = await run('re_extract_facts', { action: 're_extract_facts' })
+    if (j) {
+      setNotice(`Re-extracted ${j.facts ?? 0} fact(s), ${j.contradictions ?? 0} contradiction(s) from the existing research run. Cost: $${Number(j.costUsd ?? 0).toFixed(4)}. ${j.usedPrimaryText ? 'Used stored primary text.' : 'Sources-only mode (no primary text was stored on this pack).'}`)
+    }
+  }
 
   const rebuildBlockedByApproval = research?.status === 'approved' && !confirmingRebuild
 
@@ -172,6 +179,11 @@ export default function ResearchRoomClient({ project, initialResearch, chosenRec
             <div style={S.advancedBox}>
               <strong>Advanced</strong>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6, alignItems: 'center' }}>
+                {isExternal && pack.webResearch && (
+                  <button style={S.btnLinkQuiet} disabled={!!busy} onClick={doReExtract} title="Re-run the Haiku fact-extractor on this pack's existing web-research response + discovered sources. No new web_search. Cheapest recovery path when a run yielded citations but 0 facts.">
+                    {busy === 're_extract_facts' ? 'Extracting…' : 'Re-extract facts (no new web search)'}
+                  </button>
+                )}
                 {isExternal && (
                   confirmingClear ? (
                     <>
