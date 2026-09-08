@@ -48,10 +48,11 @@ function stageIndex(s: GenerationStage): number { return STAGE_ORDER.indexOf(s) 
 
 export function GenerateAndFactCheckPanel(props: Props) {
   const { projectId, researchStatus, hasMeaningfulBody, writer, factCheckStale } = props
-  const [busy, setBusy]           = useState<'generate' | 'fact-check' | null>(null)
+  const [busy, setBusy]           = useState<'generate' | 'fact-check' | 'repair' | null>(null)
   const [error, setError]         = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [liveStage, setLiveStage] = useState<GenerationStage | null>(null)
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const abortRef = useRef(false)
 
   const approved = researchStatus === 'approved'
@@ -98,6 +99,23 @@ export function GenerateAndFactCheckPanel(props: Props) {
       setLiveStage(null)
     }
   }, [runOneStage, props])
+
+  const runManualRepair = useCallback(async () => {
+    setError(null); setBusy('repair')
+    try {
+      const auth = await authHeader()
+      const res = await fetch(`/api/admin/editorial/studio/${projectId}/write`, {
+        method: 'POST',
+        headers: { ...auth, 'content-type': 'application/json' },
+        body: JSON.stringify({ mode: 'manual_repair' }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok || j?.ok === false) throw new Error(j?.error || `${res.status} ${res.statusText}`)
+      props.onWriterResult(j.writer as WriterMetadata, (j.studio ?? null) as StudioDocument | null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'unknown')
+    } finally { setBusy(null) }
+  }, [projectId, props])
 
   const runFactCheck = useCallback(async () => {
     setError(null); setBusy('fact-check')
@@ -178,37 +196,63 @@ export function GenerateAndFactCheckPanel(props: Props) {
       <div style={S.section}>
         <div style={S.title}>Fact check</div>
         <FactCheckSummary writer={writer} stale={factCheckStale} />
-        <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+        <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
           <button style={S.btnPrimary} disabled={busy === 'fact-check'} onClick={runFactCheck}>
             {busy === 'fact-check' ? 'Checking…' : 'Run fact check'}
           </button>
+          {writer?.factCheck && writer.factCheck.issues.some(i => i.severity !== 'minor') && !writer.repairFired && (
+            <button style={S.btnGhost} disabled={!!busy} onClick={runManualRepair} title="Spends ~2 additional Claude calls (Writer repair + Fact Checker rerun)">
+              {busy === 'repair' ? 'Fixing…' : `Fix with AI (${writer.factCheck.issues.filter(i => i.severity !== 'minor').length} issue${writer.factCheck.issues.filter(i => i.severity !== 'minor').length === 1 ? '' : 's'})`}
+            </button>
+          )}
+          {writer?.repairFired && (
+            <span style={{ ...S.meta, alignSelf: 'center' }}>A repair pass has already been applied to this draft. Regenerate to try again.</span>
+          )}
         </div>
       </div>
 
       {writer && (
         <div style={S.section}>
-          <div style={S.title}>Writer metadata</div>
-          <div style={S.meta}>Generated {new Date(writer.generatedAt).toLocaleString()} · model {writer.model}</div>
-          <div style={S.meta}>Cost estimate ${writer.generationCost.cost_usd.toFixed(4)} · {writer.generationCost.input_tokens + writer.generationCost.output_tokens} tokens</div>
-          {writer.styleRepairFired && <div style={S.meta}>Style-repair pass fired.</div>}
-          {writer.repairFired      && <div style={S.meta}>Fact repair pass fired.</div>}
-          {writer.assemblyWarnings.length > 0 && (
-            <details style={{ marginTop: 8 }}>
-              <summary style={{ cursor: 'pointer', fontSize: 12 }}>{writer.assemblyWarnings.length} assembly warning(s)</summary>
-              <ul style={S.list}>{writer.assemblyWarnings.map((w, i) => <li key={i}>[{w.kind}] {w.detail}</li>)}</ul>
-            </details>
-          )}
-          {writer.claimTrace.length > 0 && (
-            <details style={{ marginTop: 8 }}>
-              <summary style={{ cursor: 'pointer', fontSize: 12 }}>{writer.claimTrace.length} claim trace(s)</summary>
-              <ul style={S.list}>
-                {writer.claimTrace.slice(0, 20).map((c, i) => (
-                  <li key={i}><strong>{c.sectionId}:</strong> {c.claim} <span style={S.muted}>[{c.evidenceRefs.join(', ') || '—'}]</span></li>
-                ))}
-              </ul>
-            </details>
-          )}
+          <div style={S.title}>AI cost</div>
+          <div style={S.meta}>
+            <strong>${writer.generationCost.cost_usd.toFixed(4)}</strong> total ·{' '}
+            {writer.generationCost.input_tokens + writer.generationCost.output_tokens} tokens
+          </div>
         </div>
+      )}
+
+      {writer && (
+        <details style={{ ...S.section, padding: 0 }}>
+          <summary style={{ ...S.title, padding: 12, cursor: 'pointer', margin: 0 }}>
+            Advanced (debug + claim trace + assembly warnings)
+          </summary>
+          <div style={{ padding: '0 12px 12px' }}>
+            <div style={S.meta}>Generated {new Date(writer.generatedAt).toLocaleString()} · model {writer.model}</div>
+            {writer.styleRepairFired && <div style={S.meta}>Style-repair pass fired.</div>}
+            {writer.repairFired      && <div style={S.meta}>Fact repair pass fired.</div>}
+            {writer.currentRun && Object.keys(writer.currentRun.stageTimings).length > 0 && (
+              <div style={S.meta}>Stage timings:{' '}
+                {Object.entries(writer.currentRun.stageTimings).map(([k, v]) => `${k}=${(v / 1000).toFixed(1)}s`).join(' · ')}
+              </div>
+            )}
+            {writer.assemblyWarnings.length > 0 && (
+              <details style={{ marginTop: 8 }}>
+                <summary style={{ cursor: 'pointer', fontSize: 12 }}>{writer.assemblyWarnings.length} assembly warning(s)</summary>
+                <ul style={S.list}>{writer.assemblyWarnings.map((w, i) => <li key={i}>[{w.kind}] {w.detail}</li>)}</ul>
+              </details>
+            )}
+            {writer.claimTrace.length > 0 && (
+              <details style={{ marginTop: 8 }}>
+                <summary style={{ cursor: 'pointer', fontSize: 12 }}>{writer.claimTrace.length} claim trace(s)</summary>
+                <ul style={S.list}>
+                  {writer.claimTrace.slice(0, 20).map((c, i) => (
+                    <li key={i}><strong>{c.sectionId}:</strong> {c.claim} <span style={S.muted}>[{c.evidenceRefs.join(', ') || '—'}]</span></li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+        </details>
       )}
     </div>
   )

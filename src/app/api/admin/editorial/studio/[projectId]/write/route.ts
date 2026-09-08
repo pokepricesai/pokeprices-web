@@ -11,7 +11,7 @@ import 'server-only'
 import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/adminAuth'
 import { checkAdminRateLimit } from '@/lib/adminRateLimit'
-import { startGeneration, runNextStage } from '@/lib/editorial/writer/writerActions'
+import { startGeneration, runNextStage, runManualRepair } from '@/lib/editorial/writer/writerActions'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -58,6 +58,10 @@ export async function POST(req: Request, ctx: Ctx) {
       if (mode === 'start') return NextResponse.json({ ok: true, writer: started.writer, studio: started.studio, factCheck: started.factCheck })
       const stepped = await runNextStage(projectId, admin.email)
       return NextResponse.json({ ok: true, writer: stepped.writer, studio: stepped.studio, factCheck: stepped.factCheck })
+    }
+    if (mode === 'manual_repair') {
+      const result = await runManualRepair(projectId, admin.email)
+      return NextResponse.json({ ok: true, writer: result.writer, studio: result.studio, factCheck: result.factCheck })
     }
     // Step mode: caller assumes a run already exists.
     const result = await runNextStage(projectId, admin.email)

@@ -56,6 +56,20 @@ Follow the story, not a generic template. A market report might go: what actuall
 
 Typical article: 1,200 to 2,500 words. Thin evidence should produce a shorter article, not padded prose. Dense evidence may run longer.
 
+STATISTICAL IMPORTANCE VS EDITORIAL IMPORTANCE
+
+Statistical importance and editorial importance are two different things. A metric that exists is not automatically a story worth leading with.
+
+  * A market median near zero is context, not the headline. Do NOT write "The big story in August was a 0% median." Write "The tracked raw-card sample was broadly flat in August," then move on to whatever meaningful patterns actually exist.
+  * When the pack carries \`marketSignalStrength: weak\`, treat the month as quiet. Say so plainly. Do not manufacture excitement. A quiet month is an acceptable article.
+  * A breadth split of 39% falling vs 36% rising is a 2.7-point difference. That is not a dramatic bearish signal.
+  * Reserve strong verbs like "surge", "collapse", "crash", "soaring", "major shift" for cases where robust evidence genuinely supports them. If the signal is weak or moderate, use neutral language ("moved higher", "eased back", "remained flat").
+  * Prefer tables and charts for dense values; use prose to explain meaning. Do not restate the same numbers three times to fill space.
+
+EXTREME MOVES ARE ALREADY EXCLUDED
+
+The pack has already filtered out cards outside the editorial band ([-60%, +200%] on monthly moves) and unstable-endpoint cards. You will NEVER see a +5,000% or -95% mover as an editorial candidate. If you find yourself wanting to write about one of these, you are looking at the wrong source; the editorial-safe table is the one to use.
+
 INTERNAL + EXTERNAL LINKS
 
 * Internal links: pick from \`context.internalLinks\` and canonical cards/sets referenced by the pack or its dataTables. Never invent an internal URL.
@@ -171,7 +185,11 @@ export function compactWriterInputs(bundle: WriterInputBundle): unknown {
     } : null,
     existingContent: context ? {
       today: context.meta.today,
-      articles: context.articles.slice(0, 25).map(a => ({
+      // Final Cleanup — rank articles by naive keyword overlap with
+      // the project title + angle, keep only the 8 strongest so the
+      // Writer prompt stops shipping 25 stubs it does not use. Falls
+      // back to the newest 8 when the pack has no textual signal.
+      articles: rankExistingArticlesForContext(project, context.articles, 8).map(a => ({
         slug:       a.slug,
         headline:   a.headline,
         publicUrl:  a.publicUrl,
@@ -182,6 +200,39 @@ export function compactWriterInputs(bundle: WriterInputBundle): unknown {
     } : null,
   }
 }
+
+/** Score each existing article by shared meaningful tokens with the
+ *  project brief. Deterministic, cheap, no AI. Returns up to `limit`
+ *  best matches; ties broken by publish recency. */
+function rankExistingArticlesForContext(
+  project: WriterInputBundle['project'],
+  articles: NonNullable<WriterInputBundle['context']>['articles'],
+  limit: number,
+): NonNullable<WriterInputBundle['context']>['articles'] {
+  if (!articles || articles.length === 0) return []
+  const projectTokens = tokenize(`${project.title} ${project.angle ?? ''} ${project.articleType}`)
+  if (projectTokens.size === 0) {
+    return [...articles].sort((a, b) => String(b.publishedAt ?? '').localeCompare(String(a.publishedAt ?? ''))).slice(0, limit)
+  }
+  const scored = articles.map(a => {
+    const t = tokenize(`${a.headline} ${a.intro ?? ''} ${a.themeLabel ?? ''}`)
+    let overlap = 0
+    for (const tok of Array.from(projectTokens)) if (t.has(tok)) overlap += 1
+    return { a, overlap, published: String(a.publishedAt ?? '') }
+  })
+  scored.sort((x, y) => (y.overlap - x.overlap) || y.published.localeCompare(x.published))
+  return scored.slice(0, limit).map(s => s.a)
+}
+function tokenize(s: string): Set<string> {
+  const out = new Set<string>()
+  for (const raw of String(s ?? '').toLowerCase().split(/[^a-z0-9]+/)) {
+    if (raw.length < 4) continue
+    if (STOP_WORDS.has(raw)) continue
+    out.add(raw)
+  }
+  return out
+}
+const STOP_WORDS = new Set(['pokemon','pokémon','article','report','study','data','with','from','that','this','have','been','will','their','other','more','some','into','they','than','when','where','which','about','across','over','under','through','among','while','also','only','many','most','both','also','made','make','around','after','before','because','though'])
 
 function countBy(arr: readonly string[]): Record<string, number> {
   const out: Record<string, number> = {}

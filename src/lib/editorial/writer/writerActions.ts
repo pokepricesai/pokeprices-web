@@ -27,6 +27,7 @@ import { buildEditorialContext } from '../context'
 import type { EditorialContext } from '../context'
 import type { StudioDocument } from '@/lib/studio/types'
 import { auditFieldMap, buildStyleRepairUserTurn } from '../styleGuard'
+import { applyStyleFixesToDraft } from '../styleFix'
 import type { CardIdentity } from '@/lib/studio/dataBlocks/types'
 
 import { WRITER_SYSTEM_PROMPT, buildWriterUserTurn, buildWriterRepairUserTurn, parseWriterResponse } from './writerPrompt'
@@ -184,6 +185,48 @@ export async function runNextStage(projectId: number, adminEmail: string): Promi
 }
 
 /**
+ * Explicit user action: "Fix with AI" from the WriterPanel. Runs a
+ * single Writer repair pass against the currently persisted studio +
+ * fact check, then a fresh Fact Check on the repaired draft. Charges
+ * ~2 additional Claude calls; only invoked when the human clicks it.
+ */
+export async function runManualRepair(projectId: number, adminEmail: string): Promise<{ ok: true; writer: WriterMetadata; studio: StudioDocument | null; factCheck: FactCheckResult | null }> {
+  const supa = getSupabaseServiceClient()
+  const project = await fetchProject(projectId)
+  if (!project) throw new Error('project not found')
+  const research = await fetchResearch(projectId)
+  ensureResearchApproved(research)
+  const pack = research!.evidence_json as EvidencePack
+
+  const { data: pRow } = await supa.from('editorial_projects').select('studio_json, writer_json').eq('id', projectId).maybeSingle()
+  let writer = ((pRow as any)?.writer_json ?? null) as WriterMetadata | null
+  const studio = ((pRow as any)?.studio_json ?? null) as StudioDocument | null
+  if (!writer || !writer.factCheck || !writer.currentRun) throw new Error('no completed writer run to repair')
+  if (writer.currentRun.repairFired) throw new Error('a repair has already been applied for this draft; regenerate to retry')
+  if (!studio) throw new Error('no studio_json to repair')
+
+  // Reset the currentRun into the repair sequence so stage handlers
+  // work exactly as they did in the old auto-repair path.
+  const run: GenerationRun = {
+    ...writer.currentRun,
+    stage: 'repair',
+    stageLabel: 'Repairing draft',
+    updatedAt: new Date().toISOString(),
+  }
+  writer = { ...writer, currentRun: run }
+  await supa.from('editorial_projects').update({ writer_json: writer }).eq('id', projectId)
+
+  // Advance through repair → finalize (2 stage calls, ≤2 Claude calls total).
+  writer = await stageRepair(writer, project, pack, adminEmail, Date.now())
+  await supa.from('editorial_projects').update({ writer_json: writer, updated_at: new Date().toISOString() }).eq('id', projectId)
+  writer = await stageFinalize(writer, projectId, pack, adminEmail, Date.now())
+  await supa.from('editorial_projects').update({ writer_json: writer, updated_at: new Date().toISOString() }).eq('id', projectId)
+
+  const { data: pAfter } = await supa.from('editorial_projects').select('studio_json').eq('id', projectId).maybeSingle()
+  return { ok: true, writer, studio: ((pAfter as any)?.studio_json ?? null) as StudioDocument | null, factCheck: writer.factCheck ?? null }
+}
+
+/**
  * Standalone manual fact check (Studio "Run fact check" button).
  * Runs against the current studio_json + research evidence and
  * updates writer_json.factCheck + checkedStudioHash.
@@ -265,8 +308,21 @@ async function stageStyleAndAssemble(writer: WriterMetadata, project: any, pack:
   let styleRepairFired = writer.currentRun!.styleRepairFired
   let workingRaw = rawText
 
+  // Final Cleanup — deterministic style repair replaces the auto AI
+  // repair. Em dashes, British spellings, and stray whitespace are
+  // fixed in-place without a Claude call. Only if trope-level
+  // violations REMAIN after the deterministic pass does an AI repair
+  // fire — and even then, only if strictly necessary.
+  const detFix = applyStyleFixesToDraft(draft)
+  if (detFix.changed > 0) {
+    draft = detFix.draft as WriterDraft
+    styleRepairFired = true   // deterministic path counts as a repair firing for telemetry
+  }
   const audit = auditFieldMap(styleAuditFields(draft))
   if (audit.hasViolations) {
+    // The remaining violations are trope-level (or a British
+    // spelling we did not enumerate). Try a bounded AI repair as
+    // a fallback — but only ONCE, and only if truly needed.
     const repair = await callAnthropicAndLog({
       feature: 'editorial_writer_style_repair',
       model: WRITER_MODEL, system: WRITER_SYSTEM_PROMPT,
@@ -342,10 +398,11 @@ async function stageFactCheck(writer: WriterMetadata, projectId: number, pack: E
     sessionId: `factcheck-${projectId}-${Date.now()}`, usage,
   })
 
-  const actionable = factCheck.issues.some(i => i.severity !== 'minor') || numericAudit.issues.length > 0
-  const canRepair  = !writer.currentRun!.repairFired
-  const nextStage: GenerationStage = actionable && canRepair ? 'repair' : 'complete'
-  const nextLabel  = nextStage === 'repair' ? 'Repairing draft' : 'Saving draft'
+  // Final Cleanup — do NOT automatically fire a Writer repair.
+  // Studio surfaces the remaining issues + a "Fix with AI" button;
+  // the human decides whether to spend the extra Claude calls.
+  const nextStage: GenerationStage = 'complete'
+  const nextLabel  = 'Saving draft'
 
   const run: GenerationRun = {
     ...writer.currentRun!,

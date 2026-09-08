@@ -27,6 +27,7 @@ import { studioDocumentToInsightBody } from '@/lib/studio/adapter'
 import { StudioPreview } from './StudioPreview'
 import { DataBlockNode } from './DataBlockNode'
 import { InsertDataBlockMenu } from './InsertDataBlockMenu'
+import React from 'react'
 import type { WriterMetadata, FactCheckResult } from '@/lib/editorial/writer/types'
 import { GenerateAndFactCheckPanel } from './WriterPanel'
 import { PublicationPanel } from './PublicationPanel'
@@ -189,6 +190,14 @@ export default function StudioClient({ project, initialDoc, research, initialWri
             <button style={S.btnPrimary} onClick={() => setPreviewOpen(true)}>Preview</button>
           </div>
         </div>
+
+        <WorkflowBar
+          project={projectRow}
+          research={research}
+          writer={writer}
+          factCheckStale={factCheckStale}
+          onOpenTab={setTab}
+        />
 
         <div style={S.grid}>
           <div style={S.writingCol}>
@@ -360,6 +369,71 @@ function Sep() { return <span style={S.tbSep}>|</span> }
 // Save indicator
 // ─────────────────────────────────────────────────────────────────
 
+// Final Cleanup — Workflow bar. One primary next-action button so
+// the admin does not need to figure out which tab to open next.
+function WorkflowBar({ project, research, writer, factCheckStale, onOpenTab }: {
+  project: ProjectRow
+  research: EditorialResearchRow | null
+  writer: WriterMetadata | null
+  factCheckStale: boolean
+  onOpenTab: (t: 'research' | 'writer' | 'publish' | 'seo' | 'settings') => void
+}) {
+  // Derive stage states + primary next action from persisted state.
+  const researchOk = research?.status === 'approved'
+  const draftOk    = !!(writer && writer.currentRun && writer.currentRun.stage === 'complete')
+  const factOk     = !!(writer?.factCheck && writer.factCheck.status === 'pass' && !factCheckStale)
+  const publishOk  = project.status === 'published'
+
+  type Step = { key: string; label: string; ok: boolean; active: boolean }
+  const steps: Step[] = [
+    { key: 'research', label: 'Research',    ok: researchOk, active: !researchOk },
+    { key: 'draft',    label: 'Draft',       ok: draftOk,    active:  researchOk && !draftOk },
+    { key: 'review',   label: 'Fact check',  ok: factOk,     active:  draftOk    && !factOk },
+    { key: 'publish',  label: 'Publish',     ok: publishOk,  active:  factOk     && !publishOk },
+  ]
+
+  let cta:  { label: string; tab: 'research' | 'writer' | 'publish' } = { label: 'Approve research', tab: 'research' }
+  let ctaHint = ''
+  if (!researchOk) {
+    cta = { label: 'Review research', tab: 'research' }
+    ctaHint = research ? `Research status: ${research.status}` : 'No research pack yet — open the Research Room.'
+  } else if (!draftOk) {
+    cta = { label: 'Generate draft', tab: 'writer' }
+    ctaHint = 'Research is approved. Generate the first draft.'
+  } else if (factCheckStale) {
+    cta = { label: 'Rerun fact check', tab: 'writer' }
+    ctaHint = 'Draft has changed since the last fact check.'
+  } else if (!factOk) {
+    cta = { label: 'Run fact check', tab: 'writer' }
+    ctaHint = 'Fact check has issues or has not been run.'
+  } else if (!publishOk) {
+    cta = { label: 'Review & publish', tab: 'publish' }
+    ctaHint = 'Ready to publish.'
+  } else {
+    cta = { label: 'Update published', tab: 'publish' }
+    ctaHint = 'Live article. Edit + republish when needed.'
+  }
+
+  return (
+    <div style={styles.workflowBar}>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flex: 1, minWidth: 0 }}>
+        {steps.map((s, i) => (
+          <React.Fragment key={s.key}>
+            {i > 0 && <span style={styles.stepArrow}>→</span>}
+            <span style={{ ...styles.step, ...(s.active ? styles.stepActive : {}), ...(s.ok ? styles.stepDone : {}) }}>
+              {s.ok ? '✓' : s.active ? '●' : '·'} {s.label}
+            </span>
+          </React.Fragment>
+        ))}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {ctaHint && <span style={styles.ctaHint}>{ctaHint}</span>}
+        <button style={styles.ctaBtn} onClick={() => onOpenTab(cta.tab)}>{cta.label} →</button>
+      </div>
+    </div>
+  )
+}
+
 function hasMeaningfulBodyClient(doc: StudioDocument): boolean {
   const b: any = doc.bodyDoc
   if (!b || !Array.isArray(b.content)) return (doc.headline?.trim().length ?? 0) > 0 || (doc.intro?.trim().length ?? 0) > 0
@@ -426,6 +500,29 @@ function ResearchSidebar({ project, research, pack }: { project: ProjectRow; res
   const criticalWarnings = pack ? pack.warnings.filter(w => w.severity === 'critical') : []
   const majorWarnings    = pack ? pack.warnings.filter(w => w.severity === 'major')    : []
 
+  // Final Cleanup — a single summary view replaces the previous
+  // technical dump. What we know / Data quality / Caveats / Excluded.
+  // Sophisticated evidence + formulas + IDs sit under Advanced.
+
+  const findings = (analysis?.strongestFindings?.length ?? 0) > 0
+    ? analysis!.strongestFindings.slice(0, 10).map(f => f.finding)
+    : pack ? [
+        ...pack.verifiedFacts.slice(0, 5).map(f => f.statement),
+        ...pack.derivedFindings.slice(0, 5).map(f => f.statement),
+      ].slice(0, 10) : []
+
+  const dataQuality: { label: string; tone: 'ok' | 'caution' | 'blocked' } =
+    !pack                                            ? { label: 'Not built', tone: 'caution' } :
+    pack.quality.status === 'blocked'                ? { label: 'Blocked', tone: 'blocked' } :
+    (pack.quality.status !== 'ok' || criticalWarnings.length > 0 || pack.quality.freshness.isStale) ? { label: 'Caution', tone: 'caution' } :
+    { label: 'Good', tone: 'ok' }
+  const dqBg = dataQuality.tone === 'ok' ? '#dcfce7' : dataQuality.tone === 'caution' ? '#fef3c7' : '#fee2e2'
+  const dqFg = dataQuality.tone === 'ok' ? '#166534' : dataQuality.tone === 'caution' ? '#92400e' : '#991b1b'
+
+  const caveats: string[] = analysis?.requiredCaveats?.length
+    ? analysis.requiredCaveats.slice(0, 5)
+    : pack ? pack.quality.reasons.filter(r => /caveat|frame|stale/i.test(r)).slice(0, 3) : []
+
   return (
     <div style={S.sidebarInner}>
       <div style={S.sidebarHeader}>
@@ -441,69 +538,72 @@ function ResearchSidebar({ project, research, pack }: { project: ProjectRow; res
 
       {pack && (
         <>
-          <SidebarSafetyPanel pack={pack} />
+          <div style={{ padding: 12, background: 'white', border: '1px solid #e2e8f0', borderRadius: 6, marginBottom: 10 }}>
+            <div style={S.smallTitle}>Data quality</div>
+            <span style={{ display: 'inline-block', padding: '2px 10px', borderRadius: 12, background: dqBg, color: dqFg, fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase' as any }}>
+              {dataQuality.label}
+            </span>
+            {pack.marketSignalStrength && (
+              <div style={{ ...S.meta, marginTop: 4 }}>Market signal: <strong>{pack.marketSignalStrength}</strong></div>
+            )}
+          </div>
 
-          {analysis && (
-            <SidebarSection title="Analyst summary">
-              <p style={S.body}>{analysis.summary || <em style={{ color: '#64748b' }}>No analyst summary.</em>}</p>
-              {analysis.recommendedAngle && <>
+          {findings.length > 0 && (
+            <SidebarSection title="What we know">
+              <ul style={S.list}>{findings.map((s, i) => <li key={i}>{s}</li>)}</ul>
+            </SidebarSection>
+          )}
+
+          {caveats.length > 0 && (
+            <SidebarSection title="Important caveats" tone="warn">
+              <ul style={S.list}>{caveats.map((c, i) => <li key={i}>{c}</li>)}</ul>
+            </SidebarSection>
+          )}
+
+          {(criticalWarnings.length > 0 || pack.quarantinedRows.length > 0) && (
+            <SidebarSection title="What will be excluded" tone="warn">
+              <ul style={S.list}>
+                {criticalWarnings.map(w => <li key={w.id} style={{ color: '#991b1b' }}>{w.message}</li>)}
+                {pack.quarantinedRows.length > 0 && (
+                  <li>{pack.quarantinedRows.length} suspicious observation{pack.quarantinedRows.length === 1 ? '' : 's'} quarantined and hidden from automated rankings.</li>
+                )}
+              </ul>
+            </SidebarSection>
+          )}
+
+          <details style={{ padding: 12, background: 'white', border: '1px solid #e2e8f0', borderRadius: 6, marginBottom: 10 }}>
+            <summary style={{ ...S.smallTitle, cursor: 'pointer' }}>Advanced research</summary>
+            <div style={{ marginTop: 8 }}>
+              {analysis?.summary && <>
+                <div style={S.smallTitle}>Analyst summary</div>
+                <p style={S.body}>{analysis.summary}</p>
+              </>}
+              {analysis?.recommendedAngle && <>
                 <div style={S.smallTitle}>Recommended angle</div>
                 <p style={S.body}>{analysis.recommendedAngle}</p>
               </>}
-            </SidebarSection>
-          )}
-
-          {analysis && analysis.strongestFindings.length > 0 && (
-            <SidebarSection title={`Strongest findings (${analysis.strongestFindings.length})`}>
-              <ul style={S.list}>
-                {analysis.strongestFindings.map((f, i) => <li key={i}><strong>{f.finding}</strong>{f.reason ? ` — ${f.reason}` : ''}</li>)}
-              </ul>
-            </SidebarSection>
-          )}
-
-          {analysis && analysis.requiredCaveats.length > 0 && (
-            <SidebarSection title="Required caveats" tone="warn">
-              <ul style={S.list}>{analysis.requiredCaveats.map((c, i) => <li key={i}>{c}</li>)}</ul>
-            </SidebarSection>
-          )}
-
-          {pack.verifiedFacts.length > 0 && (
-            <SidebarSection title={`Verified facts (${pack.verifiedFacts.length})`}>
-              <ul style={S.list}>{pack.verifiedFacts.map(f => <li key={f.id}>{f.statement}</li>)}</ul>
-            </SidebarSection>
-          )}
-
-          {pack.derivedFindings.length > 0 && (
-            <SidebarSection title={`Derived findings (${pack.derivedFindings.length})`}>
-              <ul style={S.list}>{pack.derivedFindings.map(f => <li key={f.id}>{f.statement}{f.formula ? <span style={{ color: '#64748b', fontFamily: 'monospace' }}> ({f.formula})</span> : null}</li>)}</ul>
-            </SidebarSection>
-          )}
-
-          {(criticalWarnings.length > 0 || majorWarnings.length > 0) && (
-            <SidebarSection title={`Warnings (${criticalWarnings.length + majorWarnings.length})`} tone="warn">
-              <ul style={S.list}>
-                {[...criticalWarnings, ...majorWarnings].map(w => <li key={w.id} style={{ color: w.severity === 'critical' ? '#991b1b' : '#b45309' }}>[{w.severity}] {w.message}</li>)}
-              </ul>
-            </SidebarSection>
-          )}
-
-          {pack.quarantinedRows.length > 0 && (
-            <SidebarSection title={`Quarantined rows (${pack.quarantinedRows.length})`} tone="warn">
-              <p style={S.body}>These rows were excluded from every publishable table. Do NOT include them in article claims without independent verification.</p>
-            </SidebarSection>
-          )}
-
-          {pack.researchGaps.length > 0 && (
-            <SidebarSection title="Research gaps">
-              <ul style={S.list}>{pack.researchGaps.map((g, i) => <li key={i}>{g}</li>)}</ul>
-            </SidebarSection>
-          )}
-
-          {pack.externalSources.length > 0 && (
-            <SidebarSection title={`External sources (${pack.externalSources.length})`}>
-              <ul style={S.list}>{pack.externalSources.map(s => <li key={s.id}><a href={s.url} target="_blank" rel="noopener noreferrer" style={{ color: '#0369a1' }}>{s.title}</a>{s.publisher ? ` — ${s.publisher}` : ''}</li>)}</ul>
-            </SidebarSection>
-          )}
+              {pack.verifiedFacts.length > 0 && <>
+                <div style={S.smallTitle}>Verified facts ({pack.verifiedFacts.length})</div>
+                <ul style={S.list}>{pack.verifiedFacts.map(f => <li key={f.id}>{f.statement} <span style={S.muted}>[{f.id}]</span></li>)}</ul>
+              </>}
+              {pack.derivedFindings.length > 0 && <>
+                <div style={S.smallTitle}>Derived findings ({pack.derivedFindings.length})</div>
+                <ul style={S.list}>{pack.derivedFindings.map(f => <li key={f.id}>{f.statement}{f.formula ? <span style={{ color: '#64748b', fontFamily: 'monospace' }}> ({f.formula})</span> : null}</li>)}</ul>
+              </>}
+              {majorWarnings.length > 0 && <>
+                <div style={S.smallTitle}>Other warnings ({majorWarnings.length})</div>
+                <ul style={S.list}>{majorWarnings.map(w => <li key={w.id} style={{ color: '#b45309' }}>{w.message}</li>)}</ul>
+              </>}
+              {pack.researchGaps.length > 0 && <>
+                <div style={S.smallTitle}>Research gaps</div>
+                <ul style={S.list}>{pack.researchGaps.map((g, i) => <li key={i}>{g}</li>)}</ul>
+              </>}
+              {pack.externalSources.length > 0 && <>
+                <div style={S.smallTitle}>External sources ({pack.externalSources.length})</div>
+                <ul style={S.list}>{pack.externalSources.map(s => <li key={s.id}><a href={s.url} target="_blank" rel="noopener noreferrer" style={{ color: '#0369a1' }}>{s.title}</a>{s.publisher ? ` — ${s.publisher}` : ''}</li>)}</ul>
+              </>}
+            </div>
+          </details>
         </>
       )}
     </div>
@@ -699,6 +799,16 @@ function StudioStyles() {
       .pp-studio-editor .is-editor-empty:first-child::before { content: attr(data-placeholder); color: #94a3b8; float: left; height: 0; pointer-events: none; }
     ` }} />
   )
+}
+
+const styles: Record<string, React.CSSProperties> = {
+  workflowBar: { display: 'flex', gap: 12, alignItems: 'center', padding: '10px 14px', background: 'white', border: '1px solid #e2e8f0', borderRadius: 8, marginBottom: 12, fontFamily: "'Figtree', sans-serif" },
+  step:        { fontSize: 12, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase' as any, letterSpacing: 0.4, whiteSpace: 'nowrap' as any },
+  stepActive:  { color: '#0369a1' },
+  stepDone:    { color: '#166534' },
+  stepArrow:   { color: '#cbd5e1', fontSize: 12 },
+  ctaHint:     { fontSize: 12, color: '#64748b', maxWidth: 300, textAlign: 'right' as any },
+  ctaBtn:      { padding: '8px 14px', background: '#0369a1', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: "'Figtree', sans-serif" },
 }
 
 const S: Record<string, any> = {

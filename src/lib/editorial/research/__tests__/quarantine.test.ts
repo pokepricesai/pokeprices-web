@@ -144,39 +144,96 @@ describe('population scarcity — stale-snapshot handling', () => {
 // 3. extreme monthly mover quarantine
 // ─────────────────────────────────────────────────────────────────
 
-describe('monthly market report — extreme-mover quarantine', () => {
-  it('quarantines a +27,755% row and keeps it OUT of the top-mover table', async () => {
-    const startDate = '2026-08-01'
-    const endDate   = '2026-08-31'
-    // Enough clean rows to clear MIN_INTERSECTION=20,000. Use one
-    // fixture per intersection row; make endpoint counts pass the
-    // MIN_ROWS_PER_ENDPOINT gate by forcing the count via `counts`.
-    counts.daily_prices_2026_08_01 = 60_000
-    counts.daily_prices_2026_08_31 = 60_000
+describe('monthly market report — Final Cleanup robust methodology', () => {
+  // Endpoint windows the recipe will search: ±2 days around the
+  // calendar boundaries. Full-catalogue rows are required for a day
+  // to be picked up. The mock's `counts` map forces the count query
+  // to report a full snapshot for the three days per side.
+  const START_DAYS = ['2026-07-31', '2026-08-01', '2026-08-02']
+  const END_DAYS   = ['2026-08-30', '2026-08-31', '2026-09-02']
 
-    const start: Row[] = []
-    const end:   Row[] = []
-    for (let i = 0; i < 21_000; i++) {
+  function seedFullSnapshotCounts() {
+    for (const d of START_DAYS)  counts[`daily_prices_${d.replace(/-/g, '_')}`] = 60_000
+    for (const d of END_DAYS)    counts[`daily_prices_${d.replace(/-/g, '_')}`] = 60_000
+  }
+
+  function makeCleanCards(n: number, startCents: number, endCents: number) {
+    const rows: Row[] = []
+    for (let i = 0; i < n; i++) {
       const slug = `pc-${100000 + i}`
-      start.push({ card_slug: slug, date: startDate, raw_usd: 5000, psa10_usd: null, psa9_usd: null })
-      end  .push({ card_slug: slug, date: endDate,   raw_usd: 5100, psa10_usd: null, psa9_usd: null })
+      for (const d of START_DAYS) rows.push({ card_slug: slug, date: d, raw_usd: startCents })
+      for (const d of END_DAYS)   rows.push({ card_slug: slug, date: d, raw_usd: endCents })
     }
-    // The suspicious mover.
-    start.push({ card_slug: 'pc-extreme', date: startDate, raw_usd: 11070, psa10_usd: null, psa9_usd: null })
-    end  .push({ card_slug: 'pc-extreme', date: endDate,   raw_usd: 3083563, psa10_usd: null, psa9_usd: null })  // 27,755%
+    return rows
+  }
 
-    tables.daily_prices = [...start, ...end]
-    tables.cards = [{ card_slug: 'extreme', card_name: 'Extreme Card', set_name: 'Fake Set', card_number: '1', url_slug: 'extreme-slug' }]
+  it('excludes a card whose ONE bad endpoint day would otherwise create a 5× move', async () => {
+    seedFullSnapshotCounts()
+    // A card whose start observations wobble (10 / 10 / 12 = min 10, max 12, ratio 1.2 -> stable)
+    // but end observations WOBBLE (100 / 5 / 5 = ratio 20 -> unstable).
+    // A naive single-day compare would give end=100 and 5× move; the
+    // stability check kills it.
+    const clean = makeCleanCards(30_000, 5000, 5100)
+    const shakyEndSlug = 'pc-shaky-end'
+    for (const d of START_DAYS) clean.push({ card_slug: shakyEndSlug, date: d, raw_usd: 500 })
+    // End: two low + one huge outlier -> max/min = 20 -> unstable
+    clean.push({ card_slug: shakyEndSlug, date: END_DAYS[0], raw_usd: 500 })
+    clean.push({ card_slug: shakyEndSlug, date: END_DAYS[1], raw_usd: 500 })
+    clean.push({ card_slug: shakyEndSlug, date: END_DAYS[2], raw_usd: 10_000 })
+    tables.daily_prices = clean
 
     const pack = await runMonthlyMarketReportRecipe(
       { id: 3, title: 'Pokemon Card Market Report - August 2026', angle: null, articleType: 'monthly_market_report', targetPublishAt: null },
       { today: '2026-09-06' },
     )
-    const quarantined = pack.quarantinedRows
-    expect(quarantined.some(q => q.rowSnapshot.cardSlug === 'pc-extreme')).toBe(true)
     const riserRows = pack.dataTables.find(t => t.id.startsWith('mover-risers'))!.rows
-    expect(riserRows.some((r: any) => r.cardSlug === 'pc-extreme')).toBe(false)
-    // Aggregate figures still available (unaffected by outlier).
-    expect(pack.verifiedFacts.some(f => f.statement.includes('cards have a raw price on both dates'))).toBe(true)
+    expect(riserRows.some((r: any) => r.cardSlug === 'pc-shaky-end')).toBe(false)
+    expect(pack.quarantinedRows.some(q => q.rowSnapshot.cardSlug === 'pc-shaky-end')).toBe(true)
+  })
+
+  it('excludes a stable +500% move (outside editorial band) from publishable rankings', async () => {
+    seedFullSnapshotCounts()
+    const clean = makeCleanCards(30_000, 5000, 5100)
+    // Stable endpoints (5×5×5 both sides) but +500% move.
+    for (const d of START_DAYS) clean.push({ card_slug: 'pc-huge-rise', date: d, raw_usd: 1000 })
+    for (const d of END_DAYS)   clean.push({ card_slug: 'pc-huge-rise', date: d, raw_usd: 6000 })
+    tables.daily_prices = clean
+
+    const pack = await runMonthlyMarketReportRecipe(
+      { id: 4, title: 'Pokemon Card Market Report - August 2026', angle: null, articleType: 'monthly_market_report', targetPublishAt: null },
+      { today: '2026-09-06' },
+    )
+    const riserRows = pack.dataTables.find(t => t.id.startsWith('mover-risers'))!.rows
+    expect(riserRows.some((r: any) => r.cardSlug === 'pc-huge-rise')).toBe(false)
+    expect(pack.quarantinedRows.some(q => q.rowSnapshot.cardSlug === 'pc-huge-rise')).toBe(true)
+  })
+
+  it('excludes a -90% crash from publishable rankings but preserves it under quarantined', async () => {
+    seedFullSnapshotCounts()
+    const clean = makeCleanCards(30_000, 5000, 5100)
+    for (const d of START_DAYS) clean.push({ card_slug: 'pc-crash', date: d, raw_usd: 10_000 })
+    for (const d of END_DAYS)   clean.push({ card_slug: 'pc-crash', date: d, raw_usd: 1_000 })  // -90%
+    tables.daily_prices = clean
+
+    const pack = await runMonthlyMarketReportRecipe(
+      { id: 5, title: 'Pokemon Card Market Report - August 2026', angle: null, articleType: 'monthly_market_report', targetPublishAt: null },
+      { today: '2026-09-06' },
+    )
+    const fallerRows = pack.dataTables.find(t => t.id.startsWith('mover-fallers'))!.rows
+    expect(fallerRows.some((r: any) => r.cardSlug === 'pc-crash')).toBe(false)
+    expect(pack.quarantinedRows.some(q => q.rowSnapshot.cardSlug === 'pc-crash')).toBe(true)
+  })
+
+  it('classifies a near-zero market as marketSignalStrength=weak', async () => {
+    seedFullSnapshotCounts()
+    // 30k cards with near-identical endpoints -> median ~0, breadth balanced.
+    tables.daily_prices = makeCleanCards(30_000, 5000, 5000)
+    const pack = await runMonthlyMarketReportRecipe(
+      { id: 6, title: 'Pokemon Card Market Report - August 2026', angle: null, articleType: 'monthly_market_report', targetPublishAt: null },
+      { today: '2026-09-06' },
+    )
+    expect(pack.marketSignalStrength).toBe('weak')
+    // rejectedClaims include the "don't say big story" wording.
+    expect(pack.rejectedClaims.some(r => /big story|major shift/i.test(r.claim))).toBe(true)
   })
 })

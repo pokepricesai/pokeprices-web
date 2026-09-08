@@ -61,7 +61,14 @@ export type EvidencePack = {
   quarantinedRows:     QuarantineEntry[]
 
   quality:             PackQuality
+
+  /** Final Cleanup — story-strength signal for monthly reports.
+   *  Optional; only monthlyMarketReport populates it today. */
+  marketSignalStrength?: MarketSignalStrength
+  marketSignalReason?:   string
 }
+
+export type MarketSignalStrength = 'strong' | 'moderate' | 'weak'
 
 export type QuarantineReason =
   | 'zero_pop_with_price'
