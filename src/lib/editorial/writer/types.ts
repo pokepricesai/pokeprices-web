@@ -122,8 +122,16 @@ export type WriterMetadata = {
 // ─────────────────────────────────────────────────────────────────
 
 export type GenerationStage =
-  | 'queued'          // just created; next call transitions to 'writer'
-  | 'writer'          // pending: Writer Claude call
+  | 'queued'          // just created; next call transitions to first drafting stage
+  | 'writer'          // LEGACY: single-shot Writer Claude call (kept for in-flight runs; not created for new runs)
+  // Block 9C — Writer split. New runs use plan → part1 → part2 →
+  // assemble so no single Claude call has to produce the entire
+  // article at once (which was hitting Cloudflare's ~100s edge
+  // idle limit on real 1,500-2,500-word external articles).
+  | 'writer_plan'     // pending: small planning Claude call — headline + section outline + evidence assignment
+  | 'writer_part1'    // pending: draft sections assignedTo=part1
+  | 'writer_part2'    // pending: draft sections assignedTo=part2
+  | 'writer_assemble' // pending: deterministic merge of plan + parts into one WriterDraft
   | 'style'           // pending: style guard + optional style repair + assemble + numeric audit
   | 'fact_check'      // pending: Fact Checker Claude call
   | 'repair'          // pending: Writer repair Claude call + reassemble + re-audit
@@ -139,6 +147,9 @@ export type GenerationRun = {
   stageLabel:    string
   /** Non-null when stage === 'failed'. */
   error?:        string
+  /** On failure, which stage broke (mirrors the external-research
+   *  run shape). Set by the runNextStage error handler. */
+  failedStage?:  GenerationStage
   /** Preserved between stages so a poll can resume without redoing
    *  the previous Claude calls. Raw Writer text is 10-40 KB JSON. */
   rawWriterText?: string
@@ -148,6 +159,48 @@ export type GenerationRun = {
   /** Per-stage timing telemetry so the report + UI can show real
    *  numbers rather than cosmetic ones. Milliseconds. */
   stageTimings:  Record<string, number>
+  /** Block 9C — plan produced by stageWriterPlan and consumed by
+   *  the two part stages + assembler. */
+  plan?:          WriterPlan
+  /** Block 9C — sections drafted in each part. Stored per part so a
+   *  failed part2 retries without re-running part1. */
+  part1Sections?: WriterSection[]
+  part2Sections?: WriterSection[]
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Block 9C — Writer plan (produced by stageWriterPlan)
+// ─────────────────────────────────────────────────────────────────
+
+export type WriterPlanSection = {
+  id:            string
+  heading:       string | null
+  headingLevel?: WriterHeadingLevel
+  /** One-to-two-sentence guide telling the drafter what this
+   *  section should cover. Not the article prose. */
+  brief:         string
+  /** Evidence ids (fact-*, finding-*, table-*, source-*) the drafter
+   *  should reference in this section. Enables per-part evidence
+   *  filtering so we don't resend the entire 44-source pack. */
+  evidenceRefs:  string[]
+  /** Block intents planned for this section — the drafter can extend
+   *  or refine but should not remove them silently. */
+  blockIntents:  BlockIntent[]
+  /** Which drafting call produces this section. */
+  assignedTo:    'part1' | 'part2'
+}
+
+export type WriterPlan = {
+  headline:            string
+  intro:               string
+  seoTitle:            string
+  seoDescription:      string
+  sections:            WriterPlanSection[]
+  /** When true, part2 is allowed (and encouraged) to emit a
+   *  conclusion string. When false, no conclusion is generated. */
+  hasConclusion:       boolean
+  internalLinkIntents: WriterLinkIntent[]
+  externalLinkIntents: WriterLinkIntent[]
 }
 
 // ─────────────────────────────────────────────────────────────────

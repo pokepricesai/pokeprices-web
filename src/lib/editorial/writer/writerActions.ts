@@ -30,7 +30,13 @@ import { auditFieldMap, buildStyleRepairUserTurn } from '../styleGuard'
 import { applyStyleFixesToDraft } from '../styleFix'
 import type { CardIdentity } from '@/lib/studio/dataBlocks/types'
 
-import { WRITER_SYSTEM_PROMPT, buildWriterUserTurn, buildWriterRepairUserTurn, parseWriterResponse } from './writerPrompt'
+import {
+  WRITER_SYSTEM_PROMPT, buildWriterUserTurn, buildWriterRepairUserTurn, parseWriterResponse,
+  // Block 9C — split-Writer helpers
+  WRITER_PLAN_SYSTEM_PROMPT, buildWriterPlanUserTurn, parseWriterPlanResponse,
+  WRITER_PART_SYSTEM_PROMPT, buildWriterPartUserTurn, parseWriterPartResponse,
+  assembleDraftFromPlanAndParts,
+} from './writerPrompt'
 import { assembleStudioFromDraft } from './assembler'
 import { auditStudioNumerics } from './numericAudit'
 import { FACT_CHECKER_SYSTEM_PROMPT, buildFactCheckerUserTurn, parseFactCheckerResponse } from './factCheckerPrompt'
@@ -44,6 +50,13 @@ import { WRITER_METADATA_VERSION } from './types'
 const WRITER_MODEL       = 'claude-sonnet-4-6'
 const WRITER_MAX_TOKENS  = 8000
 const CHECKER_MAX_TOKENS = 4000
+// Block 9C — each split Writer sub-stage targets a smaller output
+// so a single Claude call comfortably lands under Cloudflare's
+// ~100s edge idle limit even on a heavy 44-source external
+// article. Plan is small (structure only); each part drafts half
+// the article.
+const WRITER_PLAN_MAX_TOKENS = 3000
+const WRITER_PART_MAX_TOKENS = 5000
 
 // ─────────────────────────────────────────────────────────────────
 // Public entry points
@@ -92,8 +105,11 @@ export async function startGeneration(projectId: number, adminEmail: string, opt
     id:        `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    stage:     'writer',
-    stageLabel: 'Writing draft',
+    // Block 9C — new runs enter the split-Writer path directly. The
+    // legacy 'writer' stage remains callable for any in-flight run
+    // that started under the old machine.
+    stage:     'writer_plan',
+    stageLabel: 'Planning article',
     usage:     emptyUsage(),
     styleRepairFired: false,
     repairFired: false,
@@ -147,13 +163,29 @@ export async function runNextStage(projectId: number, adminEmail: string): Promi
   }
 
   const stageStartMs = Date.now()
+  const stageAtEntry = writer.currentRun.stage
   try {
     switch (writer.currentRun.stage) {
       case 'queued':
-        writer = advance(writer, 'writer', 'Writing draft', stageStartMs)
+        // Block 9C — new runs land on writer_plan; the legacy
+        // 'writer' stage is reachable only via an in-flight run
+        // created under the old machine.
+        writer = advance(writer, 'writer_plan', 'Planning article', stageStartMs)
         break
       case 'writer':
         writer = await stageWriter(writer, project, pack, analysis, adminEmail, stageStartMs)
+        break
+      case 'writer_plan':
+        writer = await stageWriterPlan(writer, project, pack, analysis, adminEmail, stageStartMs)
+        break
+      case 'writer_part1':
+        writer = await stageWriterPart(writer, project, pack, analysis, 'part1', adminEmail, stageStartMs)
+        break
+      case 'writer_part2':
+        writer = await stageWriterPart(writer, project, pack, analysis, 'part2', adminEmail, stageStartMs)
+        break
+      case 'writer_assemble':
+        writer = stageWriterAssemble(writer, stageStartMs)
         break
       case 'style':
         writer = await stageStyleAndAssemble(writer, project, pack, adminEmail, stageStartMs)
@@ -170,7 +202,7 @@ export async function runNextStage(projectId: number, adminEmail: string): Promi
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown'
-    writer = fail(writer, message)
+    writer = fail(writer, message, stageAtEntry)
   }
 
   await supa.from('editorial_projects').update({
@@ -296,6 +328,175 @@ async function stageWriter(writer: WriterMetadata, project: any, pack: EvidenceP
     stageTimings: { ...writer.currentRun!.stageTimings, writer: Date.now() - stageStartMs },
   }
   return { ...writer, generationCost: usage, currentRun: run }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Block 9C — split-Writer stage handlers
+// ─────────────────────────────────────────────────────────────────
+//
+// stageWriterPlan  — small planning call. Model produces a
+//                    WriterPlan (headline + sections outline +
+//                    evidence assignment). Persists plan on the
+//                    run so parts can consume it.
+// stageWriterPart  — one Claude call per part; sees only the
+//                    evidence subset referenced by its assigned
+//                    sections + the other part's headings for
+//                    continuity. Persists per-part sections so a
+//                    failed part2 does not re-run part1.
+// stageWriterAssemble — deterministic. Merges plan + parts into a
+//                    single WriterDraft, serialises it into
+//                    rawWriterText, hands off to the existing
+//                    style stage (which reparses rawWriterText).
+//                    No AI call.
+
+async function stageWriterPlan(writer: WriterMetadata, project: any, pack: EvidencePack, analysis: ResearchAnalysis | null, adminEmail: string, stageStartMs: number): Promise<WriterMetadata> {
+  const context = await buildEditorialContext()
+  const bundle = {
+    project: { id: Number(project.id), title: String(project.title), angle: project.angle ?? null, articleType: String(project.article_type), targetPublishAt: project.target_publish_at ?? null },
+    pack, analysis, context,
+  }
+  const userTurn = buildWriterPlanUserTurn(bundle)
+  const call = await callAnthropicAndLog({
+    feature: 'editorial_writer_plan',
+    model: WRITER_MODEL, system: WRITER_PLAN_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: userTurn }],
+    max_tokens: WRITER_PLAN_MAX_TOKENS, temperature: 0.3, cacheSystem: true,
+    adminEmail, sessionId: `writer-plan-${project.id}-${Date.now()}`,
+  })
+  if (!call.ok) throw new Error(`writer_plan call failed: ${call.error || 'unknown'}`)
+  const plan = parseWriterPlanResponse(call.text)
+  if (!plan) throw new Error('writer_plan produced no parsable plan')
+  // Belt-and-braces: ensure the plan actually assigns sections to
+  // both parts. If the model put everything on part1 we split by
+  // section index at the median to keep both drafting calls small.
+  const rebalanced = ensurePartBalance(plan)
+
+  const usage = mergeCallUsage(writer.currentRun!.usage, call)
+  const run: GenerationRun = {
+    ...writer.currentRun!,
+    stage: 'writer_part1', stageLabel: 'Drafting part 1 of 2',
+    plan: rebalanced,
+    usage, updatedAt: new Date().toISOString(),
+    stageTimings: { ...writer.currentRun!.stageTimings, writer_plan: Date.now() - stageStartMs },
+  }
+  return { ...writer, generationCost: usage, currentRun: run }
+}
+
+async function stageWriterPart(writer: WriterMetadata, project: any, pack: EvidencePack, analysis: ResearchAnalysis | null, part: 'part1' | 'part2', adminEmail: string, stageStartMs: number): Promise<WriterMetadata> {
+  const plan = writer.currentRun?.plan
+  if (!plan) throw new Error(`${part} stage: no plan on run — plan stage must run first`)
+
+  const context = await buildEditorialContext()
+  const bundle = {
+    project: { id: Number(project.id), title: String(project.title), angle: project.angle ?? null, articleType: String(project.article_type), targetPublishAt: project.target_publish_at ?? null },
+    pack, analysis, context,
+  }
+
+  const otherPart: 'part1' | 'part2' = part === 'part1' ? 'part2' : 'part1'
+  const otherHeadings = plan.sections
+    .filter(s => s.assignedTo === otherPart)
+    .map(s => s.heading ?? s.id)
+
+  const userTurn = buildWriterPartUserTurn({ bundle, plan, part, otherPartHeadings: otherHeadings })
+  const call = await callAnthropicAndLog({
+    feature: `editorial_writer_${part}`,
+    model: WRITER_MODEL, system: WRITER_PART_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: userTurn }],
+    max_tokens: WRITER_PART_MAX_TOKENS, temperature: 0.4, cacheSystem: true,
+    adminEmail, sessionId: `writer-${part}-${project.id}-${Date.now()}`,
+  })
+  if (!call.ok) throw new Error(`writer_${part} call failed: ${call.error || 'unknown'}`)
+  const parsed = parseWriterPartResponse(call.text)
+  if (!parsed) throw new Error(`writer_${part} produced no parsable draft`)
+
+  const usage = mergeCallUsage(writer.currentRun!.usage, call)
+  const nextStage: GenerationStage = part === 'part1' ? 'writer_part2' : 'writer_assemble'
+  const nextLabel = part === 'part1' ? 'Drafting part 2 of 2' : 'Assembling draft'
+  const run: GenerationRun = {
+    ...writer.currentRun!,
+    stage: nextStage, stageLabel: nextLabel,
+    // Persist the part-specific data — used by assemble AND
+    // gives a failed part2 the chance to retry without re-running
+    // part1.
+    ...(part === 'part1'
+      ? { part1Sections: parsed.sections }
+      : { part2Sections: parsed.sections }),
+    // We also stash the parsed part's link intents + evidenceTrace
+    // + conclusion for the assembler to consume. Simplest: keep
+    // them on rawWriterText as a serialised JSON blob keyed by part.
+    // Cleaner: attach to the run via helper below.
+    usage, updatedAt: new Date().toISOString(),
+    stageTimings: { ...writer.currentRun!.stageTimings, [`writer_${part}`]: Date.now() - stageStartMs },
+  }
+  // Merge the part's link intents + conclusion + evidenceTrace back
+  // into a hidden "assemble scratchpad" stored on rawWriterText as
+  // JSON. This survives across the part1 → part2 stages.
+  const scratchpad = readScratchpad(writer.currentRun!.rawWriterText)
+  const nextScratchpad = { ...scratchpad, [part]: {
+    conclusion:          parsed.conclusion,
+    internalLinkIntents: parsed.internalLinkIntents,
+    externalLinkIntents: parsed.externalLinkIntents,
+    evidenceTrace:       parsed.evidenceTrace,
+  } }
+  run.rawWriterText = JSON.stringify(nextScratchpad)
+  return { ...writer, generationCost: usage, currentRun: run }
+}
+
+function stageWriterAssemble(writer: WriterMetadata, stageStartMs: number): WriterMetadata {
+  const run = writer.currentRun!
+  if (!run.plan) throw new Error('writer_assemble stage: no plan on run')
+
+  const scratchpad = readScratchpad(run.rawWriterText)
+  const part1 = {
+    sections:            run.part1Sections ?? [],
+    conclusion:          scratchpad.part1?.conclusion ?? null,
+    internalLinkIntents: scratchpad.part1?.internalLinkIntents ?? [],
+    externalLinkIntents: scratchpad.part1?.externalLinkIntents ?? [],
+    evidenceTrace:       scratchpad.part1?.evidenceTrace ?? [],
+  }
+  const part2 = {
+    sections:            run.part2Sections ?? [],
+    conclusion:          scratchpad.part2?.conclusion ?? null,
+    internalLinkIntents: scratchpad.part2?.internalLinkIntents ?? [],
+    externalLinkIntents: scratchpad.part2?.externalLinkIntents ?? [],
+    evidenceTrace:       scratchpad.part2?.evidenceTrace ?? [],
+  }
+
+  const draft = assembleDraftFromPlanAndParts(run.plan, part1, part2)
+
+  // Serialise the assembled WriterDraft into rawWriterText as a
+  // JSON code block, so the existing stageStyleAndAssemble reader
+  // (parseWriterResponse) can consume it without changes.
+  const asFence = '```json\n' + JSON.stringify(draft) + '\n```'
+  const nextRun: GenerationRun = {
+    ...run,
+    stage: 'style', stageLabel: 'Applying house style',
+    rawWriterText: asFence,
+    updatedAt: new Date().toISOString(),
+    stageTimings: { ...run.stageTimings, writer_assemble: Date.now() - stageStartMs },
+  }
+  return { ...writer, currentRun: nextRun }
+}
+
+/** If the plan didn't split sections into both parts, split by index
+ *  at the median so both drafting calls stay bounded in output. */
+function ensurePartBalance(plan: any): any {
+  const p1 = plan.sections.filter((s: any) => s.assignedTo === 'part1')
+  const p2 = plan.sections.filter((s: any) => s.assignedTo === 'part2')
+  if (p1.length > 0 && p2.length > 0) return plan
+  const half = Math.ceil(plan.sections.length / 2)
+  const rebalanced = plan.sections.map((s: any, i: number) => ({ ...s, assignedTo: i < half ? 'part1' : 'part2' }))
+  return { ...plan, sections: rebalanced }
+}
+
+type Scratchpad = {
+  part1?: { conclusion: string | null; internalLinkIntents: any[]; externalLinkIntents: any[]; evidenceTrace: any[] }
+  part2?: { conclusion: string | null; internalLinkIntents: any[]; externalLinkIntents: any[]; evidenceTrace: any[] }
+}
+function readScratchpad(rawText: string | undefined): Scratchpad {
+  if (!rawText || rawText.startsWith('```')) return {}
+  try { const j = JSON.parse(rawText); return (j && typeof j === 'object') ? j as Scratchpad : {} }
+  catch { return {} }
 }
 
 async function stageStyleAndAssemble(writer: WriterMetadata, project: any, pack: EvidencePack, adminEmail: string, stageStartMs: number): Promise<WriterMetadata> {
@@ -547,13 +748,14 @@ function advance(writer: WriterMetadata, nextStage: GenerationStage, label: stri
   }
   return { ...writer, currentRun: run }
 }
-function fail(writer: WriterMetadata | null, error: string): WriterMetadata {
+function fail(writer: WriterMetadata | null, error: string, failedStage?: GenerationStage): WriterMetadata {
   const run: GenerationRun = writer?.currentRun ? {
     ...writer.currentRun, stage: 'failed', stageLabel: 'Failed',
-    error, updatedAt: new Date().toISOString(),
+    error, failedStage: failedStage ?? writer.currentRun.stage,
+    updatedAt: new Date().toISOString(),
   } : {
     id: `run_failed_${Date.now()}`, startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    stage: 'failed', stageLabel: 'Failed', error, usage: emptyUsage(),
+    stage: 'failed', stageLabel: 'Failed', error, failedStage, usage: emptyUsage(),
     styleRepairFired: false, repairFired: false, stageTimings: {},
   }
   return {
