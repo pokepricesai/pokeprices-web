@@ -58,6 +58,22 @@ import {
   buildCheckAndFixUserTurn,
   parseCheckAndFixResponse,
 } from './checkAndFix'
+// EIC simplified internal-data path — mirrors the two-call external
+// pipeline: writer_internal drafts from a compact deterministic
+// brief; validate_and_fix runs the strict numeric audit + one Sonnet
+// correction call.
+import {
+  INTERNAL_WRITER_SYSTEM_PROMPT,
+  buildInternalWriterBrief,
+  buildInternalWriterUserTurn,
+  parseInternalArticleResponse,
+  type InternalWriterBrief,
+} from './writerInternal'
+import {
+  VALIDATE_AND_FIX_SYSTEM_PROMPT,
+  buildValidateAndFixUserTurn,
+  parseValidateAndFixResponse,
+} from './validateAndFix'
 import { markdownToStudioBodyDoc } from './externalWriter'
 import { STUDIO_DOCUMENT_VERSION } from '@/lib/studio/types'
 import { chooseRecipe } from '../research/dispatch'
@@ -95,6 +111,12 @@ const RESEARCH_AND_WRITE_MAX_TOKENS = 5000
 const RESEARCH_AND_WRITE_MAX_SEARCHES = 5
 const CHECK_AND_FIX_MAX_TOKENS = 5000
 const CHECK_AND_FIX_MAX_SEARCHES = 3
+// EIC — simplified internal path. Compact brief + one Sonnet call
+// produces the whole article (900-1,300 words of Markdown wrapped in
+// a small JSON envelope). validate_and_fix returns the corrected
+// article of similar size. No web_search.
+const WRITER_INTERNAL_MAX_TOKENS = 5000
+const VALIDATE_AND_FIX_MAX_TOKENS = 5000
 
 // ─────────────────────────────────────────────────────────────────
 // Public entry points
@@ -154,8 +176,8 @@ export async function startGeneration(projectId: number, adminEmail: string, opt
     throw new Error('existing draft has meaningful content; call with overwriteExisting=true to replace')
   }
 
-  const startingStage: GenerationStage = isExternal ? 'research_and_write' : 'writer_plan'
-  const startingLabel = isExternal ? 'Researching & writing' : 'Planning article'
+  const startingStage: GenerationStage = isExternal ? 'research_and_write' : 'writer_internal'
+  const startingLabel = isExternal ? 'Researching & writing' : 'Writing article'
 
   const run: GenerationRun = {
     id:        `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -238,9 +260,11 @@ export async function runNextStage(projectId: number, adminEmail: string): Promi
   try {
     switch (writer.currentRun.stage) {
       case 'queued': {
-        // External → research_and_write (two-stage). Internal → writer_plan.
-        const nextStage: GenerationStage = isExternal ? 'research_and_write' : 'writer_plan'
-        const nextLabel = isExternal ? 'Researching & writing' : 'Planning article'
+        // Both paths are two-stage: external → research_and_write,
+        // internal → writer_internal. Legacy writer_plan chain no
+        // longer runs for freshly-started internal generations.
+        const nextStage: GenerationStage = isExternal ? 'research_and_write' : 'writer_internal'
+        const nextLabel = isExternal ? 'Researching & writing' : 'Writing article'
         writer = advance(writer, nextStage, nextLabel, stageStartMs)
         break
       }
@@ -250,6 +274,13 @@ export async function runNextStage(projectId: number, adminEmail: string): Promi
         break
       case 'check_and_fix':
         writer = await stageCheckAndFix(writer, project, adminEmail, stageStartMs)
+        break
+      // EIC two-stage internal path
+      case 'writer_internal':
+        writer = await stageWriterInternal(writer, project, pack!, adminEmail, stageStartMs)
+        break
+      case 'validate_and_fix':
+        writer = await stageValidateAndFix(writer, project, pack!, adminEmail, stageStartMs)
         break
       // Internal-data path (unchanged) — pack is guaranteed non-null
       // by the ensureResearchApproved gate above.
@@ -797,6 +828,246 @@ async function stageCheckAndFix(writer: WriterMetadata, project: any, adminEmail
   }
 }
 
+// ─────────────────────────────────────────────────────────────────
+// EIC — simplified internal-data path (the new normal for
+// monthly_market_report, population_scarcity, data_study, etc.)
+// ─────────────────────────────────────────────────────────────────
+//
+// TWO Sonnet calls. Stage 1 (writer_internal) sends a compact
+// deterministic brief — featured risers / fallers / sets, aggregate
+// stats, approved review rows, rejected claims, internal-link
+// candidates — and asks Sonnet for one finished article.
+// Stage 2 (validate_and_fix) runs the strict numeric audit against
+// the article and hands Sonnet the list of numeric mismatches +
+// rejected claims + the same brief, asking it to directly correct
+// any real problems. No writer_plan, no writer_part1/part2, no
+// separate assemble/style/fact_check/repair/finalize passes.
+
+async function computeInternalLinkCandidatesForInternal(project: any): Promise<Array<{ title: string; url: string }>> {
+  const projectForRanking = { title: String(project.title), angle: project.angle ?? null, articleType: String(project.article_type) }
+  try {
+    const ctx = await buildEditorialContext()
+    const articleCandidates = pickInternalLinkCandidates({ project: projectForRanking, articles: ctx.articles, limit: 10 })
+    const setCandidates     = pickSetPageCandidates({ project: projectForRanking, release: ctx.release, limit: 5 })
+    return mergeInternalLinkCandidates(articleCandidates, setCandidates, 10)
+  } catch (e) {
+    console.warn('[writer_internal] internal-link candidate fetch failed:', e instanceof Error ? e.message : 'unknown')
+    return []
+  }
+}
+
+function themeForRecipe(recipe: string | undefined): { themeKey: string; themeLabel: string } {
+  if (recipe === 'monthly_market_report') return { themeKey: 'market',  themeLabel: 'Market' }
+  if (recipe === 'population_scarcity')   return { themeKey: 'grading', themeLabel: 'Grading' }
+  return { themeKey: 'market', themeLabel: 'Market' }
+}
+
+async function stageWriterInternal(writer: WriterMetadata, project: any, pack: EvidencePack, adminEmail: string, stageStartMs: number): Promise<WriterMetadata> {
+  const internalLinks = await computeInternalLinkCandidatesForInternal(project)
+  const brief: InternalWriterBrief = buildInternalWriterBrief({
+    project: { title: String(project.title), articleType: String(project.article_type), angle: project.angle ?? null, targetPublishAt: project.target_publish_at ?? null },
+    pack,
+    internalLinks,
+  })
+
+  const call = await callAnthropicAndLog({
+    feature: 'editorial_writer_internal',
+    model: WRITER_MODEL, system: INTERNAL_WRITER_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: buildInternalWriterUserTurn(brief) }],
+    max_tokens: WRITER_INTERNAL_MAX_TOKENS,
+    temperature: 0.55,
+    cacheSystem: true,
+    adminEmail, sessionId: `writer-internal-${project.id}-${Date.now()}`,
+  })
+  if (!call.ok) throw new Error(`writer_internal call failed: ${call.error || 'unknown'}`)
+
+  const parsed = parseInternalArticleResponse(call.text)
+  if (!parsed) throw new Error('writer_internal produced no parsable article (even after salvage)')
+
+  // Only /insights/* and /set/* links from the brief are allowed as
+  // internal targets; external URLs are not permitted for internal
+  // data articles at all.
+  const bodyDoc = markdownToStudioBodyDoc(parsed.bodyMarkdown, new Set())
+  const { themeKey, themeLabel } = themeForRecipe(pack.recipe)
+  const studio: StudioDocument = {
+    version:    STUDIO_DOCUMENT_VERSION,
+    headline:   parsed.title,
+    intro:      parsed.metaDescription || deriveIntroFromMarkdown(parsed.bodyMarkdown, ''),
+    themeKey, themeLabel,
+    authorName: 'PokePrices',
+    seo:        { title: parsed.metaTitle || parsed.title, description: parsed.metaDescription },
+    heroImage:  null,
+    bodyDoc,
+    updatedAt:  new Date().toISOString(),
+  }
+
+  const supa = getSupabaseServiceClient()
+  await supa.from('editorial_projects').update({ studio_json: studio }).eq('id', project.id)
+
+  const usage = mergeCallUsage(writer.currentRun!.usage, call)
+  const run: GenerationRun = {
+    ...writer.currentRun!,
+    stage: 'validate_and_fix', stageLabel: 'Checking data and facts',
+    rawWriterText: call.text,
+    usage, updatedAt: new Date().toISOString(),
+    stageTimings: { ...writer.currentRun!.stageTimings, writer_internal: Date.now() - stageStartMs },
+  }
+  return {
+    ...writer,
+    claimTrace:       [],
+    blockIntents:     [],
+    assemblyWarnings: [],
+    generationCost:   usage,
+    currentRun:       run,
+  }
+}
+
+async function stageValidateAndFix(writer: WriterMetadata, project: any, pack: EvidencePack, adminEmail: string, stageStartMs: number): Promise<WriterMetadata> {
+  const today = new Date().toISOString().slice(0, 10)
+  const supa = getSupabaseServiceClient()
+  const { data: pRow } = await supa.from('editorial_projects').select('studio_json').eq('id', project.id).maybeSingle()
+  const studio = ((pRow as any)?.studio_json ?? null) as StudioDocument | null
+  if (!studio) throw new Error('validate_and_fix: no studio_json to check')
+
+  // Deterministic numeric audit — restricted to publishable
+  // evidence so unrelated metadata numbers (freshness age, quarantine
+  // count, methodology filter thresholds) can never accidentally
+  // "match" a claim in the article.
+  const approvedSlugs = new Set(pack.approvedLargeMoverSlugs ?? [])
+  const numericAudit = auditStudioNumerics(studio, pack, [], {
+    restrictToPublishable: true,
+    approvedReviewSlugs:   approvedSlugs,
+  })
+
+  // Rebuild the same brief the writer received, so the validator
+  // sees identical publishable evidence and can consult it when
+  // rewriting an unsupported number.
+  const internalLinks = await computeInternalLinkCandidatesForInternal(project)
+  const brief: InternalWriterBrief = buildInternalWriterBrief({
+    project: { title: String(project.title), articleType: String(project.article_type), angle: project.angle ?? null, targetPublishAt: project.target_publish_at ?? null },
+    pack,
+    internalLinks,
+  })
+
+  const article = {
+    articleTitle:    studio.headline,
+    introSnippet:    studio.intro,
+    seoTitle:        studio.seo.title,
+    metaDescription: studio.seo.description,
+    bodyMarkdown:    studioBodyDocToMarkdown(studio.bodyDoc),
+  }
+
+  const call = await callAnthropicAndLog({
+    feature: 'editorial_writer_validate_and_fix',
+    model: WRITER_MODEL, system: VALIDATE_AND_FIX_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: buildValidateAndFixUserTurn({
+      article,
+      brief,
+      numericIssues:  numericAudit.issues,
+      rejectedClaims: pack.rejectedClaims.map(r => r.claim).slice(0, 12),
+      today,
+    }) }],
+    max_tokens: VALIDATE_AND_FIX_MAX_TOKENS,
+    temperature: 0.2,
+    cacheSystem: true,
+    adminEmail, sessionId: `writer-validate-${project.id}-${Date.now()}`,
+  })
+
+  const usage = mergeCallUsage(writer.currentRun!.usage, call)
+  const currentHash = hashStudioBody(studio.bodyDoc)
+
+  // Call failed — preserve the drafted article, mark review_required
+  // so the human knows the check didn't finish. Do NOT nuke the draft.
+  if (!call.ok) {
+    const softFc: FactCheckResult = {
+      version: 1, status: 'review_required', checkedAt: new Date().toISOString(),
+      packRecipe: pack.recipe,
+      issues: [{ kind: 'other', severity: 'minor', claim: 'Validate & fix stage errored — draft preserved', reason: call.error ?? 'unknown', evidenceRefs: [] }],
+      numericAudit,
+      checkedStudioHash: currentHash, autoCheck: true,
+    }
+    const run: GenerationRun = {
+      ...writer.currentRun!, stage: 'complete', stageLabel: 'Ready',
+      usage, updatedAt: new Date().toISOString(),
+      stageTimings: { ...writer.currentRun!.stageTimings, validate_and_fix: Date.now() - stageStartMs },
+    }
+    await promoteProjectStatus(Number(project.id))
+    return { ...writer, factCheck: softFc, checkedStudioHash: currentHash, correctionsSummary: 'Validate & fix stage errored — draft preserved.', generationCost: usage, currentRun: run }
+  }
+
+  const parsed = parseValidateAndFixResponse(call.text)
+  if (!parsed) {
+    // Parser couldn't recover a coherent article — preserve draft.
+    const softFc: FactCheckResult = {
+      version: 1, status: 'review_required', checkedAt: new Date().toISOString(),
+      packRecipe: pack.recipe,
+      issues: [{ kind: 'other', severity: 'minor', claim: 'Validate & fix output could not be parsed', reason: 'salvage failed', evidenceRefs: [] }],
+      numericAudit,
+      checkedStudioHash: currentHash, autoCheck: true,
+    }
+    const run: GenerationRun = {
+      ...writer.currentRun!, stage: 'complete', stageLabel: 'Ready',
+      usage, updatedAt: new Date().toISOString(),
+      stageTimings: { ...writer.currentRun!.stageTimings, validate_and_fix: Date.now() - stageStartMs },
+    }
+    await promoteProjectStatus(Number(project.id))
+    return { ...writer, factCheck: softFc, checkedStudioHash: currentHash, correctionsSummary: 'Validate & fix output could not be parsed — draft preserved.', generationCost: usage, currentRun: run }
+  }
+
+  // Rebuild the studio document from the corrected article. Internal
+  // articles do not permit external URLs, so the markdown → tiptap
+  // allowlist stays empty; only /insights/* and /set/* internal
+  // links (produced by markdownToStudioBodyDoc regardless) survive.
+  const bodyDoc = markdownToStudioBodyDoc(parsed.bodyMarkdown, new Set())
+  const nextStudio: StudioDocument = {
+    ...studio,
+    headline:  parsed.articleTitle || studio.headline,
+    intro:     parsed.introSnippet || parsed.metaDescription || studio.intro,
+    seo:       { title: parsed.seoTitle || studio.seo.title, description: parsed.metaDescription || studio.seo.description },
+    bodyDoc,
+    updatedAt: new Date().toISOString(),
+  }
+  await supa.from('editorial_projects').update({ studio_json: nextStudio }).eq('id', project.id)
+
+  // Re-run the numeric audit against the CORRECTED article so the
+  // final factCheck reflects whether the validator successfully
+  // fixed the numeric issues.
+  const finalAudit = auditStudioNumerics(nextStudio, pack, [], {
+    restrictToPublishable: true,
+    approvedReviewSlugs:   approvedSlugs,
+  })
+  const nextHash = hashStudioBody(nextStudio.bodyDoc)
+  const factCheck: FactCheckResult = {
+    version: 1,
+    status: finalAudit.status === 'pass' ? 'pass' : 'review_required',
+    checkedAt: new Date().toISOString(),
+    packRecipe: pack.recipe,
+    issues: finalAudit.status === 'pass' ? [] : finalAudit.issues.slice(0, 8).map(iss => ({
+      kind: 'unsupported_numeric_claim' as const,
+      severity: 'minor' as const,
+      claim: iss.token.raw,
+      reason: iss.reason,
+      evidenceRefs: [] as string[],
+    })),
+    numericAudit: finalAudit,
+    checkedStudioHash: nextHash, autoCheck: true,
+  }
+  await promoteProjectStatus(Number(project.id))
+  const run: GenerationRun = {
+    ...writer.currentRun!, stage: 'complete', stageLabel: 'Ready',
+    usage, updatedAt: new Date().toISOString(),
+    stageTimings: { ...writer.currentRun!.stageTimings, validate_and_fix: Date.now() - stageStartMs },
+  }
+  return {
+    ...writer,
+    factCheck,
+    checkedStudioHash: nextHash,
+    correctionsSummary: parsed.correctionsSummary || 'No changes needed.',
+    generationCost: usage,
+    currentRun: run,
+  }
+}
+
 /** Shared with stageWriterExternal — derive the article deck from
  *  the first body paragraph, falling back to metaDescription when
  *  the body opens with a heading. */
@@ -1061,7 +1332,7 @@ async function stageRepair(writer: WriterMetadata, project: any, pack: EvidenceP
   if (!factCheck) throw new Error('repair stage: no factCheck to repair against')
 
   const factSummary = factCheck.issues.map((i, k) => `  ${k + 1}. [${i.severity}] ${i.kind} — ${i.claim} :: ${i.reason}${i.suggestedCorrection ? ` (suggest: ${i.suggestedCorrection})` : ''}`).join('\n') || '  (none)'
-  const numSummary  = numericAudit.issues.map((i, k) => `  ${k + 1}. "${i.token.raw}" at ${i.token.location}${i.nearest ? ` — nearest allowed ${i.nearest.value} (${i.nearest.source})` : ''}`).join('\n') || '  (none)'
+  const numSummary  = numericAudit.issues.map((i, k) => `  ${k + 1}. "${i.token.raw}" at ${i.token.location}`).join('\n') || '  (none)'
 
   const rep = await callAnthropicAndLog({
     feature: 'editorial_writer_repair',

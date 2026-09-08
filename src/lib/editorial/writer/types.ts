@@ -143,12 +143,20 @@ export type GenerationStage =
   // call → tiny JSON → deterministic Markdown-to-TipTap. No plan,
   // no parts, no evidence-ref bookkeeping.
   | 'writer_external' // pending: single Sonnet call for external_research articles
-  // EIC — external articles now use exactly TWO AI calls total, no
-  // EvidencePack, no research approval gate. Everything else in
-  // this file is legacy and stays only for internal-data articles
-  // and for in-flight runs created under the old machines.
+  // EIC — external articles use exactly TWO AI calls total, no
+  // EvidencePack, no research approval gate.
   | 'research_and_write' // pending: Sonnet + web_search researches AND drafts in one call
   | 'check_and_fix'      // pending: Sonnet + bounded web_search directly fixes meaningful issues
+  // EIC — internal-data articles also use exactly TWO AI calls
+  // total. Sends a compact deterministic brief (not the full
+  // EvidencePack), then a validate_and_fix pass that runs the
+  // deterministic numeric audit + one Sonnet correction call.
+  // Skips the writer_plan / part1 / part2 / assemble / style /
+  // fact_check / repair / finalize legacy chain entirely for new
+  // internal runs; those slots remain reachable only for in-flight
+  // runs created under the older machine.
+  | 'writer_internal'    // pending: single Sonnet call over compact deterministic brief
+  | 'validate_and_fix'   // pending: strict numeric audit + one Sonnet correction call
   | 'style'           // pending: style guard + optional style repair + assemble + numeric audit
   | 'fact_check'      // pending: Fact Checker Claude call
   | 'repair'          // pending: Writer repair Claude call + reassemble + re-audit

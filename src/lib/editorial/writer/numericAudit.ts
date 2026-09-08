@@ -74,20 +74,51 @@ function normaliseToken(raw: string): { value: number; kind: NumericToken['kind'
 
 type AllowedValue = { value: number; kind: NumericToken['kind']; source: string }
 
-export function buildAllowedValues(pack: EvidencePack, blocksBuilt: BlockIntent[]): AllowedValue[] {
+export type BuildAllowedValuesOptions = {
+  /** When true, only pull from PUBLISHABLE evidence — the featured
+   *  tables + verified facts + derived findings + approved review
+   *  rows. Skip metadata like `quality.freshness.daysOld`,
+   *  quarantine counts, methodology filter strings, and raw
+   *  (non-featured) mover tables. Prevents the auditor from
+   *  accidentally accepting stray numbers unrelated to article
+   *  claims (or worse, suggesting them as corrections). */
+  restrictToPublishable?: boolean
+  /** When restrictToPublishable is true, this set of card slugs is
+   *  the only manual-review-table rows treated as allowed. Others
+   *  in the same tables are ignored. */
+  approvedReviewSlugs?: ReadonlySet<string>
+}
+
+export function buildAllowedValues(
+  pack: EvidencePack,
+  blocksBuilt: BlockIntent[],
+  opts: BuildAllowedValuesOptions = {},
+): AllowedValue[] {
   const out: AllowedValue[] = []
   const push = (value: number, kind: NumericToken['kind'], source: string) => {
     if (Number.isFinite(value)) out.push({ value, kind, source })
   }
+  const strict = opts.restrictToPublishable === true
 
   // From every verified fact + derived finding statement.
   for (const f of pack.verifiedFacts) for (const tok of extractNumericTokens(f.statement, `fact:${f.id}`)) push(tok.value, tok.kind, `fact:${f.id}`)
   for (const f of pack.derivedFindings) for (const tok of extractNumericTokens(f.statement, `finding:${f.id}`)) push(tok.value, tok.kind, `finding:${f.id}`)
 
-  // From every dataTable cell (numeric only).
+  // From dataTable cells. In strict mode only "featured-*" tables +
+  // approved manual-review rows count; raw mover-risers/fallers
+  // rankings are audit backing but not source-of-truth for article
+  // claims.
   for (const t of pack.dataTables) {
+    const isFeatured = /^featured-/.test(t.id)
+    const isReview   = /^mover-review-/.test(t.id)
+    if (strict && !isFeatured && !isReview) continue
     for (let i = 0; i < t.rows.length; i++) {
       const row = t.rows[i]
+      if (strict && isReview) {
+        // Only allow numbers from approved rows.
+        const slug = String(row.cardSlug ?? '')
+        if (!opts.approvedReviewSlugs?.has(slug)) continue
+      }
       for (const [k, v] of Object.entries(row)) {
         if (typeof v === 'number' && Number.isFinite(v)) push(v, guessNumericKind(k), `table:${t.id}:${i}:${k}`)
         else if (typeof v === 'string') for (const tok of extractNumericTokens(v, `table:${t.id}:${i}:${k}`)) push(tok.value, tok.kind, `table:${t.id}:${i}:${k}`)
@@ -95,10 +126,14 @@ export function buildAllowedValues(pack: EvidencePack, blocksBuilt: BlockIntent[
     }
   }
 
-  // Provenance + quality numbers.
+  // Provenance + quality numbers. In strict mode skip metadata that
+  // has nothing to do with article claims (freshness age, quarantine
+  // count). Sample size stays — the article may cite it.
   push(pack.quality.sampleSize, 'count', 'quality.sampleSize')
-  push(pack.quality.freshness.daysOld, 'count', 'quality.freshness.daysOld')
-  push(pack.quarantinedRows.length, 'count', 'quality.quarantinedCount')
+  if (!strict) {
+    push(pack.quality.freshness.daysOld, 'count', 'quality.freshness.daysOld')
+    push(pack.quarantinedRows.length, 'count', 'quality.quarantinedCount')
+  }
 
   // Direct block-intent values.
   for (const b of blocksBuilt) {
@@ -108,14 +143,18 @@ export function buildAllowedValues(pack: EvidencePack, blocksBuilt: BlockIntent[
     if (b.kind === 'ranking_table' && typeof b.limit === 'number') push(b.limit, 'count', `blockIntent:${b.kind}:limit`)
   }
 
-  // Any ISO date mentioned in the pack methodology filters.
-  for (const f of pack.methodology.filters) for (const tok of extractNumericTokens(f.value, `methodology:${f.label}`)) push(tok.value, tok.kind, `methodology:${f.label}`)
-  for (const tok of extractNumericTokens(pack.methodology.summary, 'methodology.summary')) push(tok.value, tok.kind, 'methodology.summary')
+  // In strict mode skip methodology filter strings — those are
+  // internal implementation numbers (window sizes, thresholds) that
+  // will never legitimately appear in article prose.
+  if (!strict) {
+    for (const f of pack.methodology.filters) for (const tok of extractNumericTokens(f.value, `methodology:${f.label}`)) push(tok.value, tok.kind, `methodology:${f.label}`)
+    for (const tok of extractNumericTokens(pack.methodology.summary, 'methodology.summary')) push(tok.value, tok.kind, 'methodology.summary')
+  }
 
   // Simple ratios reachable from evidence prices (psa10/raw + psa9/raw
   // per table row that has both). Bounded to first 200 to avoid
   // enumeration blowup on huge tables.
-  const derived = derivedRatiosFromTables(pack)
+  const derived = derivedRatiosFromTables(pack, strict)
   for (const d of derived) push(d.value, 'ratio', d.source)
 
   // Also allow the years appearing in the pack's dataAsOf + provenance.
@@ -125,9 +164,10 @@ export function buildAllowedValues(pack: EvidencePack, blocksBuilt: BlockIntent[
   return out
 }
 
-function derivedRatiosFromTables(pack: EvidencePack): Array<{ value: number; source: string }> {
+function derivedRatiosFromTables(pack: EvidencePack, strict: boolean = false): Array<{ value: number; source: string }> {
   const out: Array<{ value: number; source: string }> = []
   for (const t of pack.dataTables) {
+    if (strict && !/^featured-/.test(t.id)) continue
     for (let i = 0; i < Math.min(t.rows.length, 200); i++) {
       const r = t.rows[i]
       const raw   = numeric(r.rawUsd ?? r.raw_usd ?? r.raw)
@@ -156,7 +196,12 @@ function guessNumericKind(colKey: string): NumericToken['kind'] {
 // Public audit entry
 // ─────────────────────────────────────────────────────────────────
 
-export function auditStudioNumerics(studio: StudioDocument, pack: EvidencePack, blocksBuilt: BlockIntent[]): NumericAuditResult {
+export function auditStudioNumerics(
+  studio: StudioDocument,
+  pack: EvidencePack,
+  blocksBuilt: BlockIntent[],
+  opts: BuildAllowedValuesOptions = {},
+): NumericAuditResult {
   const tokens: NumericToken[] = []
   // Extract from headline, intro, seo fields, and every paragraph in bodyDoc.
   tokens.push(...extractNumericTokens(studio.headline, 'headline'))
@@ -165,16 +210,20 @@ export function auditStudioNumerics(studio: StudioDocument, pack: EvidencePack, 
   tokens.push(...extractNumericTokens(studio.seo.description, 'seoDescription'))
   walkTiptapForNumericTokens(studio.bodyDoc, tokens)
 
-  const allowed = buildAllowedValues(pack, blocksBuilt)
+  const allowed = buildAllowedValues(pack, blocksBuilt, opts)
   const issues: NumericAuditIssue[] = []
   let matched = 0
   for (const t of tokens) {
     const hit = findAllowedMatch(t, allowed)
     if (hit) { matched += 1; continue }
+    // Note: previous "Did you mean X?" nearest-value suggestions
+    // were removed — they surfaced unrelated numbers as false
+    // "corrections" and confused reviewers. If a number is
+    // unsupported the issue lists the offending token + location;
+    // validate_and_fix has the actual evidence to consult.
     issues.push({
       token: t,
       reason: describeMismatch(t),
-      nearest: nearestAllowed(t, allowed),
     })
   }
   return {
@@ -227,16 +276,13 @@ function tokenTolerance(kind: NumericToken['kind'], value: number): number {
     default:         return 0
   }
 }
-function nearestAllowed(tok: NumericToken, allowed: AllowedValue[]): NumericAuditIssue['nearest'] | undefined {
-  let best: NumericAuditIssue['nearest'] | undefined
-  let bestDiff = Number.POSITIVE_INFINITY
-  for (const a of allowed) {
-    if (!isCompatibleKind(tok.kind, a.kind)) continue
-    const diff = Math.abs(tok.value - a.value)
-    if (diff < bestDiff) { bestDiff = diff; best = { value: a.value, source: a.source } }
-  }
-  return best
-}
+// nearestAllowed() removed. Previously it suggested the numerically
+// nearest allowed value as a "Did you mean X?" hint on every issue;
+// in practice that surfaced unrelated numbers (sample sizes, page
+// counts) and confused reviewers. If a number is unsupported the
+// issue simply lists the offending token + location. validate_and_fix
+// has full evidence access to make the actual correction.
+
 function describeMismatch(tok: NumericToken): string {
   return `Number "${tok.raw}" (${tok.kind}) at ${tok.location} does not match any allowed value derived from the evidence pack.`
 }

@@ -48,12 +48,16 @@ function isExternalArticleType(articleType: string | undefined, title?: string):
 // split-Writer stages (plan / part1 / part2 / assemble) replace
 // the old single 'writer' step for new runs; the legacy 'writer'
 // slot stays reachable for in-flight runs from the previous machine.
-const STAGE_ORDER: GenerationStage[] = ['queued', 'research_and_write', 'check_and_fix', 'writer', 'writer_plan', 'writer_part1', 'writer_part2', 'writer_assemble', 'writer_external', 'style', 'fact_check', 'repair', 'finalize', 'complete']
+const STAGE_ORDER: GenerationStage[] = ['queued', 'research_and_write', 'check_and_fix', 'writer_internal', 'validate_and_fix', 'writer', 'writer_plan', 'writer_part1', 'writer_part2', 'writer_assemble', 'writer_external', 'style', 'fact_check', 'repair', 'finalize', 'complete']
 const STAGE_LABELS: Record<GenerationStage, string> = {
   queued:             'Preparing',
   // EIC two-stage external path (normal for SEO / news / new-set articles)
   research_and_write: 'Researching & writing',
   check_and_fix:      'Checking & fixing',
+  // EIC two-stage internal-data path (monthly market report,
+  // population studies, price analysis)
+  writer_internal:    'Writing article',
+  validate_and_fix:   'Checking data and facts',
   // Legacy stages — kept for in-flight runs from prior machines
   writer:             'Writing draft',
   writer_plan:        'Planning article',

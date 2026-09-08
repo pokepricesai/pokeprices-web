@@ -215,7 +215,7 @@ export type FactCheckerInputBundle = {
 
 export function buildFactCheckerUserTurn(bundle: FactCheckerInputBundle): string {
   const bodyText = flattenTiptapToPlainText(bundle.studio.bodyDoc)
-  const numericIssues = bundle.numericAudit.issues.map((i, k) => `  [${k + 1}] "${i.token.raw}" (${i.token.kind}) at ${i.token.location}${i.nearest ? ` — nearest allowed ${i.nearest.value} (${i.nearest.source})` : ''}`).join('\n') || '  (none)'
+  const numericIssues = bundle.numericAudit.issues.map((i, k) => `  [${k + 1}] "${i.token.raw}" (${i.token.kind}) at ${i.token.location}`).join('\n') || '  (none)'
 
   return [
     'MODE=fact_check',
@@ -352,8 +352,8 @@ export function parseFactCheckerResponse(rawText: string, pack: EvidencePack, nu
       claim: `Unsupported number: ${na.token.raw}`,
       location: na.token.location,
       reason: na.reason,
-      evidenceRefs: na.nearest ? [na.nearest.source] : [],
-      suggestedCorrection: na.nearest ? `Did you mean ${na.nearest.value}?` : undefined,
+      evidenceRefs: [],
+      suggestedCorrection: undefined,
     })
   }
 
