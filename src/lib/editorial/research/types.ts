@@ -89,11 +89,70 @@ export type EvidencePack = {
    *  run. Powers the "Research checked X days ago" UI and the
    *  preflight staleness warning. Undefined = never researched. */
   webResearch?: WebResearchMeta
+
+  /** External Research Fix v3 — in-flight or last-completed staged
+   *  research run. Persists between stages so a browser refresh can
+   *  resume without re-spending already-completed searches. Cleared
+   *  is fine on 'complete' + subsequent Rebuild. */
+  externalResearchRun?: ExternalResearchRun
 }
 
 export type SourceTier = 1 | 2 | 3
 
 export type FactStatus = 'confirmed' | 'reported' | 'rumored' | 'unverified'
+
+// ─────────────────────────────────────────────────────────────────
+// External Research Fix v3 — resumable stage machine
+// ─────────────────────────────────────────────────────────────────
+//
+// The single-request "Research web" flow (~102s on the first live
+// run) hit Cloudflare's edge idle limit and returned HTTP 524 on the
+// second production attempt. This mirrors the Writer's Block 9B fix:
+// split into bounded stages, persist state per stage, poll from the
+// UI. Each stage does AT MOST one Claude call and completes well
+// under any Vercel plan's ceiling.
+
+export type ExternalResearchStage =
+  | 'queued'
+  | 'researching_primary'
+  | 'researching_supporting'
+  | 'extracting'
+  | 'finalizing'
+  | 'complete'
+  | 'failed'
+
+export type ExternalResearchRun = {
+  id:          string
+  stage:       ExternalResearchStage
+  stageLabel:  string
+  startedAt:   string
+  updatedAt:   string
+  /** Cumulative telemetry across every stage of THIS run. */
+  searchesUsed: number
+  costUsd:      number
+  tokens: {
+    input:  number
+    output: number
+  }
+  /** Sources accumulated across primary + supporting stages. Merged
+   *  into pack.externalSources during finalize. */
+  discoveredSources: ExternalSource[]
+  /** Bounded raw prose from each research stage — used by the
+   *  extractor to build structured facts without hitting the web
+   *  again. Bounded ~30KB per stage. */
+  primaryText?:    string
+  supportingText?: string
+  /** Structured evidence produced by the extraction stage. */
+  extractedFacts?:          VerifiedFact[]
+  extractedContradictions?: ClaimContradiction[]
+  extractedQuestions?:      string[]
+  extractedGaps?:           string[]
+  /** Per-stage wall-clock in ms. */
+  stageTimings: Partial<Record<ExternalResearchStage, number>>
+  /** On failure, which stage broke + concise reason. */
+  failedStage?: ExternalResearchStage
+  error?:       string
+}
 
 export type WebResearchMeta = {
   researchedAt: string

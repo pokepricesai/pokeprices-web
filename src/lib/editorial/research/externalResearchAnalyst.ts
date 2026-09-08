@@ -21,6 +21,61 @@ import type {
 } from './types'
 import { classifySourceTier, domainOf } from './externalResearch'
 
+// ─────────────────────────────────────────────────────────────────
+// External Research Fix v3 — staged system prompts
+// ─────────────────────────────────────────────────────────────────
+//
+// The old single "gather then structure" prompt (EXTERNAL_RESEARCH_
+// SYSTEM_PROMPT below, kept for tests) is now split into two
+// discovery stages (primary + supporting) and one extraction stage
+// (Haiku, no web_search). Each stage stays comfortably under any
+// Vercel plan's synchronous ceiling.
+
+export const EXTERNAL_RESEARCH_PRIMARY_SYSTEM_PROMPT = `${POKEPRICES_EDITORIAL_PROFILE}
+
+You are the PokePrices External Research Analyst — DISCOVERY ROUND 1 (primary sources).
+
+MISSION
+
+For the editorial project below, use the web_search tool to gather AUTHORITATIVE (Tier-1) evidence: pokemon.com, pokemoncenter.com, pokemon.co.jp, tcg.pokemon.com, PSA/CGC official pages, The Pokémon Company / regional official sites. Aim to answer the highest-priority research questions with sources that can independently establish them as confirmed facts.
+
+RULES
+
+1. Cite everything. Any sentence that states a fact must have an inline citation to a search result. Uncited prose is discarded.
+2. Do NOT extract structured facts yet — a downstream extraction stage does that from your prose + citations.
+3. Do NOT invent sources or paraphrase content you have not actually retrieved.
+4. Prefer Tier-1 sources for release-critical claims. Tier-2 (TCGplayer, Bulbapedia, PokéBeach) is acceptable if a Tier-1 source does not exist. Tier-3 (Reddit, YouTube, forums, retailer blogs) is only useful for identifying leads — never for establishing a critical claim in this stage.
+5. Return well-organised prose grouped by research question, with inline citations. This prose is stored so a later stage can extract structured facts from it.
+
+STYLE
+
+American English. No em dashes. No AI-writing tropes. Factual, neutral, cited.
+
+Your reply is prose (with inline citations from web_search). No JSON in this stage. Do NOT introduce yourself or write meta-commentary.`
+
+export const EXTERNAL_RESEARCH_SUPPORTING_SYSTEM_PROMPT = `${POKEPRICES_EDITORIAL_PROFILE}
+
+You are the PokePrices External Research Analyst — DISCOVERY ROUND 2 (supporting sources).
+
+MISSION
+
+A previous round already gathered primary (Tier-1) evidence for this project (summarised below). Your job is to FILL GAPS with specialist Tier-2 sources (TCGplayer, PokéBeach, Bulbapedia, established Pokémon/TCG publications), corroborate anything the primary sources only reported without confirming, and identify any contradictions between the primary evidence and other reputable coverage.
+
+RULES
+
+1. Do NOT re-search claims already established by Tier-1 sources — that wastes search budget.
+2. Cite everything you write. Uncited prose is discarded.
+3. Do NOT invent sources.
+4. Prefer complementary evidence — retailer specifics, product-level detail, community-level confirmation of a Tier-1 claim.
+5. Where possible, note when a Tier-2 source DISAGREES with a Tier-1 source; the extractor uses this to build the contradictions list.
+6. Return well-organised prose with inline citations. No JSON in this stage.
+
+STYLE
+
+American English. No em dashes. No AI-writing tropes. Factual, neutral, cited.
+
+Do NOT introduce yourself or write meta-commentary.`
+
 export const EXTERNAL_RESEARCH_SYSTEM_PROMPT = `${POKEPRICES_EDITORIAL_PROFILE}
 
 You are the PokePrices External Research Analyst. Your job is to gather reputable external evidence for a planned editorial project by using the web_search tool, then return a structured evidence pack that a human editor will approve.
@@ -147,6 +202,77 @@ export function buildExternalResearchUserTurn(args: {
     '4. For every fact, assign status (confirmed/reported/rumored/unverified) using the consensus rule.',
     '5. Surface every contradiction — never silently pick one side.',
     '6. Return the JSON evidence pack. Do not write article prose.',
+  ].filter(Boolean).join('\n')
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Staged user-turn builders (v3)
+// ─────────────────────────────────────────────────────────────────
+
+export function buildPrimaryStageUserTurn(args: {
+  project:      PackProjectRef
+  seedSources:  readonly ExternalSource[]
+  today:        string
+}): string {
+  const seedBlock = args.seedSources.length === 0
+    ? 'No manual seed sources attached.'
+    : args.seedSources.map(s => `  * ${s.id} — [Tier ${s.sourceTier ?? classifySourceTier(s.url)}] ${s.title} (${s.publisher ?? domainOf(s.url)}) — ${s.url}`).join('\n')
+  return [
+    'MODE=discovery_primary',
+    '',
+    `Today's date: ${args.today}`,
+    `Project: ${args.project.title}`,
+    `Article type: ${args.project.articleType}`,
+    args.project.angle ? `Angle: ${args.project.angle}` : '',
+    '',
+    'Manual seed sources (trusted starting points):',
+    seedBlock,
+    '',
+    'Task:',
+    '1. Identify 3-6 highest-priority research questions for this article.',
+    '2. Use web_search (Tier-1 focus) to answer them. You have a bounded search budget (~3 searches).',
+    '3. Return prose organised by research question with inline citations. Do NOT emit JSON.',
+    '4. If a Tier-1 source contradicts a manual seed, call it out.',
+  ].filter(Boolean).join('\n')
+}
+
+export function buildSupportingStageUserTurn(args: {
+  project:      PackProjectRef
+  seedSources:  readonly ExternalSource[]
+  primarySources: readonly ExternalSource[]
+  primaryText:  string
+  today:        string
+}): string {
+  const seedBlock = args.seedSources.length === 0
+    ? 'None.'
+    : args.seedSources.map(s => `  * ${s.id} — [Tier ${s.sourceTier ?? classifySourceTier(s.url)}] ${s.title} (${s.publisher ?? domainOf(s.url)}) — ${s.url}`).join('\n')
+  const primarySrcBlock = args.primarySources.length === 0
+    ? 'None yet.'
+    : args.primarySources.map(s => `  * ${s.id} — [Tier ${s.sourceTier ?? 3}] ${s.title} (${s.publisher ?? domainOf(s.url)}) — ${s.url}`).join('\n')
+  const primary = args.primaryText.length > 20_000 ? args.primaryText.slice(0, 20_000) + '\n\n[…truncated…]' : args.primaryText
+  return [
+    'MODE=discovery_supporting',
+    '',
+    `Today's date: ${args.today}`,
+    `Project: ${args.project.title}`,
+    args.project.angle ? `Angle: ${args.project.angle}` : '',
+    '',
+    'Manual seed sources:',
+    seedBlock,
+    '',
+    'Primary sources already discovered (do NOT re-search these claims):',
+    primarySrcBlock,
+    '',
+    'Prose from primary discovery round (for context — do not re-cite these unless corroborating):',
+    '```',
+    primary || '(none)',
+    '```',
+    '',
+    'Task:',
+    '1. Identify remaining gaps and any potentially contradicting evidence.',
+    '2. Use web_search (Tier-2 specialist focus) to fill those gaps. Bounded budget (~3 searches).',
+    '3. Return prose grouped by remaining question with inline citations. NO JSON.',
+    '4. Where a Tier-2 source disagrees with a primary Tier-1 source, note it explicitly.',
   ].filter(Boolean).join('\n')
 }
 
@@ -394,16 +520,33 @@ Your ENTIRE reply must be ONE JSON code block and NOTHING else:
 No prose outside the JSON block. No apologies. No summary. If you write prose the entire extraction is discarded.`
 
 export function buildExternalResearchFallbackUserTurn(args: {
-  project:      PackProjectRef
-  primaryText:  string
-  discovered:   readonly ExternalSource[]
+  project:         PackProjectRef
+  primaryText:     string
+  /** External Research Fix v3 — optional prose from the supporting
+   *  discovery stage. When present it's appended so the extractor
+   *  sees both rounds of research at once. */
+  supportingText?: string
+  discovered:      readonly ExternalSource[]
 }): string {
   const sourceList = args.discovered.length === 0
     ? '(none)'
     : args.discovered.map(s => `  * ${s.id} — [Tier ${s.sourceTier ?? 3}] ${s.title} (${s.publisher ?? domainOf(s.url)}) — ${s.url}`).join('\n')
 
-  // Bound the primary text so we do not send 100KB back to Haiku.
-  const primary = args.primaryText.length > 30_000 ? args.primaryText.slice(0, 30_000) + '\n\n[…truncated…]' : args.primaryText
+  // Bound each stage's text so combined we never send more than
+  // ~50KB to Haiku.
+  const primary   = clipText(args.primaryText, 30_000)
+  const supporting = args.supportingText ? clipText(args.supportingText, 20_000) : ''
+
+  const proseBlocks: string[] = []
+  if (primary) {
+    proseBlocks.push('Analyst prose — DISCOVERY PRIMARY (Tier-1 focus, may contain inline citations):', '```', primary, '```', '')
+  }
+  if (supporting) {
+    proseBlocks.push('Analyst prose — DISCOVERY SUPPORTING (Tier-2 fill-in, may contain inline citations):', '```', supporting, '```', '')
+  }
+  if (proseBlocks.length === 0) {
+    proseBlocks.push('(no analyst prose stored. Extract facts using ONLY what the source URLs and titles below directly support. If you cannot support a fact with a cited source, do not include it.)', '')
+  }
 
   return [
     'MODE=extract_facts_only',
@@ -411,16 +554,17 @@ export function buildExternalResearchFallbackUserTurn(args: {
     `Project: ${args.project.title}`,
     `Article type: ${args.project.articleType}`,
     '',
-    'Analyst prose (verbatim, may contain inline citations):',
-    '```',
-    primary || '(the primary analyst call returned no prose. Extract facts using ONLY what the source URLs and titles below directly support. If you cannot support a fact with a cited source, do not include it.)',
-    '```',
-    '',
+    ...proseBlocks,
     'Available sources:',
     sourceList,
     '',
     'Return the JSON object as instructed. NO PROSE OUTSIDE THE JSON BLOCK.',
   ].join('\n')
+}
+
+function clipText(s: string, cap: number): string {
+  if (!s) return ''
+  return s.length > cap ? s.slice(0, cap) + '\n\n[…truncated…]' : s
 }
 
 /** Deterministic JSON extractor — tolerates unfenced JSON, JSON

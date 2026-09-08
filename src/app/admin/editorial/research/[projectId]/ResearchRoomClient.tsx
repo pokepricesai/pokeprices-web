@@ -24,7 +24,24 @@ import type {
   Warning, DataTable, VerifiedFact, DerivedFinding,
   ExternalSource, ResearchNote, QuarantineEntry,
   ClaimContradiction, SourceTier, FactStatus,
+  ExternalResearchRun, ExternalResearchStage,
 } from '@/lib/editorial/research/types'
+
+// External Research Fix v3 — stage labels are exported from the
+// server module but the UI needs client-side copies for progress
+// rendering during in-flight runs (no round-trip required).
+const STAGE_LABELS: Record<ExternalResearchStage, string> = {
+  queued:                 'Queued',
+  researching_primary:    'Searching official sources',
+  researching_supporting: 'Researching supporting sources',
+  extracting:             'Building evidence',
+  finalizing:             'Checking source quality',
+  complete:               'Complete',
+  failed:                 'Failed',
+}
+const STAGE_ORDER: ExternalResearchStage[] = [
+  'queued', 'researching_primary', 'researching_supporting', 'extracting', 'finalizing', 'complete',
+]
 
 type ProjectRow = {
   id: number
@@ -93,14 +110,64 @@ export default function ResearchRoomClient({ project, initialResearch, chosenRec
   const doAnalyze = () => run('analyze',  { action: 'analyze' })
   const doApprove = () => run('approve',  { action: 'approve' })
   const doRevoke  = () => run('revoke',   { action: 'revoke' })
-  const doResearchWeb = async () => {
-    const j = await run('research_web', { action: 'research_web' })
-    if (j) {
-      const cost = j.cost?.costUsd != null ? `$${Number(j.cost.costUsd).toFixed(4)}` : ''
-      const searches = j.cost?.searchesUsed != null ? `${j.cost.searchesUsed} search${j.cost.searchesUsed === 1 ? '' : 'es'}` : ''
-      const fallback = j.cost?.fallbackUsed ? ' (Haiku fallback fired)' : ''
-      setNotice(`Research web complete — ${j.discovered ?? 0} sources, ${j.facts ?? 0} facts, ${j.contradictions ?? 0} contradiction(s). ${searches}${cost ? ` · ${cost}` : ''}${fallback}`)
+  // External Research Fix v3 — resumable stage machine.
+  // "Research web" now becomes: start → poll advance in a loop.
+  // Each poll runs one bounded stage server-side; the browser never
+  // holds a single request open for the whole ~2-minute pipeline.
+  const activeRun: ExternalResearchRun | undefined = pack?.externalResearchRun
+  const stageInFlight = activeRun && activeRun.stage !== 'complete' && activeRun.stage !== 'failed'
+  const stageFailed   = activeRun?.stage === 'failed'
+
+  const pollStages = useCallback(async () => {
+    // Advance stage-by-stage until complete or failed. Each poll is
+    // its own HTTP call so Cloudflare's edge idle limit is never hit.
+    // The busy label reflects the LAST stage completed; the pack
+    // state (fetched on every poll) tells us the NEXT stage to run.
+    for (let step = 0; step < 12; step++) {
+      const j = await post(url, { action: 'research_web_advance' })
+      setResearch(j.research ?? null)
+      if (j.finished) {
+        const r: ExternalResearchRun | undefined = j.run
+        if (r?.stage === 'complete') {
+          const cost  = r.costUsd != null ? ` · $${Number(r.costUsd).toFixed(4)}` : ''
+          const uses  = r.searchesUsed != null ? ` · ${r.searchesUsed} search${r.searchesUsed === 1 ? '' : 'es'}` : ''
+          const facts = r.extractedFacts?.length ?? 0
+          const contr = r.extractedContradictions?.length ?? 0
+          const disc  = r.discoveredSources?.length ?? 0
+          setNotice(`Research web complete — ${disc} sources, ${facts} facts, ${contr} contradiction(s)${uses}${cost}`)
+        } else if (r?.stage === 'failed') {
+          setError(`Research failed at ${r.failedStage ?? 'unknown'}: ${r.error ?? 'unknown error'}. Click Retry to resume from ${r.failedStage ?? 'the failed stage'} without repeating successful searches.`)
+        }
+        return
+      }
     }
+    setError('Research is still running after 12 polls — reload the page and click Resume research.')
+  }, [url])
+
+  const doResearchWeb = async () => {
+    setBusy('research_web'); setError(null); setNotice(null)
+    try {
+      const started = await post(url, { action: 'research_web_start' })
+      setResearch(started.research ?? null)
+      await pollStages()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'unknown error')
+    } finally { setBusy(null) }
+  }
+  const doResumeResearch = async () => {
+    setBusy('research_web'); setError(null); setNotice(null)
+    try { await pollStages() }
+    catch (e) { setError(e instanceof Error ? e.message : 'unknown error') }
+    finally { setBusy(null) }
+  }
+  const doRetryResearch = async () => {
+    setBusy('research_web'); setError(null); setNotice(null)
+    try {
+      const started = await post(url, { action: 'research_web_retry' })
+      setResearch(started.research ?? null)
+      await pollStages()
+    } catch (e) { setError(e instanceof Error ? e.message : 'unknown error') }
+    finally { setBusy(null) }
   }
   const doClearDiscovered = () => run('clear_discovered_sources', { action: 'clear_discovered_sources' })
   const doReExtract = async () => {
@@ -136,9 +203,19 @@ export default function ResearchRoomClient({ project, initialResearch, chosenRec
             )}
             {pack && (
               <>
-                {isExternal && (
-                  <button style={S.btnPrimary} disabled={!!busy} onClick={doResearchWeb} title="Discover / refresh external evidence with Claude web search">
-                    {busy === 'research_web' ? 'Searching the web…' : (pack.webResearch ? 'Refresh web research' : 'Research web')}
+                {isExternal && !stageInFlight && !stageFailed && (
+                  <button style={S.btnPrimary} disabled={!!busy} onClick={doResearchWeb} title="Discover / refresh external evidence with staged Claude web search. Runs 2 discovery stages + 1 extraction stage.">
+                    {busy === 'research_web' ? (activeRun?.stageLabel ?? 'Working…') : (pack.webResearch ? 'Refresh web research' : 'Research web')}
+                  </button>
+                )}
+                {isExternal && stageInFlight && (
+                  <button style={S.btnPrimary} disabled={busy === 'research_web'} onClick={doResumeResearch} title="A research run is in progress. Resume polling from the current stage — successful stages are not repeated.">
+                    {busy === 'research_web' ? (activeRun?.stageLabel ?? 'Working…') : `Resume research (${activeRun?.stageLabel})`}
+                  </button>
+                )}
+                {isExternal && stageFailed && (
+                  <button style={S.btnWarn} disabled={busy === 'research_web'} onClick={doRetryResearch} title={`Retry from ${activeRun?.failedStage}. Successful searches are not repeated.`}>
+                    {busy === 'research_web' ? (activeRun?.stageLabel ?? 'Retrying…') : `Retry research (from ${activeRun?.failedStage})`}
                   </button>
                 )}
                 {rebuildBlockedByApproval ? (
@@ -218,6 +295,7 @@ export default function ResearchRoomClient({ project, initialResearch, chosenRec
           {pack && (
             <>
               <QualityCard pack={pack} />
+              {isExternal && activeRun && <StageProgressCard run={activeRun} />}
               {isExternal && <WebResearchMetaCard pack={pack} />}
               {isExternal && <WhatWeKnow pack={pack} />}
               {isExternal && <ContradictionsSection pack={pack} />}
@@ -707,6 +785,49 @@ function StatusBadge({ status }: { status?: FactStatus }) {
   }
   const s = map[status]
   return <span style={{ ...S.badgeBase, background: s.bg, color: s.fg }}>{status.toUpperCase()}</span>
+}
+
+function StageProgressCard({ run }: { run: ExternalResearchRun }) {
+  const currentIdx = STAGE_ORDER.indexOf(run.stage)
+  const isFailed   = run.stage === 'failed'
+  const isDone     = run.stage === 'complete'
+  const bg = isFailed ? '#fef2f2' : isDone ? '#f0fdf4' : '#eff6ff'
+  const border = isFailed ? '#fca5a5' : isDone ? '#86efac' : '#93c5fd'
+  return (
+    <div style={{ ...S.section, background: bg, border: `1px solid ${border}` }}>
+      <h2 style={S.h2}>Web research run · {run.stageLabel}</h2>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' as any }}>
+        {STAGE_ORDER.filter(s => s !== 'queued' && s !== 'complete').map(stage => {
+          const idx = STAGE_ORDER.indexOf(stage)
+          const done = !isFailed && currentIdx >= idx + 1
+          const current = !isFailed && !isDone && currentIdx === idx
+          const failed = isFailed && run.failedStage === stage
+          const bg = failed ? '#fca5a5' : done ? '#86efac' : current ? '#93c5fd' : '#e2e8f0'
+          const fg = failed ? '#7f1d1d' : done ? '#14532d' : current ? '#1e3a8a' : '#475569'
+          const timing = run.stageTimings[stage]
+          return (
+            <span key={stage} style={{ padding: '4px 10px', borderRadius: 12, background: bg, color: fg, fontSize: 11, fontWeight: 700, letterSpacing: 0.3 }}>
+              {STAGE_LABELS[stage]}{timing ? ` · ${(timing / 1000).toFixed(1)}s` : ''}
+            </span>
+          )
+        })}
+      </div>
+      <div style={S.qGrid}>
+        <div><strong>Searches:</strong> {run.searchesUsed}</div>
+        <div><strong>Cost:</strong> ${run.costUsd.toFixed(4)}</div>
+        <div><strong>Tokens:</strong> {run.tokens.input.toLocaleString()} in / {run.tokens.output.toLocaleString()} out</div>
+        <div><strong>Discovered:</strong> {run.discoveredSources.length} source(s)</div>
+      </div>
+      {isFailed && run.error && (
+        <div style={{ ...S.errorBox, marginTop: 8 }}>
+          <strong>Stage failed:</strong> {run.failedStage} — {run.error}
+        </div>
+      )}
+      {!isFailed && !isDone && (
+        <p style={S.muted}>Each stage is bounded and persists on success. If your browser reloads, click <strong>Resume research</strong> to continue — successful searches are never repeated.</p>
+      )}
+    </div>
+  )
 }
 
 function WebResearchMetaCard({ pack }: { pack: EvidencePack }) {

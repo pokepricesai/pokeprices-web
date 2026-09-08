@@ -33,10 +33,21 @@ import {
   researchWebForProject, clearDiscoveredSources,
   reExtractFactsForProject,
 } from '@/lib/editorial/research/serverActions'
+import {
+  startExternalResearchRun,
+  advanceExternalResearchRun,
+  retryExternalResearchRun,
+} from '@/lib/editorial/research/externalResearchStages'
 import { chooseRecipe } from '@/lib/editorial/research/dispatch'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+// External Research Fix v3 — each stage is a single Claude call
+// (~30-60s including web_search or Haiku extraction). 120s per HTTP
+// invocation gives generous cover for the tail while staying under
+// every Vercel plan's synchronous ceiling and safely under
+// Cloudflare's ~100s edge idle limit for the client-facing polls.
+export const maxDuration = 120
 
 const RATE_NAMESPACE = 'api/admin/editorial/research'
 const RATE_LIMIT     = 60
@@ -168,6 +179,19 @@ export async function POST(req: Request, ctx: Ctx) {
           costUsd: r.costUsd,
           usedPrimaryText: r.usedPrimaryText,
         })
+      }
+      // External Research Fix v3 — resumable staged run
+      case 'research_web_start': {
+        const r = await startExternalResearchRun(projectId, admin.email)
+        return NextResponse.json({ ok: true, research: r.row, run: r.run, resumed: r.resumed })
+      }
+      case 'research_web_advance': {
+        const r = await advanceExternalResearchRun(projectId, admin.email)
+        return NextResponse.json({ ok: true, research: r.row, run: r.run, finished: r.finished })
+      }
+      case 'research_web_retry': {
+        const r = await retryExternalResearchRun(projectId, admin.email)
+        return NextResponse.json({ ok: true, research: r.row, run: r.run, finished: r.finished })
       }
       case 'approve_large_mover': {
         const cardSlug = strOrEmpty(body.cardSlug)
