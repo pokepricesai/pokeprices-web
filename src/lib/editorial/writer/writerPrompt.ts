@@ -70,6 +70,18 @@ EXTREME MOVES ARE ALREADY EXCLUDED
 
 The pack has already filtered out cards outside the editorial band ([-60%, +200%] on monthly moves) and unstable-endpoint cards. You will NEVER see a +5,000% or -95% mover as an editorial candidate. If you find yourself wanting to write about one of these, you are looking at the wrong source; the editorial-safe table is the one to use.
 
+EXTERNAL-RESEARCH ARTICLES (recipe = external_research)
+
+When the pack recipe is \`external_research\`, facts come from reputable external sources rather than PokePrices data. Extra rules apply:
+
+  * Facts carry a \`status\` field: "confirmed", "reported", "rumored", "unverified". You MUST preserve the language of that status in prose. A "reported" fact reads as "TCGplayer reports…". A "rumored" fact reads as "community leaks suggest…" or "unconfirmed reports point to…". You may not upgrade a "reported" fact to a confirmed statement.
+  * Facts also carry a \`sourceTier\`: 1 (official/authoritative), 2 (specialist), 3 (community). Tier-3 alone cannot establish a release-critical fact — phrase such claims as reports or rumors, not confirmed news.
+  * The pack's \`contradictions\` array lists claims where sources disagree. You MUST surface each contradiction in prose, name at least one source per position, and not silently pick a side. Example: "Official channels have not confirmed a release date. Retailer listings currently point to November, but these should not be presented as confirmed."
+  * The pack's \`researchQuestions\` array shows what was actually investigated. Use it as a scaffold for the article's structure, not verbatim as headings.
+  * Every externally-sourced claim in prose MUST link to (or be traceable via evidenceTrace to) one of the pack's \`externalSources\`. Never invent a source, publisher, or URL.
+  * Synthesize into original PokePrices prose. Do not closely reproduce or paraphrase source wording; write as an editorial synthesis of what is known, reported, and unknown.
+  * Explicitly cover \`researchGaps\` — a "What we do not know yet" section is expected on release/news pieces.
+
 INTERNAL + EXTERNAL LINKS
 
 * Internal links: pick from \`context.internalLinks\` and canonical cards/sets referenced by the pack or its dataTables. Never invent an internal URL.
@@ -170,13 +182,24 @@ export function compactWriterInputs(bundle: WriterInputBundle): unknown {
           totalRows: t.rows.length,
         }
       }),
-      externalSources:   pack.externalSources.map(s => ({ id: s.id, url: s.url, title: s.title, publisher: s.publisher, publicationDate: s.publicationDate })),
+      externalSources:   pack.externalSources.map(s => ({
+        id: s.id, url: s.url, title: s.title,
+        publisher: s.publisher, publicationDate: s.publicationDate,
+        origin: s.origin ?? 'manual', sourceTier: s.sourceTier,
+      })),
       internalLinks:     pack.internalLinks,
       visualOpportunities: pack.visualOpportunities,
       warnings:          pack.warnings,
       researchGaps:      pack.researchGaps,
       rejectedClaims:    pack.rejectedClaims,
       quality:           pack.quality,
+      // External Research Fix — surface the fact-status /
+      // contradictions / research-question fields to the Writer.
+      // Undefined for internal-data packs; the prompt gates its own
+      // handling on pack.recipe.
+      researchQuestions: pack.researchQuestions,
+      contradictions:    pack.contradictions,
+      webResearch:       pack.webResearch,
       quarantinedRowsSummary: {
         count:  pack.quarantinedRows.length,
         reasons: countBy(pack.quarantinedRows.map(q => q.reason)),

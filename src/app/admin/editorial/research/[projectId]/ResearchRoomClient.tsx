@@ -23,6 +23,7 @@ import type {
   EditorialResearchRow, EvidencePack, ResearchAnalysis,
   Warning, DataTable, VerifiedFact, DerivedFinding,
   ExternalSource, ResearchNote, QuarantineEntry,
+  ClaimContradiction, SourceTier, FactStatus,
 } from '@/lib/editorial/research/types'
 
 type ProjectRow = {
@@ -65,19 +66,25 @@ export default function ResearchRoomClient({ project, initialResearch, chosenRec
   const [research, setResearch] = useState<EditorialResearchRow | null>(initialResearch)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [confirmingRebuild, setConfirmingRebuild] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [confirmingClear, setConfirmingClear] = useState(false)
 
   const url = `/api/admin/editorial/research/${project.id}`
   const pack = research?.evidence_json ?? null
   const analysis = research?.analyst_json ?? null
+  const isExternal = chosenRecipe === 'external_research' || pack?.recipe === 'external_research'
 
   const run = useCallback(async (label: string, body: any) => {
-    setBusy(label); setError(null)
+    setBusy(label); setError(null); setNotice(null)
     try {
       const j = await post(url, body)
       setResearch(j.research ?? null)
+      return j
     } catch (e) {
       setError(e instanceof Error ? e.message : 'unknown error')
+      return null
     } finally { setBusy(null) }
   }, [url])
 
@@ -86,6 +93,15 @@ export default function ResearchRoomClient({ project, initialResearch, chosenRec
   const doAnalyze = () => run('analyze',  { action: 'analyze' })
   const doApprove = () => run('approve',  { action: 'approve' })
   const doRevoke  = () => run('revoke',   { action: 'revoke' })
+  const doResearchWeb = async () => {
+    const j = await run('research_web', { action: 'research_web' })
+    if (j) {
+      const cost = j.cost?.costUsd != null ? `$${Number(j.cost.costUsd).toFixed(4)}` : ''
+      const searches = j.cost?.searchesUsed != null ? `${j.cost.searchesUsed} search${j.cost.searchesUsed === 1 ? '' : 'es'}` : ''
+      setNotice(`Research web complete — ${j.discovered ?? 0} sources, ${j.facts ?? 0} facts, ${j.contradictions ?? 0} contradiction(s). ${searches}${cost ? ` · ${cost}` : ''}`)
+    }
+  }
+  const doClearDiscovered = () => run('clear_discovered_sources', { action: 'clear_discovered_sources' })
 
   const rebuildBlockedByApproval = research?.status === 'approved' && !confirmingRebuild
 
@@ -113,18 +129,25 @@ export default function ResearchRoomClient({ project, initialResearch, chosenRec
             )}
             {pack && (
               <>
-                {rebuildBlockedByApproval ? (
-                  <button style={S.btnWarn} disabled={!!busy} onClick={() => setConfirmingRebuild(true)}>
-                    Rebuild (will revoke approval)…
-                  </button>
-                ) : (
-                  <button style={S.btnPrimary} disabled={!!busy} onClick={doRebuild}>
-                    {busy === 'rebuild' ? 'Rebuilding…' : (confirmingRebuild ? 'Confirm rebuild + revoke' : 'Rebuild')}
+                {isExternal && (
+                  <button style={S.btnPrimary} disabled={!!busy} onClick={doResearchWeb} title="Discover / refresh external evidence with Claude web search">
+                    {busy === 'research_web' ? 'Searching the web…' : (pack.webResearch ? 'Refresh web research' : 'Research web')}
                   </button>
                 )}
-                <button style={S.btnPrimary} disabled={!!busy} onClick={doAnalyze}>
-                  {busy === 'analyze' ? 'Analyzing…' : (analysis ? 'Re-run Analyst' : 'Analyze with AI')}
-                </button>
+                {rebuildBlockedByApproval ? (
+                  <button style={S.btnWarn} disabled={!!busy} onClick={() => setConfirmingRebuild(true)}>
+                    Rebuild evidence (will revoke approval)…
+                  </button>
+                ) : (
+                  <button style={S.btnPrimary} disabled={!!busy} onClick={doRebuild} title="Recalculate pack from current discovered + manual evidence. Manual sources and notes are preserved.">
+                    {busy === 'rebuild' ? 'Rebuilding…' : (confirmingRebuild ? 'Confirm rebuild + revoke' : 'Rebuild evidence')}
+                  </button>
+                )}
+                {!isExternal && (
+                  <button style={S.btnPrimary} disabled={!!busy} onClick={doAnalyze}>
+                    {busy === 'analyze' ? 'Analyzing…' : (analysis ? 'Re-run Analyst' : 'Analyze with AI')}
+                  </button>
+                )}
                 {research?.status !== 'approved' && (
                   <button
                     style={pack.quality.publishable && !pack.warnings.some(w => w.severity === 'critical') ? S.btnGreen : S.btnDisabled}
@@ -132,7 +155,7 @@ export default function ResearchRoomClient({ project, initialResearch, chosenRec
                     onClick={doApprove}
                     title={!pack.quality.publishable ? pack.quality.reasons.join(' · ') : ''}
                   >
-                    {busy === 'approve' ? 'Approving…' : 'Approve evidence'}
+                    {busy === 'approve' ? 'Approving…' : 'Approve research'}
                   </button>
                 )}
                 {research?.status === 'approved' && (
@@ -140,10 +163,38 @@ export default function ResearchRoomClient({ project, initialResearch, chosenRec
                     {busy === 'revoke' ? 'Revoking…' : 'Revoke approval'}
                   </button>
                 )}
+                <button style={S.btnLinkQuiet} onClick={() => setAdvancedOpen(v => !v)}>{advancedOpen ? 'Hide advanced' : 'Advanced ▾'}</button>
               </>
             )}
           </div>
 
+          {advancedOpen && pack && (
+            <div style={S.advancedBox}>
+              <strong>Advanced</strong>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6, alignItems: 'center' }}>
+                {isExternal && (
+                  confirmingClear ? (
+                    <>
+                      <button style={S.btnWarn} disabled={!!busy} onClick={() => { setConfirmingClear(false); doClearDiscovered() }}>Confirm: remove all web-discovered sources</button>
+                      <button style={S.btnLinkQuiet} onClick={() => setConfirmingClear(false)}>Cancel</button>
+                    </>
+                  ) : (
+                    <button style={S.btnLinkQuiet} disabled={!!busy} onClick={() => setConfirmingClear(true)} title="Removes web-discovered sources and web-only facts. Manual sources and notes are kept.">
+                      Clear discovered research…
+                    </button>
+                  )
+                )}
+                {isExternal && !confirmingClear && <span style={S.muted}>Manual sources are always preserved.</span>}
+                {!isExternal && (
+                  <button style={S.btnLinkQuiet} disabled={!!busy} onClick={doAnalyze}>
+                    {busy === 'analyze' ? 'Analyzing…' : (analysis ? 'Re-run Analyst' : 'Analyze with AI')}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {notice && <div style={S.noticeBox}>{notice}</div>}
           {error && <div style={S.errorBox}>{error}</div>}
 
           {!pack && (
@@ -155,15 +206,19 @@ export default function ResearchRoomClient({ project, initialResearch, chosenRec
           {pack && (
             <>
               <QualityCard pack={pack} />
+              {isExternal && <WebResearchMetaCard pack={pack} />}
+              {isExternal && <WhatWeKnow pack={pack} />}
+              {isExternal && <ContradictionsSection pack={pack} />}
+              {isExternal && <ResearchQuestionsSection pack={pack} />}
               <Methodology pack={pack} />
-              <VerifiedEvidence pack={pack} />
+              {!isExternal && <VerifiedEvidence pack={pack} />}
               <DataTables pack={pack} />
               <Warnings pack={pack} />
               <Quarantined pack={pack} />
               <ResearchGaps pack={pack} />
               <ExternalSources pack={pack} projectUrl={url} onUpdated={setResearch} busy={busy} setBusy={setBusy} setError={setError} />
               <ResearchNotes    pack={pack} projectUrl={url} onUpdated={setResearch} busy={busy} setBusy={setBusy} setError={setError} />
-              <AnalystSection   analysis={analysis} onAnalyze={doAnalyze} busy={busy} />
+              {!isExternal && <AnalystSection   analysis={analysis} onAnalyze={doAnalyze} busy={busy} />}
               <VisualOpportunities pack={pack} />
               <RejectedClaims pack={pack} />
             </>
@@ -440,24 +495,66 @@ function ExternalSources({ pack, projectUrl, onUpdated, busy, setBusy, setError 
     finally { setBusy(null) }
   }, [projectUrl, onUpdated, setBusy, setError])
 
+  // Group manual and web-discovered sources so admins can see them
+  // separately. Manual first — those are the seeds and human-curated
+  // evidence. Web second — those may be replaced on the next "Research
+  // web" run.
+  const manual = pack.externalSources.filter(s => (s.origin ?? 'manual') === 'manual')
+  const web    = pack.externalSources.filter(s => (s.origin ?? 'manual') === 'web')
+  const summary = {
+    tier1: pack.externalSources.filter(s => (s.sourceTier ?? 3) === 1).length,
+    tier2: pack.externalSources.filter(s => s.sourceTier === 2).length,
+    tier3: pack.externalSources.filter(s => (s.sourceTier ?? 3) === 3).length,
+  }
+
   return (
     <div style={S.section}>
       <h2 style={S.h2}>External sources ({pack.externalSources.length})</h2>
+      {pack.externalSources.length > 0 && (
+        <div style={S.muted}>
+          Source authority: {summary.tier1} authoritative · {summary.tier2} specialist · {summary.tier3} supporting
+        </div>
+      )}
       {pack.externalSources.length === 0 ? (
         <p style={S.muted}>No external sources attached yet.</p>
       ) : (
-        <ul style={S.list}>
-          {pack.externalSources.map((s: ExternalSource) => (
-            <li key={s.id} style={{ marginBottom: 8 }}>
-              <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ color: '#0369a1' }}>{s.title}</a>
-              {s.publisher && <span style={S.muted}> · {s.publisher}</span>}
-              {s.publicationDate && <span style={S.muted}> · {s.publicationDate}</span>}
-              {s.note && <div style={S.muted}>Note: {s.note}</div>}
-              {s.supportsFactId && <div style={S.muted}>Supports fact: {s.supportsFactId}</div>}
-              <button style={S.btnLink} disabled={!!busy} onClick={() => remove(s.id)}>Remove</button>
-            </li>
-          ))}
-        </ul>
+        <>
+          <h3 style={S.h3}>Manual sources ({manual.length})</h3>
+          {manual.length === 0 ? <p style={S.muted}>None. Manual sources you attach here survive rebuilds and seed the "Research web" call.</p> : (
+            <ul style={S.list}>
+              {manual.map((s: ExternalSource) => (
+                <li key={s.id} style={{ marginBottom: 8 }}>
+                  <span style={S.badgeManual}>MANUAL</span>
+                  <TierBadge tier={s.sourceTier as SourceTier | undefined} />
+                  <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ color: '#0369a1' }}>{s.title}</a>
+                  {s.publisher && <span style={S.muted}> · {s.publisher}</span>}
+                  {s.publicationDate && <span style={S.muted}> · {s.publicationDate}</span>}
+                  {s.note && <div style={S.muted}>Note: {s.note}</div>}
+                  {s.supportsFactId && <div style={S.muted}>Supports fact: {s.supportsFactId}</div>}
+                  <button style={S.btnLink} disabled={!!busy} onClick={() => remove(s.id)}>Remove</button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {web.length > 0 && (
+            <>
+              <h3 style={S.h3}>Web-discovered sources ({web.length})</h3>
+              <ul style={S.list}>
+                {web.map((s: ExternalSource) => (
+                  <li key={s.id} style={{ marginBottom: 8 }}>
+                    <span style={S.badgeWeb}>WEB</span>
+                    <TierBadge tier={s.sourceTier as SourceTier | undefined} />
+                    <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ color: '#0369a1' }}>{s.title}</a>
+                    {s.publisher && <span style={S.muted}> · {s.publisher}</span>}
+                    {s.publicationDate && <span style={S.muted}> · {s.publicationDate}</span>}
+                    {s.note && <div style={S.muted}>Note: {s.note}</div>}
+                    <button style={S.btnLink} disabled={!!busy} onClick={() => remove(s.id)}>Remove</button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </>
       )}
       <div style={S.formRow}>
         <input placeholder="URL" style={S.input} value={form.url}   onChange={e => setForm({ ...form, url: e.target.value })} />
@@ -578,6 +675,118 @@ function recBg(v: string): string { return v === 'ready' ? '#dcfce7' : v === 're
 function recFg(v: string): string { return v === 'ready' ? '#166534' : v === 'ready_with_caveats' ? '#92400e' : v === 'more_research_needed' ? '#0369a1' : '#991b1b' }
 
 // ─────────────────────────────────────────────────────────────────
+// External Research Fix components
+// ─────────────────────────────────────────────────────────────────
+
+function TierBadge({ tier }: { tier?: SourceTier }) {
+  if (!tier) return null
+  const style = tier === 1 ? S.badgeT1 : tier === 2 ? S.badgeT2 : S.badgeT3
+  const label = tier === 1 ? 'TIER 1' : tier === 2 ? 'TIER 2' : 'TIER 3'
+  return <span style={style} title={tier === 1 ? 'Authoritative' : tier === 2 ? 'Specialist' : 'Supporting'}>{label}</span>
+}
+
+function StatusBadge({ status }: { status?: FactStatus }) {
+  if (!status) return null
+  const map: Record<FactStatus, { bg: string; fg: string }> = {
+    confirmed:  { bg: '#dcfce7', fg: '#166534' },
+    reported:   { bg: '#e0f2fe', fg: '#0369a1' },
+    rumored:    { bg: '#fef3c7', fg: '#92400e' },
+    unverified: { bg: '#fee2e2', fg: '#991b1b' },
+  }
+  const s = map[status]
+  return <span style={{ ...S.badgeBase, background: s.bg, color: s.fg }}>{status.toUpperCase()}</span>
+}
+
+function WebResearchMetaCard({ pack }: { pack: EvidencePack }) {
+  const w = pack.webResearch
+  if (!w) {
+    return (
+      <div style={S.section}>
+        <h2 style={S.h2}>Web research</h2>
+        <p style={S.muted}>No web research yet. Click <strong>Research web</strong> to discover external evidence with Claude web search.</p>
+      </div>
+    )
+  }
+  const days = Math.floor((Date.now() - Date.parse(w.researchedAt)) / (24 * 60 * 60 * 1000))
+  const ago = days === 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`
+  return (
+    <div style={S.section}>
+      <h2 style={S.h2}>Web research</h2>
+      <div style={S.qGrid}>
+        <div><strong>Checked:</strong> {ago}</div>
+        <div><strong>Searches:</strong> {w.searchesUsed}</div>
+        <div><strong>Model:</strong> {w.model}</div>
+        <div><strong>Cost:</strong> ${w.costUsd.toFixed(4)}</div>
+      </div>
+      <p style={S.muted}>Web research runs only when you click <strong>Research web</strong>. Manual sources are preserved across every rebuild.</p>
+    </div>
+  )
+}
+
+function WhatWeKnow({ pack }: { pack: EvidencePack }) {
+  const facts = pack.verifiedFacts.filter(f => f.evidenceRefs.length > 0)
+  if (facts.length === 0) {
+    return (
+      <div style={S.section}>
+        <h2 style={S.h2}>What we know</h2>
+        <p style={S.muted}>No externally-sourced facts yet. Attach sources or run web research.</p>
+      </div>
+    )
+  }
+  return (
+    <div style={S.section}>
+      <h2 style={S.h2}>What we know ({facts.length})</h2>
+      <ul style={S.list}>
+        {facts.map(f => (
+          <li key={f.id} style={{ marginBottom: 8 }}>
+            <TierBadge tier={f.sourceTier as SourceTier | undefined} />
+            <StatusBadge status={f.status as FactStatus | undefined} />
+            {f.statement}
+            <div style={S.muted}>Evidence: {f.evidenceRefs.join(', ') || '—'}{f.asOf ? ` · as of ${f.asOf}` : ''}</div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function ContradictionsSection({ pack }: { pack: EvidencePack }) {
+  const c = pack.contradictions ?? []
+  if (c.length === 0) return null
+  return (
+    <div style={{ ...S.section, background: '#fffbeb', border: '1px solid #fbbf24' }}>
+      <h2 style={S.h2}>Source contradictions ({c.length})</h2>
+      <p style={S.body}>Sources disagree on the claims below. The Writer must surface each disagreement in prose — do not silently pick one.</p>
+      {c.map(row => (
+        <div key={row.id} style={{ padding: 12, marginBottom: 10, background: 'white', border: '1px solid #fde68a', borderRadius: 6 }}>
+          <div style={{ fontWeight: 700 }}>{row.claim}</div>
+          <ul style={S.list}>
+            {row.positions.map((p, i) => (
+              <li key={i}>
+                {p.statement}
+                <div style={S.muted}>Evidence: {p.evidenceRefs.join(', ') || '—'}</div>
+              </li>
+            ))}
+          </ul>
+          {row.note && <div style={S.muted}>{row.note}</div>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ResearchQuestionsSection({ pack }: { pack: EvidencePack }) {
+  const q = pack.researchQuestions ?? []
+  if (q.length === 0) return null
+  return (
+    <div style={S.section}>
+      <h2 style={S.h2}>Research questions ({q.length})</h2>
+      <ul style={S.list}>{q.map((question, i) => <li key={i}>{question}</li>)}</ul>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Styles
 // ─────────────────────────────────────────────────────────────────
 
@@ -617,4 +826,14 @@ const S: Record<string, any> = {
   formula:   { fontSize: 12, color: '#64748b', fontFamily: 'monospace' },
   formRow:   { display: 'flex', gap: 8, flexWrap: 'wrap' as any, marginTop: 8 },
   input:     { padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13, minWidth: 180 },
+  // External Research Fix
+  btnLinkQuiet: { padding: '6px 10px', background: 'transparent', color: '#475569', border: '1px solid #cbd5e1', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 },
+  advancedBox:  { padding: 12, background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 6, marginBottom: 12, fontSize: 13, color: '#334155' },
+  noticeBox:    { padding: 12, background: '#ecfeff', border: '1px solid #67e8f9', color: '#0e7490', borderRadius: 6, marginBottom: 12, fontSize: 13 },
+  badgeBase:  { display: 'inline-block', padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, letterSpacing: 0.4, marginRight: 6, verticalAlign: 'middle' as any },
+  badgeManual:{ display: 'inline-block', padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, letterSpacing: 0.4, marginRight: 6, verticalAlign: 'middle' as any, background: '#dbeafe', color: '#1e40af' },
+  badgeWeb:   { display: 'inline-block', padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, letterSpacing: 0.4, marginRight: 6, verticalAlign: 'middle' as any, background: '#e0e7ff', color: '#4338ca' },
+  badgeT1:    { display: 'inline-block', padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, letterSpacing: 0.4, marginRight: 6, verticalAlign: 'middle' as any, background: '#dcfce7', color: '#166534' },
+  badgeT2:    { display: 'inline-block', padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, letterSpacing: 0.4, marginRight: 6, verticalAlign: 'middle' as any, background: '#fef3c7', color: '#92400e' },
+  badgeT3:    { display: 'inline-block', padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, letterSpacing: 0.4, marginRight: 6, verticalAlign: 'middle' as any, background: '#f1f5f9', color: '#475569' },
 }

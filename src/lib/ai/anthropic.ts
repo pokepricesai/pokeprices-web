@@ -48,6 +48,21 @@ function costFor(model: string, usage: AiUsage): number {
 
 export type AnthropicMessage = { role: 'user' | 'assistant'; content: string }
 
+/** Configuration for Anthropic's server-side web_search tool. When
+ *  supplied, the caller wires it into the `tools` array of the
+ *  Messages API request. All fields optional — `max_uses` should
+ *  always be set to bound token/search cost. */
+export type WebSearchToolConfig = {
+  /** Maximum number of web_search invocations Claude may make. */
+  max_uses?: number
+  /** Restrict to a whitelist of publisher domains. */
+  allowed_domains?: string[]
+  /** Refuse specific publisher domains. */
+  blocked_domains?: string[]
+  /** ISO-3166 country hint for localisation. */
+  user_location?: { type: 'approximate'; country?: string; region?: string; city?: string; timezone?: string }
+}
+
 export type CallAnthropicInput = {
   model:       string
   system:      string
@@ -56,6 +71,10 @@ export type CallAnthropicInput = {
   temperature?: number
   /** Enable ephemeral prompt caching on the system prompt. */
   cacheSystem?: boolean
+  /** External Research Fix — enable the server-side web_search
+   *  tool. When present, the response usage.server_tool_use.
+   *  web_search_requests counter is surfaced back to the caller. */
+  webSearch?:  WebSearchToolConfig
 }
 
 export type AiUsage = {
@@ -77,11 +96,24 @@ export type CallAnthropicResult = {
   status:      number
   error:       string
   detail:      string
+  /** External Research Fix — populated when webSearch was requested
+   *  and Anthropic returned server_tool_use telemetry. Undefined
+   *  otherwise. Priced at $10 per 1,000 searches. */
+  webSearch?:  { searchesUsed: number; searchCostUsd: number }
+  /** External Research Fix — every citation Claude emitted, in the
+   *  order they appeared. One entry per unique URL. Empty when the
+   *  response did not include web_search_result_location citations. */
+  citations?:  Array<{ url: string; title?: string; publisher?: string; encountered_text?: string }>
 }
 const EMPTY_USAGE: AiUsage = { input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0 }
 function failResult(status: number, error: string, latency_ms: number, detail = '', model = ''): CallAnthropicResult {
   return { ok: false, text: '', model, usage: EMPTY_USAGE, cost_usd: 0, latency_ms, stop_reason: null, status, error, detail }
 }
+
+/** Anthropic bills web_search separately from tokens: $10 per 1,000
+ *  server-side searches. Kept here so the pricing lives next to the
+ *  token-pricing table for review. */
+const WEB_SEARCH_USD_PER_CALL = 0.01
 
 // ── Main call ────────────────────────────────────────────────────
 
@@ -96,6 +128,26 @@ export async function callAnthropic(input: CallAnthropicInput): Promise<CallAnth
     ? [{ type: 'text' as const, text: input.system, cache_control: { type: 'ephemeral' as const } }]
     : input.system
 
+  const body: Record<string, unknown> = {
+    model:       input.model,
+    max_tokens:  input.max_tokens,
+    temperature: input.temperature ?? 0.4,
+    system:      systemBlocks,
+    messages:    input.messages,
+  }
+
+  if (input.webSearch) {
+    const tool: Record<string, unknown> = {
+      type: 'web_search_20250305',
+      name: 'web_search',
+    }
+    if (typeof input.webSearch.max_uses === 'number') tool.max_uses = input.webSearch.max_uses
+    if (input.webSearch.allowed_domains?.length)      tool.allowed_domains = input.webSearch.allowed_domains
+    if (input.webSearch.blocked_domains?.length)      tool.blocked_domains = input.webSearch.blocked_domains
+    if (input.webSearch.user_location)                tool.user_location = input.webSearch.user_location
+    body.tools = [tool]
+  }
+
   let res: Response
   try {
     res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -105,13 +157,7 @@ export async function callAnthropic(input: CallAnthropicInput): Promise<CallAnth
         'x-api-key':         apiKey,
         'anthropic-version': '2023-06-01',
       },
-      body: JSON.stringify({
-        model:       input.model,
-        max_tokens:  input.max_tokens,
-        temperature: input.temperature ?? 0.4,
-        system:      systemBlocks,
-        messages:    input.messages,
-      }),
+      body: JSON.stringify(body),
     })
   } catch (e) {
     return failResult(502, 'AI upstream network failure', Date.now() - started, e instanceof Error ? e.message : 'unknown', input.model)
@@ -124,7 +170,38 @@ export async function callAnthropic(input: CallAnthropicInput): Promise<CallAnth
   }
 
   const data = await res.json().catch(() => null) as any
-  const text = data?.content?.[0]?.text ?? ''
+  // With tools enabled Claude returns a mix of `text` blocks, tool_use
+  // blocks (server-side web_search), and `web_search_tool_result`
+  // blocks. Text needs to be joined across every text block; citations
+  // live either as their own citation blocks or attached to text.
+  const blocks: any[] = Array.isArray(data?.content) ? data.content : []
+  const textParts: string[] = []
+  const citations: Array<{ url: string; title?: string; publisher?: string; encountered_text?: string }> = []
+  const seenUrls = new Set<string>()
+  const pushCitation = (c: any) => {
+    const url = typeof c?.url === 'string' ? c.url : ''
+    if (!url || seenUrls.has(url)) return
+    seenUrls.add(url)
+    citations.push({
+      url,
+      title:            typeof c?.title === 'string' ? c.title : undefined,
+      publisher:        typeof c?.encrypted_index === 'string' ? undefined : undefined,
+      encountered_text: typeof c?.cited_text === 'string' ? c.cited_text.slice(0, 400) : undefined,
+    })
+  }
+  for (const b of blocks) {
+    if (b?.type === 'text' && typeof b.text === 'string') {
+      textParts.push(b.text)
+      if (Array.isArray(b.citations)) for (const c of b.citations) pushCitation(c)
+    } else if (b?.type === 'web_search_tool_result' && Array.isArray(b.content)) {
+      for (const r of b.content) {
+        if (r?.type === 'web_search_result' && typeof r.url === 'string') {
+          pushCitation({ url: r.url, title: r.title, cited_text: r.encrypted_content ? undefined : r.page_age })
+        }
+      }
+    }
+  }
+  const text = textParts.join('\n')
   const stop_reason = data?.stop_reason ?? null
   const usage: AiUsage = {
     input_tokens:          Number(data?.usage?.input_tokens          ?? 0),
@@ -132,17 +209,29 @@ export async function callAnthropic(input: CallAnthropicInput): Promise<CallAnth
     cache_creation_tokens: Number(data?.usage?.cache_creation_input_tokens ?? 0),
     cache_read_tokens:     Number(data?.usage?.cache_read_input_tokens     ?? 0),
   }
+  let webSearch: { searchesUsed: number; searchCostUsd: number } | undefined
+  const searchesUsed = Number(data?.usage?.server_tool_use?.web_search_requests ?? 0)
+  if (input.webSearch || searchesUsed > 0) {
+    webSearch = {
+      searchesUsed,
+      searchCostUsd: Number((searchesUsed * WEB_SEARCH_USD_PER_CALL).toFixed(6)),
+    }
+  }
+  const tokenCost = costFor(input.model, usage)
+  const totalCost = Number((tokenCost + (webSearch?.searchCostUsd ?? 0)).toFixed(6))
   return {
     ok: true,
     text,
     model:       input.model,
     usage,
-    cost_usd:    costFor(input.model, usage),
+    cost_usd:    totalCost,
     latency_ms,
     stop_reason,
     status:      200,
     error:       '',
     detail:      '',
+    webSearch,
+    citations,
   }
 }
 

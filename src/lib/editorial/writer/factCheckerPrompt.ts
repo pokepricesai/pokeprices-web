@@ -49,6 +49,14 @@ Identify:
   * quarantined_row_referenced: the article uses a quarantined value.
   * inconsistent_with_evidence: an internal contradiction, or numbers that disagree with the pack.
 
+EXTERNAL-RESEARCH SPECIFICS (pack.recipe === "external_research")
+
+Additional issue kinds to raise against external-research articles:
+  * external_source_misused when a fact in the pack is marked \`status: "reported"\` or \`status: "rumored"\` and the article states it as confirmed news (no "reported", no "rumored", no attributive phrasing).
+  * external_source_misused when a fact has only Tier-3 (community) sourcing and the article treats it as an official/confirmed claim.
+  * inconsistent_with_evidence when \`pack.contradictions\` contains a claim under dispute and the article picks one side without surfacing the disagreement or naming at least one source per position.
+  * missing_required_caveat when the article omits an important \`researchGap\` — for a release/news piece, notable unknowns must be acknowledged.
+
 DO NOT
 
 Do not:
@@ -144,6 +152,11 @@ function compactPackForChecker(pack: EvidencePack): unknown {
     rejectedClaims:  pack.rejectedClaims,
     quality:         pack.quality,
     quarantinedRows: pack.quarantinedRows.map(q => ({ id: q.id, reason: q.reason, message: q.message })),
+    // External Research Fix — visible to checker so it can flag
+    // silent contradiction-picks and rumor→confirmation upgrades.
+    contradictions:    pack.contradictions,
+    researchQuestions: pack.researchQuestions,
+    webResearch:       pack.webResearch,
   }
 }
 

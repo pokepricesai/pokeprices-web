@@ -22,7 +22,13 @@ describe('chooseRecipe', () => {
   it('selects population_scarcity when angle mentions scarcity even without keyword in title', () => {
     expect(chooseRecipe({ ...base, title: 'Interesting study', angle: 'Very low PSA 10 population scarcity',   articleType: 'data_study' })).toBe('population_scarcity')
   })
-  it('falls back to generic_fallback for unrecognised shapes', () => {
-    expect(chooseRecipe({ ...base, title: 'New set launch guide', articleType: 'new_set' })).toBe('generic_fallback')
+  it('routes new_set article_type to external_research (was previously generic_fallback)', () => {
+    // External Research Fix — new_set / upcoming_set / news / etc.
+    // now flow into the external_research recipe so the web-research
+    // pipeline (Item 2 of the fix) can populate them.
+    expect(chooseRecipe({ ...base, title: 'New set launch guide', articleType: 'new_set' })).toBe('external_research')
+  })
+  it('still falls back to generic_fallback for genuinely unrecognised shapes (no matching type, no matching keywords)', () => {
+    expect(chooseRecipe({ ...base, title: 'Random musings', articleType: 'ideas_backlog' })).toBe('generic_fallback')
   })
 })

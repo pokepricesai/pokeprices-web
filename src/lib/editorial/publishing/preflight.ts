@@ -194,6 +194,34 @@ export async function runPublicationPreflight(projectId: number, opts: Preflight
   if (!built.payload.image_url)       warnings.push({ id: 'hero.missing', label: 'Hero image missing', severity: 'warning', detail: 'article renders without a hero; consider uploading one' })
   for (const w of built.warnings)     warnings.push({ id: 'payload.warning', label: 'Payload warning', severity: 'warning', detail: w })
 
+  // External Research Fix — freshness warning for release/news pieces.
+  // Rules stay simple + article-type aware:
+  //   * external_research + upcoming_set/new_set/news → warn > 7d
+  //   * external_research otherwise (evergreen)       → warn > 60d
+  //   * other recipes                                 → no warning
+  if (pack?.recipe === 'external_research' && pack.webResearch?.researchedAt) {
+    const researchedDays = Math.floor((Date.now() - Date.parse(pack.webResearch.researchedAt)) / (24 * 60 * 60 * 1000))
+    const t = (project.article_type ?? '').toLowerCase()
+    const currentEvent = t === 'upcoming_set' || t === 'new_set' || t === 'release_news' || t === 'news' || t === 'product_announcement' || t === 'set_preview'
+    const staleThreshold = currentEvent ? 7 : 60
+    if (researchedDays > staleThreshold) {
+      warnings.push({
+        id: 'research.stale',
+        label: 'Web research is stale',
+        severity: 'warning',
+        detail: `Web research last ran ${researchedDays} days ago (threshold ${staleThreshold}d for ${currentEvent ? 'release/news' : 'evergreen'}). Consider "Refresh web research" before publishing.`,
+      })
+    }
+  }
+  if (pack?.contradictions && pack.contradictions.length > 0) {
+    warnings.push({
+      id: 'research.contradictions',
+      label: 'Unresolved source contradictions',
+      severity: 'warning',
+      detail: `${pack.contradictions.length} contradiction(s) in the evidence. Confirm the article surfaces every disagreement in prose.`,
+    })
+  }
+
   const blocked = checks.some(c => c.severity === 'blocker')
   return {
     status: blocked ? 'blocked' : 'pass',

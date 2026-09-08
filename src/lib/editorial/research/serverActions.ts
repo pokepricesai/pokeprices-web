@@ -3,12 +3,19 @@
 // EIC Block 6 — server-side action handlers for the Research Room.
 //
 // These functions are the single source of truth for "what does a
-// build / rebuild / approve / revoke / add-source / add-note mean".
-// The API route is a thin dispatcher over them; the intent is that
-// unit + integration tests can call these directly.
+// build / rebuild / approve / revoke / add-source / add-note /
+// research-web / clear-discovered mean". The API route is a thin
+// dispatcher over them; the intent is that unit + integration tests
+// can call these directly.
 //
-// All mutations are on the editorial_research table via the service-
-// role client. Callers must have already passed requireAdmin().
+// External Research Fix (2026-09):
+//   * Rebuild preserves manual sources, notes, research questions,
+//     and prior web-research telemetry (regardless of recipe).
+//   * `researchWebForProject` runs one bounded Anthropic call with
+//     the web_search tool; it merges discovered sources / facts /
+//     contradictions into the current pack.
+//   * `clearDiscoveredSources` is an Advanced reset that removes
+//     web-discovered evidence but leaves manual + notes intact.
 
 import 'server-only'
 import { getSupabaseServiceClient } from '@/lib/supabaseService'
@@ -16,13 +23,24 @@ import { runResearchRecipe, chooseRecipe } from './dispatch'
 import { parseAnalystResponse, buildAnalystUserTurn, RESEARCH_ANALYST_SYSTEM_PROMPT, analystStyleFields } from './analystPrompt'
 import { callAnthropicAndLog, type AnthropicMessage } from '@/lib/ai/anthropic'
 import { auditFieldMap, buildStyleRepairUserTurn, type StyleAudit } from '../styleGuard'
+import { buildEditorialContext } from '../context'
+import {
+  EXTERNAL_RESEARCH_SYSTEM_PROMPT,
+  buildExternalResearchUserTurn,
+  parseExternalResearchResponse,
+  mergeExternalResearchIntoPack,
+} from './externalResearchAnalyst'
+import { classifySourceTier, computeExternalQuality } from './externalResearch'
 import type {
   EvidencePack, ResearchAnalysis, EditorialResearchRow,
-  ResearchStatus, ExternalSource, ResearchNote,
+  ResearchStatus, ExternalSource, ResearchNote, WebResearchMeta,
 } from './types'
 
 const ANALYST_MODEL = 'claude-sonnet-4-6'
 const ANALYST_MAX_TOKENS = 3000
+const EXTERNAL_RESEARCH_MODEL = 'claude-sonnet-4-6'
+const EXTERNAL_RESEARCH_MAX_TOKENS = 6000
+const EXTERNAL_RESEARCH_MAX_SEARCHES = 6
 
 // ─────────────────────────────────────────────────────────────────
 // Fetch
@@ -58,6 +76,12 @@ export async function fetchResearch(projectId: number): Promise<EditorialResearc
 // ─────────────────────────────────────────────────────────────────
 // Build / rebuild
 // ─────────────────────────────────────────────────────────────────
+//
+// Rebuild ALWAYS passes the prior pack into the recipe so that
+// manual sources, notes, research questions, and prior web-research
+// telemetry can be preserved. Every recipe is responsible for
+// honouring `options.previous`; the external_research recipe
+// already does so.
 
 export async function buildResearchForProject(projectId: number, opts: { rebuild?: boolean; force?: boolean; today?: string } = {}): Promise<{ row: EditorialResearchRow; pack: EvidencePack; recipe: string }> {
   const project = await fetchProject(projectId)
@@ -70,10 +94,32 @@ export async function buildResearchForProject(projectId: number, opts: { rebuild
     throw new Error('research already exists; call rebuild instead')
   }
 
-  const pack = await runResearchRecipe(
-    { id: project.id, title: project.title, angle: project.angle, articleType: project.article_type, targetPublishAt: project.target_publish_at },
-    { today: opts.today },
-  )
+  const projectRef = {
+    id: project.id, title: project.title, angle: project.angle,
+    articleType: project.article_type, targetPublishAt: project.target_publish_at,
+  }
+
+  // External + generic recipes benefit from editorialContext for the
+  // related-articles table + internal-link picking. Skip the fetch
+  // for the internal-data recipes to keep them fast.
+  const recipeId = chooseRecipe(projectRef)
+  const context = (recipeId === 'external_research' || recipeId === 'generic_fallback')
+    ? await safeBuildEditorialContext(opts.today)
+    : undefined
+
+  const previous = existing?.evidence_json ?? null
+
+  const rawPack = await runResearchRecipe(projectRef, {
+    today:    opts.today,
+    context,
+    previous,
+  })
+
+  // Cross-recipe preserve. Even the deterministic internal recipes
+  // must not delete manually-attached external sources or notes on
+  // rebuild — external editorial evidence can support an internal-
+  // data article too.
+  const pack = mergeManualEvidenceIntoRebuiltPack(rawPack, previous)
 
   const newStatus: ResearchStatus =
     pack.quality.status === 'blocked'       ? 'blocked'
@@ -95,11 +141,42 @@ export async function buildResearchForProject(projectId: number, opts: { rebuild
     ? await supa.from('editorial_research').update(upsertPayload).eq('project_id', projectId).select('*').single()
     : await supa.from('editorial_research').insert([{ ...upsertPayload, created_at: new Date().toISOString() }]).select('*').single()
   if (error) throw new Error(`buildResearch upsert: ${error.message}`)
-  return { row: data as any, pack, recipe: chooseRecipe({ id: project.id, title: project.title, angle: project.angle, articleType: project.article_type, targetPublishAt: project.target_publish_at }) }
+  return { row: data as any, pack, recipe: recipeId }
+}
+
+/** Cross-recipe safety net. If the newly-built pack doesn't already
+ *  carry the manual sources / notes / questions from the previous
+ *  pack, splice them in. External recipe already does this itself;
+ *  this covers the deterministic internal recipes for the case
+ *  where an admin attached an external source to a monthly report
+ *  and then rebuilt. */
+export function mergeManualEvidenceIntoRebuiltPack(next: EvidencePack, previous: EvidencePack | null): EvidencePack {
+  if (!previous) return next
+  const nextIds = new Set(next.externalSources.map(s => s.id))
+  const missingManualSources = (previous.externalSources ?? [])
+    .filter(s => (s.origin ?? 'manual') === 'manual')
+    .filter(s => !nextIds.has(s.id))
+  const missingNotes = (previous.notes ?? []).filter(n => !next.notes.some(x => x.id === n.id))
+  return {
+    ...next,
+    externalSources:  missingManualSources.length === 0 ? next.externalSources : [...next.externalSources, ...missingManualSources],
+    notes:            missingNotes.length === 0 ? next.notes : [...next.notes, ...missingNotes],
+    researchQuestions: next.researchQuestions ?? previous.researchQuestions,
+    webResearch:      next.webResearch ?? previous.webResearch,
+    contradictions:   next.contradictions ?? previous.contradictions,
+  }
+}
+
+async function safeBuildEditorialContext(_today?: string) {
+  try { return await buildEditorialContext() }
+  catch (e) {
+    console.warn('[research] buildEditorialContext failed, continuing without:', e instanceof Error ? e.message : 'unknown')
+    return undefined
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Analyze (AI Research Analyst)
+// Analyze (AI Research Analyst — internal-data packs)
 // ─────────────────────────────────────────────────────────────────
 
 export async function analyzeResearchForProject(projectId: number, adminEmail: string): Promise<{ row: EditorialResearchRow; analysis: ResearchAnalysis; styleRepairFired: boolean; usage: any }> {
@@ -176,6 +253,153 @@ export async function analyzeResearchForProject(projectId: number, adminEmail: s
 }
 
 // ─────────────────────────────────────────────────────────────────
+// External Research Fix — web research call
+// ─────────────────────────────────────────────────────────────────
+
+export type ResearchWebResult = {
+  row:            EditorialResearchRow
+  pack:           EvidencePack
+  discovered:     number
+  facts:          number
+  contradictions: number
+  cost:           WebResearchMeta
+}
+
+export async function researchWebForProject(projectId: number, adminEmail: string, opts: { maxSearches?: number } = {}): Promise<ResearchWebResult> {
+  const existing = await fetchResearch(projectId)
+  if (!existing || !existing.evidence_json) throw new Error('no evidence pack — build research first')
+  const pack = existing.evidence_json as EvidencePack
+  if (pack.recipe !== 'external_research') {
+    throw new Error(`research_web is only available for external_research packs (this pack is ${pack.recipe})`)
+  }
+
+  // Mark manual seeds so the prompt can list them and the pack can
+  // show which sources were used as seeds.
+  const seedSources = pack.externalSources
+    .filter(s => (s.origin ?? 'manual') === 'manual')
+    .map(s => ({
+      ...s,
+      sourceTier: s.sourceTier ?? classifySourceTier(s.url),
+      isSeed:     true,
+    }))
+
+  const userMessage = buildExternalResearchUserTurn({
+    project:         pack.project,
+    seedSources,
+    priorQuestions:  pack.researchQuestions ?? [],
+    priorNotes:      pack.notes ?? [],
+    today:           pack.dataAsOf,
+  })
+
+  const maxUses = Math.max(1, Math.min(12, opts.maxSearches ?? EXTERNAL_RESEARCH_MAX_SEARCHES))
+
+  const call = await callAnthropicAndLog({
+    feature:     'editorial_external_research',
+    model:       EXTERNAL_RESEARCH_MODEL,
+    system:      EXTERNAL_RESEARCH_SYSTEM_PROMPT,
+    messages:    [{ role: 'user', content: userMessage }],
+    max_tokens:  EXTERNAL_RESEARCH_MAX_TOKENS,
+    temperature: 0.2,
+    cacheSystem: true,
+    webSearch:   { max_uses: maxUses },
+    adminEmail,
+    sessionId:   `external-research-${projectId}-${Date.now()}`,
+  })
+  if (!call.ok) throw new Error(`external research call failed: ${call.error || 'unknown'}${call.detail ? ' - ' + call.detail : ''}`)
+
+  const parsed = parseExternalResearchResponse(call.text, {
+    knownManualSourceIds: seedSources.map(s => s.id),
+    citationsFromApi:     call.citations ?? [],
+    now:                  new Date().toISOString(),
+    adminEmail,
+  })
+
+  const packWithSeedTiers: EvidencePack = {
+    ...pack,
+    externalSources: pack.externalSources.map(s => (s.origin ?? 'manual') === 'manual'
+      ? { ...s, sourceTier: s.sourceTier ?? classifySourceTier(s.url) }
+      : s,
+    ),
+  }
+
+  const merged = mergeExternalResearchIntoPack(packWithSeedTiers, parsed)
+
+  const webMeta: WebResearchMeta = {
+    researchedAt: new Date().toISOString(),
+    searchesUsed: call.webSearch?.searchesUsed ?? 0,
+    costUsd:      call.cost_usd,
+    model:        call.model,
+    latencyMs:    call.latency_ms,
+  }
+
+  // Recompute quality from the enriched pack.
+  const nextManualSources = merged.externalSources.filter(s => (s.origin ?? 'manual') === 'manual')
+  const nextAllSources    = merged.externalSources
+  const quality = computeExternalQuality({
+    externalSources:  nextAllSources,
+    verifiedFacts:    merged.verifiedFacts,
+    hasWebResearch:   true,
+    today:            pack.dataAsOf,
+    webResearchedAt:  webMeta.researchedAt.slice(0, 10),
+  })
+
+  const nextPack: EvidencePack = {
+    ...merged,
+    webResearch: webMeta,
+    quality,
+    warnings: merged.warnings.filter(w => w.id !== 'ext-no-sources'),
+  }
+
+  const supa = getSupabaseServiceClient()
+  const newStatus: ResearchStatus = quality.status === 'blocked' ? 'blocked'
+    : quality.status === 'needs_review' ? 'review_required'
+    : 'gathering'
+  const { data, error } = await supa
+    .from('editorial_research')
+    .update({ evidence_json: nextPack, status: newStatus, updated_at: new Date().toISOString() })
+    .eq('project_id', projectId)
+    .select('*')
+    .single()
+  if (error) throw new Error(`research_web persist: ${error.message}`)
+
+  return {
+    row:            data as any,
+    pack:           nextPack,
+    discovered:     parsed.discoveredSources.length,
+    facts:          parsed.verifiedFacts.length,
+    contradictions: parsed.contradictions.length,
+    cost:           webMeta,
+  }
+}
+
+export async function clearDiscoveredSources(projectId: number): Promise<EditorialResearchRow> {
+  const existing = await fetchResearch(projectId)
+  if (!existing || !existing.evidence_json) throw new Error('no evidence pack')
+  const pack = existing.evidence_json as EvidencePack
+  const manualSources = pack.externalSources.filter(s => (s.origin ?? 'manual') === 'manual')
+  const manualIds = new Set(manualSources.map(s => s.id))
+  // Facts sourced purely by web are dropped.
+  const survivingFacts = pack.verifiedFacts.filter(f => {
+    if (f.evidenceRefs.length === 0) return true
+    return f.evidenceRefs.every(r => manualIds.has(r))
+  })
+  const nextPack: EvidencePack = {
+    ...pack,
+    externalSources: manualSources,
+    verifiedFacts:   survivingFacts,
+    contradictions:  [],
+    webResearch:     undefined,
+    quality:         computeExternalQuality({
+      externalSources: manualSources,
+      verifiedFacts:   survivingFacts,
+      hasWebResearch:  false,
+      today:           pack.dataAsOf,
+    }),
+  }
+  return persistPack(projectId, nextPack)
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Approve / revoke
 // ─────────────────────────────────────────────────────────────────
 
@@ -245,20 +469,36 @@ export async function addExternalSource(projectId: number, source: Omit<External
   const existing = await fetchResearch(projectId)
   if (!existing || !existing.evidence_json) throw new Error('no evidence pack; build first')
   const pack = existing.evidence_json as EvidencePack
+  const url = String(source.url ?? '').slice(0, 2000)
+  const title = String(source.title ?? '').slice(0, 500)
+  if (!url || !title) throw new Error('url and title are required')
   const added: ExternalSource = {
     id: `ext-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
     kind: 'external',
     addedAt: new Date().toISOString(),
     addedBy: adminEmail,
-    url:  String(source.url ?? '').slice(0, 2000),
-    title: String(source.title ?? '').slice(0, 500),
+    url,
+    title,
     publisher: source.publisher ? String(source.publisher).slice(0, 200) : undefined,
     publicationDate: source.publicationDate ? String(source.publicationDate).slice(0, 40) : undefined,
     note: source.note ? String(source.note).slice(0, 2000) : undefined,
     supportsFactId: source.supportsFactId ? String(source.supportsFactId).slice(0, 100) : undefined,
+    origin:     'manual',
+    sourceTier: source.sourceTier ?? classifySourceTier(url),
   }
-  if (!added.url || !added.title) throw new Error('url and title are required')
   const newPack: EvidencePack = { ...pack, externalSources: [...pack.externalSources, added] }
+  // If this is an external-research pack, recompute quality so a
+  // freshly-attached Tier-1 source can flip it publishable.
+  if (pack.recipe === 'external_research') {
+    newPack.quality = computeExternalQuality({
+      externalSources:  newPack.externalSources,
+      verifiedFacts:    newPack.verifiedFacts,
+      hasWebResearch:   !!newPack.webResearch,
+      today:            newPack.dataAsOf,
+      webResearchedAt:  newPack.webResearch?.researchedAt?.slice(0, 10),
+    })
+    newPack.warnings = newPack.warnings.filter(w => w.id !== 'ext-no-sources')
+  }
   return persistPack(projectId, newPack)
 }
 
@@ -267,6 +507,15 @@ export async function removeExternalSource(projectId: number, sourceId: string):
   if (!existing || !existing.evidence_json) throw new Error('no evidence pack')
   const pack = existing.evidence_json as EvidencePack
   const newPack: EvidencePack = { ...pack, externalSources: pack.externalSources.filter(s => s.id !== sourceId) }
+  if (pack.recipe === 'external_research') {
+    newPack.quality = computeExternalQuality({
+      externalSources:  newPack.externalSources,
+      verifiedFacts:    newPack.verifiedFacts,
+      hasWebResearch:   !!newPack.webResearch,
+      today:            newPack.dataAsOf,
+      webResearchedAt:  newPack.webResearch?.researchedAt?.slice(0, 10),
+    })
+  }
   return persistPack(projectId, newPack)
 }
 

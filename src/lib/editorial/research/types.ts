@@ -17,6 +17,7 @@
 export type ResearchRecipeId =
   | 'population_scarcity'
   | 'monthly_market_report'
+  | 'external_research'
   | 'generic_fallback'
 
 export type ResearchStatus =
@@ -72,6 +73,43 @@ export type EvidencePack = {
    *  the pack itself so the Research Room can add/remove them and
    *  the approval travels with the evidence. Rebuilds reset it. */
   approvedLargeMoverSlugs?: string[]
+
+  /** External Research Fix — a bounded list of article-specific
+   *  research questions the external Research Analyst answered (or
+   *  tried to). Persists across rebuilds so reviewers can re-run
+   *  discovery against a stable brief. */
+  researchQuestions?: string[]
+
+  /** External Research Fix — sourced positions that disagree on a
+   *  release-critical claim. The Writer must surface, not silently
+   *  pick, when this list is non-empty. */
+  contradictions?: ClaimContradiction[]
+
+  /** External Research Fix — telemetry from the last web-research
+   *  run. Powers the "Research checked X days ago" UI and the
+   *  preflight staleness warning. Undefined = never researched. */
+  webResearch?: WebResearchMeta
+}
+
+export type SourceTier = 1 | 2 | 3
+
+export type FactStatus = 'confirmed' | 'reported' | 'rumored' | 'unverified'
+
+export type WebResearchMeta = {
+  researchedAt: string
+  searchesUsed: number
+  costUsd:      number
+  model:        string
+  latencyMs?:   number
+}
+
+export type ClaimContradiction = {
+  id:        string
+  /** Human-readable claim under dispute, e.g. "Release date". */
+  claim:     string
+  /** Each disagreeing position with the source(s) that support it. */
+  positions: Array<{ statement: string; evidenceRefs: string[] }>
+  note?:     string
 }
 
 export type MarketSignalStrength = 'strong' | 'moderate' | 'weak'
@@ -130,6 +168,15 @@ export type VerifiedFact = {
   statement:     string
   evidenceRefs:  string[]  // ids into dataTables / internalSources / externalSources
   asOf?:         string
+  /** External Research Fix — quality signal on externally-sourced
+   *  facts. Missing on internal-data facts. */
+  sourceTier?:   SourceTier
+  /** External Research Fix — factual status. 'confirmed' when at
+   *  least one Tier-1 source or two independent Tier-2 sources
+   *  support it; 'reported' for single Tier-2 sourcing; 'rumored'
+   *  for community-tier claims; 'unverified' for anything the
+   *  Analyst could not corroborate. */
+  status?:       FactStatus
 }
 
 // A deterministic calculation from verified facts. Includes the
@@ -183,6 +230,19 @@ export type ExternalSource = {
   supportsFactId?:  string
   addedAt:          string
   addedBy?:         string
+  /** External Research Fix — 'manual' (human-attached, survives
+   *  rebuild) or 'web' (discovered by the web-research call, may be
+   *  replaced on a fresh discovery run). Missing = treat as manual
+   *  for back-compat with pre-fix rows. */
+  origin?:          'manual' | 'web'
+  /** External Research Fix — source-authority tier (1 authoritative,
+   *  2 specialist, 3 supporting). Set on discovered sources by the
+   *  external Analyst; set on manual sources by an optional editor
+   *  choice. */
+  sourceTier?:      SourceTier
+  /** External Research Fix — marked TRUE by the recipe when this
+   *  manual source was used as a seed for a web-research run. */
+  isSeed?:          boolean
 }
 
 export type InternalLink = {

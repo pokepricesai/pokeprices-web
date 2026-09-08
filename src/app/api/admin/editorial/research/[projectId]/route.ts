@@ -30,6 +30,7 @@ import {
   addExternalSource, removeExternalSource,
   addResearchNote, removeResearchNote,
   approveLargeMover, revokeLargeMover,
+  researchWebForProject, clearDiscoveredSources,
 } from '@/lib/editorial/research/serverActions'
 import { chooseRecipe } from '@/lib/editorial/research/dispatch'
 
@@ -138,6 +139,22 @@ export async function POST(req: Request, ctx: Ctx) {
         const noteId = strOrEmpty(body.noteId)
         if (!noteId) return bad(400, 'noteId required')
         const row = await removeResearchNote(projectId, noteId)
+        return NextResponse.json({ ok: true, research: row })
+      }
+      case 'research_web': {
+        const maxSearches = typeof body.maxSearches === 'number' ? body.maxSearches : undefined
+        const r = await researchWebForProject(projectId, admin.email, { maxSearches })
+        return NextResponse.json({
+          ok: true,
+          research: r.row,
+          discovered: r.discovered,
+          facts: r.facts,
+          contradictions: r.contradictions,
+          cost: r.cost,
+        })
+      }
+      case 'clear_discovered_sources': {
+        const row = await clearDiscoveredSources(projectId)
         return NextResponse.json({ ok: true, research: row })
       }
       case 'approve_large_mover': {
