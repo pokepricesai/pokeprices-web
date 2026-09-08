@@ -34,7 +34,7 @@
 
 import 'server-only'
 import { getSupabaseServiceClient } from '@/lib/supabaseService'
-import { fetchAllPages } from '../pageFetch'
+import { fetchAllPages, fetchInChunks } from '../pageFetch'
 import type {
   EvidencePack, VerifiedFact, DerivedFinding, DataTable, Warning,
   InternalSource, PackQuality, PackProjectRef, QuarantineEntry,
@@ -204,17 +204,22 @@ export async function runMonthlyMarketReportRecipe(
   // rows sit under Large moves requiring review in the Research
   // Room until the editor approves them.
 
-  // (A) product filter: fetch cards metadata for every slug in the aggregate sample.
+  // (A) product filter: fetch cards metadata for every slug in the
+  //     aggregate sample. Chunked because a real August run produces
+  //     ~30-40k slugs and a single .in() would push the PostgREST
+  //     query string past 8KB (414 Request-URI Too Large).
   const aggSlugs = aggregateSample.map(d => d.cardSlug)
   const aggSlugsBare = aggSlugs.map(s => s.replace(/^pc-/, ''))
-  const cardMeta = aggSlugsBare.length === 0
-    ? { rows: [] as any[], pagesFetched: 0, truncated: false }
-    : await fetchAllPages<any>(
-        () => supa.from('cards').select('card_slug, card_name, set_name, card_number, url_slug, is_sealed, language').in('card_slug', aggSlugsBare),
-        { hardMaxRows: 200_000 },
-      )
+  const cardMetaRows: any[] = aggSlugsBare.length === 0 ? [] : await fetchInChunks<any>(
+    aggSlugsBare,
+    (chunk) => supa
+      .from('cards')
+      .select('card_slug, card_name, set_name, card_number, url_slug, is_sealed, language')
+      .in('card_slug', chunk as string[]),
+    { chunkSize: 400, hardMaxRows: 200_000 },
+  )
   const cardBySlug = new Map<string, any>()
-  for (const c of cardMeta.rows) {
+  for (const c of cardMetaRows) {
     cardBySlug.set(String(c.card_slug), c)
     cardBySlug.set(`pc-${c.card_slug}`, c)
   }
@@ -332,6 +337,46 @@ export async function runMonthlyMarketReportRecipe(
   const reviewRisersRows = reviewRisers.map(enrichMover)
   const reviewFallersRows= reviewFallers.map(enrichMover)
 
+  // ── Editorial ranking (a separate shortlist, NOT a replacement) ──
+  //
+  // Percentage move is one input to editorial importance, not the
+  // whole rule. A 40% move in a $3 card with thin sales is usually
+  // less interesting than a 10% move in a $200 card with substantial
+  // activity. computeEditorialScore combines:
+  //   * value tier (log10(endUsd) × 10, capped at 30)
+  //   * observations tier (0.5 per obs, capped at 15)
+  //   * movement (|pct|, capped at 20 — reasonable moves reward, spikes don't get bonus)
+  //   * persistence bonus (up to 10 for a fully-persistent endpoint)
+  //   * recognisability nudge (up to 15 total for iconic Pokémon + iconic sets)
+  //
+  // Featured shortlist = high-confidence candidates that also pass
+  // a value + observation floor, ranked by editorial score. Raw pct
+  // rankings above stay in the pack for transparency.
+  const enrichedHighRisers  = highCandidates.filter(c => c.pct > 0).map(enrichMover)
+  const enrichedHighFallers = highCandidates.filter(c => c.pct < 0).map(enrichMover)
+  const featuredRisersRows  = buildFeaturedShortlist(enrichedHighRisers,  'risers')
+  const featuredFallersRows = buildFeaturedShortlist(enrichedHighFallers, 'fallers')
+
+  // Set-level editorial aggregation over the full high-confidence
+  // pool (both directions). Sets need >=3 mover members to qualify;
+  // top FEATURED_SET_LIMIT are surfaced. Ranked by aggregate value,
+  // count, and iconic-set nudge.
+  const enrichedAllHighMovers = highCandidates.map(enrichMover)
+  const featuredSetsRows = buildFeaturedSets(enrichedAllHighMovers)
+
+  if (featuredRisersRows.length < 3) {
+    warnings.push({ id: 'featured-risers-thin', severity: 'minor',
+      message: `Only ${featuredRisersRows.length} featured riser${featuredRisersRows.length === 1 ? '' : 's'} passed the editorial floor (value + observations + persistence). Article should be short or lean on aggregate / set-level context.` })
+  }
+  if (featuredFallersRows.length < 3) {
+    warnings.push({ id: 'featured-fallers-thin', severity: 'minor',
+      message: `Only ${featuredFallersRows.length} featured faller${featuredFallersRows.length === 1 ? '' : 's'} passed the editorial floor.` })
+  }
+  if (featuredSetsRows.length === 0) {
+    warnings.push({ id: 'featured-sets-thin', severity: 'minor',
+      message: `No set has enough featured-quality movers this month for a set-level story. Aggregate + individual cards only.` })
+  }
+
   // Quarantined rows (visible in Research Room, not usable by Writer)
   const quarantinedRows: QuarantineEntry[] = [...excludedExtreme, ...excludedPersist, ...excludedUnstable].slice(0, 60).map(d => {
     const en = enrichMover(d)
@@ -369,7 +414,7 @@ export async function runMonthlyMarketReportRecipe(
     { id: 'src-dp-start', kind: 'internal', label: `daily_prices near ${startDate}`, table: 'daily_prices', filters: `date IN (${startWindow.join(', ')})`, asOf: startDate, rowCount: startPages.length },
     { id: 'src-dp-end',   kind: 'internal', label: `daily_prices near ${endDate}`,   table: 'daily_prices', filters: `date IN (${endWindow.join(', ')})`,   asOf: endDate,   rowCount: endPages.length },
     { id: 'src-dp-persistence', kind: 'internal', label: `daily_prices persistence window`, table: 'daily_prices', filters: `date IN (${persistenceWindow.join(', ')})`, asOf: persistenceWindow[persistenceWindow.length - 1] ?? endDate, rowCount: persistencePages.length },
-    { id: 'src-cards-movers', kind: 'internal', label: 'cards — mover metadata', table: 'cards', filters: `card_slug IN (${aggSlugsBare.length} slugs)`, asOf: today, rowCount: cardMeta.rows.length },
+    { id: 'src-cards-movers', kind: 'internal', label: 'cards — mover metadata', table: 'cards', filters: `card_slug IN (${aggSlugsBare.length} slugs, chunked)`, asOf: today, rowCount: cardMetaRows.length },
   ]
 
   const moverTableColumns = [
@@ -387,7 +432,49 @@ export async function runMonthlyMarketReportRecipe(
     { key: 'persistenceDeviationPct', label: 'Post-window deviation %', align: 'right' as const },
   ]
 
+  const featuredMoverColumns = [
+    { key: 'cardName',       label: 'Card' },
+    { key: 'setName',        label: 'Set' },
+    { key: 'endUsd',         label: 'Current $',      align: 'right' as const },
+    { key: 'pct',            label: '% change',       align: 'right' as const },
+    { key: 'totalObs',       label: 'Obs (start+end)', align: 'right' as const },
+    { key: 'editorialScore', label: 'Editorial score', align: 'right' as const },
+    { key: 'reasons',        label: 'Why featured' },
+  ]
+
+  const featuredSetColumns = [
+    { key: 'setName',        label: 'Set' },
+    { key: 'moverCount',     label: 'Featured movers', align: 'right' as const },
+    { key: 'medianPct',      label: 'Median % change', align: 'right' as const },
+    { key: 'totalEndUsd',    label: 'Combined $',      align: 'right' as const },
+    { key: 'editorialScore', label: 'Editorial score', align: 'right' as const },
+  ]
+
   const dataTables: DataTable[] = [
+    // FEATURED tables come FIRST — this is the editorial shortlist
+    // the Writer should lead with. Raw pct-ranked tables follow for
+    // transparency but are not the primary editorial view.
+    {
+      id: `featured-risers-${year}-${String(month).padStart(2,'0')}`,
+      title: `Featured risers, ${monthLabel} (${featuredRisersRows.length} card${featuredRisersRows.length === 1 ? '' : 's'}) — editorial shortlist`,
+      source: `High-confidence pool ranked by editorial score (value + observations + movement + persistence + iconic-set/Pokémon nudge). Not raw % rank.`,
+      asOf: endDate, columns: featuredMoverColumns, rows: featuredRisersRows,
+      note: 'Prefer these over the raw-price risers table below when writing the article.',
+    },
+    {
+      id: `featured-fallers-${year}-${String(month).padStart(2,'0')}`,
+      title: `Featured fallers, ${monthLabel} (${featuredFallersRows.length} card${featuredFallersRows.length === 1 ? '' : 's'}) — editorial shortlist`,
+      source: `High-confidence pool ranked by editorial score. Not raw % rank.`,
+      asOf: endDate, columns: featuredMoverColumns, rows: featuredFallersRows,
+      note: 'Prefer these over the raw-price fallers table below when writing the article.',
+    },
+    {
+      id: `featured-sets-${year}-${String(month).padStart(2,'0')}`,
+      title: `Featured sets, ${monthLabel} (${featuredSetsRows.length} set${featuredSetsRows.length === 1 ? '' : 's'})`,
+      source: `Sets with >= ${FEATURED_SET_MIN_MEMBERS} high-confidence movers, ranked by combined value + count + iconic-set nudge.`,
+      asOf: endDate, columns: featuredSetColumns, rows: featuredSetsRows,
+      note: 'Use for set-level commentary. Sets without enough featured members are omitted rather than surfaced by raw % alone.',
+    },
     {
       id: `mover-risers-${year}-${String(month).padStart(2,'0')}`,
       title: `High-confidence raw-price risers, ${monthLabel} (${topRisersRows.length} card${topRisersRows.length === 1 ? '' : 's'})`,
@@ -647,6 +734,177 @@ function slugifySet(s: string): string { return String(s ?? '').trim().replace(/
 function fmtSignedPct(n: number | null): string { if (n == null) return 'n/a'; const s = n.toFixed(1); return `${n >= 0 ? '+' : ''}${s}%` }
 function medianOf(xs: number[]): number { if (xs.length === 0) return 0; const s = xs.slice().sort((a,b)=>a-b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m-1] + s[m]) / 2 }
 function percentile(xs: number[], p: number): number { if (xs.length === 0) return 0; const s = xs.slice().sort((a,b)=>a-b); const i = Math.min(s.length - 1, Math.max(0, Math.floor(p * s.length))); return s[i] }
+
+// ─────────────────────────────────────────────────────────────────
+// Editorial ranking — deterministic shortlist for the Writer
+// ─────────────────────────────────────────────────────────────────
+//
+// Signals actually available on the existing pack row:
+//   * endCents      — median endpoint value in cents (proxy for "cards worth talking about")
+//   * pct           — monthly % change
+//   * startObsCount + endObsCount — endpoint sample size (proxy for confidence + activity)
+//   * persistenceDeviation — how well the endpoint held up in the next few days
+//   * card_name, set_name — free-text card + set names (used for a small iconic-recognition nudge)
+//
+// Signals NOT used because they're not queryable here without new
+// SQL work: card_volume grades / sales counts (referenced by the
+// Opportunity Radar but require a separate join we don't want to
+// add mid-recipe), page-view telemetry (not in this DB).
+//
+// Featured-quality floors (soft): endUsd >= $10 AND totalObs >= 8.
+// Auto-relax to endUsd >= $5 AND totalObs >= 6 if fewer than 3
+// cards qualify. Keep fewer, better rows over lots of noise.
+
+const FEATURED_MIN_END_USD_STRICT   = 10
+const FEATURED_MIN_TOTAL_OBS_STRICT = 8
+const FEATURED_MIN_END_USD_RELAXED  = 5
+const FEATURED_MIN_TOTAL_OBS_RELAXED = 6
+const FEATURED_LIMIT                = 5
+const FEATURED_SET_LIMIT            = 5
+const FEATURED_SET_MIN_MEMBERS      = 3
+
+// Small curated recognisability list. Kept short + additive-only —
+// a $500 non-iconic card with 40 obs still tops a $12 iconic card.
+const ICONIC_POKEMON = new Set<string>([
+  'charizard', 'blastoise', 'venusaur', 'pikachu',
+  'mewtwo', 'mew', 'lugia', 'ho-oh', 'rayquaza',
+  'umbreon', 'espeon', 'sylveon', 'jolteon', 'vaporeon', 'flareon',
+  'gengar', 'lucario', 'greninja', 'garchomp', 'gyarados',
+  'eevee', 'snorlax', 'dragonite', 'gardevoir', 'metagross',
+])
+const ICONIC_SET_PATTERNS: RegExp[] = [
+  /\bbase set\b/i, /\bjungle\b/i, /\bfossil\b/i, /\bteam rocket\b/i,
+  /\bneo\b/i, /\bskyridge\b/i, /\baquapolis\b/i, /\bexpedition\b/i,
+  /\bevolving skies\b/i, /\bcrown zenith\b/i, /\bhidden fates\b/i, /\bshining fates\b/i,
+  /\bobsidian flames\b/i, /\bpaldea evolved\b/i,
+  /\bpokemon 151\b|\b151\b/i, /\bprismatic evolutions\b/i,
+  /\bsurging sparks\b/i, /\bpaldean fates\b/i, /\btwilight masquerade\b/i, /\bshrouded fable\b/i,
+]
+
+function iconicPokemonHit(cardName: string): boolean {
+  const n = cardName.toLowerCase()
+  for (const pkmn of Array.from(ICONIC_POKEMON)) if (n.includes(pkmn)) return true
+  return false
+}
+function iconicSetHit(setName: string): boolean {
+  for (const rx of ICONIC_SET_PATTERNS) if (rx.test(setName)) return true
+  return false
+}
+
+type EnrichedMover = ReturnType<typeof enrichMoverType>
+// Placeholder to align on the row shape enrichMover produces; used
+// only for the helper signatures below.
+function enrichMoverType() {
+  return {
+    cardSlug: '', cardName: '', cardNumber: '', setName: '', urlSlug: '' as string,
+    startUsd: 0, endUsd: 0, pct: 0, startObs: 0, endObs: 0,
+    startMinUsd: 0, startMaxUsd: 0, endMinUsd: 0, endMaxUsd: 0,
+    stability: null as number | null,
+    persistenceDeviationPct: null as number | null,
+    confidence: 'high' as 'high' | 'manual_review_required' | 'excluded',
+  }
+}
+
+function computeEditorialScore(m: EnrichedMover): { score: number; reasons: string[] } {
+  const reasons: string[] = []
+
+  // Value tier — log-scaled, max 30.
+  const valueScore = Math.min(30, Math.max(0, Math.log10(Math.max(1, m.endUsd)) * 10))
+  if (m.endUsd >= 100)      reasons.push(`$${m.endUsd.toFixed(0)} card`)
+  else if (m.endUsd >= 25)  reasons.push(`$${m.endUsd.toFixed(0)}`)
+
+  // Observations tier — 0.5 per obs, max 15.
+  const totalObs = m.startObs + m.endObs
+  const obsScore = Math.min(15, totalObs * 0.5)
+  if (totalObs >= 20)       reasons.push(`${totalObs} endpoint obs`)
+
+  // Movement — reward reasonable moves but cap so noisy spikes don't outrank editorial substance.
+  const absPct = Math.abs(m.pct)
+  const movementScore = Math.min(20, absPct)
+  if (absPct >= 20)         reasons.push(`${m.pct >= 0 ? '+' : ''}${m.pct.toFixed(0)}% move`)
+
+  // Persistence — full 10 if end-endpoint held; scales down with drift.
+  const persistPct = m.persistenceDeviationPct
+  const persistenceBonus =
+    persistPct == null ? 5                                        // unknown → neutral 5 pts
+    : Math.max(0, 10 * (1 - persistPct / 25))                     // 25% deviation = 0 pts
+  if (persistPct != null && persistPct <= 5) reasons.push('endpoint held')
+
+  // Recognisability nudge — additive only.
+  let recBonus = 0
+  if (iconicPokemonHit(m.cardName)) { recBonus += 8; reasons.push('iconic Pokémon') }
+  if (iconicSetHit(m.setName))      { recBonus += 7; reasons.push('recognisable set') }
+
+  return {
+    score: Math.round((valueScore + obsScore + movementScore + persistenceBonus + recBonus) * 10) / 10,
+    reasons,
+  }
+}
+
+function buildFeaturedShortlist(enriched: readonly EnrichedMover[], direction: 'risers' | 'fallers'): Array<Record<string, any>> {
+  const applyFloor = (minUsd: number, minObs: number) =>
+    enriched.filter(m => m.endUsd >= minUsd && (m.startObs + m.endObs) >= minObs)
+
+  // Try strict floor first. If <3 candidates, relax so we don't
+  // starve the article on tight months.
+  let candidates = applyFloor(FEATURED_MIN_END_USD_STRICT, FEATURED_MIN_TOTAL_OBS_STRICT)
+  let floorLabel = `>= $${FEATURED_MIN_END_USD_STRICT} + ${FEATURED_MIN_TOTAL_OBS_STRICT} obs`
+  if (candidates.length < 3) {
+    candidates = applyFloor(FEATURED_MIN_END_USD_RELAXED, FEATURED_MIN_TOTAL_OBS_RELAXED)
+    floorLabel = `>= $${FEATURED_MIN_END_USD_RELAXED} + ${FEATURED_MIN_TOTAL_OBS_RELAXED} obs (relaxed)`
+  }
+
+  const scored = candidates.map(m => {
+    const { score, reasons } = computeEditorialScore(m)
+    return { m, score, reasons }
+  })
+  scored.sort((a, b) => b.score - a.score)
+  return scored.slice(0, FEATURED_LIMIT).map(({ m, score, reasons }) => ({
+    cardName:       m.cardName,
+    cardNumber:     m.cardNumber,
+    setName:        m.setName,
+    endUsd:         m.endUsd,
+    startUsd:       m.startUsd,
+    pct:            m.pct,
+    totalObs:       m.startObs + m.endObs,
+    editorialScore: score,
+    reasons:        (reasons.length ? reasons : ['baseline editorial score']).join(', '),
+    // trail — carry the raw fields so downstream can rebuild if needed
+    cardSlug:       m.cardSlug,
+    urlSlug:        m.urlSlug,
+    _floor:         floorLabel,
+  }))
+}
+
+function buildFeaturedSets(enriched: readonly EnrichedMover[]): Array<Record<string, any>> {
+  type SetAgg = { setName: string; members: EnrichedMover[] }
+  const bySet = new Map<string, SetAgg>()
+  for (const m of enriched) {
+    const key = m.setName || '(unknown set)'
+    if (!bySet.has(key)) bySet.set(key, { setName: key, members: [] })
+    bySet.get(key)!.members.push(m)
+  }
+  const qualified = Array.from(bySet.values()).filter(s => s.members.length >= FEATURED_SET_MIN_MEMBERS)
+  const scored = qualified.map(s => {
+    const totalEndUsd = s.members.reduce((a, m) => a + m.endUsd, 0)
+    const pctList = s.members.map(m => m.pct).sort((a, b) => a - b)
+    const median = pctList.length % 2 ? pctList[Math.floor(pctList.length / 2)] : (pctList[pctList.length / 2 - 1] + pctList[pctList.length / 2]) / 2
+    // Set editorial score: log-scaled value + member count + iconic-set nudge.
+    const valueScore = Math.min(30, Math.max(0, Math.log10(Math.max(1, totalEndUsd)) * 10))
+    const countScore = Math.min(20, s.members.length * 2)
+    const recBonus   = iconicSetHit(s.setName) ? 10 : 0
+    const score      = Math.round((valueScore + countScore + recBonus) * 10) / 10
+    return {
+      setName:        s.setName,
+      moverCount:     s.members.length,
+      medianPct:      Math.round(median * 10) / 10,
+      totalEndUsd:    Math.round(totalEndUsd),
+      editorialScore: score,
+    }
+  })
+  scored.sort((a, b) => b.editorialScore - a.editorialScore)
+  return scored.slice(0, FEATURED_SET_LIMIT)
+}
 
 function computeQuality(inp: { cleanSize: number; warnings: Warning[]; dataAsOf: string; today: string; minIntersection: number }): PackQuality {
   const daysOld = daysBetween(inp.dataAsOf, inp.today)

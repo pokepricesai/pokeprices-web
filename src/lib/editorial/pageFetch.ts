@@ -27,6 +27,50 @@ import 'server-only'
 
 export type PagedResult<T> = { rows: T[]; pagesFetched: number; truncated: boolean }
 
+/** Batches large `.in()` filter calls into safe-sized URL requests.
+ *
+ *  PostgREST speaks over HTTP GET so a `.in('col', values)` with many
+ *  thousands of values produces a URL that exceeds the ~8KB frontend
+ *  limit — Supabase returns 414 Request-URI Too Large. This helper
+ *  splits `values` into chunks and concatenates the returned rows.
+ *
+ *  The caller supplies a factory that produces a Supabase query
+ *  builder for a single chunk — typically a builder that ends with
+ *  `.in(column, chunk)`. Each chunk runs through fetchAllPages so
+ *  large per-chunk row counts still page correctly. Chunks run
+ *  serially by default (safe for the PostgREST connection pool);
+ *  set `concurrent` > 1 for bounded parallelism when appropriate.
+ *
+ *  Chunk-size heuristic: at 500 items ~8 chars each we're roughly
+ *  4KB of query string per request — comfortably below 8KB even
+ *  with the rest of the URL. Tune down if columns are longer. */
+export async function fetchInChunks<T>(
+  values: readonly (string | number)[],
+  builderFactory: (chunk: readonly (string | number)[]) => any,
+  opts: { chunkSize?: number; concurrent?: number; pageSize?: number; hardMaxRows?: number } = {},
+): Promise<T[]> {
+  const chunkSize   = Math.max(1, opts.chunkSize   ?? 400)
+  const concurrent  = Math.max(1, opts.concurrent  ?? 1)
+  const uniqueVals  = Array.from(new Set(values))
+  if (uniqueVals.length === 0) return []
+
+  const chunks: Array<readonly (string | number)[]> = []
+  for (let i = 0; i < uniqueVals.length; i += chunkSize) chunks.push(uniqueVals.slice(i, i + chunkSize))
+
+  const out: T[] = []
+  for (let i = 0; i < chunks.length; i += concurrent) {
+    const batch = chunks.slice(i, i + concurrent)
+    const results = await Promise.all(
+      batch.map(chunk => fetchAllPages<T>(
+        () => builderFactory(chunk),
+        { pageSize: opts.pageSize, hardMaxRows: opts.hardMaxRows },
+      )),
+    )
+    for (const r of results) out.push(...r.rows)
+  }
+  return out
+}
+
 export async function fetchAllPages<T>(
   builderFactory: () => any,
   opts: { pageSize?: number; hardMaxRows?: number; maxPages?: number } = {},
