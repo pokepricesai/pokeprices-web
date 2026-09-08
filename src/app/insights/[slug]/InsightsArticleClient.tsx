@@ -1,5 +1,5 @@
 'use client'
-import { Fragment, useState, useEffect } from 'react'
+import React, { Fragment, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import ArticleSchema from '@/components/ArticleSchema'
@@ -12,6 +12,7 @@ import {
   isSafeArticleImageSrc,
   type ParagraphSegment,
 } from '@/lib/insights/richText'
+import { DataBlockRenderer } from '@/components/insights/DataBlockRenderer'
 
 const THEME_COLOURS: Record<string, string> = {
   grading:    '#a78bfa',
@@ -145,7 +146,11 @@ function ParagraphSegments({ segments }: { segments: ParagraphSegment[] }) {
   return (
     <>
       {segments.map((seg, i) => {
-        const inner = seg.bold ? <strong>{seg.text}</strong> : seg.text
+        // Block 7 — optional italic mark added additively so legacy
+        // segments (bold + href only) render unchanged.
+        let inner: React.ReactNode = seg.text
+        if ((seg as any).italic) inner = <em>{inner}</em>
+        if (seg.bold)             inner = <strong>{inner}</strong>
         if (seg.href && isSafeArticleHref(seg.href)) {
           if (isInternalArticleHref(seg.href)) {
             return (
@@ -173,11 +178,65 @@ function ParagraphSegments({ segments }: { segments: ParagraphSegment[] }) {
 function Block({ block }: { block: any }) {
   // ── New admin format (heading / paragraph / image) ──
   if (block.type === 'heading') {
+    // Block 7 — optional `level: 3` renders an H3. Missing level
+    // defaults to H2 so every existing article renders identically.
+    if (block.level === 3) {
+      return (
+        <h3 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 17, fontWeight: 800, color: 'var(--text)', margin: '24px 0 10px', lineHeight: 1.3 }}>
+          {block.text}
+        </h3>
+      )
+    }
     return (
       <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 20, fontWeight: 800, color: 'var(--text)', margin: '32px 0 12px', lineHeight: 1.3 }}>
         {block.text}
       </h2>
     )
+  }
+
+  // Block 7 — list. Not used by any legacy article, so purely additive.
+  if (block.type === 'list' && Array.isArray(block.items)) {
+    const tag = block.ordered ? 'ol' : 'ul'
+    const items = block.items as Array<any[]>
+    return React.createElement(tag,
+      { style: { fontSize: 15, lineHeight: 1.8, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", margin: '0 0 20px 20px', padding: 0 } as any },
+      items.map((segs, i) => (
+        <li key={i} style={{ marginBottom: 4 }}>
+          <ParagraphSegments segments={Array.isArray(segs) ? segs : []} />
+        </li>
+      )),
+    )
+  }
+
+  // Block 7 — blockquote.
+  if (block.type === 'quote') {
+    const segs = Array.isArray(block.content) ? block.content : []
+    return (
+      <blockquote style={{
+        margin: '20px 0 24px',
+        padding: '12px 18px',
+        borderLeft: '3px solid var(--primary)',
+        color: 'var(--text-muted)',
+        fontStyle: 'italic',
+        fontFamily: "'Figtree', sans-serif",
+        fontSize: 15,
+        lineHeight: 1.7,
+      }}>
+        <ParagraphSegments segments={segs} />
+      </blockquote>
+    )
+  }
+
+  // Block 7 — horizontal rule.
+  if (block.type === 'hr') {
+    return <hr style={{ border: 0, borderTop: '1px solid var(--border)', margin: '28px 0' }} />
+  }
+
+  // Block 8 — data blocks. Dispatch to the shared DataBlockRenderer.
+  // Legacy articles never emit `data_block` so this branch is
+  // completely additive.
+  if (block.type === 'data_block') {
+    return <DataBlockRenderer variant={block.variant} payload={block.payload} />
   }
 
   if (block.type === 'paragraph' || block.type === 'text') {

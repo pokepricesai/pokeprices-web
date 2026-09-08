@@ -343,6 +343,16 @@ export default function AdminDashboardClient({ recentSalesAvailable }: AdminDash
       <section style={sectionStyle} aria-labelledby="tools-heading">
         <h2 id="tools-heading" style={h2Style}>Admin tools</h2>
         <div style={toolGridStyle}>
+          {/* EIC Block 2 — Editorial HQ is the new front door for
+              editorial planning: idea backlog, this-week plan, release
+              watch. The existing Insights (Articles) editor remains
+              the place to write and publish. */}
+          <ToolCard
+            name="Editorial HQ"
+            purpose="Plan the two weekly articles, curate the idea backlog and watch upcoming Pokémon releases."
+            href="/admin/editorial"
+            primary="Open Editorial HQ"
+          />
           <ToolCard
             name="Insights (Articles)"
             purpose="Create, edit and publish Insights articles with rich text and images."

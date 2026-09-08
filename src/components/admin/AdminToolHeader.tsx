@@ -24,6 +24,11 @@ export type AdminToolHeaderProps = {
    *  false on `/admin` itself so the header doesn't loop back to
    *  its own page. */
   showAdminHome?: boolean
+  /** EIC Block 2 — optional cross-tool links rendered inline before
+   *  "Admin Home". Kept optional so existing tools stay visually
+   *  identical unless they opt in. Use for peer navigation between
+   *  related surfaces (e.g. Insights admin → Editorial HQ). */
+  extraLinks?: ReadonlyArray<{ href: string; label: string }>
 }
 
 const headerStyle: React.CSSProperties = {
@@ -65,11 +70,14 @@ const linkStyle: React.CSSProperties = {
   background: 'var(--card)',
 }
 
-export default function AdminToolHeader({ toolName, showAdminHome = true }: AdminToolHeaderProps) {
+export default function AdminToolHeader({ toolName, showAdminHome = true, extraLinks }: AdminToolHeaderProps) {
   return (
     <div style={headerStyle} data-admin-tool-header>
       <span style={toolPillStyle}>{toolName}</span>
       <div style={linkGroupStyle}>
+        {extraLinks?.map(({ href, label }) => (
+          <Link key={href} href={href} style={linkStyle}>{label}</Link>
+        ))}
         {showAdminHome && (
           <Link href="/admin" style={linkStyle}>Admin Home</Link>
         )}
