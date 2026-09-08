@@ -50,6 +50,8 @@ import {
   buildResearchAndWriteUserTurn,
   parseResearchAndWriteResponse,
   pickInternalLinkCandidates,
+  pickSetPageCandidates,
+  mergeInternalLinkCandidates,
 } from './researchAndWrite'
 import {
   CHECK_AND_FIX_SYSTEM_PROMPT,
@@ -600,18 +602,23 @@ function readScratchpad(rawText: string | undefined): Scratchpad {
 
 async function stageResearchAndWrite(writer: WriterMetadata, project: any, adminEmail: string, stageStartMs: number): Promise<WriterMetadata> {
   const today = new Date().toISOString().slice(0, 10)
-  // Best-effort — fetch existing published PokePrices insights and
-  // pick up to ~10 keyword-matched candidates the model may weave
-  // into the article as natural internal links. Failure is silent
-  // (zero candidates is a fine result per the prompt).
+  // Best-effort — fetch existing PokePrices editorial context and
+  // produce a small merged list of internal-link candidates the
+  // model may weave in. Two sources, both from infrastructure we
+  // already fetch:
+  //   * Insights: keyword-overlap-ranked published articles.
+  //   * Set pages: keyword-matched setName/altSetNames from the
+  //     release context, using each item's canonical
+  //     pokePricesSetUrl.
+  // No fallback to "most recent" — zero candidates is a fine
+  // result per the prompt.
+  const projectForRanking = { title: String(project.title), angle: project.angle ?? null, articleType: String(project.article_type) }
   let internalLinks: Array<{ title: string; url: string }> = []
   try {
     const ctx = await buildEditorialContext()
-    internalLinks = pickInternalLinkCandidates({
-      project:  { title: String(project.title), angle: project.angle ?? null, articleType: String(project.article_type) },
-      articles: ctx.articles,
-      limit:    10,
-    })
+    const articleCandidates = pickInternalLinkCandidates({ project: projectForRanking, articles: ctx.articles, limit: 10 })
+    const setCandidates     = pickSetPageCandidates({ project: projectForRanking, release: ctx.release, limit: 5 })
+    internalLinks = mergeInternalLinkCandidates(articleCandidates, setCandidates, 10)
   } catch (e) {
     console.warn('[writer_research_and_write] internal-link candidate fetch failed, continuing without:', e instanceof Error ? e.message : 'unknown')
   }

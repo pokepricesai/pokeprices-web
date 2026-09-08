@@ -12,6 +12,7 @@
 import { POKEPRICES_EDITORIAL_PROFILE } from '../strategistPrompt'
 import { stripCitationMarkup } from './sanitizeCitations'
 import type { EditorialContextArticle } from '../context'
+import type { ReleaseContext } from '../releaseContext'
 
 export const RESEARCH_AND_WRITE_ROLE_RULES = `You are the PokePrices AI Writer. Your job is to research and write ONE Pokémon collector article in a single pass.
 
@@ -131,14 +132,7 @@ export function pickInternalLinkCandidates(args: {
   const limit = args.limit ?? 10
   if (!args.articles || args.articles.length === 0) return []
   const projectTokens = tokenizeForInternalLinks(`${args.project.title} ${args.project.angle ?? ''} ${args.project.articleType}`)
-  if (projectTokens.size === 0) {
-    // Fall back to the most recently published articles (up to
-    // limit) — better than empty when we can't score.
-    return [...args.articles]
-      .sort((a, b) => String(b.publishedAt ?? '').localeCompare(String(a.publishedAt ?? '')))
-      .slice(0, limit)
-      .map(a => ({ title: a.headline, url: a.publicUrl }))
-  }
+  if (projectTokens.size === 0) return []
   const scored = args.articles.map(a => {
     const t = tokenizeForInternalLinks(`${a.headline} ${a.intro ?? ''} ${a.themeLabel ?? ''}`)
     let overlap = 0
@@ -147,9 +141,68 @@ export function pickInternalLinkCandidates(args: {
   })
   scored.sort((x, y) => (y.overlap - x.overlap) || y.published.localeCompare(x.published))
   return scored
-    .filter(s => s.overlap > 0)          // any overlap qualifies; zero-overlap articles omitted
+    .filter(s => s.overlap > 0)
     .slice(0, limit)
     .map(s => ({ title: s.a.headline, url: s.a.publicUrl }))
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Set-page candidates from ReleaseContext (existing infrastructure)
+// ─────────────────────────────────────────────────────────────────
+//
+// EditorialContext.release already carries recent + upcoming
+// ReleaseItems, each with a canonical `pokePricesSetUrl` where the
+// set is indexed on the site. Match the project title tokens
+// against setName + altSetNames and surface the URL. No new
+// tables, no new indexes, no new AI stage.
+
+export function pickSetPageCandidates(args: {
+  project: { title: string; angle: string | null; articleType: string }
+  release: ReleaseContext | undefined | null
+  limit?:  number
+}): Array<{ title: string; url: string }> {
+  const limit = args.limit ?? 5
+  const release = args.release
+  if (!release) return []
+  const items = [...release.recent, ...release.upcoming]
+  if (items.length === 0) return []
+  const projectTokens = tokenizeForInternalLinks(`${args.project.title} ${args.project.angle ?? ''} ${args.project.articleType}`)
+  if (projectTokens.size === 0) return []
+
+  const seen = new Set<string>()
+  const scored: Array<{ url: string; title: string; overlap: number }> = []
+  for (const it of items) {
+    if (!it.pokePricesSetUrl) continue
+    if (seen.has(it.pokePricesSetUrl)) continue
+    const names = [it.setName, ...(it.altSetNames ?? [])].filter(Boolean).join(' ')
+    const t = tokenizeForInternalLinks(names)
+    let overlap = 0
+    for (const tok of Array.from(projectTokens)) if (t.has(tok)) overlap += 1
+    if (overlap === 0) continue
+    seen.add(it.pokePricesSetUrl)
+    scored.push({ url: it.pokePricesSetUrl, title: it.setName, overlap })
+  }
+  scored.sort((x, y) => y.overlap - x.overlap)
+  return scored.slice(0, limit).map(s => ({ title: s.title, url: s.url }))
+}
+
+/** Combine Insights + set-page candidates, dedupe by URL, cap at
+ *  `limit`. Insights entries are prepended so they win on ties. */
+export function mergeInternalLinkCandidates(
+  primary:   ReadonlyArray<{ title: string; url: string }>,
+  secondary: ReadonlyArray<{ title: string; url: string }>,
+  limit:     number = 10,
+): Array<{ title: string; url: string }> {
+  const seen = new Set<string>()
+  const out: Array<{ title: string; url: string }> = []
+  for (const c of [...primary, ...secondary]) {
+    if (!c?.url) continue
+    if (seen.has(c.url)) continue
+    seen.add(c.url)
+    out.push(c)
+    if (out.length >= limit) break
+  }
+  return out
 }
 
 function tokenizeForInternalLinks(s: string): Set<string> {
