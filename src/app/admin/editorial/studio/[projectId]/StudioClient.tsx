@@ -762,27 +762,13 @@ function plainTextFromDoc(node: any): string {
   return node.content.map(plainTextFromDoc).join(' ')
 }
 
+// Studio image upload — sign + PUT + return the public URL. Shape
+// lives in src/lib/insights/uploadArticleImage.ts so the exact
+// request/response contract with the server route can be regression-
+// tested without pulling this whole client component into tests.
 async function uploadArticleImage(file: File, purpose: 'hero' | 'body' = 'body'): Promise<string> {
-  // The server validator (/api/admin/insights/upload) rejects
-  // requests that don't include purpose: 'hero' | 'body'. This call
-  // previously omitted the field entirely and every upload failed
-  // with `purpose must be "hero" or "body"`. Hero-image control
-  // must pass 'hero'; the TipTap in-body image insert defaults to
-  // 'body'.
-  const auth = await authHeader()
-  const filename = `studio-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]+/g, '_')}`
-  const signRes = await fetch('/api/admin/insights/upload', {
-    method: 'POST',
-    headers: { ...auth, 'content-type': 'application/json' },
-    body: JSON.stringify({ filename, contentType: file.type, sizeBytes: file.size, purpose }),
-  })
-  const signJson = await signRes.json().catch(() => ({}))
-  if (!signRes.ok || !signJson?.uploadUrl || !signJson?.publicUrl) {
-    throw new Error(signJson?.error || `${signRes.status} ${signRes.statusText}`)
-  }
-  const putRes = await fetch(signJson.uploadUrl, { method: 'PUT', headers: { 'content-type': file.type }, body: file })
-  if (!putRes.ok) throw new Error(`Storage upload failed: ${putRes.status}`)
-  return signJson.publicUrl as string
+  const { uploadArticleImage: uploadArticleImageImpl } = await import('@/lib/insights/uploadArticleImage')
+  return uploadArticleImageImpl(file, purpose, { authHeader })
 }
 
 // ─────────────────────────────────────────────────────────────────
