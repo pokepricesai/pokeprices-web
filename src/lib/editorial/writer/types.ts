@@ -132,6 +132,10 @@ export type GenerationStage =
   | 'writer_part1'    // pending: draft sections assignedTo=part1
   | 'writer_part2'    // pending: draft sections assignedTo=part2
   | 'writer_assemble' // pending: deterministic merge of plan + parts into one WriterDraft
+  // EIC — external_research uses a single simple path. One Sonnet
+  // call → tiny JSON → deterministic Markdown-to-TipTap. No plan,
+  // no parts, no evidence-ref bookkeeping.
+  | 'writer_external' // pending: single Sonnet call for external_research articles
   | 'style'           // pending: style guard + optional style repair + assemble + numeric audit
   | 'fact_check'      // pending: Fact Checker Claude call
   | 'repair'          // pending: Writer repair Claude call + reassemble + re-audit

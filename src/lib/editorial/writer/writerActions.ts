@@ -37,9 +37,19 @@ import {
   WRITER_PART_SYSTEM_PROMPT, buildWriterPartUserTurn, parseWriterPartResponse,
   assembleDraftFromPlanAndParts,
 } from './writerPrompt'
+// EIC — simplified external-research Writer path
+import {
+  EXTERNAL_WRITER_SYSTEM_PROMPT,
+  buildExternalArticleUserTurn,
+  parseExternalArticleResponse,
+  buildStudioDocFromExternalArticle,
+} from './externalWriter'
 import { assembleStudioFromDraft } from './assembler'
 import { auditStudioNumerics } from './numericAudit'
-import { FACT_CHECKER_SYSTEM_PROMPT, buildFactCheckerUserTurn, parseFactCheckerResponse } from './factCheckerPrompt'
+import {
+  FACT_CHECKER_SYSTEM_PROMPT, buildFactCheckerUserTurn, parseFactCheckerResponse,
+  EXTERNAL_FACT_CHECKER_SYSTEM_PROMPT, buildExternalFactCheckerUserTurn,
+} from './factCheckerPrompt'
 import { hashStudioBody } from './hash'
 import type {
   WriterDraft, WriterMetadata, WriterUsage, WriterClaimTrace, BlockIntent,
@@ -57,6 +67,10 @@ const CHECKER_MAX_TOKENS = 4000
 // the article.
 const WRITER_PLAN_MAX_TOKENS = 3000
 const WRITER_PART_MAX_TOKENS = 5000
+// External Writer — one Sonnet call producing ~700-1,200 words of
+// Markdown wrapped in a tiny JSON envelope. ~1,500-2,500 output
+// tokens comfortably lands in 30-45s.
+const WRITER_EXTERNAL_MAX_TOKENS = 4500
 
 // ─────────────────────────────────────────────────────────────────
 // Public entry points
@@ -101,15 +115,20 @@ export async function startGeneration(projectId: number, adminEmail: string, opt
     throw new Error('existing draft has meaningful content; call with overwriteExisting=true to replace')
   }
 
+  // EIC — external_research uses a single simple Sonnet call. The
+  // split-Writer machinery (plan → part1 → part2 → assemble) stays
+  // in place for internal-data articles where per-claim evidence
+  // bookkeeping is load-bearing.
+  const packRecipe = (research!.evidence_json as EvidencePack).recipe
+  const startingStage: GenerationStage = packRecipe === 'external_research' ? 'writer_external' : 'writer_plan'
+  const startingLabel = packRecipe === 'external_research' ? 'Writing article' : 'Planning article'
+
   const run: GenerationRun = {
     id:        `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    // Block 9C — new runs enter the split-Writer path directly. The
-    // legacy 'writer' stage remains callable for any in-flight run
-    // that started under the old machine.
-    stage:     'writer_plan',
-    stageLabel: 'Planning article',
+    stage:     startingStage,
+    stageLabel: startingLabel,
     usage:     emptyUsage(),
     styleRepairFired: false,
     repairFired: false,
@@ -166,12 +185,13 @@ export async function runNextStage(projectId: number, adminEmail: string): Promi
   const stageAtEntry = writer.currentRun.stage
   try {
     switch (writer.currentRun.stage) {
-      case 'queued':
-        // Block 9C — new runs land on writer_plan; the legacy
-        // 'writer' stage is reachable only via an in-flight run
-        // created under the old machine.
-        writer = advance(writer, 'writer_plan', 'Planning article', stageStartMs)
+      case 'queued': {
+        // External runs → writer_external. Internal → writer_plan.
+        const nextStage: GenerationStage = pack.recipe === 'external_research' ? 'writer_external' : 'writer_plan'
+        const nextLabel = pack.recipe === 'external_research' ? 'Writing article' : 'Planning article'
+        writer = advance(writer, nextStage, nextLabel, stageStartMs)
         break
+      }
       case 'writer':
         writer = await stageWriter(writer, project, pack, analysis, adminEmail, stageStartMs)
         break
@@ -186,6 +206,9 @@ export async function runNextStage(projectId: number, adminEmail: string): Promi
         break
       case 'writer_assemble':
         writer = stageWriterAssemble(writer, stageStartMs)
+        break
+      case 'writer_external':
+        writer = await stageWriterExternal(writer, project, pack, adminEmail, stageStartMs)
         break
       case 'style':
         writer = await stageStyleAndAssemble(writer, project, pack, adminEmail, stageStartMs)
@@ -499,6 +522,64 @@ function readScratchpad(rawText: string | undefined): Scratchpad {
   catch { return {} }
 }
 
+// ─────────────────────────────────────────────────────────────────
+// EIC — simplified external-research Writer path
+// ─────────────────────────────────────────────────────────────────
+//
+// ONE Sonnet call. Tiny JSON output. Deterministic Markdown-to-
+// TipTap conversion. If JSON extraction fails but usable prose was
+// returned, salvage it. No block intents / evidence traces / claim
+// traces / plan / parts. Skips the style-repair AI call and the
+// numeric audit (both were designed for internal-data articles).
+// After this stage, the run advances straight to fact_check.
+
+async function stageWriterExternal(writer: WriterMetadata, project: any, pack: EvidencePack, adminEmail: string, stageStartMs: number): Promise<WriterMetadata> {
+  const userTurn = buildExternalArticleUserTurn({
+    project: { id: Number(project.id), title: String(project.title), angle: project.angle ?? null, articleType: String(project.article_type) },
+    pack,
+  })
+
+  const call = await callAnthropicAndLog({
+    feature: 'editorial_writer_external',
+    model: WRITER_MODEL, system: EXTERNAL_WRITER_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: userTurn }],
+    max_tokens: WRITER_EXTERNAL_MAX_TOKENS, temperature: 0.55, cacheSystem: true,
+    adminEmail, sessionId: `writer-ext-${project.id}-${Date.now()}`,
+  })
+  if (!call.ok) throw new Error(`writer_external call failed: ${call.error || 'unknown'}`)
+
+  const parsed = parseExternalArticleResponse(call.text)
+  if (!parsed) throw new Error('writer_external produced no parsable article (even after salvage)')
+
+  const studio = buildStudioDocFromExternalArticle({ parsed, pack })
+
+  // Persist immediately so a browser refresh mid-flow sees the draft.
+  const supa = getSupabaseServiceClient()
+  await supa.from('editorial_projects').update({ studio_json: studio }).eq('id', project.id)
+
+  const usage = mergeCallUsage(writer.currentRun!.usage, call)
+  // Stash the raw response text on the run so the Fact Checker
+  // stage can consult it for verification if needed.
+  const run: GenerationRun = {
+    ...writer.currentRun!,
+    stage: 'fact_check', stageLabel: 'Checking facts',
+    rawWriterText: call.text,
+    usage, updatedAt: new Date().toISOString(),
+    stageTimings: { ...writer.currentRun!.stageTimings, writer_external: Date.now() - stageStartMs },
+  }
+  return {
+    ...writer,
+    // External articles do not carry per-claim evidence traces or
+    // block intents. Reset these arrays so the Fact Checker doesn't
+    // reference stale data from a prior generation.
+    claimTrace:       [],
+    blockIntents:     [],
+    assemblyWarnings: [],
+    generationCost:   usage,
+    currentRun:       run,
+  }
+}
+
 async function stageStyleAndAssemble(writer: WriterMetadata, project: any, pack: EvidencePack, adminEmail: string, stageStartMs: number): Promise<WriterMetadata> {
   const rawText = writer.currentRun!.rawWriterText
   if (!rawText) throw new Error('style stage: missing rawWriterText')
@@ -591,13 +672,25 @@ async function stageFactCheck(writer: WriterMetadata, projectId: number, pack: E
   const studio = ((pRow as any)?.studio_json ?? null) as StudioDocument | null
   if (!studio) throw new Error('fact_check stage: no studio_json to check')
 
-  const numericAudit = auditStudioNumerics(studio, pack, writer.blockIntents)
+  // EIC — external_research skips the numeric audit entirely. It
+  // was designed for internal-data articles where every price and
+  // count is provable line-by-line. For external SEO pieces it
+  // produced noise like "Unsupported 128. Did you mean 44?".
+  const isExternal = pack.recipe === 'external_research'
+  const numericAudit: NumericAuditResult = isExternal
+    ? { status: 'pass', checked: 0, matched: 0, issues: [] }
+    : auditStudioNumerics(studio, pack, writer.blockIntents)
   const usage = writer.currentRun!.usage
   const studioHash = hashStudioBody(studio.bodyDoc)
-  const factCheck  = await runFactChecker(pack, studio, writer.claimTrace, writer.blockIntents, numericAudit, {
-    checkedStudioHash: studioHash, autoCheck: true, adminEmail,
-    sessionId: `factcheck-${projectId}-${Date.now()}`, usage,
-  })
+  const factCheck  = isExternal
+    ? await runExternalFactChecker(pack, studio, {
+        checkedStudioHash: studioHash, autoCheck: true, adminEmail,
+        sessionId: `factcheck-ext-${projectId}-${Date.now()}`, usage,
+      })
+    : await runFactChecker(pack, studio, writer.claimTrace, writer.blockIntents, numericAudit, {
+        checkedStudioHash: studioHash, autoCheck: true, adminEmail,
+        sessionId: `factcheck-${projectId}-${Date.now()}`, usage,
+      })
 
   // Final Cleanup — do NOT automatically fire a Writer repair.
   // Studio surfaces the remaining issues + a "Fix with AI" button;
@@ -854,6 +947,81 @@ async function runFactChecker(
   }
   addCallUsage(opts.usage, call)
   return parseFactCheckerResponse(call.text, pack, numericAudit, { checkedStudioHash: opts.checkedStudioHash, autoCheck: opts.autoCheck })
+}
+
+// EIC — lightweight external-research Fact Checker call. Uses the
+// smaller EXTERNAL_FACT_CHECKER_SYSTEM_PROMPT and skips the
+// per-claim / numeric machinery. Caps returned issues at 5 as a
+// belt-and-braces guard against a chatty model.
+
+async function runExternalFactChecker(
+  pack: EvidencePack, studio: StudioDocument,
+  opts: { checkedStudioHash: string; autoCheck: boolean; adminEmail: string; sessionId: string; usage: WriterUsage },
+): Promise<FactCheckResult> {
+  const articleText = flattenStudioToPlainText(studio.bodyDoc)
+  const userTurn = buildExternalFactCheckerUserTurn({
+    articleText,
+    headline:       studio.headline,
+    seoTitle:       studio.seo.title,
+    seoDescription: studio.seo.description,
+    pack,
+  })
+  const call = await callAnthropicAndLog({
+    feature:  'editorial_writer_fact_check_external',
+    model:    WRITER_MODEL, system: EXTERNAL_FACT_CHECKER_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: userTurn }],
+    max_tokens: 2000, temperature: 0.15, cacheSystem: true,
+    adminEmail: opts.adminEmail, sessionId: opts.sessionId,
+  })
+  const empty: NumericAuditResult = { status: 'pass', checked: 0, matched: 0, issues: [] }
+  if (!call.ok) {
+    return {
+      version: 1, status: 'review_required', checkedAt: new Date().toISOString(),
+      packRecipe: pack.recipe,
+      issues: [{ kind: 'other', severity: 'major', claim: 'External Fact Checker call failed', reason: call.error ?? 'unknown', evidenceRefs: [] }],
+      numericAudit: empty, checkedStudioHash: opts.checkedStudioHash, autoCheck: opts.autoCheck,
+    }
+  }
+  addCallUsage(opts.usage, call)
+  const parsed = parseFactCheckerResponse(call.text, pack, empty, { checkedStudioHash: opts.checkedStudioHash, autoCheck: opts.autoCheck })
+  // Cap issue count at 5 for external — Fact Checker was told not
+  // to produce more, but we don't rely on that alone.
+  const rank = { critical: 0, major: 1, minor: 2 } as const
+  parsed.issues = parsed.issues.slice().sort((a, b) => rank[a.severity] - rank[b.severity]).slice(0, 5)
+  return parsed
+}
+
+/** Flatten a TipTap bodyDoc into readable plain text for the
+ *  Fact Checker. Preserves paragraph breaks + heading structure. */
+function flattenStudioToPlainText(bodyDoc: unknown): string {
+  const out: string[] = []
+  const walk = (node: any) => {
+    if (!node) return
+    if (node.type === 'heading') {
+      const text = collectText(node.content)
+      out.push('\n## ' + text + '\n')
+      return
+    }
+    if (node.type === 'paragraph') {
+      const text = collectText(node.content)
+      if (text.trim()) out.push(text)
+      return
+    }
+    if (node.type === 'bulletList' || node.type === 'orderedList') {
+      for (const li of node.content ?? []) {
+        const text = collectText(li.content?.[0]?.content ?? li.content ?? [])
+        if (text.trim()) out.push('- ' + text)
+      }
+      return
+    }
+    if (Array.isArray(node.content)) for (const c of node.content) walk(c)
+  }
+  walk(bodyDoc)
+  return out.join('\n\n')
+}
+function collectText(content: any[] | undefined): string {
+  if (!Array.isArray(content)) return ''
+  return content.map(c => (typeof c?.text === 'string' ? c.text : (Array.isArray(c?.content) ? collectText(c.content) : ''))).join('')
 }
 
 function buildCardIndex(pack: EvidencePack): Map<string, CardIdentity> {

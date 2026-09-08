@@ -36,7 +36,7 @@ type Props = {
 // split-Writer stages (plan / part1 / part2 / assemble) replace
 // the old single 'writer' step for new runs; the legacy 'writer'
 // slot stays reachable for in-flight runs from the previous machine.
-const STAGE_ORDER: GenerationStage[] = ['queued', 'writer', 'writer_plan', 'writer_part1', 'writer_part2', 'writer_assemble', 'style', 'fact_check', 'repair', 'finalize', 'complete']
+const STAGE_ORDER: GenerationStage[] = ['queued', 'writer', 'writer_plan', 'writer_part1', 'writer_part2', 'writer_assemble', 'writer_external', 'style', 'fact_check', 'repair', 'finalize', 'complete']
 const STAGE_LABELS: Record<GenerationStage, string> = {
   queued:          'Preparing',
   writer:          'Writing draft',
@@ -44,6 +44,7 @@ const STAGE_LABELS: Record<GenerationStage, string> = {
   writer_part1:    'Drafting part 1 of 2',
   writer_part2:    'Drafting part 2 of 2',
   writer_assemble: 'Assembling draft',
+  writer_external: 'Writing article',
   style:           'Applying house style',
   fact_check:      'Checking facts',
   repair:          'Repairing draft',

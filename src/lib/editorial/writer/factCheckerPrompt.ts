@@ -95,6 +95,113 @@ export const FACT_CHECKER_SYSTEM_PROMPT = `${POKEPRICES_EDITORIAL_PROFILE}
 ${FACT_CHECKER_ROLE_RULES}`
 
 // ─────────────────────────────────────────────────────────────────
+// EIC — lightweight external-research Fact Checker
+// ─────────────────────────────────────────────────────────────────
+//
+// External SEO / collector pieces are not regulatory reports. The
+// full Fact Checker (with per-claim provenance, numeric audits, and
+// 30+ low-value findings) is designed for internal-data articles.
+// For external, we care about meaningful problems only.
+
+export const EXTERNAL_FACT_CHECKER_ROLE_RULES = `You are the PokePrices Fact Checker for an external Pokémon collector article. Your job is to catch MEANINGFUL problems, not to run a forensic audit.
+
+INPUT
+
+You receive:
+  * The article body as plain text.
+  * A short research summary (the factual source the Writer used).
+  * A list of external sources (URL + title + publisher).
+  * Optional: contradictions the research explicitly flagged.
+
+WHAT TO FLAG
+
+Only these categories count:
+  * unsupported_factual_claim: an article claim that is NOT supported anywhere in the research summary or the source list. Invented dates, invented card counts, invented product names, invented publishers.
+  * external_source_misused: the research flags a claim as reported/rumored/unconfirmed and the article states it as confirmed news.
+  * rejected_claim_detected: rumor or leak presented as fact.
+  * inconsistent_with_evidence: article contradicts the research summary or ignores a flagged contradiction.
+  * missing_required_caveat: article makes a strong claim on something the research explicitly says is not yet confirmed, without qualifying it.
+
+WHAT NOT TO FLAG
+
+Do NOT flag:
+  * every sentence for lack of a matching evidence id (this article does not carry claim traces).
+  * ordinary numbers that are present in the research summary. Do not run a numeric allowlist audit.
+  * minor phrasing preferences.
+  * editorial interpretation that is clearly framed as opinion.
+  * SEO word choices.
+  * absence of a "methodology" or "sources" section.
+  * paraphrase differences from the research summary.
+
+BUDGET
+
+Aim for PASS. If real issues exist, list at most 5. If more than 5 would qualify, list the 5 highest-severity ones. Do not pad the list.
+
+OUTPUT
+
+Reply with ONE JSON object wrapped in a fenced code block tagged \`json\`:
+
+  {
+    "status": "pass" | "review_required" | "fail",
+    "issues": [
+      {
+        "kind": "unsupported_factual_claim" | "external_source_misused" | "rejected_claim_detected" | "inconsistent_with_evidence" | "missing_required_caveat" | "other",
+        "severity": "critical" | "major" | "minor",
+        "claim": string,
+        "location"?: string,
+        "reason": string,
+        "evidenceRefs": string[],
+        "suggestedCorrection"?: string
+      }
+    ]
+  }
+
+Status guidance: PASS when no meaningful issues. REVIEW_REQUIRED for 1-5 issues that should be resolved before publish. FAIL only for genuinely broken output (invented sources, invented publishers, rumor stated as confirmed news on a critical claim).`
+
+export const EXTERNAL_FACT_CHECKER_SYSTEM_PROMPT = `${POKEPRICES_EDITORIAL_PROFILE}
+
+${EXTERNAL_FACT_CHECKER_ROLE_RULES}`
+
+export function buildExternalFactCheckerUserTurn(args: {
+  articleText:     string
+  headline:        string
+  seoTitle:        string
+  seoDescription:  string
+  pack:            EvidencePack
+}): string {
+  const summary = (args.pack.researchSummary && args.pack.researchSummary.trim())
+    || [args.pack.externalResearchRun?.primaryText, args.pack.externalResearchRun?.supportingText].filter(Boolean).join('\n\n')
+  const cappedSummary = summary.length > 8_000 ? summary.slice(0, 8_000) + '\n\n[…truncated]' : summary
+  const topSources = [...args.pack.externalSources]
+    .sort((a, b) => ((a.sourceTier ?? 3) - (b.sourceTier ?? 3)))
+    .slice(0, 20)
+    .map(s => ({ url: s.url, title: s.title, publisher: s.publisher }))
+  const contradictions = (args.pack.contradictions ?? []).slice(0, 3).map(c => ({ on: c.claim, positions: c.positions.map(p => p.statement) }))
+
+  return [
+    'MODE=external_fact_check',
+    '',
+    'Fact-check the article against the research summary + sources below. Return one JSON object matching the schema.',
+    '',
+    '=== ARTICLE ===',
+    `HEADLINE: ${args.headline}`,
+    `SEO TITLE: ${args.seoTitle}`,
+    `SEO DESCRIPTION: ${args.seoDescription}`,
+    '',
+    args.articleText,
+    '',
+    '=== RESEARCH SUMMARY ===',
+    cappedSummary || '(no summary — flag any unsourced factual claim as unsupported)',
+    '',
+    '=== SOURCES ===',
+    '```json',
+    JSON.stringify(topSources, null, 2),
+    '```',
+    contradictions.length > 0 ? '\n=== CONTRADICTIONS ===\n```json\n' + JSON.stringify(contradictions, null, 2) + '\n```' : '',
+  ].filter(Boolean).join('\n')
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Input compaction
 // ─────────────────────────────────────────────────────────────────
 
