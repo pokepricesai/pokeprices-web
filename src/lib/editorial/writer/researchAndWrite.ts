@@ -10,6 +10,7 @@
 // ONE Sonnet call using the web_search tool.
 
 import { POKEPRICES_EDITORIAL_PROFILE } from '../strategistPrompt'
+import { stripCitationMarkup } from './sanitizeCitations'
 
 export const RESEARCH_AND_WRITE_ROLE_RULES = `You are the PokePrices AI Writer. Your job is to research and write ONE Pokémon collector article in a single pass.
 
@@ -38,6 +39,7 @@ VOICE
 FACTUAL DISCIPLINE
 
   * Use only facts you actually verified via web_search. Do not invent dates, prices, card counts, product names, or sources.
+  * Do NOT include <cite>, citation-index, tool-citation, or source-reference markup in the article body. Use normal Markdown links only when useful. Any such markup will be stripped downstream anyway.
   * Confirmed claims (backed by an official source you searched) can be stated directly.
   * Reported claims (single specialist source) use natural attributive phrasing: "TCGplayer reports…", "PokéBeach is saying…".
   * Rumor / leak / unconfirmed information MUST be clearly labelled: "Community leaks suggest…", "Not yet confirmed by Pokémon…".
@@ -152,10 +154,14 @@ export function parseResearchAndWriteResponse(rawText: string): ResearchAndWrite
 }
 
 function fromParsed(parsed: any, salvaged: boolean): ResearchAndWriteArticle {
-  const title           = clip(str(parsed.title ?? parsed.headline), 300)
-  const metaTitle       = clip(str(parsed.metaTitle ?? parsed.seoTitle ?? title), 200)
-  const metaDescription = clip(str(parsed.metaDescription ?? parsed.seoDescription), 400)
-  const bodyMarkdown    = clip(str(parsed.bodyMarkdown ?? parsed.body ?? parsed.markdown), 40_000)
+  // Deterministic sanitizer removes any web-search citation markup
+  // the model emitted (e.g. `(cite index="21-14">text</cite>`) so
+  // it never reaches Studio or the published article. Prompt
+  // guidance discourages it, but compliance is not guaranteed.
+  const title           = clip(stripCitationMarkup(str(parsed.title ?? parsed.headline)), 300)
+  const metaTitle       = clip(stripCitationMarkup(str(parsed.metaTitle ?? parsed.seoTitle ?? title)), 200)
+  const metaDescription = clip(stripCitationMarkup(str(parsed.metaDescription ?? parsed.seoDescription)), 400)
+  const bodyMarkdown    = clip(stripCitationMarkup(str(parsed.bodyMarkdown ?? parsed.body ?? parsed.markdown)), 40_000)
   const sources         = normaliseSources(parsed.sources ?? parsed.references)
   return { title, metaTitle, metaDescription, bodyMarkdown, sources, salvaged }
 }
@@ -197,7 +203,8 @@ function salvageMarkdown(rawText: string): ResearchAndWriteArticle | null {
     else                     { title = ln.replace(/^#+\s*/, '').slice(0, 300); bodyStart = i + (ln.startsWith('#') ? 1 : 0) }
     break
   }
-  const bodyMarkdown = lines.slice(bodyStart).join('\n').trim()
+  const rawBody = lines.slice(bodyStart).join('\n').trim()
+  const bodyMarkdown = stripCitationMarkup(rawBody)
   if (bodyMarkdown.length < 100) return null
 
   const firstPara = bodyMarkdown.split(/\n\s*\n/, 1)[0] ?? ''
@@ -218,9 +225,10 @@ function salvageMarkdown(rawText: string): ResearchAndWriteArticle | null {
     if (urls.length >= 30) break
   }
 
+  const cleanTitle = stripCitationMarkup(title)
   return {
-    title:           title || 'Untitled article',
-    metaTitle:       (title || 'Untitled article').slice(0, 60),
+    title:           cleanTitle || 'Untitled article',
+    metaTitle:       (cleanTitle || 'Untitled article').slice(0, 60),
     metaDescription,
     bodyMarkdown,
     sources:         urls.map(url => ({ url })),

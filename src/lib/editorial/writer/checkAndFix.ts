@@ -10,6 +10,7 @@
 // Store only a short internal correctionsSummary.
 
 import { POKEPRICES_EDITORIAL_PROFILE } from '../strategistPrompt'
+import { stripCitationMarkup } from './sanitizeCitations'
 
 export const CHECK_AND_FIX_ROLE_RULES = `You are the PokePrices Fact Checker. You are handed an article that has already been drafted from live web research. Your job is to catch and DIRECTLY FIX meaningful factual risks — not to produce an issue list.
 
@@ -39,6 +40,8 @@ Do NOT:
   * Change the SEO title or meta description unless they contain a factual error.
 
 If no meaningful problems exist, return the article UNCHANGED and set correctionsSummary to "No changes needed."
+
+Do NOT include <cite>, citation-index, tool-citation, or source-reference markup in the returned article body. Use normal Markdown links only when useful. Any such markup will be stripped downstream anyway.
 
 OUTPUT FORMAT
 
@@ -138,11 +141,14 @@ export function parseCheckAndFixResponse(rawText: string): CheckedArticle | null
 }
 
 function fromParsed(parsed: any, salvaged: boolean): CheckedArticle {
+  // Deterministic sanitizer — if the checker reintroduced web-search
+  // citation markup (e.g. `(cite index="21-14">text</cite>`) while
+  // rewriting, strip it before it can reach Studio.
   return {
-    title:              clip(str(parsed.title ?? parsed.headline), 300),
-    metaTitle:          clip(str(parsed.metaTitle ?? parsed.seoTitle), 200),
-    metaDescription:    clip(str(parsed.metaDescription ?? parsed.seoDescription), 400),
-    bodyMarkdown:       clip(str(parsed.bodyMarkdown ?? parsed.body ?? parsed.markdown), 40_000),
+    title:              clip(stripCitationMarkup(str(parsed.title ?? parsed.headline)), 300),
+    metaTitle:          clip(stripCitationMarkup(str(parsed.metaTitle ?? parsed.seoTitle)), 200),
+    metaDescription:    clip(stripCitationMarkup(str(parsed.metaDescription ?? parsed.seoDescription)), 400),
+    bodyMarkdown:       clip(stripCitationMarkup(str(parsed.bodyMarkdown ?? parsed.body ?? parsed.markdown)), 40_000),
     sources:            normaliseSources(parsed.sources ?? parsed.references),
     correctionsSummary: clip(str(parsed.correctionsSummary ?? parsed.summary ?? ''), 2000) || 'No changes needed.',
     salvaged,
@@ -182,12 +188,14 @@ function salvageMarkdown(rawText: string): CheckedArticle | null {
     else                     { title = ln.replace(/^#+\s*/, '').slice(0, 300); bodyStart = i + (ln.startsWith('#') ? 1 : 0) }
     break
   }
-  const bodyMarkdown = lines.slice(bodyStart).join('\n').trim()
+  const rawBody = lines.slice(bodyStart).join('\n').trim()
+  const bodyMarkdown = stripCitationMarkup(rawBody)
   if (bodyMarkdown.length < 100) return null
   const firstPara = bodyMarkdown.split(/\n\s*\n/, 1)[0] ?? ''
+  const cleanTitle = stripCitationMarkup(title)
   return {
-    title:              title || 'Untitled article',
-    metaTitle:          (title || 'Untitled article').slice(0, 60),
+    title:              cleanTitle || 'Untitled article',
+    metaTitle:          (cleanTitle || 'Untitled article').slice(0, 60),
     metaDescription:    firstPara.replace(/[#*_`>]/g, '').slice(0, 160).trim(),
     bodyMarkdown,
     sources:            [],
