@@ -43,15 +43,44 @@ import type {
 import { CENTS_PER_USD, daysBetween } from './qualityChecks'
 
 const MIN_ROWS_PER_ENDPOINT       = 30_000
-const MIN_INTERSECTION            = 15_000     // slightly lower because we require 2+ obs at each end
+const MIN_INTERSECTION            = 15_000
 const TOP_MOVER_MIN_START_CENTS   = 500        // $5
 const TOP_MOVER_LIMIT             = 10
-const NEAR_ENDPOINT_WINDOW_DAYS   = 2          // ± days around the calendar endpoint
-const MIN_ENDPOINT_OBSERVATIONS   = 2          // require at least 2 valid obs at each end
-const ENDPOINT_STABILITY_RATIO    = 3.0        // max/min ratio inside the endpoint window
-const EDITORIAL_MAX_POSITIVE_PCT  = 200        // above this -> excluded
-const EDITORIAL_MAX_NEGATIVE_PCT  = -60        // below this -> excluded
-const HIGH_CONFIDENCE_ABS_PCT     = 100        // |pct| < 100 -> can be high-confidence
+const NEAR_ENDPOINT_WINDOW_DAYS   = 2
+
+// ── AGGREGATE sample thresholds (broad, for median / IQR / breadth) ──
+const AGGREGATE_MIN_ENDPOINT_OBS  = 2          // 2 obs each side is plenty for aggregates
+const AGGREGATE_STABILITY_RATIO   = 3.0        // loose — aggregates absorb noise
+
+// ── MOVER CANDIDATE thresholds (much stricter) ──
+// Distribution audit against real Aug-2026 endpoints:
+//   worst_ratio < 1.10 catches 81% of pairs
+//   worst_ratio < 1.20 catches 89%
+//   worst_ratio < 1.30 catches 93%
+// 1.30 is a defensible compromise: it removes the twitchiest 7% of
+// cards without shrinking the candidate pool below the point where
+// a decent article can be written.
+const MOVER_MIN_ENDPOINT_OBS      = 3          // strict: full 3 snapshots at each end
+const MOVER_STABILITY_RATIO       = 1.30       // strict: endpoint observations tightly grouped
+const MOVER_MIN_START_CENTS       = 500        // $5 minimum start price
+
+// ── Two-tier editorial confidence ──
+// Anything outside the auto band goes to manual_review_required so a
+// human can decide before it enters an article. Everything outside
+// the outer band is excluded entirely.
+const AUTO_PUBLISH_MAX_POSITIVE_PCT = 75       // > 75% up -> manual_review_required
+const AUTO_PUBLISH_MAX_NEGATIVE_PCT = -40      // < -40% down -> manual_review_required
+const REVIEW_MAX_POSITIVE_PCT       = 200      // > 200% up -> excluded
+const REVIEW_MAX_NEGATIVE_PCT       = -60      // < -60% down -> excluded
+
+// ── Persistence check (post-endpoint sanity) ──
+// A dramatic endpoint value must not immediately snap back. Compare
+// the end-endpoint median against the median of the next 3 full
+// snapshots; if they disagree by more than 25%, the endpoint was a
+// spike, not a trend.
+const PERSISTENCE_WINDOW_MIN_DAYS = 2          // start looking >= 2 days after the calendar endpoint
+const PERSISTENCE_WINDOW_MAX_DAYS = 8          // stop 8 days after
+const PERSISTENCE_MAX_DEVIATION   = 0.25       // 25% max deviation of post-median vs end-median
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
@@ -75,16 +104,16 @@ export async function runMonthlyMarketReportRecipe(
 
   const warnings: Warning[] = []
 
-  // ── Step 1: pick 3 full-catalogue days near each endpoint ──
+  // ── Step 1: pick full-catalogue days near each endpoint ──
   const startWindow = await pickEndpointDays(supa, startDate)
   const endWindow   = await pickEndpointDays(supa, endDate)
-  if (startWindow.length < MIN_ENDPOINT_OBSERVATIONS) {
+  if (startWindow.length < AGGREGATE_MIN_ENDPOINT_OBS) {
     warnings.push({ id: 'endpoint-start-thin', severity: 'critical',
-      message: `Only ${startWindow.length} full-catalogue snapshot(s) within ±${NEAR_ENDPOINT_WINDOW_DAYS} days of ${startDate}. Robust start endpoint needs ${MIN_ENDPOINT_OBSERVATIONS}+.` })
+      message: `Only ${startWindow.length} full-catalogue snapshot(s) within ±${NEAR_ENDPOINT_WINDOW_DAYS} days of ${startDate}. Robust start endpoint needs ${AGGREGATE_MIN_ENDPOINT_OBS}+.` })
   }
-  if (endWindow.length < MIN_ENDPOINT_OBSERVATIONS) {
+  if (endWindow.length < AGGREGATE_MIN_ENDPOINT_OBS) {
     warnings.push({ id: 'endpoint-end-thin', severity: 'critical',
-      message: `Only ${endWindow.length} full-catalogue snapshot(s) within ±${NEAR_ENDPOINT_WINDOW_DAYS} days of ${endDate}. Robust end endpoint needs ${MIN_ENDPOINT_OBSERVATIONS}+.` })
+      message: `Only ${endWindow.length} full-catalogue snapshot(s) within ±${NEAR_ENDPOINT_WINDOW_DAYS} days of ${endDate}. Robust end endpoint needs ${AGGREGATE_MIN_ENDPOINT_OBS}+.` })
   }
 
   // ── Step 2: fetch every card observation across the two windows ──
@@ -92,15 +121,11 @@ export async function runMonthlyMarketReportRecipe(
     fetchDaysPaged(supa, startWindow),
     fetchDaysPaged(supa, endWindow),
   ])
-
-  // Group by slug and compute robust endpoint values (median of
-  // valid positive raw_usd observations).
-  const startRobust = groupToRobustEndpoint(startPages)
-  const endRobust   = groupToRobustEndpoint(endPages)
+  const startRobust = groupToRobustEndpoint(startPages, AGGREGATE_STABILITY_RATIO)
+  const endRobust   = groupToRobustEndpoint(endPages,   AGGREGATE_STABILITY_RATIO)
 
   const startOnly: string[] = []
   const endOnly:   string[] = []
-  const unstable:  string[] = []
 
   type MonthlyDelta = {
     cardSlug:      string
@@ -108,12 +133,9 @@ export async function runMonthlyMarketReportRecipe(
     endCents:      number
     startObsCount: number
     endObsCount:   number
-    startStable:   boolean
-    endStable:     boolean
+    startMin: number; startMax: number
+    endMin:   number; endMax:   number
     pct:           number
-    absChangeCents: number
-    editorialConfidence: 'high' | 'medium' | 'excluded'
-    exclusionReason?: 'extreme_move' | 'unstable_endpoint' | 'below_min_price' | 'insufficient_obs'
   }
 
   const deltas: MonthlyDelta[] = []
@@ -124,106 +146,199 @@ export async function runMonthlyMarketReportRecipe(
     if (!s && !e) continue
     if (s && !e) { startOnly.push(slug); continue }
     if (!s && e) { endOnly.push(slug);   continue }
-    // Require enough observations on both sides.
-    if (s!.count < MIN_ENDPOINT_OBSERVATIONS || e!.count < MIN_ENDPOINT_OBSERVATIONS) {
-      // Not editorially trustworthy — mark as excluded so it can
-      // show up under Quarantined Data for reviewer eyes.
-      deltas.push({
-        cardSlug: slug,
-        startCents: s!.median, endCents: e!.median,
-        startObsCount: s!.count, endObsCount: e!.count,
-        startStable: s!.stable, endStable: e!.stable,
-        pct: safePct(s!.median, e!.median),
-        absChangeCents: e!.median - s!.median,
-        editorialConfidence: 'excluded',
-        exclusionReason: 'insufficient_obs',
-      })
-      continue
-    }
-    const stable = s!.stable && e!.stable
-    if (!stable) unstable.push(slug)
-    const pct = safePct(s!.median, e!.median)
-    const abs = e!.median - s!.median
-    const conf = classifyEditorialConfidence({ pct, stable })
+    if (s!.count < AGGREGATE_MIN_ENDPOINT_OBS || e!.count < AGGREGATE_MIN_ENDPOINT_OBS) continue
+    // AGGREGATE sample stability: loose 3× rule. This is only used
+    // for median / IQR / breadth counts. Individual movers get the
+    // stricter check below.
+    const looseStable = (s!.max / Math.max(1, s!.min)) < AGGREGATE_STABILITY_RATIO
+                      && (e!.max / Math.max(1, e!.min)) < AGGREGATE_STABILITY_RATIO
+    if (!looseStable) continue
     deltas.push({
       cardSlug: slug,
       startCents: s!.median, endCents: e!.median,
       startObsCount: s!.count, endObsCount: e!.count,
-      startStable: s!.stable, endStable: e!.stable,
-      pct, absChangeCents: abs,
-      editorialConfidence: conf.confidence,
-      exclusionReason: conf.reason,
+      startMin: s!.min, startMax: s!.max, endMin: e!.min, endMax: e!.max,
+      pct: safePct(s!.median, e!.median),
     })
   }
 
-  const bothPricedRaw = deltas.filter(d => d.editorialConfidence !== 'excluded' || d.exclusionReason === 'extreme_move' || d.exclusionReason === 'unstable_endpoint')
-  const cleanSample   = deltas.filter(d => d.editorialConfidence !== 'excluded')
-  const excludedCount = deltas.filter(d => d.editorialConfidence === 'excluded').length
-
-  if (cleanSample.length < MIN_INTERSECTION) {
+  // Aggregate CLEAN sample (loose stability, no editorial-band gate)
+  const aggregateSample = deltas
+  if (aggregateSample.length < MIN_INTERSECTION) {
     warnings.push({ id: 'intersection-thin', severity: 'critical',
-      message: `Clean sample is ${cleanSample.length} cards (below ${MIN_INTERSECTION}). Robust monthly report requires more overlap between endpoint windows.` })
+      message: `Aggregate sample is ${aggregateSample.length} cards (below ${MIN_INTERSECTION}). Robust monthly report requires more overlap between endpoint windows.` })
   }
   if (startOnly.length + endOnly.length > 0) {
     warnings.push({ id: 'survivorship', severity: 'minor',
       message: `${startOnly.length} cards priced at start but not end; ${endOnly.length} vice versa. Sample restricted to intersection.` })
   }
 
-  // ── Step 3: aggregate stats over the CLEAN sample ──
-  const cleanPcts = cleanSample.map(d => d.pct)
-  const median  = medianOf(cleanPcts)
-  const q1      = percentile(cleanPcts, 0.25)
-  const q3      = percentile(cleanPcts, 0.75)
-  const rising  = cleanPcts.filter(p => p >   1).length
-  const falling = cleanPcts.filter(p => p <  -1).length
-  const flat    = cleanPcts.length - rising - falling
-  const risingPctOfSample  = cleanSample.length ? (100 * rising  / cleanSample.length) : 0
-  const fallingPctOfSample = cleanSample.length ? (100 * falling / cleanSample.length) : 0
+  // ── Step 3: aggregate stats ──
+  const aggPcts = aggregateSample.map(d => d.pct)
+  const median  = medianOf(aggPcts)
+  const q1      = percentile(aggPcts, 0.25)
+  const q3      = percentile(aggPcts, 0.75)
+  const rising  = aggPcts.filter(p => p >   1).length
+  const falling = aggPcts.filter(p => p <  -1).length
+  const flat    = aggPcts.length - rising - falling
+  const risingPctOfSample  = aggregateSample.length ? (100 * rising  / aggregateSample.length) : 0
+  const fallingPctOfSample = aggregateSample.length ? (100 * falling / aggregateSample.length) : 0
 
-  // ── Step 4: top movers, editorial-safe only ──
-  const meaningful  = cleanSample.filter(d => d.startCents >= TOP_MOVER_MIN_START_CENTS)
-  const topRisers   = [...meaningful].sort((a, b) => b.pct - a.pct).slice(0, TOP_MOVER_LIMIT)
-  const topFallers  = [...meaningful].sort((a, b) => a.pct - b.pct).slice(0, TOP_MOVER_LIMIT)
+  // ── Step 4: build the MOVER CANDIDATE pool (stricter). ──
+  //
+  // Rules layered on top of the aggregate sample:
+  //   A. product filter: English, not sealed, not Topps, no obvious sealed-product names
+  //   B. 3 valid observations at BOTH endpoints (99.2% of the sample already has this)
+  //   C. endpoint stability worst-ratio < 1.30 (93% of the sample)
+  //   D. start median >= $5
+  //   E. within outer editorial band [-60%, +200%]; anything outside is excluded
+  //   F. persistence check: end-endpoint median must not immediately snap back
+  //
+  // Then a two-tier editorial confidence:
+  //   * `high` when within [-40%, +75%]
+  //   * `manual_review_required` when in the outer bands
+  //   * `excluded` when it fails any of A-F
+  //
+  // The Writer receives only `high` PLUS any human-approved slugs
+  // in `pack.approvedLargeMoverSlugs`. `manual_review_required`
+  // rows sit under Large moves requiring review in the Research
+  // Room until the editor approves them.
 
-  // ── Step 5: quarantined for review (extremes + unstable) ──
-  const quarantinedMovers = deltas.filter(d => d.editorialConfidence === 'excluded' && (d.exclusionReason === 'extreme_move' || d.exclusionReason === 'unstable_endpoint'))
-
-  // ── Step 6: enrich top-mover + quarantined cards ──
-  const moverSlugs = Array.from(new Set([...topRisers, ...topFallers, ...quarantinedMovers].map(m => m.cardSlug)))
-  const moverSlugsBare = moverSlugs.map(s => String(s).replace(/^pc-/, ''))
-  const moverCards = moverSlugsBare.length === 0
+  // (A) product filter: fetch cards metadata for every slug in the aggregate sample.
+  const aggSlugs = aggregateSample.map(d => d.cardSlug)
+  const aggSlugsBare = aggSlugs.map(s => s.replace(/^pc-/, ''))
+  const cardMeta = aggSlugsBare.length === 0
     ? { rows: [] as any[], pagesFetched: 0, truncated: false }
     : await fetchAllPages<any>(
-        () => supa.from('cards').select('card_slug, card_name, set_name, card_number, url_slug').in('card_slug', moverSlugsBare),
-        { hardMaxRows: 20_000 },
+        () => supa.from('cards').select('card_slug, card_name, set_name, card_number, url_slug, is_sealed, language').in('card_slug', aggSlugsBare),
+        { hardMaxRows: 200_000 },
       )
   const cardBySlug = new Map<string, any>()
-  for (const c of moverCards.rows) { cardBySlug.set(String(c.card_slug), c); cardBySlug.set(`pc-${c.card_slug}`, c) }
+  for (const c of cardMeta.rows) {
+    cardBySlug.set(String(c.card_slug), c)
+    cardBySlug.set(`pc-${c.card_slug}`, c)
+  }
 
-  const enrichMover = (d: MonthlyDelta) => {
+  type ProductFilterResult = { included: boolean; reason?: 'sealed' | 'non_english' | 'topps' | 'sealed_name_pattern' | 'unknown_card' }
+  const productFilter = (slug: string): ProductFilterResult => {
+    const c = cardBySlug.get(slug)
+    if (!c) return { included: false, reason: 'unknown_card' }
+    if (c.is_sealed === true) return { included: false, reason: 'sealed' }
+    if (c.language && c.language !== 'en') return { included: false, reason: 'non_english' }
+    const setName = String(c.set_name ?? '')
+    if (/topps/i.test(setName)) return { included: false, reason: 'topps' }
+    const name = String(c.card_name ?? '')
+    if (/\b(booster (pack|box)|theme deck|premium collection|elite trainer box|starter deck|preconstructed|bundle)\b/i.test(name)) return { included: false, reason: 'sealed_name_pattern' }
+    return { included: true }
+  }
+
+  // (E) editorial band + (F) persistence — first prep the persistence
+  // window: full-catalogue snapshots strictly AFTER the calendar end.
+  const persistenceWindow = await pickPersistenceDays(supa, endDate)
+  const persistencePages = persistenceWindow.length === 0
+    ? [] as Array<{ card_slug: string; date: string; raw_usd: number | null }>
+    : await fetchDaysPaged(supa, persistenceWindow)
+  const persistenceRobust = groupToRobustEndpoint(persistencePages, AGGREGATE_STABILITY_RATIO)
+
+  type MoverCandidate = MonthlyDelta & {
+    productReason?: ProductFilterResult['reason']
+    strictStability?: number   // max/min ratio worst-of-both-sides
+    persistenceDeviation?: number  // |persistence_median - end_median| / end_median
+    confidence: 'high' | 'manual_review_required' | 'excluded'
+    exclusionReason?: 'product' | 'insufficient_obs' | 'unstable_endpoint' | 'below_min_price' | 'extreme_move' | 'failed_persistence'
+  }
+
+  const candidatePool: MoverCandidate[] = aggregateSample.map(d => {
+    // (A) product
+    const p = productFilter(d.cardSlug)
+    if (!p.included) return { ...d, productReason: p.reason, confidence: 'excluded', exclusionReason: 'product' }
+    // (B) 3 obs each side
+    if (d.startObsCount < MOVER_MIN_ENDPOINT_OBS || d.endObsCount < MOVER_MIN_ENDPOINT_OBS) {
+      return { ...d, confidence: 'excluded', exclusionReason: 'insufficient_obs' }
+    }
+    // (C) tighter stability
+    const worst = Math.max(
+      d.startMax / Math.max(1, d.startMin),
+      d.endMax   / Math.max(1, d.endMin),
+    )
+    if (worst >= MOVER_STABILITY_RATIO) {
+      return { ...d, strictStability: worst, confidence: 'excluded', exclusionReason: 'unstable_endpoint' }
+    }
+    // (D) min start price
+    if (d.startCents < MOVER_MIN_START_CENTS) {
+      return { ...d, strictStability: worst, confidence: 'excluded', exclusionReason: 'below_min_price' }
+    }
+    // (E) outer editorial band
+    if (d.pct > REVIEW_MAX_POSITIVE_PCT || d.pct < REVIEW_MAX_NEGATIVE_PCT) {
+      return { ...d, strictStability: worst, confidence: 'excluded', exclusionReason: 'extreme_move' }
+    }
+    // (F) persistence
+    const pr = persistenceRobust.get(d.cardSlug)
+    let deviation: number | undefined
+    if (pr && pr.count >= 2) {
+      deviation = Math.abs(pr.median - d.endCents) / Math.max(1, d.endCents)
+      if (deviation > PERSISTENCE_MAX_DEVIATION) {
+        return { ...d, strictStability: worst, persistenceDeviation: deviation, confidence: 'excluded', exclusionReason: 'failed_persistence' }
+      }
+    }
+    // Two-tier: auto vs manual review
+    const auto = d.pct <= AUTO_PUBLISH_MAX_POSITIVE_PCT && d.pct >= AUTO_PUBLISH_MAX_NEGATIVE_PCT
+    return {
+      ...d,
+      strictStability: worst,
+      persistenceDeviation: deviation,
+      confidence: auto ? 'high' : 'manual_review_required',
+    }
+  })
+
+  const highCandidates   = candidatePool.filter(c => c.confidence === 'high')
+  const manualCandidates = candidatePool.filter(c => c.confidence === 'manual_review_required')
+  const excludedByProduct = candidatePool.filter(c => c.exclusionReason === 'product')
+  const excludedExtreme   = candidatePool.filter(c => c.exclusionReason === 'extreme_move')
+  const excludedPersist   = candidatePool.filter(c => c.exclusionReason === 'failed_persistence')
+  const excludedUnstable  = candidatePool.filter(c => c.exclusionReason === 'unstable_endpoint')
+  const excludedInsuffObs = candidatePool.filter(c => c.exclusionReason === 'insufficient_obs')
+
+  // Rank + limit — do NOT force 10; publish only what exists.
+  const topRisers   = [...highCandidates].filter(c => c.pct > 0).sort((a, b) => b.pct - a.pct).slice(0, TOP_MOVER_LIMIT)
+  const topFallers  = [...highCandidates].filter(c => c.pct < 0).sort((a, b) => a.pct - b.pct).slice(0, TOP_MOVER_LIMIT)
+  const reviewRisers  = [...manualCandidates].filter(c => c.pct > 0).sort((a, b) => b.pct - a.pct).slice(0, 20)
+  const reviewFallers = [...manualCandidates].filter(c => c.pct < 0).sort((a, b) => a.pct - b.pct).slice(0, 20)
+
+  const enrichMover = (d: MoverCandidate) => {
     const c = cardBySlug.get(d.cardSlug) ?? {}
     return {
-      cardSlug:    d.cardSlug,
-      cardName:    trimName(String(c.card_name ?? '')),
-      cardNumber:  String(c.card_number ?? ''),
-      setName:     String(c.set_name ?? ''),
-      urlSlug:     c.url_slug ?? '',
-      startUsd:    round2(d.startCents / CENTS_PER_USD),
-      endUsd:      round2(d.endCents   / CENTS_PER_USD),
-      pct:         round2(d.pct),
-      startObs:    d.startObsCount,
-      endObs:      d.endObsCount,
-      editorialConfidence: d.editorialConfidence,
+      cardSlug:     d.cardSlug,
+      cardName:     trimName(String(c.card_name ?? '')),
+      cardNumber:   String(c.card_number ?? ''),
+      setName:      String(c.set_name ?? ''),
+      urlSlug:      c.url_slug ?? '',
+      startUsd:     round2(d.startCents / CENTS_PER_USD),
+      endUsd:       round2(d.endCents   / CENTS_PER_USD),
+      pct:          round2(d.pct),
+      startObs:     d.startObsCount,
+      endObs:       d.endObsCount,
+      startMinUsd:  round2(d.startMin / CENTS_PER_USD),
+      startMaxUsd:  round2(d.startMax / CENTS_PER_USD),
+      endMinUsd:    round2(d.endMin   / CENTS_PER_USD),
+      endMaxUsd:    round2(d.endMax   / CENTS_PER_USD),
+      stability:    d.strictStability != null ? round2(d.strictStability) : null,
+      persistenceDeviationPct: d.persistenceDeviation != null ? round2(100 * d.persistenceDeviation) : null,
+      confidence:   d.confidence,
     }
   }
-  const topRisersRows  = topRisers.map(enrichMover)
-  const topFallersRows = topFallers.map(enrichMover)
+  const topRisersRows    = topRisers.map(enrichMover)
+  const topFallersRows   = topFallers.map(enrichMover)
+  const reviewRisersRows = reviewRisers.map(enrichMover)
+  const reviewFallersRows= reviewFallers.map(enrichMover)
 
-  const quarantinedRows: QuarantineEntry[] = quarantinedMovers.map(d => {
+  // Quarantined rows (visible in Research Room, not usable by Writer)
+  const quarantinedRows: QuarantineEntry[] = [...excludedExtreme, ...excludedPersist, ...excludedUnstable].slice(0, 60).map(d => {
     const en = enrichMover(d)
-    const reasonLabel = d.exclusionReason === 'extreme_move'
-      ? `moved ${fmtSignedPct(d.pct)} — outside the editorial [-60%, +200%] band`
-      : `endpoint observations wobble beyond the ${ENDPOINT_STABILITY_RATIO}× stability ratio`
+    const reasonLabel =
+      d.exclusionReason === 'extreme_move'      ? `moved ${fmtSignedPct(d.pct)} — outside the editorial [-${-REVIEW_MAX_NEGATIVE_PCT}%, +${REVIEW_MAX_POSITIVE_PCT}%] band` :
+      d.exclusionReason === 'failed_persistence' ? `end-endpoint value did not persist — post-window median deviated by ${en.persistenceDeviationPct}% (max ${PERSISTENCE_MAX_DEVIATION * 100}% allowed)` :
+      `endpoint observations wobble beyond the ${MOVER_STABILITY_RATIO}× stability ratio (worst = ${en.stability}×)`
     return {
       id: `q-mover-${d.cardSlug}`,
       wouldHaveJoined: `mover-risers-${year}-${String(month).padStart(2,'0')} or fallers`,
@@ -234,6 +349,7 @@ export async function runMonthlyMarketReportRecipe(
         cardSlug: d.cardSlug, cardName: en.cardName, cardNumber: en.cardNumber, setName: en.setName,
         startUsd: en.startUsd, endUsd: en.endUsd, pct: en.pct,
         startObs: d.startObsCount, endObs: d.endObsCount,
+        stability: en.stability, persistenceDeviationPct: en.persistenceDeviationPct,
         reason: d.exclusionReason ?? 'excluded',
       },
       contaminatesPublishable: false,
@@ -242,74 +358,86 @@ export async function runMonthlyMarketReportRecipe(
 
   // ── Step 7: market signal strength (transparent rules) ──
   const signal = classifyMarketSignal({
-    sampleSize: cleanSample.length,
+    sampleSize: aggregateSample.length,
     absMedian:  Math.abs(median),
     breadthGap: Math.abs(risingPctOfSample - fallingPctOfSample),
     iqrWidth:   q3 - q1,
-    trustworthyMoversCount: topRisers.length + topFallers.length,
+    trustworthyMoversCount: topRisersRows.length + topFallersRows.length,
   })
 
   const internalSources: InternalSource[] = [
     { id: 'src-dp-start', kind: 'internal', label: `daily_prices near ${startDate}`, table: 'daily_prices', filters: `date IN (${startWindow.join(', ')})`, asOf: startDate, rowCount: startPages.length },
     { id: 'src-dp-end',   kind: 'internal', label: `daily_prices near ${endDate}`,   table: 'daily_prices', filters: `date IN (${endWindow.join(', ')})`,   asOf: endDate,   rowCount: endPages.length },
-    { id: 'src-cards-movers', kind: 'internal', label: 'cards — mover metadata', table: 'cards', filters: `card_slug IN (${moverSlugs.length} slugs)`, asOf: today, rowCount: moverCards.rows.length },
+    { id: 'src-dp-persistence', kind: 'internal', label: `daily_prices persistence window`, table: 'daily_prices', filters: `date IN (${persistenceWindow.join(', ')})`, asOf: persistenceWindow[persistenceWindow.length - 1] ?? endDate, rowCount: persistencePages.length },
+    { id: 'src-cards-movers', kind: 'internal', label: 'cards — mover metadata', table: 'cards', filters: `card_slug IN (${aggSlugsBare.length} slugs)`, asOf: today, rowCount: cardMeta.rows.length },
+  ]
+
+  const moverTableColumns = [
+    { key: 'cardName',    label: 'Card' },
+    { key: 'cardNumber',  label: '#',        align: 'right' as const },
+    { key: 'setName',     label: 'Set' },
+    { key: 'startUsd',    label: `Start $ (median near ${startDate})`, align: 'right' as const },
+    { key: 'endUsd',      label: `End $ (median near ${endDate})`,     align: 'right' as const },
+    { key: 'startMinUsd', label: 'Start min',  align: 'right' as const },
+    { key: 'startMaxUsd', label: 'Start max',  align: 'right' as const },
+    { key: 'endMinUsd',   label: 'End min',    align: 'right' as const },
+    { key: 'endMaxUsd',   label: 'End max',    align: 'right' as const },
+    { key: 'pct',         label: '% change',   align: 'right' as const },
+    { key: 'stability',   label: 'Stability ×', align: 'right' as const },
+    { key: 'persistenceDeviationPct', label: 'Post-window deviation %', align: 'right' as const },
   ]
 
   const dataTables: DataTable[] = [
     {
       id: `mover-risers-${year}-${String(month).padStart(2,'0')}`,
-      title: `Top ${topRisersRows.length} editorial-safe raw-price risers, ${monthLabel}`,
-      source: `daily_prices (${startWindow.length}-day start window + ${endWindow.length}-day end window) + cards`,
-      asOf: endDate,
-      columns: [
-        { key: 'cardName',   label: 'Card' },
-        { key: 'cardNumber', label: '#',                                align: 'right' },
-        { key: 'setName',    label: 'Set' },
-        { key: 'startUsd',   label: `Start $ (median near ${startDate})`, align: 'right' },
-        { key: 'endUsd',     label: `End $ (median near ${endDate})`,     align: 'right' },
-        { key: 'pct',        label: '% change',                          align: 'right' },
-        { key: 'editorialConfidence', label: 'Confidence' },
-      ],
-      rows: topRisersRows,
+      title: `High-confidence raw-price risers, ${monthLabel} (${topRisersRows.length} card${topRisersRows.length === 1 ? '' : 's'})`,
+      source: `daily_prices (${startWindow.length}-day start + ${endWindow.length}-day end + ${persistenceWindow.length}-day persistence) + cards, English TCG only, sealed excluded`,
+      asOf: endDate, columns: moverTableColumns, rows: topRisersRows,
     },
     {
       id: `mover-fallers-${year}-${String(month).padStart(2,'0')}`,
-      title: `Top ${topFallersRows.length} editorial-safe raw-price fallers, ${monthLabel}`,
-      source: `daily_prices (${startWindow.length}-day start window + ${endWindow.length}-day end window) + cards`,
-      asOf: endDate,
-      columns: [
-        { key: 'cardName',   label: 'Card' },
-        { key: 'cardNumber', label: '#',                                align: 'right' },
-        { key: 'setName',    label: 'Set' },
-        { key: 'startUsd',   label: `Start $ (median near ${startDate})`, align: 'right' },
-        { key: 'endUsd',     label: `End $ (median near ${endDate})`,     align: 'right' },
-        { key: 'pct',        label: '% change',                          align: 'right' },
-        { key: 'editorialConfidence', label: 'Confidence' },
-      ],
-      rows: topFallersRows,
+      title: `High-confidence raw-price fallers, ${monthLabel} (${topFallersRows.length} card${topFallersRows.length === 1 ? '' : 's'})`,
+      source: `daily_prices (${startWindow.length}-day start + ${endWindow.length}-day end + ${persistenceWindow.length}-day persistence) + cards, English TCG only, sealed excluded`,
+      asOf: endDate, columns: moverTableColumns, rows: topFallersRows,
+    },
+    {
+      id: `mover-review-risers-${year}-${String(month).padStart(2,'0')}`,
+      title: `Large-move riser candidates requiring manual review (${reviewRisersRows.length})`,
+      source: `Same pipeline as high-confidence; pct is above +${AUTO_PUBLISH_MAX_POSITIVE_PCT}% but ≤ +${REVIEW_MAX_POSITIVE_PCT}%. Not writable until approved in the Research Room.`,
+      asOf: endDate, columns: moverTableColumns, rows: reviewRisersRows,
+    },
+    {
+      id: `mover-review-fallers-${year}-${String(month).padStart(2,'0')}`,
+      title: `Large-move faller candidates requiring manual review (${reviewFallersRows.length})`,
+      source: `Same pipeline as high-confidence; pct is below ${AUTO_PUBLISH_MAX_NEGATIVE_PCT}% but ≥ ${REVIEW_MAX_NEGATIVE_PCT}%. Not writable until approved in the Research Room.`,
+      asOf: endDate, columns: moverTableColumns, rows: reviewFallersRows,
     },
   ]
 
   const verifiedFacts: VerifiedFact[] = [
-    { id: 'fact-window', type: 'verified_fact', statement: `Report window: ${startDate} to ${endDate} (${monthLabel}). Endpoint prices are the median of each card's observations within ±${NEAR_ENDPOINT_WINDOW_DAYS} days of the calendar boundary.`, evidenceRefs: [], asOf: endDate },
-    { id: 'fact-clean-sample', type: 'verified_fact', statement: `${cleanSample.length} cards enter the editorial-safe sample after robust-endpoint + stability + extreme-move filters.`, evidenceRefs: ['src-dp-start', 'src-dp-end'], asOf: endDate },
-    { id: 'fact-excluded', type: 'verified_fact', statement: `${excludedCount} cards were excluded from the editorial-safe sample. Of these, ${quarantinedMovers.length} appear under Quarantined Data (extreme move or unstable endpoints) and can be manually reviewed.`, evidenceRefs: ['src-dp-start', 'src-dp-end'], asOf: endDate },
+    { id: 'fact-window',            type: 'verified_fact', statement: `Report window: ${startDate} to ${endDate} (${monthLabel}). Endpoint prices are the median of each card's observations within ±${NEAR_ENDPOINT_WINDOW_DAYS} days of the calendar boundary.`, evidenceRefs: [], asOf: endDate },
+    { id: 'fact-aggregate-sample',  type: 'verified_fact', statement: `${aggregateSample.length} cards enter the aggregate sample used for median / IQR / breadth (loose ${AGGREGATE_STABILITY_RATIO}× stability).`, evidenceRefs: ['src-dp-start', 'src-dp-end'], asOf: endDate },
+    { id: 'fact-mover-pool',        type: 'verified_fact', statement: `${highCandidates.length} card${highCandidates.length === 1 ? ' is' : 's are'} high-confidence movers, ${manualCandidates.length} require manual review, ${excludedByProduct.length + excludedInsuffObs.length + excludedUnstable.length + excludedExtreme.length + excludedPersist.length} excluded from the mover pool by product / stability / extreme / persistence filters.`, evidenceRefs: ['src-dp-start', 'src-dp-end', 'src-dp-persistence'], asOf: endDate },
+    { id: 'fact-mover-scope',       type: 'verified_fact', statement: `Mover pool product scope: English-language TCG cards, sealed products excluded, Topps and similar non-TCG lines excluded, obvious sealed-name products (booster pack / box, theme deck, premium collection, elite trainer box, bundle) excluded.`, evidenceRefs: ['src-cards-movers'], asOf: today },
   ]
 
   const derivedFindings: DerivedFinding[] = [
-    { id: 'finding-median-raw', type: 'derived_finding', statement: `Median monthly raw-price change across the clean sample was ${fmtSignedPct(median)}.`, formula: 'median(rawPct) over cards clearing all editorial filters', evidenceRefs: ['fact-clean-sample'], asOf: endDate },
-    { id: 'finding-iqr',        type: 'derived_finding', statement: `Interquartile range of monthly raw-price change was ${fmtSignedPct(q1)} to ${fmtSignedPct(q3)}.`, formula: 'p25(rawPct), p75(rawPct)', evidenceRefs: ['fact-clean-sample'], asOf: endDate },
-    { id: 'finding-direction',  type: 'derived_finding', statement: `${rising} clean cards rose more than 1%, ${falling} fell more than 1%, ${flat} were within a percentage point of flat.`, formula: 'count where rawPct > 1; count where rawPct < -1; remainder', evidenceRefs: ['fact-clean-sample'], asOf: endDate },
-    { id: 'finding-signal',     type: 'derived_finding', statement: `Market signal strength: ${signal.strength}. ${signal.reason}`, formula: 'classify(median, breadth, IQR, sample size, mover count)', evidenceRefs: ['fact-clean-sample'], asOf: endDate },
+    { id: 'finding-median-raw', type: 'derived_finding', statement: `Median monthly raw-price change across the aggregate sample was ${fmtSignedPct(median)}.`, formula: 'median(rawPct) over aggregate sample', evidenceRefs: ['fact-aggregate-sample'], asOf: endDate },
+    { id: 'finding-iqr',        type: 'derived_finding', statement: `Interquartile range of monthly raw-price change was ${fmtSignedPct(q1)} to ${fmtSignedPct(q3)}.`, formula: 'p25(rawPct), p75(rawPct)', evidenceRefs: ['fact-aggregate-sample'], asOf: endDate },
+    { id: 'finding-direction',  type: 'derived_finding', statement: `${rising} cards rose more than 1%, ${falling} fell more than 1%, ${flat} were within a percentage point of flat.`, formula: 'count where rawPct > 1; count where rawPct < -1; remainder', evidenceRefs: ['fact-aggregate-sample'], asOf: endDate },
+    { id: 'finding-signal',     type: 'derived_finding', statement: `Market signal strength: ${signal.strength}. ${signal.reason}`, formula: 'classify(median, breadth, IQR, sample size, mover count)', evidenceRefs: ['fact-aggregate-sample'], asOf: endDate },
   ]
 
   const gaps: string[] = []
-  if (cleanSample.length < MIN_INTERSECTION) gaps.push(`Clean sample of ${cleanSample.length} is below the ${MIN_INTERSECTION} publishability bar. Extend endpoint scraping coverage.`)
-  if (quarantinedMovers.length > 0)          gaps.push(`${quarantinedMovers.length} extreme / unstable-endpoint movers were quarantined. Reviewer can manually restore any with independent evidence.`)
+  if (aggregateSample.length < MIN_INTERSECTION) gaps.push(`Aggregate sample of ${aggregateSample.length} is below the ${MIN_INTERSECTION} publishability bar. Extend endpoint scraping coverage.`)
+  if (highCandidates.length === 0)               gaps.push(`Zero high-confidence movers this month. The article should describe the aggregate story only or lean on manually-approved candidates.`)
+  if (manualCandidates.length > 0)               gaps.push(`${manualCandidates.length} large-move candidates await manual review in the Research Room. Approve any you want the Writer to use.`)
 
   const rejectedClaims: Array<{ claim: string; reason: string }> = [
-    { claim: `The Pokemon market moved X% in ${monthLabel}.`,   reason: 'Sample is the PokePrices tracked catalogue on daily_prices, not the whole Pokemon TCG market.' },
-    { claim: `Card X gained N,NNN% in ${monthLabel}.`,          reason: `Editorial filter excludes any card outside the [-60%, +200%] band. Extreme rows sit under Quarantined Data pending manual verification.` },
+    { claim: `The Pokemon market moved X% in ${monthLabel}.`, reason: 'Sample is the PokePrices tracked catalogue on daily_prices, not the whole Pokemon TCG market.' },
+    { claim: `Card X gained N,NNN% in ${monthLabel}.`,        reason: `Mover pool excludes anything outside [-60%, +200%] and anything a human has not approved above ±${AUTO_PUBLISH_MAX_POSITIVE_PCT}% up or ${AUTO_PUBLISH_MAX_NEGATIVE_PCT}% down.` },
+    { claim: `Japanese card X was among the biggest movers.`, reason: 'Mover pool is English-language TCG only by default. Japanese cards may exist in the aggregate stats but are not eligible for the automated mover ranking of a Pokemon Card Market Report.' },
+    { claim: `Booster Pack / Booster Box / theme deck X moved N%.`, reason: 'Sealed products are excluded from card-mover rankings; they belong in a sealed-product story, not a card story.' },
   ]
   if (signal.strength === 'weak') {
     rejectedClaims.push({ claim: `The big story in ${monthLabel} was a ${fmtSignedPct(median)} median.`, reason: 'Near-zero median with balanced breadth is a quiet month, not a headline. Do not manufacture excitement.' })
@@ -317,7 +445,7 @@ export async function runMonthlyMarketReportRecipe(
   }
 
   const quality = computeQuality({
-    cleanSize:       cleanSample.length,
+    cleanSize:       aggregateSample.length,
     warnings,
     dataAsOf:        endDate,
     today,
@@ -332,22 +460,26 @@ export async function runMonthlyMarketReportRecipe(
     dataAsOf:    endDate,
     methodology: {
       summary:
-        `Endpoint prices are the median of each card's raw_usd observations from up to ${NEAR_ENDPOINT_WINDOW_DAYS + 1} full-catalogue snapshots within ±${NEAR_ENDPOINT_WINDOW_DAYS} days of ${startDate} and ${endDate}. A card enters the editorial-safe sample only when both endpoints have >= ${MIN_ENDPOINT_OBSERVATIONS} valid observations, the endpoint observations are internally stable (max/min ratio < ${ENDPOINT_STABILITY_RATIO}), and the resulting monthly move sits inside [${EDITORIAL_MAX_NEGATIVE_PCT}%, +${EDITORIAL_MAX_POSITIVE_PCT}%]. Rows outside those bands are preserved under Quarantined Data for manual review.`,
+        `Two-tier methodology. AGGREGATE stats (median / IQR / breadth) come from every card with >= ${AGGREGATE_MIN_ENDPOINT_OBS} endpoint observations at each side and loose ${AGGREGATE_STABILITY_RATIO}× stability. MOVER CANDIDATES apply a stricter product filter (English-language TCG only; sealed products, Topps and similar excluded), require 3 endpoint observations at each side, tighter ${MOVER_STABILITY_RATIO}× stability, and a persistence check against the next full-catalogue snapshots after ${endDate}. Movers are then split into "high-confidence" (auto-eligible; ${AUTO_PUBLISH_MAX_NEGATIVE_PCT}% to +${AUTO_PUBLISH_MAX_POSITIVE_PCT}%) and "manual review" (${REVIEW_MAX_NEGATIVE_PCT}% to +${REVIEW_MAX_POSITIVE_PCT}% but outside the auto band). Anything outside the outer band, or that fails product / stability / persistence, is excluded.`,
       filters: [
-        { label: 'Start window', value: startWindow.join(', ') },
-        { label: 'End window',   value: endWindow.join(', ') },
-        { label: 'Endpoint value', value: `median(raw_usd) over up to ${NEAR_ENDPOINT_WINDOW_DAYS + 1} full snapshots per side` },
-        { label: 'Min endpoint observations', value: `>= ${MIN_ENDPOINT_OBSERVATIONS} on BOTH sides` },
-        { label: 'Endpoint stability', value: `max/min ratio < ${ENDPOINT_STABILITY_RATIO} within each endpoint window` },
-        { label: 'Editorial extreme guard', value: `[${EDITORIAL_MAX_NEGATIVE_PCT}%, +${EDITORIAL_MAX_POSITIVE_PCT}%]` },
-        { label: 'Top-mover start-price gate', value: `>= $${TOP_MOVER_MIN_START_CENTS / CENTS_PER_USD}` },
+        { label: 'Start window',   value: startWindow.join(', ') },
+        { label: 'End window',     value: endWindow.join(', ') },
+        { label: 'Persistence window', value: persistenceWindow.join(', ') || '(none available)' },
+        { label: 'Endpoint value', value: `median(raw_usd) over full snapshots in each window` },
+        { label: 'Aggregate sample rules', value: `>= ${AGGREGATE_MIN_ENDPOINT_OBS} obs/side, loose ${AGGREGATE_STABILITY_RATIO}× stability` },
+        { label: 'Mover candidate rules',  value: `>= ${MOVER_MIN_ENDPOINT_OBS} obs/side, ${MOVER_STABILITY_RATIO}× stability, English TCG, non-sealed, non-Topps, start >= $${MOVER_MIN_START_CENTS / CENTS_PER_USD}` },
+        { label: 'Auto-publish band',      value: `[${AUTO_PUBLISH_MAX_NEGATIVE_PCT}%, +${AUTO_PUBLISH_MAX_POSITIVE_PCT}%]` },
+        { label: 'Manual-review band',     value: `[${REVIEW_MAX_NEGATIVE_PCT}%, ${AUTO_PUBLISH_MAX_NEGATIVE_PCT}%) ∪ (+${AUTO_PUBLISH_MAX_POSITIVE_PCT}%, +${REVIEW_MAX_POSITIVE_PCT}%]` },
+        { label: 'Persistence tolerance',  value: `end-window median must not deviate by > ${PERSISTENCE_MAX_DEVIATION * 100}% from the post-window median` },
       ],
       excludedGroups: [
-        { label: 'start-only cards',   reason: `${startOnly.length} cards priced at start but not end` },
-        { label: 'end-only cards',     reason: `${endOnly.length} cards priced at end but not start` },
-        { label: 'unstable endpoints', reason: `${unstable.length} cards where near-endpoint observations wobble beyond the stability ratio` },
-        { label: 'extreme moves',      reason: `${deltas.filter(d => d.exclusionReason === 'extreme_move').length} cards outside [${EDITORIAL_MAX_NEGATIVE_PCT}%, +${EDITORIAL_MAX_POSITIVE_PCT}%]` },
-        { label: 'insufficient observations', reason: `${deltas.filter(d => d.exclusionReason === 'insufficient_obs').length} cards with <${MIN_ENDPOINT_OBSERVATIONS} valid observations at an endpoint` },
+        { label: 'start-only cards',            reason: `${startOnly.length} cards priced at start but not end` },
+        { label: 'end-only cards',              reason: `${endOnly.length} cards priced at end but not start` },
+        { label: 'product-scope excluded',      reason: `${excludedByProduct.length} cards (sealed / Topps / non-English / bundle names)` },
+        { label: 'insufficient mover observations', reason: `${excludedInsuffObs.length} cards with <${MOVER_MIN_ENDPOINT_OBS} observations at an endpoint` },
+        { label: 'unstable endpoints (strict)', reason: `${excludedUnstable.length} cards where endpoint observations wobble beyond ${MOVER_STABILITY_RATIO}× (worst-of-both-sides)` },
+        { label: 'failed persistence',          reason: `${excludedPersist.length} cards whose end-endpoint value snapped back on the next full snapshots` },
+        { label: 'extreme moves',               reason: `${excludedExtreme.length} cards outside the outer editorial band` },
       ],
       dedupKey: 'card_slug (one observation per card per date; per-endpoint median then applied)',
     },
@@ -411,9 +543,12 @@ async function fetchDaysPaged(supa: ReturnType<typeof getSupabaseServiceClient>,
   return out
 }
 
-type RobustEndpoint = { median: number; count: number; stable: boolean }
+type RobustEndpoint = { median: number; count: number; min: number; max: number }
 
-function groupToRobustEndpoint(rows: Array<{ card_slug: string; date: string; raw_usd: number | null }>): Map<string, RobustEndpoint> {
+function groupToRobustEndpoint(rows: Array<{ card_slug: string; date: string; raw_usd: number | null }>, _stabilityRatio: number): Map<string, RobustEndpoint> {
+  // stabilityRatio no longer used inside the aggregator; callers
+  // apply their own strict/loose stability rule downstream so that
+  // aggregate + mover pools can share this cheap computation.
   const bySlug = new Map<string, number[]>()
   for (const r of rows) {
     const v = typeof r.raw_usd === 'number' ? r.raw_usd : Number(r.raw_usd)
@@ -425,21 +560,27 @@ function groupToRobustEndpoint(rows: Array<{ card_slug: string; date: string; ra
   const out = new Map<string, RobustEndpoint>()
   for (const [slug, vals] of Array.from(bySlug.entries())) {
     const min = Math.min(...vals), max = Math.max(...vals)
-    const stable = min > 0 && (max / min) < ENDPOINT_STABILITY_RATIO
-    out.set(slug, { median: medianOf(vals), count: vals.length, stable })
+    out.set(slug, { median: medianOf(vals), count: vals.length, min, max })
   }
   return out
 }
 
-function classifyEditorialConfidence(inp: { pct: number; stable: boolean }): { confidence: 'high' | 'medium' | 'excluded'; reason?: MonthlyExclusionReason } {
-  if (!inp.stable) return { confidence: 'excluded', reason: 'unstable_endpoint' }
-  if (inp.pct > EDITORIAL_MAX_POSITIVE_PCT || inp.pct < EDITORIAL_MAX_NEGATIVE_PCT) return { confidence: 'excluded', reason: 'extreme_move' }
-  const abs = Math.abs(inp.pct)
-  if (abs < HIGH_CONFIDENCE_ABS_PCT) return { confidence: 'high' }
-  return { confidence: 'medium' }
+/** Pick full-catalogue days STRICTLY AFTER the calendar endpoint,
+ *  starting at least PERSISTENCE_WINDOW_MIN_DAYS past it. Used by
+ *  the mover-candidate persistence check. */
+async function pickPersistenceDays(supa: ReturnType<typeof getSupabaseServiceClient>, endpointDate: string): Promise<string[]> {
+  const target = new Date(endpointDate + 'T00:00:00Z')
+  const candidates: string[] = []
+  for (let dx = PERSISTENCE_WINDOW_MIN_DAYS; dx <= PERSISTENCE_WINDOW_MAX_DAYS; dx++) {
+    const d = new Date(target); d.setUTCDate(target.getUTCDate() + dx)
+    candidates.push(d.toISOString().slice(0, 10))
+  }
+  const rows = await Promise.all(candidates.map(async (d) => {
+    const { count } = await supa.from('daily_prices').select('card_slug', { count: 'exact', head: true }).eq('date', d)
+    return { date: d, c: Number(count ?? 0) }
+  }))
+  return rows.filter(x => x.c >= MIN_ROWS_PER_ENDPOINT).slice(0, 3).map(x => x.date)
 }
-
-type MonthlyExclusionReason = 'extreme_move' | 'unstable_endpoint' | 'below_min_price' | 'insufficient_obs'
 
 // ─────────────────────────────────────────────────────────────────
 // Signal strength — transparent rules

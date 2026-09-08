@@ -66,6 +66,12 @@ export type EvidencePack = {
    *  Optional; only monthlyMarketReport populates it today. */
   marketSignalStrength?: MarketSignalStrength
   marketSignalReason?:   string
+
+  /** Final Data Trust Patch — human-approved large movers survive
+   *  into the Writer as if they were high-confidence. Stored on
+   *  the pack itself so the Research Room can add/remove them and
+   *  the approval travels with the evidence. Rebuilds reset it. */
+  approvedLargeMoverSlugs?: string[]
 }
 
 export type MarketSignalStrength = 'strong' | 'moderate' | 'weak'

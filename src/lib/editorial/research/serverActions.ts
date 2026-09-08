@@ -293,6 +293,34 @@ export async function removeResearchNote(projectId: number, noteId: string): Pro
   return persistPack(projectId, newPack)
 }
 
+/** Final Data Trust Patch — approve a large-move candidate so the
+ *  Writer may use it. Slug must appear in one of the pack's
+ *  manual-review tables; anything else is rejected. */
+export async function approveLargeMover(projectId: number, cardSlug: string): Promise<EditorialResearchRow> {
+  const existing = await fetchResearch(projectId)
+  if (!existing || !existing.evidence_json) throw new Error('no evidence pack')
+  const pack = existing.evidence_json as EvidencePack
+  const eligible = new Set<string>()
+  for (const t of pack.dataTables) {
+    if (!/^mover-review-(risers|fallers)-/.test(t.id)) continue
+    for (const r of t.rows) if ((r as any).cardSlug) eligible.add(String((r as any).cardSlug))
+  }
+  if (!eligible.has(cardSlug)) throw new Error(`slug ${cardSlug} is not in any manual-review mover table`)
+  const current = new Set<string>(pack.approvedLargeMoverSlugs ?? [])
+  current.add(cardSlug)
+  const newPack: EvidencePack = { ...pack, approvedLargeMoverSlugs: Array.from(current).sort() }
+  return persistPack(projectId, newPack)
+}
+
+export async function revokeLargeMover(projectId: number, cardSlug: string): Promise<EditorialResearchRow> {
+  const existing = await fetchResearch(projectId)
+  if (!existing || !existing.evidence_json) throw new Error('no evidence pack')
+  const pack = existing.evidence_json as EvidencePack
+  const current = (pack.approvedLargeMoverSlugs ?? []).filter(s => s !== cardSlug)
+  const newPack: EvidencePack = { ...pack, approvedLargeMoverSlugs: current }
+  return persistPack(projectId, newPack)
+}
+
 async function persistPack(projectId: number, pack: EvidencePack): Promise<EditorialResearchRow> {
   const supa = getSupabaseServiceClient()
   const { data, error } = await supa

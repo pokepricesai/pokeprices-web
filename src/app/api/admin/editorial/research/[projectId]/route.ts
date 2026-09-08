@@ -29,6 +29,7 @@ import {
   approveResearch, revokeResearchApproval,
   addExternalSource, removeExternalSource,
   addResearchNote, removeResearchNote,
+  approveLargeMover, revokeLargeMover,
 } from '@/lib/editorial/research/serverActions'
 import { chooseRecipe } from '@/lib/editorial/research/dispatch'
 
@@ -137,6 +138,18 @@ export async function POST(req: Request, ctx: Ctx) {
         const noteId = strOrEmpty(body.noteId)
         if (!noteId) return bad(400, 'noteId required')
         const row = await removeResearchNote(projectId, noteId)
+        return NextResponse.json({ ok: true, research: row })
+      }
+      case 'approve_large_mover': {
+        const cardSlug = strOrEmpty(body.cardSlug)
+        if (!cardSlug) return bad(400, 'cardSlug required')
+        const row = await approveLargeMover(projectId, cardSlug)
+        return NextResponse.json({ ok: true, research: row })
+      }
+      case 'revoke_large_mover': {
+        const cardSlug = strOrEmpty(body.cardSlug)
+        if (!cardSlug) return bad(400, 'cardSlug required')
+        const row = await revokeLargeMover(projectId, cardSlug)
         return NextResponse.json({ ok: true, research: row })
       }
       default:

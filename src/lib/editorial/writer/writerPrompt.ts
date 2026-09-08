@@ -151,12 +151,25 @@ export function compactWriterInputs(bundle: WriterInputBundle): unknown {
       methodology:       pack.methodology,
       verifiedFacts:     pack.verifiedFacts,
       derivedFindings:   pack.derivedFindings,
-      dataTables:        pack.dataTables.map(t => ({
-        id: t.id, title: t.title, source: t.source, asOf: t.asOf,
-        columns: t.columns.map(c => ({ key: c.key, label: c.label, align: c.align })),
-        rows: t.rows.slice(0, 30),
-        totalRows: t.rows.length,
-      })),
+      dataTables:        pack.dataTables.map(t => {
+        // Final Data Trust Patch — for monthly market reports, the
+        // Writer never receives the manual-review candidate tables
+        // as usable evidence unless a slug has been human-approved
+        // in pack.approvedLargeMoverSlugs. Approved slugs move into
+        // the corresponding high-confidence table before the pack
+        // is sent to the Writer.
+        const isReviewTable = /^mover-review-(risers|fallers)-/.test(t.id)
+        const approvedSet   = new Set(pack.approvedLargeMoverSlugs ?? [])
+        const rows = isReviewTable
+          ? t.rows.filter(r => approvedSet.has(String((r as any).cardSlug ?? '')))
+          : t.rows.slice(0, 30)
+        return {
+          id: t.id, title: t.title, source: t.source, asOf: t.asOf,
+          columns: t.columns.map(c => ({ key: c.key, label: c.label, align: c.align })),
+          rows,
+          totalRows: t.rows.length,
+        }
+      }),
       externalSources:   pack.externalSources.map(s => ({ id: s.id, url: s.url, title: s.title, publisher: s.publisher, publicationDate: s.publicationDate })),
       internalLinks:     pack.internalLinks,
       visualOpportunities: pack.visualOpportunities,
