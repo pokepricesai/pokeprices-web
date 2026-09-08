@@ -111,23 +111,18 @@ async function apiDeleteRelease(id: number): Promise<void> {
 
 // ── Deep Research prompt (external articles) ────────────────────
 //
-// Mirrors the article-type routing used server-side by
-// chooseRecipe(project). For external types the EIC no longer
-// runs an AI writer or fact checker — admin copies the Deep
-// Research prompt and pastes it into ChatGPT Deep Research.
+// Uses the canonical getEditorialMode helper so the article_type
+// alone decides the mode. Title heuristics no longer accidentally
+// route internal data articles into the external workflow.
 
-const EXTERNAL_ARTICLE_TYPES = new Set<string>([
-  'upcoming_set', 'new_set', 'news', 'release_news',
-  'product_announcement', 'set_preview', 'evergreen_guide',
-  'external_research',
-])
-const EXTERNAL_TITLE_HINT = /\b(everything we know|coming soon|announced|announcement|revealed|reveal|preview|leak|leaked|rumou?r|upcoming|release date|preorder|pre-order|drop date|drops)\b/i
+import { getEditorialMode as _getEditorialMode } from '@/lib/editorial/editorialMode'
 
 function isExternalOpportunity(project: { article_type?: string; articleType?: string; title?: string; angle?: string | null }): boolean {
-  const t = String((project as any).article_type ?? (project as any).articleType ?? '').toLowerCase()
-  if (EXTERNAL_ARTICLE_TYPES.has(t)) return true
-  const combined = `${project.title ?? ''} ${project.angle ?? ''}`
-  return EXTERNAL_TITLE_HINT.test(combined)
+  return _getEditorialMode({
+    article_type: (project as any).article_type ?? (project as any).articleType ?? null,
+    title:        project.title ?? null,
+    angle:        project.angle ?? null,
+  }) === 'external'
 }
 
 function DeepResearchPromptButton({ project, compact }: { project: { id: number; title: string; article_type?: string; angle?: string | null }; compact?: boolean }) {
@@ -513,7 +508,7 @@ export default function EditorialHqClient({ context, radar, researchStatusById }
             title="Opportunity Radar"
             subtitle={`Grounded editorial opportunities inferred from real PokePrices data. ${radar.opportunities.length} detected today.`}
           />
-          <OpportunityRadarPanel radar={radar} onCreate={onCreate} />
+          <OpportunityRadarPanel radar={radar} onCreate={onCreate} activeProjects={projects} />
         </section>
 
         {/* THIS WEEK */}
@@ -1327,12 +1322,71 @@ function opportunityToProjectPayload(
 // ── Opportunity Radar panel ─────────────────────────────────────
 
 function OpportunityRadarPanel({
-  radar, onCreate,
+  radar, onCreate, activeProjects,
 }: {
   radar: OpportunityRadar
   onCreate: (payload: Partial<EditorialProject>) => Promise<any>
+  /** Live project list used for suggestion dedupe. When a project
+   *  already exists whose title matches an opportunity (case-
+   *  insensitive normalised containment), the opportunity is hidden
+   *  from the Radar list. Locally-created / acted-on suggestions
+   *  also hide immediately via `locallyDismissed`. */
+  activeProjects?: readonly EditorialProject[]
 }) {
-  const [expanded, setExpanded] = useState<string | null>(null)
+  const [expanded, setExpanded]           = useState<string | null>(null)
+  const [locallyDismissed, setDismissed]  = useState<Set<string>>(new Set())
+
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+  const projectTitles = (activeProjects ?? []).map(p => norm(p.title))
+
+  // Dedupe: opportunity is hidden when a live project's normalised
+  // title contains (or is contained by) the opportunity's normalised
+  // headline. Handles both directions so slight rewording doesn't
+  // resurface an already-planned idea.
+  const isAlreadyClaimed = (o: Opportunity): boolean => {
+    if (locallyDismissed.has(o.id)) return true
+    const oNorm = norm(o.headlineSuggestion)
+    if (!oNorm) return false
+    for (const t of projectTitles) {
+      if (!t) continue
+      if (t === oNorm) return true
+      if (t.includes(oNorm) || oNorm.includes(t)) return true
+    }
+    return false
+  }
+
+  const visible = radar.opportunities.filter(o => !isAlreadyClaimed(o))
+
+  // Split into external / internal groups via canonical helper.
+  const [external, internal] = visible.reduce<[Opportunity[], Opportunity[]]>((acc, o) => {
+    const mode = _getEditorialMode({ article_type: o.suggestedArticleType, title: o.headlineSuggestion, angle: o.angle })
+    if (mode === 'external') acc[0].push(o); else acc[1].push(o)
+    return acc
+  }, [[], []])
+
+  // Cap each side at 4 so the two groups are visually balanced by
+  // default. Everything else remains available via "Show all N".
+  const VISIBLE_PER_GROUP = 4
+  const externalVisible = external.slice(0, VISIBLE_PER_GROUP)
+  const internalVisible = internal.slice(0, VISIBLE_PER_GROUP)
+  const externalHidden  = external.length - externalVisible.length
+  const internalHidden  = internal.length - internalVisible.length
+
+  const dismissLocally = (id: string) => setDismissed(prev => { const n = new Set(prev); n.add(id); return n })
+
+  const onCreateFromOpportunity = async (o: Opportunity, payload: Partial<EditorialProject>) => {
+    const result = await onCreate(payload)
+    // Hide immediately whether or not the parent state updates on
+    // this render — feels correct even before Next re-renders.
+    dismissLocally(o.id)
+    return result
+  }
+
+  const onRefresh = () => {
+    // Radar is deterministic and re-runs on every page load.
+    // A hard reload is the simplest reliable refresh signal.
+    if (typeof window !== 'undefined') window.location.reload()
+  }
 
   if (radar.opportunities.length === 0) {
     return (
@@ -1355,91 +1409,136 @@ function OpportunityRadarPanel({
     )
   }
 
-  return (
-    <div style={{ display: 'grid', gap: 10 }}>
-      {radar.opportunities.map(o => {
-        const isOpen = expanded === o.id
-        return (
-          <div key={o.id} style={{ ...card, padding: 16 }}>
-            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-              <div style={{ flex: 1, minWidth: 260 }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--text-muted)' }}>{o.kind.replace(/_/g, ' ')}</span>
-                  <DataStrengthBadge s={o.dataStrength} />
-                  <CitationBadge s={o.citationPotential} />
-                  {o.overlap.verdict !== 'low' && (
-                    <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: '#b91c1c' }}>
-                      {o.overlap.verdict} overlap
-                    </span>
-                  )}
-                </div>
-                <h3 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 18, margin: '4px 0 6px', color: 'var(--text)' }}>{o.headlineSuggestion}</h3>
-                <p style={{ fontSize: 13, color: 'var(--text)', margin: '0 0 6px', lineHeight: 1.5 }}>{o.angle}</p>
-                <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}><strong>Why now:</strong> {o.whyNow}</p>
-                {(o.relatedSets.length > 0 || o.relatedCards.length > 0) && (
-                  <div style={{ marginTop: 8, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {o.relatedSets.slice(0, 5).map(s => <ChipTag key={'s-' + s} label={`Set: ${s}`} tone="blue" />)}
-                    {o.relatedCards.slice(0, 3).map((c, i) => <ChipTag key={'c-' + i + c.name} label={`Card: ${c.name}`} tone="grey" />)}
-                    {o.relatedCards.length > 3 && <ChipTag label={`+${o.relatedCards.length - 3} more cards`} tone="grey" />}
-                  </div>
-                )}
-                {o.overlap.verdict !== 'low' && o.overlap.topMatchHeadline && (
-                  <div style={{ marginTop: 8, fontSize: 12, color: '#b91c1c' }}>
-                    Closest existing: <a href={`/insights/${o.overlap.topMatchSlug}`} target="_blank" rel="noopener noreferrer" style={{ color: '#b91c1c' }}>{o.overlap.topMatchHeadline}</a>
-                  </div>
-                )}
-              </div>
-              <div style={{ display: 'grid', gap: 6, minWidth: 150, textAlign: 'right' }}>
-                <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 34, fontWeight: 800, color: 'var(--text)', lineHeight: 1 }}>{o.score}</div>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>out of 100</div>
-                <TypeBadge type={o.suggestedArticleType} />
-                {o.suggestedTiming && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{o.suggestedTiming}</span>}
-                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: 4 }}>
-                  <button style={btnGhost} onClick={() => onCreate(opportunityToProjectPayload(o, 'idea', null))}>Save as idea</button>
-                  <PlanOpportunityInline onSubmit={async iso => { await onCreate(opportunityToProjectPayload(o, 'planned', iso)) }} />
-                </div>
-              </div>
+  const renderOpp = (o: Opportunity) => {
+    const isOpen = expanded === o.id
+    const mode = _getEditorialMode({ article_type: o.suggestedArticleType, title: o.headlineSuggestion, angle: o.angle })
+    return (
+      <div key={o.id} style={{ ...card, padding: 16 }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 260 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--text-muted)' }}>{o.kind.replace(/_/g, ' ')}</span>
+              <DataStrengthBadge s={o.dataStrength} />
+              <CitationBadge s={o.citationPotential} />
+              {o.overlap.verdict !== 'low' && (
+                <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: '#b91c1c' }}>
+                  {o.overlap.verdict} overlap
+                </span>
+              )}
             </div>
-            <button
-              style={{ ...btnGhost, marginTop: 10, fontSize: 11, padding: '4px 10px' }}
-              onClick={() => setExpanded(isOpen ? null : o.id)}
-              aria-expanded={isOpen}
-            >
-              {isOpen ? 'Hide evidence + metrics' : 'Show evidence + metrics'}
-            </button>
-            {isOpen && (
-              <div style={{ marginTop: 10, display: 'grid', gap: 10, padding: 12, borderRadius: 10, background: 'var(--bg-light)', border: '1px solid var(--border)' }}>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>Score reasons</div>
-                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--text)' }}>
-                    {o.scoreReasons.map((r, i) => <li key={i}>{r}</li>)}
-                  </ul>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>Metrics</div>
-                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--text)' }}>
-                    {o.metrics.map((m, i) => <li key={i}><strong>{m.label}:</strong> {m.value}{m.hint ? ` — ${m.hint}` : ''}</li>)}
-                  </ul>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>Evidence</div>
-                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--text)' }}>
-                    {o.evidenceSummary.map((e, i) => <li key={i}>{e}</li>)}
-                  </ul>
-                </div>
-                {o.visuals.length > 0 && (
-                  <div>
-                    <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>Suggested visuals</div>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      {o.visuals.map(v => <ChipTag key={v} label={v.replace(/_/g, ' ')} tone="grey" />)}
-                    </div>
-                  </div>
-                )}
+            <h3 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 18, margin: '4px 0 6px', color: 'var(--text)' }}>{o.headlineSuggestion}</h3>
+            <p style={{ fontSize: 13, color: 'var(--text)', margin: '0 0 6px', lineHeight: 1.5 }}>{o.angle}</p>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}><strong>Why now:</strong> {o.whyNow}</p>
+            {(o.relatedSets.length > 0 || o.relatedCards.length > 0) && (
+              <div style={{ marginTop: 8, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {o.relatedSets.slice(0, 5).map(s => <ChipTag key={'s-' + s} label={`Set: ${s}`} tone="blue" />)}
+                {o.relatedCards.slice(0, 3).map((c, i) => <ChipTag key={'c-' + i + c.name} label={`Card: ${c.name}`} tone="grey" />)}
+                {o.relatedCards.length > 3 && <ChipTag label={`+${o.relatedCards.length - 3} more cards`} tone="grey" />}
+              </div>
+            )}
+            {o.overlap.verdict !== 'low' && o.overlap.topMatchHeadline && (
+              <div style={{ marginTop: 8, fontSize: 12, color: '#b91c1c' }}>
+                Closest existing: <a href={`/insights/${o.overlap.topMatchSlug}`} target="_blank" rel="noopener noreferrer" style={{ color: '#b91c1c' }}>{o.overlap.topMatchHeadline}</a>
               </div>
             )}
           </div>
-        )
-      })}
+          <div style={{ display: 'grid', gap: 6, minWidth: 150, textAlign: 'right' }}>
+            <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 34, fontWeight: 800, color: 'var(--text)', lineHeight: 1 }}>{o.score}</div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>out of 100</div>
+            <TypeBadge type={o.suggestedArticleType} />
+            {o.suggestedTiming && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{o.suggestedTiming}</span>}
+            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: 4 }}>
+              <button style={btnGhost} onClick={() => onCreateFromOpportunity(o, opportunityToProjectPayload(o, 'idea', null))}>Save as idea</button>
+              <PlanOpportunityInline onSubmit={async iso => { await onCreateFromOpportunity(o, opportunityToProjectPayload(o, 'planned', iso)) }} />
+              {mode === 'external' && (
+                <DeepResearchPromptButton project={{ id: -1, title: o.headlineSuggestion, article_type: o.suggestedArticleType, angle: o.angle }} compact />
+              )}
+            </div>
+          </div>
+        </div>
+        <button
+          style={{ ...btnGhost, marginTop: 10, fontSize: 11, padding: '4px 10px' }}
+          onClick={() => setExpanded(isOpen ? null : o.id)}
+          aria-expanded={isOpen}
+        >
+          {isOpen ? 'Hide evidence + metrics' : 'Show evidence + metrics'}
+        </button>
+        {isOpen && (
+          <div style={{ marginTop: 10, display: 'grid', gap: 10, padding: 12, borderRadius: 10, background: 'var(--bg-light)', border: '1px solid var(--border)' }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>Score reasons</div>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--text)' }}>
+                {o.scoreReasons.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>Metrics</div>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--text)' }}>
+                {o.metrics.map((m, i) => <li key={i}><strong>{m.label}:</strong> {m.value}{m.hint ? ` — ${m.hint}` : ''}</li>)}
+              </ul>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>Evidence</div>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--text)' }}>
+                {o.evidenceSummary.map((e, i) => <li key={i}>{e}</li>)}
+              </ul>
+            </div>
+            {o.visuals.length > 0 && (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>Suggested visuals</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {o.visuals.map(v => <ChipTag key={v} label={v.replace(/_/g, ' ')} tone="grey" />)}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          {visible.length} suggestion{visible.length === 1 ? '' : 's'} · {external.length} external · {internal.length} data
+          {(radar.opportunities.length - visible.length) > 0 && ` · ${radar.opportunities.length - visible.length} already saved / planned`}
+        </div>
+        <button style={btnGhost} onClick={onRefresh} title="Recalculate suggestions from the latest PokePrices data + release calendar">
+          Refresh Opportunities
+        </button>
+      </div>
+
+      {external.length + internal.length === 0 ? (
+        <div style={{ ...card, padding: 20, fontSize: 13, color: 'var(--text-muted)' }}>
+          Every current suggestion has already been saved or planned. Click <strong>Refresh Opportunities</strong> after new data lands, or check back tomorrow.
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 14 }}>
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+              External opportunities {externalVisible.length > 0 ? `(${externalVisible.length}${externalHidden > 0 ? ` of ${external.length}` : ''})` : ''}
+            </div>
+            {externalVisible.length === 0
+              ? <div style={{ ...card, padding: 14, fontSize: 12, color: 'var(--text-muted)' }}>No external opportunities detected right now.</div>
+              : externalVisible.map(renderOpp)}
+            {externalHidden > 0 && (
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>+ {externalHidden} more external hidden. Save or plan a few to make room.</div>
+            )}
+          </div>
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+              PokePrices data opportunities {internalVisible.length > 0 ? `(${internalVisible.length}${internalHidden > 0 ? ` of ${internal.length}` : ''})` : ''}
+            </div>
+            {internalVisible.length === 0
+              ? <div style={{ ...card, padding: 14, fontSize: 12, color: 'var(--text-muted)' }}>No proprietary-data opportunities detected right now.</div>
+              : internalVisible.map(renderOpp)}
+            {internalHidden > 0 && (
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>+ {internalHidden} more data-led hidden. Save or plan a few to make room.</div>
+            )}
+          </div>
+        </div>
+      )}
       {radar.meta.detectorsSuppressed.length > 0 && (
         <details style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
           <summary style={{ cursor: 'pointer' }}>Detector diagnostics ({radar.meta.detectorsSuppressed.length} suppressed)</summary>

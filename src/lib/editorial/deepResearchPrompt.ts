@@ -39,7 +39,7 @@ export function buildDeepResearchPrompt(args: DeepResearchPromptInput): string {
   const questions = defaultResearchQuestions(args.project.articleType)
   const internalLinksBlock = args.internalLinks.length === 0
     ? '(none — do not invent PokePrices URLs)'
-    : args.internalLinks.map(l => `- ${l.title} — https://www.pokeprices.io${l.url.startsWith('/') ? l.url : '/' + l.url}`).join('\n')
+    : args.internalLinks.map(l => `- ${l.title} — ${normalisePokePricesUrl(l.url)}`).join('\n')
 
   return TEMPLATE
     .replace('{{topic}}',             args.project.title)
@@ -49,6 +49,19 @@ export function buildDeepResearchPrompt(args: DeepResearchPromptInput): string {
     .replace('{{currentDate}}',       args.today)
     .replace('{{researchQuestions}}', questions.map((q, i) => `${i + 1}. ${q}`).join('\n'))
     .replace('{{internalLinks}}',     internalLinksBlock)
+}
+
+/** URL normalisation for the internal-links block. Fixes the earlier
+ *  bug where an already-absolute URL was double-hosted producing
+ *  https://www.pokeprices.io/https://www.pokeprices.io/... */
+export function normalisePokePricesUrl(url: string): string {
+  const HOST = 'https://www.pokeprices.io'
+  const raw = String(url ?? '').trim()
+  if (!raw) return raw
+  // Already fully-qualified — leave alone.
+  if (/^https?:\/\//i.test(raw)) return raw
+  // Relative path — prepend host exactly once.
+  return HOST + (raw.startsWith('/') ? raw : '/' + raw)
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -84,12 +97,12 @@ KEY QUESTIONS TO ANSWER:
 
 {{researchQuestions}}
 
-Writing requirements:
+WRITING REQUIREMENTS
 
 - Write for Pokémon card collectors and investors
 - Make it factual, useful and entertaining
 - Do not write like a research report or encyclopedia
-- Lead with the most interesting collector angle
+- Lead with the most interesting collector angle in the first paragraph — do NOT repeat the article title at the top of the body
 - Explain why important facts matter
 - Use restrained editorial opinion where helpful
 - Clearly distinguish confirmed information from rumor or unconfirmed reporting
@@ -103,13 +116,32 @@ Writing requirements:
 - Use 4–6 useful H2 sections
 - Optimize naturally for search without keyword stuffing
 
-INTERNAL POKEPRICES LINKS AVAILABLE:
+FORMATTING RULES — READ CAREFULLY
+
+The article body must look like normal editorial writing, not AI-generated Markdown.
+
+- Do NOT use bold formatting inside the article body. Specifically:
+  - no **random words**
+  - no bold Pokémon names
+  - no bold dates
+  - no bold product names
+  - no bold sentences for emphasis
+- Italics should be rare and only used where linguistically appropriate (film / product / publication titles).
+- H2 (##) and H3 (###) headings are fine and encouraged.
+- Normal Markdown links [anchor text](https://...) are fine and encouraged.
+- Do NOT include a "Methodology" or "Research methodology" section.
+- Do NOT include a "Bottom line:" summary paragraph unless it reads naturally, unforced.
+- Do NOT include a generic closing paragraph like "we'll keep this updated" unless there is useful new information in it.
+- Do NOT use fake quotation marks around ordinary product names.
+- Do NOT emit inline citation artifacts such as \`【1†L2-L4】\`, \`[1]\`, or bracket footnote references. Deep Research can use citations internally while researching, but the final ARTICLE BODY must be clean publishable prose. Put the source list in the separate SOURCES section only.
+
+INTERNAL POKEPRICES LINKS AVAILABLE
 
 {{internalLinks}}
 
 Use these naturally where useful. Do not invent PokePrices URLs.
 
-Before finalizing:
+BEFORE FINALIZING
 
 - Re-check dates
 - Re-check product names
@@ -117,13 +149,27 @@ Before finalizing:
 - Re-check anything described as officially confirmed
 - Remove unsupported claims
 
-Return:
+OUTPUT FORMAT — RETURN EXACTLY THIS STRUCTURE
 
-- Final article title
-- SEO title
-- Meta description
-- Finished article body
-- Source list used
+Return the finished article as clearly labeled sections in this exact order. Use these section headers verbatim so the PokePrices CMS can pick each field cleanly:
+
+ARTICLE TITLE
+[final article H1, 60-70 chars]
+
+INTRO SNIPPET
+[short 1-2 sentence standfirst / excerpt, ~150 chars — will render under the H1]
+
+SEO TITLE
+[SEO title, ~50-60 chars, may vary from the article H1]
+
+META DESCRIPTION
+[meta description, 140-160 chars]
+
+ARTICLE BODY
+[finished article, starting directly with the opening paragraph — do NOT repeat the article title at the top]
+
+SOURCES
+[bulleted list of URLs actually used, one per line, in publication order]
 `
 
 // ─────────────────────────────────────────────────────────────────

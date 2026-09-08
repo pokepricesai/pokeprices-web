@@ -37,14 +37,10 @@ type Props = {
   onFactCheckResult:  (result: FactCheckResult) => void
 }
 
-const EXTERNAL_ARTICLE_TYPES = new Set<string>([
-  'upcoming_set', 'new_set', 'news', 'release_news',
-  'product_announcement', 'set_preview', 'evergreen_guide',
-  'external_research',
-])
-function isExternalArticleType(articleType: string | undefined): boolean {
-  if (!articleType) return false
-  return EXTERNAL_ARTICLE_TYPES.has(articleType.toLowerCase())
+import { getEditorialMode } from '@/lib/editorial/editorialMode'
+
+function isExternalArticleType(articleType: string | undefined, title?: string): boolean {
+  return getEditorialMode({ article_type: articleType ?? null, title: title ?? null }) === 'external'
 }
 
 // Block 9B/9C — real server stages. Progress UI reflects
@@ -167,7 +163,7 @@ export function GenerateAndFactCheckPanel(props: Props) {
   // flow is intentionally bypassed. Admin uses the Copy Deep
   // Research Prompt button on Editorial HQ, pastes the returned
   // article into Studio manually, then optionally runs Fact Check.
-  const isExternal = isExternalArticleType(props.articleType)
+  const isExternal = isExternalArticleType(props.articleType, props.projectTitle)
 
   return (
     <div style={S.wrap}>

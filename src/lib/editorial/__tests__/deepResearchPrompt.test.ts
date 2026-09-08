@@ -3,7 +3,7 @@
 // Tests for the Deep Research prompt generator.
 
 import { describe, it, expect } from 'vitest'
-import { buildDeepResearchPrompt } from '../deepResearchPrompt'
+import { buildDeepResearchPrompt, normalisePokePricesUrl } from '../deepResearchPrompt'
 
 const TODAY = '2026-09-08'
 
@@ -31,11 +31,38 @@ describe('buildDeepResearchPrompt template shape', () => {
   it('contains every section header from the spec', () => {
     for (const header of [
       'TOPIC:', 'PROPOSED TITLE:', 'ANGLE:', 'WHY NOW:', 'CURRENT DATE:',
-      'KEY QUESTIONS TO ANSWER:', 'Writing requirements:',
-      'INTERNAL POKEPRICES LINKS AVAILABLE:', 'Before finalizing:', 'Return:',
+      'KEY QUESTIONS TO ANSWER:', 'WRITING REQUIREMENTS', 'FORMATTING RULES',
+      'INTERNAL POKEPRICES LINKS AVAILABLE', 'BEFORE FINALIZING', 'OUTPUT FORMAT',
     ]) {
       expect(prompt).toContain(header)
     }
+  })
+
+  it('output format lists ARTICLE TITLE / INTRO SNIPPET / SEO TITLE / META DESCRIPTION / ARTICLE BODY / SOURCES in exact order', () => {
+    // The prompt template inlines those labels; assert each appears
+    // and check the ordering by index.
+    const labels = ['ARTICLE TITLE', 'INTRO SNIPPET', 'SEO TITLE', 'META DESCRIPTION', 'ARTICLE BODY', 'SOURCES']
+    const positions = labels.map(l => prompt.indexOf('\n' + l + '\n'))
+    for (const p of positions) expect(p).toBeGreaterThan(-1)
+    // Strictly ascending
+    for (let i = 1; i < positions.length; i++) expect(positions[i]).toBeGreaterThan(positions[i - 1])
+  })
+
+  it('explicitly bans bold formatting in the article body', () => {
+    expect(prompt).toContain('Do NOT use bold formatting inside the article body')
+    expect(prompt).toContain('no **random words**')
+    expect(prompt).toContain('no bold Pokémon names')
+  })
+
+  it('explicitly forbids inline citation artefacts and the methodology / bottom-line sections', () => {
+    expect(prompt).toContain('inline citation artifacts')
+    expect(prompt).toContain('【1†L2-L4】')
+    expect(prompt).toContain('Do NOT include a "Methodology"')
+    expect(prompt).toContain('Bottom line')
+  })
+
+  it('tells the model to start body with opening paragraph and not repeat the title', () => {
+    expect(prompt).toContain('do NOT repeat the article title at the top')
   })
 
   it('names all three source-priority tiers by their public names', () => {
@@ -54,15 +81,17 @@ describe('buildDeepResearchPrompt template shape', () => {
     expect(prompt).toContain('Do not invent facts')
   })
 
-  it('includes the finalize-checklist and the Return: contract', () => {
+  it('includes the finalize-checklist and the new labeled return contract', () => {
     expect(prompt).toContain('Re-check dates')
     expect(prompt).toContain('Re-check product names')
     expect(prompt).toContain('Re-check card/set numbers')
-    expect(prompt).toContain('Final article title')
-    expect(prompt).toContain('SEO title')
-    expect(prompt).toContain('Meta description')
-    expect(prompt).toContain('Finished article body')
-    expect(prompt).toContain('Source list used')
+    // New labeled output structure
+    expect(prompt).toContain('ARTICLE TITLE')
+    expect(prompt).toContain('INTRO SNIPPET')
+    expect(prompt).toContain('SEO TITLE')
+    expect(prompt).toContain('META DESCRIPTION')
+    expect(prompt).toContain('ARTICLE BODY')
+    expect(prompt).toContain('SOURCES')
   })
 })
 
@@ -120,9 +149,29 @@ describe('buildDeepResearchPrompt substitutions', () => {
     expect(prompt).toContain('- Celebration Collection set page — https://www.pokeprices.io/set/celebration-collection')
   })
 
+  it('does NOT double-host already-absolute pokeprices.io URLs', () => {
+    // Regression: previous bug produced
+    // https://www.pokeprices.io/https://www.pokeprices.io/insights/...
+    const prompt = buildDeepResearchPrompt({
+      project: project(),
+      today: TODAY,
+      internalLinks: [
+        // Already absolute
+        { title: 'Full URL A', url: 'https://www.pokeprices.io/insights/a' },
+        // Also already absolute
+        { title: 'Full URL B', url: 'https://www.pokeprices.io/set/b' },
+      ],
+    })
+    expect(prompt).toContain('- Full URL A — https://www.pokeprices.io/insights/a')
+    expect(prompt).toContain('- Full URL B — https://www.pokeprices.io/set/b')
+    // The regression string must NOT appear.
+    expect(prompt).not.toContain('https://www.pokeprices.io/https://')
+  })
+
   it('shows a friendly placeholder when there are no internal links', () => {
     const prompt = buildDeepResearchPrompt({ project: project(), today: TODAY, internalLinks: [] })
-    expect(prompt).toContain('INTERNAL POKEPRICES LINKS AVAILABLE:\n\n(none — do not invent PokePrices URLs)')
+    expect(prompt).toContain('INTERNAL POKEPRICES LINKS AVAILABLE')
+    expect(prompt).toContain('(none — do not invent PokePrices URLs)')
   })
 })
 
@@ -158,6 +207,37 @@ describe('buildDeepResearchPrompt research questions by article type', () => {
 // Forbidden internal jargon — none of it leaks to the prompt
 // ─────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────
+// normalisePokePricesUrl — unit
+// ─────────────────────────────────────────────────────────────────
+
+describe('normalisePokePricesUrl', () => {
+  it('leaves an already-fully-qualified pokeprices.io URL alone', () => {
+    expect(normalisePokePricesUrl('https://www.pokeprices.io/insights/foo')).toBe('https://www.pokeprices.io/insights/foo')
+    expect(normalisePokePricesUrl('https://www.pokeprices.io/set/bar')).toBe('https://www.pokeprices.io/set/bar')
+  })
+  it('leaves external absolute URLs alone', () => {
+    expect(normalisePokePricesUrl('https://pokemon.com/x')).toBe('https://pokemon.com/x')
+    expect(normalisePokePricesUrl('http://example.com')).toBe('http://example.com')
+  })
+  it('prepends the host to a relative path', () => {
+    expect(normalisePokePricesUrl('/insights/foo')).toBe('https://www.pokeprices.io/insights/foo')
+    expect(normalisePokePricesUrl('/set/bar')).toBe('https://www.pokeprices.io/set/bar')
+  })
+  it('prepends "/" when the relative path is missing it', () => {
+    expect(normalisePokePricesUrl('insights/foo')).toBe('https://www.pokeprices.io/insights/foo')
+  })
+  it('never double-hosts', () => {
+    // The previous concatenation bug — check the helper itself is
+    // idempotent-safe on the buggy input pattern.
+    expect(normalisePokePricesUrl('https://www.pokeprices.io/insights/x')).not.toContain('https://www.pokeprices.io/https://')
+  })
+  it('safe on empty / whitespace input', () => {
+    expect(normalisePokePricesUrl('')).toBe('')
+    expect(normalisePokePricesUrl('   ')).toBe('')
+  })
+})
+
 describe('buildDeepResearchPrompt does not leak internal machinery', () => {
   const prompt = buildDeepResearchPrompt({
     project: project(),
@@ -165,10 +245,13 @@ describe('buildDeepResearchPrompt does not leak internal machinery', () => {
     internalLinks: [{ title: 'Anniversary sets in Pokémon history', url: '/insights/anniversary-history' }],
   })
 
+  // Note: "Methodology" / "methodology" DOES appear — the prompt
+  // explicitly instructs the model NOT to write a Methodology
+  // section, which requires naming the concept.
   it.each([
     'EvidencePack', 'evidenceRefs', 'sourceTier', 'Tier 1', 'Tier 2', 'Tier 3',
     'claim trace', 'claimTrace', 'block intents', 'blockIntents',
-    'quarantine', 'methodology', 'numericAudit', 'verifiedFacts',
+    'quarantine', 'numericAudit', 'verifiedFacts',
     'stripCitationMarkup', 'run.stage', 'runId',
   ])('does not mention "%s"', jargon => {
     expect(prompt).not.toContain(jargon)

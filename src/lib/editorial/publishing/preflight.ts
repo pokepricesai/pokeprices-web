@@ -15,6 +15,7 @@ import type { EvidencePack } from '../research/types'
 import { studioProjectToInsightPayload, type InsightPayload } from './payload'
 import { generateSlug, isValidSlug } from './slug'
 import { hashStudioBody } from '@/lib/editorial/writer/hash'
+import { getEditorialMode } from '../editorialMode'
 
 // ─────────────────────────────────────────────────────────────────
 // Result shapes
@@ -64,18 +65,33 @@ export async function runPublicationPreflight(projectId: number, opts: Preflight
     }
   }
 
-  // ── Research approved ──
-  const research = await fetchResearch(projectId)
-  if (!research || research.status !== 'approved') {
-    checks.push({ id: 'research.approved', label: 'Research is approved', severity: 'blocker', detail: `status: ${research?.status ?? 'not_started'}` })
-  } else {
-    checks.push({ id: 'research.approved', label: 'Research is approved', severity: 'ok' })
+  // EIC cleanup — canonical mode routing. External SEO / news / new-
+  // set articles are researched and written externally (Deep Research)
+  // and only need CMS essentials at publish time; they must not be
+  // blocked by internal EvidencePack / writer / factcheck gates.
+  const mode = getEditorialMode({
+    article_type: project.article_type,
+    title:        project.title,
+    angle:        project.angle,
+  })
+  const isExternal = mode === 'external'
+
+  // ── Research approved (INTERNAL ONLY) ──
+  const research = isExternal ? null : await fetchResearch(projectId)
+  if (!isExternal) {
+    if (!research || research.status !== 'approved') {
+      checks.push({ id: 'research.approved', label: 'Research is approved', severity: 'blocker', detail: `status: ${research?.status ?? 'not_started'}` })
+    } else {
+      checks.push({ id: 'research.approved', label: 'Research is approved', severity: 'ok' })
+    }
   }
   const pack = (research?.evidence_json ?? null) as EvidencePack | null
-  if (pack && !pack.quality.publishable) {
-    checks.push({ id: 'research.publishable', label: 'Research pack is publishable', severity: 'blocker', detail: pack.quality.reasons.join(' · ').slice(0, 300) })
-  } else if (pack) {
-    checks.push({ id: 'research.publishable', label: 'Research pack is publishable', severity: 'ok' })
+  if (!isExternal) {
+    if (pack && !pack.quality.publishable) {
+      checks.push({ id: 'research.publishable', label: 'Research pack is publishable', severity: 'blocker', detail: pack.quality.reasons.join(' · ').slice(0, 300) })
+    } else if (pack) {
+      checks.push({ id: 'research.publishable', label: 'Research pack is publishable', severity: 'ok' })
+    }
   }
 
   // ── Studio present + meaningful ──
@@ -115,27 +131,29 @@ export async function runPublicationPreflight(projectId: number, opts: Preflight
     checks.push({ id: 'slug.unique', label: 'Slug is available', severity: 'ok' })
   }
 
-  // ── Fact check present, pass, and current ──
+  // ── Fact check present, pass, and current (INTERNAL ONLY) ──
   const fc = writer?.factCheck ?? null
   const currentStudioHash = hashStudioBody(studio.bodyDoc)
-  if (!fc) {
-    checks.push({ id: 'factcheck.present', label: 'Fact check has been run', severity: 'blocker', detail: 'no fact check recorded' })
-  } else {
-    checks.push({ id: 'factcheck.present', label: 'Fact check has been run', severity: 'ok' })
-    if (fc.status !== 'pass') {
-      checks.push({ id: 'factcheck.pass', label: 'Fact check status = pass', severity: 'blocker', detail: `status: ${fc.status}` })
+  if (!isExternal) {
+    if (!fc) {
+      checks.push({ id: 'factcheck.present', label: 'Fact check has been run', severity: 'blocker', detail: 'no fact check recorded' })
     } else {
-      checks.push({ id: 'factcheck.pass', label: 'Fact check status = pass', severity: 'ok' })
-    }
-    if (writer?.checkedStudioHash && writer.checkedStudioHash !== currentStudioHash) {
-      checks.push({ id: 'factcheck.current', label: 'Fact check matches current draft', severity: 'blocker', detail: 'Fact check is out of date — draft has changed since the last check' })
-    } else {
-      checks.push({ id: 'factcheck.current', label: 'Fact check matches current draft', severity: 'ok' })
-    }
-    if (fc.numericAudit.issues.length > 0) {
-      checks.push({ id: 'factcheck.numeric', label: '0 unsupported numeric claims', severity: 'blocker', detail: `${fc.numericAudit.issues.length} numeric issue(s) unresolved` })
-    } else {
-      checks.push({ id: 'factcheck.numeric', label: '0 unsupported numeric claims', severity: 'ok' })
+      checks.push({ id: 'factcheck.present', label: 'Fact check has been run', severity: 'ok' })
+      if (fc.status !== 'pass') {
+        checks.push({ id: 'factcheck.pass', label: 'Fact check status = pass', severity: 'blocker', detail: `status: ${fc.status}` })
+      } else {
+        checks.push({ id: 'factcheck.pass', label: 'Fact check status = pass', severity: 'ok' })
+      }
+      if (writer?.checkedStudioHash && writer.checkedStudioHash !== currentStudioHash) {
+        checks.push({ id: 'factcheck.current', label: 'Fact check matches current draft', severity: 'blocker', detail: 'Fact check is out of date — draft has changed since the last check' })
+      } else {
+        checks.push({ id: 'factcheck.current', label: 'Fact check matches current draft', severity: 'ok' })
+      }
+      if (fc.numericAudit.issues.length > 0) {
+        checks.push({ id: 'factcheck.numeric', label: '0 unsupported numeric claims', severity: 'blocker', detail: `${fc.numericAudit.issues.length} numeric issue(s) unresolved` })
+      } else {
+        checks.push({ id: 'factcheck.numeric', label: '0 unsupported numeric claims', severity: 'ok' })
+      }
     }
   }
 
