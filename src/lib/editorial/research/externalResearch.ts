@@ -206,18 +206,28 @@ export function buildExternalMethodology(args: {
 // Quality computation
 // ─────────────────────────────────────────────────────────────────
 //
-// An external pack is publishable when:
-//   * At least ONE Tier-1 source, OR at least TWO Tier-2 sources
-//     (independent publishers, distinct domains), AND
-//   * At least 3 verifiedFacts backed by those sources, AND
-//   * No unresolved critical warnings.
+// External Research Fix v5 — external packs are publishable when:
+//   * A web-research run completed successfully AND we have a
+//     non-empty research summary (or manual sources standing in),
+//   * Source authority OK: >=1 Tier-1 OR >=2 distinct Tier-2 domains,
+//   * No unresolved CRITICAL contradiction / warning.
+//
+// The prior rule required >=3 structured verifiedFacts. That gate is
+// removed for external_research — 44 Tier-1 sources with rich cited
+// prose should not be blocked because Haiku failed to emit 3 fact
+// objects. Structured facts remain OPTIONAL and populate via the
+// Advanced Re-extract flow.
 
 export function computeExternalQuality(args: {
-  externalSources:   readonly ExternalSource[]
-  verifiedFacts:     readonly VerifiedFact[]
-  hasWebResearch:    boolean
-  today:             string
-  webResearchedAt?:  string
+  externalSources:      readonly ExternalSource[]
+  verifiedFacts:        readonly VerifiedFact[]
+  hasWebResearch:       boolean
+  today:                string
+  webResearchedAt?:     string
+  /** External Research Fix v5 — new inputs. Both optional so old
+   *  callers (which pre-date v5) still compile. */
+  hasResearchSummary?:  boolean
+  contradictions?:      ReadonlyArray<{ id?: string; claim?: string }>
 }): PackQuality {
   const t1 = args.externalSources.filter(s => s.sourceTier === 1)
   const t2Domains = new Set(
@@ -228,18 +238,31 @@ export function computeExternalQuality(args: {
   )
   const sourceOk = t1.length >= 1 || t2Domains.size >= 2
 
+  // Prefer the v5 "research completed + summary present" gate for
+  // external packs. Fall back to the old fact-count path only when
+  // structured facts are already present (backwards compatibility
+  // with any pack that WAS approved under the old rule).
+  const summaryOk = args.hasResearchSummary ?? args.hasWebResearch
   const factCount = args.verifiedFacts.filter(f => f.evidenceRefs.length > 0).length
-  const factsOk = factCount >= 3
+  const legacyFactsPath = factCount >= 3
+
+  // A contradiction is "critical" here if it exists at all; the
+  // Analyst / extractor only emits contradictions for meaningful
+  // release-critical disagreement, so any non-empty list warrants a
+  // pause. Editors can still approve by resolving in prose or by
+  // adding a note. Empty list = fine.
+  const unresolvedContradiction = (args.contradictions ?? []).length > 0
 
   const reasons: string[] = []
   if (!args.hasWebResearch && args.externalSources.length === 0) {
     reasons.push('No external evidence yet.')
   }
   if (!sourceOk) reasons.push('Insufficient source authority (need 1× Tier-1 or 2× Tier-2 from distinct domains).')
-  if (!factsOk)  reasons.push(`Fewer than 3 externally-sourced facts (currently ${factCount}).`)
+  if (!summaryOk && !legacyFactsPath) reasons.push('No research summary — run web research first.')
+  if (unresolvedContradiction) reasons.push(`${(args.contradictions ?? []).length} unresolved contradiction(s) — surface in prose or resolve before approving.`)
 
-  const publishable = sourceOk && factsOk && reasons.length === 0
-  const status: PackQuality['status'] = publishable ? 'ok' : (args.externalSources.length === 0 && !args.hasWebResearch ? 'needs_review' : 'needs_review')
+  const publishable = sourceOk && (summaryOk || legacyFactsPath) && !unresolvedContradiction
+  const status: PackQuality['status'] = publishable ? 'ok' : 'needs_review'
 
   // Freshness: use the web-research date when we have one, otherwise
   // "today" so the pack isn't marked stale for missing what we
@@ -255,6 +278,30 @@ export function computeExternalQuality(args: {
     publishable,
     reasons,
   }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// v5 — human-facing research summary builder
+// ─────────────────────────────────────────────────────────────────
+//
+// Editors read this to decide approval. It's just the cited Sonnet
+// prose we already have, lightly framed. No AI call, no cost.
+
+export function buildResearchSummaryFromRun(args: {
+  primaryText?:    string
+  supportingText?: string
+  /** Truncation cap; the source-of-truth full prose stays on the run. */
+  cap?:            number
+}): string {
+  const cap = args.cap ?? 12_000
+  const parts: string[] = []
+  const primary = (args.primaryText ?? '').trim()
+  const supporting = (args.supportingText ?? '').trim()
+  if (primary) parts.push('## Primary discovery (Tier-1 focus)\n\n' + primary)
+  if (supporting) parts.push('## Supporting discovery (Tier-2 fill-in)\n\n' + supporting)
+  if (parts.length === 0) return ''
+  const combined = parts.join('\n\n---\n\n')
+  return combined.length > cap ? combined.slice(0, cap) + '\n\n[…summary truncated for storage; full prose is available on the run…]' : combined
 }
 
 // ─────────────────────────────────────────────────────────────────

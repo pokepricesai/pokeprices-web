@@ -95,6 +95,22 @@ export type EvidencePack = {
    *  resume without re-spending already-completed searches. Cleared
    *  is fine on 'complete' + subsequent Rebuild. */
   externalResearchRun?: ExternalResearchRun
+
+  /** External Research Fix v5 — human-facing synthesis of the
+   *  external research run. Derived from run.primaryText +
+   *  run.supportingText at finalize time (no AI call). What editors
+   *  actually read to make an approval decision. */
+  researchSummary?: string
+
+  /** External Research Fix v5 — optional structured findings, only
+   *  populated when the Advanced Re-extract runs the Haiku
+   *  extractor. Not required for approval; useful for future
+   *  downstream tooling. */
+  researchFindings?: {
+    confirmed:        string[]
+    reportedOrLikely: string[]
+    unknown:          string[]
+  }
 }
 
 export type SourceTier = 1 | 2 | 3

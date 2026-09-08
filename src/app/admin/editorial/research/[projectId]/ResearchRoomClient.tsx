@@ -176,6 +176,12 @@ export default function ResearchRoomClient({ project, initialResearch, chosenRec
       setNotice(`Re-extracted ${j.facts ?? 0} fact(s), ${j.contradictions ?? 0} contradiction(s) from the existing research run. Cost: $${Number(j.costUsd ?? 0).toFixed(4)}. ${j.usedPrimaryText ? 'Used stored primary text.' : 'Sources-only mode (no primary text was stored on this pack).'}`)
     }
   }
+  const doRefinalize = async () => {
+    const j = await run('research_web_refinalize', { action: 'research_web_refinalize' })
+    if (j) {
+      setNotice(`Refreshed summary + quality from the existing research run. No AI cost.`)
+    }
+  }
 
   const rebuildBlockedByApproval = research?.status === 'approved' && !confirmingRebuild
 
@@ -255,13 +261,21 @@ export default function ResearchRoomClient({ project, initialResearch, chosenRec
           {advancedOpen && pack && (
             <div style={S.advancedBox}>
               <strong>Advanced</strong>
+              {isExternal && pack.externalResearchRun && (pack.externalResearchRun.stage === 'complete' || pack.externalResearchRun.stage === 'finalizing') && (
+                <div style={{ marginTop: 6 }}>
+                  <button style={S.btnLinkQuiet} disabled={!!busy} onClick={doRefinalize} title="Rebuild the research summary + recompute quality from the pack's existing staged run. No new web_search, no AI cost.">
+                    {busy === 'research_web_refinalize' ? 'Refreshing…' : 'Refresh summary + quality (no AI)'}
+                  </button>
+                </div>
+              )}
+              {isExternal && <WhatWeKnow pack={pack} />}
               {isExternal && pack.webResearch?.extractionDiagnostics && (
                 <ExtractionDiagnosticsPanel d={pack.webResearch.extractionDiagnostics} />
               )}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6, alignItems: 'center' }}>
                 {isExternal && pack.webResearch && (
-                  <button style={S.btnLinkQuiet} disabled={!!busy} onClick={doReExtract} title="Re-run the Haiku fact-extractor on this pack's existing web-research response + discovered sources. No new web_search. Cheapest recovery path when a run yielded citations but 0 facts.">
-                    {busy === 're_extract_facts' ? 'Extracting…' : 'Re-extract facts (no new web search)'}
+                  <button style={S.btnLinkQuiet} disabled={!!busy} onClick={doReExtract} title="Optional: run the Haiku fact-extractor to produce structured verifiedFacts alongside the research summary. Not required for approval or the Writer.">
+                    {busy === 're_extract_facts' ? 'Extracting…' : 'Extract structured facts (optional, Haiku)'}
                   </button>
                 )}
                 {isExternal && (
@@ -299,8 +313,8 @@ export default function ResearchRoomClient({ project, initialResearch, chosenRec
             <>
               <QualityCard pack={pack} />
               {isExternal && activeRun && <StageProgressCard run={activeRun} />}
+              {isExternal && <WhatWeFound pack={pack} onRefinalize={doRefinalize} busy={busy} />}
               {isExternal && <WebResearchMetaCard pack={pack} />}
-              {isExternal && <WhatWeKnow pack={pack} />}
               {isExternal && <ContradictionsSection pack={pack} />}
               {isExternal && <ResearchQuestionsSection pack={pack} />}
               <Methodology pack={pack} />
@@ -875,6 +889,45 @@ function StageProgressCard({ run }: { run: ExternalResearchRun }) {
       {!isFailed && !isDone && (
         <p style={S.muted}>Each stage is bounded and persists on success. If your browser reloads, click <strong>Resume research</strong> to continue — successful searches are never repeated.</p>
       )}
+    </div>
+  )
+}
+
+function WhatWeFound({ pack, onRefinalize, busy }: { pack: EvidencePack; onRefinalize: () => void; busy: string | null }) {
+  const run = pack.externalResearchRun
+  // Prefer the persisted researchSummary; fall back to reading the
+  // run's primary + supporting prose directly (covers old completed
+  // packs like project 12 that were finalized before v5 shipped).
+  const summary = pack.researchSummary && pack.researchSummary.trim().length > 0
+    ? pack.researchSummary
+    : run
+      ? [run.primaryText ?? '', run.supportingText ?? ''].filter(s => s.trim().length > 0).join('\n\n---\n\n')
+      : ''
+
+  if (!summary) {
+    return (
+      <div style={S.section}>
+        <h2 style={S.h2}>What we found</h2>
+        <p style={S.muted}>No research summary yet. Click <strong>Research web</strong> to gather external evidence.</p>
+      </div>
+    )
+  }
+
+  const staleSummary = !pack.researchSummary && !!run   // completed under old rules
+  return (
+    <div style={S.section}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
+        <h2 style={{ ...S.h2, marginBottom: 0 }}>What we found</h2>
+        {staleSummary && (
+          <button style={S.btnLinkQuiet} disabled={!!busy} onClick={onRefinalize} title="This pack was finalized before v5 — refresh to persist the research summary and recompute the (simpler) publishability gate.">
+            {busy === 'research_web_refinalize' ? 'Refreshing…' : 'Refresh summary + quality (no AI)'}
+          </button>
+        )}
+      </div>
+      <p style={S.muted}>Research synthesis from the staged web-search run. Sources are numbered as inline citations in the prose below; the full source list is under <strong>External sources</strong>.</p>
+      <pre style={{ marginTop: 10, padding: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, whiteSpace: 'pre-wrap' as any, wordBreak: 'break-word' as any, fontFamily: 'inherit', fontSize: 13, color: '#334155', lineHeight: 1.55, maxHeight: 560, overflow: 'auto' }}>
+        {summary}
+      </pre>
     </div>
   )
 }

@@ -88,6 +88,7 @@ import {
   startExternalResearchRun,
   advanceExternalResearchRun,
   retryExternalResearchRun,
+  refinalizeExternalResearch,
 } from '../externalResearchStages'
 import type { EvidencePack } from '../types'
 import { runExternalResearchRecipe } from '../externalResearch'
@@ -112,85 +113,52 @@ beforeEach(() => {
 // 1. Each stage advances by exactly one step and persists
 // ─────────────────────────────────────────────────────────────────
 
-describe('stage machine: advances exactly one stage per call', () => {
-  it('start → advance × 5 lands on complete, one Claude call per non-deterministic stage', async () => {
+describe('stage machine v5: default happy path skips auto-extraction', () => {
+  it('start → advance × 4 lands on complete with researchSummary but zero mandatory extraction', async () => {
     await seedPack()
 
-    // Script the two discovery stages + one extraction stage.
+    // v5 default flow: primary → supporting → finalizing → complete.
+    // No auto-extractor call in the queue.
     scriptedResponses.push(
-      { feature: 'primary', text: 'Primary prose. [1] Official announcement.', cost: 0.12, searches: 3, citations: [
+      { text: 'Primary prose. [1] Officially announced. [2] Expansion page live.', cost: 0.12, searches: 3, citations: [
         { url: 'https://www.pokemon.com/us/pokemon-news/celebration', title: 'Official' },
         { url: 'https://tcg.pokemon.com/en-us/expansions/celebration/', title: 'Expansion page' },
       ], webSearch: {} },
-      { feature: 'supporting', text: 'Supporting prose. Retailer coverage [1].', cost: 0.10, searches: 3, citations: [
+      { text: 'Supporting prose. Retailer coverage [1] indicates preorders.', cost: 0.10, searches: 3, citations: [
         { url: 'https://www.tcgplayer.com/product/xyz', title: 'Preorder listing' },
       ], webSearch: {} },
-      // Extractor emits structured JSON referring back to discovered
-      // ids using the v4 STABLE src_NNN scheme that stageExtract
-      // remaps to. The persistent ids are translated back on the way
-      // out; v3-style persistent-id refs no longer work.
-      { feature: 'extract', text: '```json\n' + JSON.stringify({
-        researchQuestions: ['Is the release date confirmed?', 'What products are included?'],
-        discoveredSources: [],
-        verifiedFacts: [
-          { id: 'fact-official', statement: 'Set has an official expansion page.', status: 'confirmed', sourceTier: 1, evidenceRefs: ['src_001', 'src_002'] },
-          { id: 'fact-preorder', statement: 'Preorders are live at TCGplayer.', status: 'reported', sourceTier: 2, evidenceRefs: ['src_003'] },
-          { id: 'fact-announced', statement: 'The Pokémon Company has announced the set.', status: 'confirmed', sourceTier: 1, evidenceRefs: ['src_001'] },
-        ],
-        contradictions: [],
-        researchGaps: ['Exact card count not yet published.'],
-      }) + '\n```', cost: 0.008, searches: 0 },
     )
 
-    // Start the run.
-    const started = await startExternalResearchRun(PROJECT_ID, 'e@x')
-    expect(started.run.stage).toBe('queued')
-
-    // 1st advance: queued → researching_primary (deterministic, no AI call).
-    const a1 = await advanceExternalResearchRun(PROJECT_ID, 'e@x')
-    expect(a1.run.stage).toBe('researching_primary')
-    expect(callLog).toHaveLength(0)
-
-    // 2nd advance: runs Stage A (primary), lands on researching_supporting.
-    const a2 = await advanceExternalResearchRun(PROJECT_ID, 'e@x')
+    await startExternalResearchRun(PROJECT_ID, 'e@x')
+    await advanceExternalResearchRun(PROJECT_ID, 'e@x')  // queued → researching_primary
+    const a2 = await advanceExternalResearchRun(PROJECT_ID, 'e@x')  // primary runs → researching_supporting
     expect(a2.run.stage).toBe('researching_supporting')
-    expect(callLog.map(c => c.feature)).toEqual(['editorial_external_research_primary'])
-    expect(a2.run.discoveredSources).toHaveLength(2)
-    expect(a2.run.searchesUsed).toBe(3)
-    expect(a2.run.primaryText).toBeTruthy()
 
-    // 3rd advance: runs Stage B (supporting), lands on extracting.
-    const a3 = await advanceExternalResearchRun(PROJECT_ID, 'e@x')
-    expect(a3.run.stage).toBe('extracting')
+    const a3 = await advanceExternalResearchRun(PROJECT_ID, 'e@x')  // supporting runs → FINALIZING (not extracting)
+    expect(a3.run.stage).toBe('finalizing')
     expect(callLog.map(c => c.feature)).toEqual(['editorial_external_research_primary', 'editorial_external_research_supporting'])
-    expect(a3.run.discoveredSources.length).toBeGreaterThanOrEqual(3)
-    expect(a3.run.searchesUsed).toBe(6)                    // budget ceiling
-    expect(a3.run.supportingText).toBeTruthy()
 
-    // No patching needed — the extractor script already uses
-    // src_001..src_003 which stageExtract translates back to the
-    // pack's persistent src-cite-... ids.
+    const a4 = await advanceExternalResearchRun(PROJECT_ID, 'e@x')  // finalize → complete
+    expect(a4.run.stage).toBe('complete')
+    expect(a4.finished).toBe(true)
 
-    // 4th advance: runs Stage C (extraction), lands on finalizing.
-    const a4 = await advanceExternalResearchRun(PROJECT_ID, 'e@x')
-    expect(a4.run.stage).toBe('finalizing')
-    expect(callLog.map(c => c.feature)).toEqual(['editorial_external_research_primary', 'editorial_external_research_supporting', 'editorial_external_research_extract'])
-    expect(a4.run.extractedFacts?.length).toBe(3)
-    expect(a4.run.extractedQuestions?.length).toBe(2)
+    // Exactly 2 AI calls total (both Sonnet discovery). No Haiku
+    // extractor unless the user explicitly runs "Extract structured
+    // facts" from Advanced.
+    expect(callLog).toHaveLength(2)
+    expect(callLog.every(c => c.feature !== 'editorial_external_research_extract')).toBe(true)
 
-    // 5th advance: deterministic finalize, lands on complete.
-    const a5 = await advanceExternalResearchRun(PROJECT_ID, 'e@x')
-    expect(a5.run.stage).toBe('complete')
-    expect(a5.finished).toBe(true)
-    // NO additional AI call in finalize.
-    expect(callLog).toHaveLength(3)
+    // Pack has researchSummary populated from the discovery prose.
+    expect(a4.pack.researchSummary).toBeTruthy()
+    expect(a4.pack.researchSummary!.length).toBeGreaterThan(0)
+    expect(a4.pack.researchSummary).toContain('Primary prose')
+    expect(a4.pack.researchSummary).toContain('Supporting prose')
 
-    // Pack was updated: 3 web-discovered sources, 3 facts + 1 bootstrap.
-    expect(a5.pack.externalSources).toHaveLength(3)
-    expect(a5.pack.externalSources.every(s => (s.origin ?? 'manual') === 'web')).toBe(true)
-    expect(a5.pack.verifiedFacts).toHaveLength(4)   // bootstrap + 3 extracted
-    expect(a5.pack.webResearch?.searchesUsed).toBe(6)
-    expect(a5.pack.quality.publishable).toBe(true)   // 6 sources incl. Tier-1, 3+ facts
+    // Publishable — Tier-1 source authority + summary present, no
+    // ≥3-facts requirement.
+    expect(a4.pack.quality.publishable).toBe(true)
+    expect(a4.pack.verifiedFacts.length).toBeLessThanOrEqual(1)  // only the bootstrap fact-project
+    expect(a4.pack.externalSources.length).toBe(3)
   })
 })
 
@@ -202,7 +170,7 @@ describe('stage machine: mid-run refresh resumes at current stage', () => {
   it('startExternalResearchRun on an in-flight run returns existing run without doing work', async () => {
     await seedPack()
 
-    scriptedResponses.push({ feature: 'primary', text: 'Prose', cost: 0.05, searches: 3, citations: [], webSearch: {} })
+    scriptedResponses.push({ text: 'Prose', cost: 0.05, searches: 3, citations: [], webSearch: {} })
     await startExternalResearchRun(PROJECT_ID, 'e@x')
     await advanceExternalResearchRun(PROJECT_ID, 'e@x')  // queued → researching_primary
     await advanceExternalResearchRun(PROJECT_ID, 'e@x')  // primary → researching_supporting
@@ -222,12 +190,12 @@ describe('stage machine: mid-run refresh resumes at current stage', () => {
 // ─────────────────────────────────────────────────────────────────
 
 describe('stage machine: failed stage retries without repeating work', () => {
-  it('when Stage B fails, retry runs only Stage B (not Stage A again)', async () => {
+  it('when Stage B fails, retry runs only Stage B (not Stage A again) — v5 lands on finalizing', async () => {
     await seedPack()
 
     // Script: primary succeeds, supporting FAILS by throwing (empty script).
     scriptedResponses.push(
-      { feature: 'primary', text: 'Primary prose', cost: 0.10, searches: 3, citations: [
+      { text: 'Primary prose', cost: 0.10, searches: 3, citations: [
         { url: 'https://www.pokemon.com/us/pokemon-news/celebration', title: 'Official' },
       ], webSearch: {} },
       // No script for supporting — will throw "Unexpected AI call"
@@ -242,11 +210,13 @@ describe('stage machine: failed stage retries without repeating work', () => {
 
     // Retry — script a successful supporting call this time.
     scriptedResponses.push(
-      { feature: 'supporting', text: 'Retry prose', cost: 0.09, searches: 3, citations: [], webSearch: {} },
+      { text: 'Retry prose', cost: 0.09, searches: 3, citations: [], webSearch: {} },
     )
     const retryResult = await retryExternalResearchRun(PROJECT_ID, 'e@x')
-    // retry advances exactly one stage from the failed point.
-    expect(retryResult.run.stage).toBe('extracting')
+    // v5: retry advances exactly one stage from the failed point,
+    // and supporting now feeds straight into finalizing (no
+    // extracting in the default flow).
+    expect(retryResult.run.stage).toBe('finalizing')
     // Primary was NOT re-called — callLog only shows the retry supporting.
     expect(callLog.map(c => c.feature)).toEqual(['editorial_external_research_primary', 'editorial_external_research_supporting'])
     expect(retryResult.run.searchesUsed).toBe(6)   // still bounded to 6 (3 primary + 3 supporting)
@@ -257,24 +227,23 @@ describe('stage machine: failed stage retries without repeating work', () => {
 // 4. Web-search budget stays capped at 6
 // ─────────────────────────────────────────────────────────────────
 
-describe('stage machine: total web-search budget capped', () => {
-  it('primary and supporting stages each request max_uses=3, extractor requests no web_search', async () => {
+describe('stage machine v5: total web-search budget capped, no auto-extractor', () => {
+  it('primary + supporting each request max_uses=3, total budget stays at 6, no extractor call in the default happy path', async () => {
     await seedPack()
 
+    // Only 2 scripts — v5 default flow has no extractor.
     scriptedResponses.push(
-      { feature: 'primary',    text: 'p', cost: 0.05, searches: 3, citations: [], webSearch: {} },
-      { feature: 'supporting', text: 's', cost: 0.05, searches: 3, citations: [], webSearch: {} },
-      { feature: 'extract',    text: '```json\n{"verifiedFacts":[],"discoveredSources":[],"contradictions":[],"researchQuestions":[],"researchGaps":[]}\n```', cost: 0.008, searches: 0 },
+      { text: 'p', cost: 0.05, searches: 3, citations: [], webSearch: {} },
+      { text: 's', cost: 0.05, searches: 3, citations: [], webSearch: {} },
     )
     await startExternalResearchRun(PROJECT_ID, 'e@x')
     for (let i = 0; i < 6; i++) await advanceExternalResearchRun(PROJECT_ID, 'e@x')
 
+    expect(callLog.length).toBe(2)
     expect(callLog[0].webSearch).toBeTruthy()
     expect(callLog[0].webSearch.max_uses).toBe(3)
     expect(callLog[1].webSearch).toBeTruthy()
     expect(callLog[1].webSearch.max_uses).toBe(3)
-    // Extractor MUST NOT have webSearch configured.
-    expect(callLog[2].webSearch).toBeUndefined()
   })
 })
 
@@ -292,11 +261,10 @@ describe('stage machine: manual sources survive staged run', () => {
     db[`project_id:${PROJECT_ID}`].evidence_json = seeded
 
     scriptedResponses.push(
-      { feature: 'primary',    text: 'p', cost: 0.05, searches: 3, citations: [
+      { text: 'p', cost: 0.05, searches: 3, citations: [
         { url: 'https://www.pokemon.com/us/pokemon-news/celebration', title: 'Official' },
       ], webSearch: {} },
-      { feature: 'supporting', text: 's', cost: 0.05, searches: 3, citations: [], webSearch: {} },
-      { feature: 'extract',    text: '```json\n{"verifiedFacts":[],"discoveredSources":[],"contradictions":[],"researchQuestions":[],"researchGaps":[]}\n```', cost: 0.008, searches: 0 },
+      { text: 's', cost: 0.05, searches: 3, citations: [], webSearch: {} },
     )
 
     await startExternalResearchRun(PROJECT_ID, 'e@x')
@@ -316,28 +284,36 @@ describe('stage machine: manual sources survive staged run', () => {
 // v4 — extractor uses stable src_NNN ids; facts survive translation
 // ─────────────────────────────────────────────────────────────────
 
-describe('stage machine v4: stable src_NNN ids let facts survive', () => {
+// Helper: run through primary+supporting to accumulate discovered
+// sources, then force stage back to 'extracting' so we can drive
+// stageExtract directly (v5 default flow skips it).
+async function seedAndForceExtracting() {
+  await seedPack()
+  scriptedResponses.push(
+    { text: 'Primary prose citing Tier-1 and Tier-3.', cost: 0.10, searches: 3, citations: [
+      { url: 'https://www.pokemon.com/us/celebration', title: 'Official' },
+      { url: 'https://www.reddit.com/r/pokemontcg/x',  title: 'Community' },
+    ], webSearch: {} },
+    { text: 'Supporting prose citing Tier-2.', cost: 0.10, searches: 3, citations: [
+      { url: 'https://www.tcgplayer.com/product/xyz', title: 'Preorder' },
+    ], webSearch: {} },
+  )
+  await startExternalResearchRun(PROJECT_ID, 'e@x')
+  await advanceExternalResearchRun(PROJECT_ID, 'e@x') // queued → primary
+  await advanceExternalResearchRun(PROJECT_ID, 'e@x') // primary → supporting
+  await advanceExternalResearchRun(PROJECT_ID, 'e@x') // supporting → finalizing (v5)
+  // Force the stage back to 'extracting' to exercise stageExtract.
+  const row = db[`project_id:${PROJECT_ID}`]
+  row.evidence_json.externalResearchRun.stage = 'extracting'
+  row.evidence_json.externalResearchRun.stageLabel = 'Building structured evidence (advanced)'
+}
+
+describe('stage machine v4: stable src_NNN ids let facts survive (extract path still callable)', () => {
   it('extractor prompt uses src_NNN ids; parser translates refs back to persistent ids', async () => {
-    await seedPack()
-
-    // Discovery stages: 2 primary sources, 1 supporting source.
-    scriptedResponses.push(
-      { text: 'Primary prose citing Tier-1 and Tier-3.', cost: 0.10, searches: 3, citations: [
-        { url: 'https://www.pokemon.com/us/celebration', title: 'Official' },
-        { url: 'https://www.reddit.com/r/pokemontcg/x',  title: 'Community' },
-      ], webSearch: {} },
-      { text: 'Supporting prose citing Tier-2.', cost: 0.10, searches: 3, citations: [
-        { url: 'https://www.tcgplayer.com/product/xyz', title: 'Preorder' },
-      ], webSearch: {} },
-    )
-
-    await startExternalResearchRun(PROJECT_ID, 'e@x')
-    await advanceExternalResearchRun(PROJECT_ID, 'e@x') // queued → primary
-    await advanceExternalResearchRun(PROJECT_ID, 'e@x') // primary runs → supporting
-    await advanceExternalResearchRun(PROJECT_ID, 'e@x') // supporting runs → extracting
+    await seedAndForceExtracting()
 
     // Now Haiku returns facts using src_001/002/003 — exactly the
-    // ids v4 gives it. Extractor call is the next one in the queue.
+    // ids v4 gives it.
     scriptedResponses.push({
       text: '```json\n' + JSON.stringify({
         researchQuestions: ['Is it official?'],
@@ -372,18 +348,7 @@ describe('stage machine v4: stable src_NNN ids let facts survive', () => {
   })
 
   it('diagnostics record rejections when Haiku mistypes a src_NNN id', async () => {
-    await seedPack()
-
-    scriptedResponses.push(
-      { text: 'P', cost: 0.05, searches: 3, citations: [
-        { url: 'https://www.pokemon.com/us/x', title: 'Official' },
-      ], webSearch: {} },
-      { text: 'S', cost: 0.05, searches: 3, citations: [], webSearch: {} },
-    )
-    await startExternalResearchRun(PROJECT_ID, 'e@x')
-    await advanceExternalResearchRun(PROJECT_ID, 'e@x')
-    await advanceExternalResearchRun(PROJECT_ID, 'e@x')
-    await advanceExternalResearchRun(PROJECT_ID, 'e@x')
+    await seedAndForceExtracting()
 
     // Model emits ONE valid fact + ONE fact with a bogus ref (src_099).
     scriptedResponses.push({
@@ -405,19 +370,114 @@ describe('stage machine v4: stable src_NNN ids let facts survive', () => {
   })
 })
 
+// ─────────────────────────────────────────────────────────────────
+// v5 — refinalize an old pack without new AI cost (project 12 fix)
+// ─────────────────────────────────────────────────────────────────
+
+describe('refinalize: recovers a pack finalized under the old ≥3-facts rule', () => {
+  it('a completed run with 0 extracted facts becomes publishable via refinalize (no AI cost)', async () => {
+    await seedPack()
+
+    // Simulate the project-12 shape: run reached 'complete' under
+    // v4 with 3 discovered sources (2 Tier-1, 1 Tier-2) but zero
+    // extracted facts. The pack was blocked by the old ≥3-facts gate.
+    const row = db[`project_id:${PROJECT_ID}`]
+    const pack = row.evidence_json
+    pack.externalResearchRun = {
+      id: 'legacy-run',
+      stage: 'complete',
+      stageLabel: 'Complete',
+      startedAt: '2026-09-08T10:00:00Z',
+      updatedAt: '2026-09-08T11:00:00Z',
+      searchesUsed: 6,
+      costUsd: 0.25,
+      tokens: { input: 500, output: 5000 },
+      primaryText: 'Primary research prose with cited Tier-1 official Pokémon sources establishing the set.',
+      supportingText: 'Supporting prose corroborating with retailer listings.',
+      discoveredSources: [
+        { id: 'src-cite-1-abc', kind: 'external', url: 'https://www.pokemon.com/us/celebration', title: 'Official', addedAt: '2026-09-08', origin: 'web', sourceTier: 1 },
+        { id: 'src-cite-2-def', kind: 'external', url: 'https://tcg.pokemon.com/en-us/expansions/celebration/', title: 'Expansion', addedAt: '2026-09-08', origin: 'web', sourceTier: 1 },
+        { id: 'src-cite-3-ghi', kind: 'external', url: 'https://tcgplayer.com/x', title: 'Preorder', addedAt: '2026-09-08', origin: 'web', sourceTier: 2 },
+      ],
+      extractedFacts: [],
+      extractedContradictions: [],
+      extractedQuestions: [],
+      extractedGaps: [],
+      stageTimings: {},
+    }
+    pack.externalSources = pack.externalSources.concat(pack.externalResearchRun.discoveredSources)
+    // Force stale-style quality — pre-v5 output.
+    pack.quality = {
+      status: 'needs_review',
+      dataStrength: 'medium',
+      sampleSize: 3,
+      freshness: { asOf: '2026-09-08', daysOld: 0, isStale: false },
+      publishable: false,
+      reasons: ['Fewer than 3 externally-sourced facts (currently 0).'],
+    }
+    pack.researchSummary = undefined
+    row.evidence_json = pack
+
+    // Trigger refinalize — no AI, no destructive changes.
+    const before = callLog.length
+    const result = await refinalizeExternalResearch(PROJECT_ID, 'e@x')
+    expect(callLog.length).toBe(before) // no Claude calls fired
+
+    // Now publishable — has Tier-1 sources + research summary, no
+    // ≥3-facts gate.
+    expect(result.pack.quality.publishable).toBe(true)
+    expect(result.pack.researchSummary).toBeTruthy()
+    expect(result.pack.researchSummary!.length).toBeGreaterThan(0)
+    expect(result.pack.researchSummary).toContain('Primary research prose')
+    expect(result.pack.researchSummary).toContain('Supporting prose')
+    // Sources and run data untouched (non-destructive).
+    expect(result.pack.externalSources.length).toBe(pack.externalSources.length)
+    expect(result.pack.externalResearchRun!.discoveredSources.length).toBe(3)
+    expect(result.pack.externalResearchRun!.primaryText).toBe('Primary research prose with cited Tier-1 official Pokémon sources establishing the set.')
+  })
+
+  it('refinalize is idempotent — running twice produces the same pack shape', async () => {
+    await seedPack()
+    const row = db[`project_id:${PROJECT_ID}`]
+    row.evidence_json.externalResearchRun = {
+      id: 'r',
+      stage: 'complete',
+      stageLabel: 'Complete',
+      startedAt: '2026-09-08T10:00:00Z',
+      updatedAt: '2026-09-08T11:00:00Z',
+      searchesUsed: 6,
+      costUsd: 0.20,
+      tokens: { input: 100, output: 100 },
+      primaryText: 'p',
+      supportingText: 's',
+      discoveredSources: [
+        { id: 'src-1', kind: 'external', url: 'https://pokemon.com/x', title: 'x', addedAt: '2026-09-08', origin: 'web', sourceTier: 1 },
+      ],
+      stageTimings: {},
+    }
+    row.evidence_json.externalSources.push(row.evidence_json.externalResearchRun.discoveredSources[0])
+    row.evidence_json.researchSummary = undefined
+
+    const r1 = await refinalizeExternalResearch(PROJECT_ID, 'e@x')
+    const r2 = await refinalizeExternalResearch(PROJECT_ID, 'e@x')
+    expect(r2.pack.quality.publishable).toBe(r1.pack.quality.publishable)
+    expect(r2.pack.researchSummary).toBe(r1.pack.researchSummary)
+    expect(r2.pack.externalSources.length).toBe(r1.pack.externalSources.length)
+  })
+})
+
 describe('stage machine: source tiers preserved end-to-end', () => {
   it('tier assignments (via classifySourceTier) survive the finalize merge', async () => {
     await seedPack()
 
     scriptedResponses.push(
-      { feature: 'primary', text: 'p', cost: 0.05, searches: 3, citations: [
+      { text: 'p', cost: 0.05, searches: 3, citations: [
         { url: 'https://www.pokemon.com/us/pokemon-news/x', title: 'T1 official' },   // Tier 1
         { url: 'https://www.reddit.com/r/pokemontcg/y',    title: 'T3 reddit'    },   // Tier 3
       ], webSearch: {} },
-      { feature: 'supporting', text: 's', cost: 0.05, searches: 3, citations: [
+      { text: 's', cost: 0.05, searches: 3, citations: [
         { url: 'https://www.tcgplayer.com/z', title: 'T2 tcgplayer' },                // Tier 2
       ], webSearch: {} },
-      { feature: 'extract', text: '```json\n{"verifiedFacts":[],"discoveredSources":[],"contradictions":[],"researchQuestions":[],"researchGaps":[]}\n```', cost: 0.008, searches: 0 },
     )
 
     await startExternalResearchRun(PROJECT_ID, 'e@x')

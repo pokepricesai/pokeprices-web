@@ -37,6 +37,7 @@ import {
   startExternalResearchRun,
   advanceExternalResearchRun,
   retryExternalResearchRun,
+  refinalizeExternalResearch,
 } from '@/lib/editorial/research/externalResearchStages'
 import { chooseRecipe } from '@/lib/editorial/research/dispatch'
 
@@ -191,6 +192,10 @@ export async function POST(req: Request, ctx: Ctx) {
       }
       case 'research_web_retry': {
         const r = await retryExternalResearchRun(projectId, admin.email)
+        return NextResponse.json({ ok: true, research: r.row, run: r.run, finished: r.finished })
+      }
+      case 'research_web_refinalize': {
+        const r = await refinalizeExternalResearch(projectId, admin.email)
         return NextResponse.json({ ok: true, research: r.row, run: r.run, finished: r.finished })
       }
       case 'approve_large_mover': {

@@ -179,7 +179,10 @@ describe('external_research quality: external-only can be publishable', () => {
     expect(q.publishable).toBe(false)
   })
 
-  it('NOT publishable with strong sources but only 2 facts', () => {
+  it('NOT publishable with strong sources but no research summary and only 2 legacy facts', () => {
+    // Under v5 the ≥3-facts requirement is gone, but "no summary +
+    // no web research + <3 facts" still fails — because there is
+    // no research artefact at all for editors to review.
     const sources: ExternalSource[] = [
       { id: 'a', kind: 'external', url: 'https://pokemon.com/x', title: 'A', addedAt: TODAY, sourceTier: 1, origin: 'manual' },
     ]
@@ -187,9 +190,8 @@ describe('external_research quality: external-only can be publishable', () => {
       { id: 'f1', type: 'verified_fact', statement: '1', evidenceRefs: ['a'] },
       { id: 'f2', type: 'verified_fact', statement: '2', evidenceRefs: ['a'] },
     ]
-    const q = computeExternalQuality({ externalSources: sources, verifiedFacts: facts, hasWebResearch: false, today: TODAY })
+    const q = computeExternalQuality({ externalSources: sources, verifiedFacts: facts, hasWebResearch: false, hasResearchSummary: false, today: TODAY })
     expect(q.publishable).toBe(false)
-    expect(q.reasons.join(' ')).toMatch(/Fewer than 3/)
   })
 })
 
@@ -523,6 +525,112 @@ describe('regression lock: manual source survives a full simulated cycle', () =>
     // source AND web-derived fact all need appropriate handling.
     const afterRebuild = await runExternalResearchRecipe(PROJECT, { today: TODAY, previous: afterWeb })
     expect(afterRebuild.externalSources.some(s => s.id === 'ext-manual-tcg')).toBe(true)   // regression lock
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────
+// v5 — external quality gate no longer requires ≥3 facts
+// ─────────────────────────────────────────────────────────────────
+
+describe('computeExternalQuality v5: fact-count gate is gone for external', () => {
+  it('publishable with 1 Tier-1 source and a research summary, even with 0 facts', () => {
+    const sources: ExternalSource[] = [
+      { id: 'a', kind: 'external', url: 'https://pokemon.com/x', title: 'Official', addedAt: TODAY, sourceTier: 1, origin: 'web' },
+    ]
+    const q = computeExternalQuality({
+      externalSources:     sources,
+      verifiedFacts:       [],                  // ZERO structured facts
+      hasWebResearch:      true,
+      hasResearchSummary:  true,
+      contradictions:      [],
+      today:               TODAY,
+    })
+    expect(q.publishable).toBe(true)
+  })
+
+  it('publishable with 2 distinct Tier-2 domains and 0 facts, if summary present', () => {
+    const sources: ExternalSource[] = [
+      { id: 'a', kind: 'external', url: 'https://tcgplayer.com/x',  title: 'A', addedAt: TODAY, sourceTier: 2, origin: 'web' },
+      { id: 'b', kind: 'external', url: 'https://pokebeach.com/x',  title: 'B', addedAt: TODAY, sourceTier: 2, origin: 'web' },
+    ]
+    const q = computeExternalQuality({
+      externalSources:     sources,
+      verifiedFacts:       [],
+      hasWebResearch:      true,
+      hasResearchSummary:  true,
+      contradictions:      [],
+      today:               TODAY,
+    })
+    expect(q.publishable).toBe(true)
+  })
+
+  it('NOT publishable when a contradiction is unresolved', () => {
+    const sources: ExternalSource[] = [
+      { id: 'a', kind: 'external', url: 'https://pokemon.com/x', title: 'Official', addedAt: TODAY, sourceTier: 1, origin: 'web' },
+    ]
+    const q = computeExternalQuality({
+      externalSources:     sources,
+      verifiedFacts:       [],
+      hasWebResearch:      true,
+      hasResearchSummary:  true,
+      contradictions:      [{ id: 'c1', claim: 'release date' }],
+      today:               TODAY,
+    })
+    expect(q.publishable).toBe(false)
+    expect(q.reasons.join(' ')).toMatch(/contradiction/i)
+  })
+
+  it('NOT publishable when no research + no manual sources', () => {
+    const q = computeExternalQuality({
+      externalSources:     [],
+      verifiedFacts:       [],
+      hasWebResearch:      false,
+      hasResearchSummary:  false,
+      today:               TODAY,
+    })
+    expect(q.publishable).toBe(false)
+  })
+
+  it('backwards-compat: legacy pack with 3 sourced facts + no researchSummary is still publishable', () => {
+    const sources: ExternalSource[] = [
+      { id: 'a', kind: 'external', url: 'https://pokemon.com/x', title: 'Official', addedAt: TODAY, sourceTier: 1, origin: 'web' },
+    ]
+    const facts: VerifiedFact[] = [
+      { id: 'f1', type: 'verified_fact', statement: '1', evidenceRefs: ['a'] },
+      { id: 'f2', type: 'verified_fact', statement: '2', evidenceRefs: ['a'] },
+      { id: 'f3', type: 'verified_fact', statement: '3', evidenceRefs: ['a'] },
+    ]
+    const q = computeExternalQuality({
+      externalSources:     sources,
+      verifiedFacts:       facts,
+      hasWebResearch:      true,
+      hasResearchSummary:  false,   // no summary but facts carry it
+      today:               TODAY,
+    })
+    expect(q.publishable).toBe(true)
+  })
+})
+
+describe('buildResearchSummaryFromRun', () => {
+  it('joins primary and supporting prose with headings', async () => {
+    const { buildResearchSummaryFromRun } = await import('../externalResearch')
+    const summary = buildResearchSummaryFromRun({ primaryText: 'A', supportingText: 'B' })
+    expect(summary).toContain('Primary discovery')
+    expect(summary).toContain('Supporting discovery')
+    expect(summary).toContain('A')
+    expect(summary).toContain('B')
+  })
+  it('returns empty when both stages are empty', async () => {
+    const { buildResearchSummaryFromRun } = await import('../externalResearch')
+    expect(buildResearchSummaryFromRun({})).toBe('')
+    expect(buildResearchSummaryFromRun({ primaryText: '', supportingText: '' })).toBe('')
+  })
+  it('truncates at the cap', async () => {
+    const { buildResearchSummaryFromRun } = await import('../externalResearch')
+    const big = 'x'.repeat(20_000)
+    const summary = buildResearchSummaryFromRun({ primaryText: big, cap: 5000 })
+    expect(summary.length).toBeLessThanOrEqual(5100)
+    expect(summary).toContain('[…summary truncated')
   })
 })
 

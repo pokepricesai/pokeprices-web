@@ -51,11 +51,13 @@ Identify:
 
 EXTERNAL-RESEARCH SPECIFICS (pack.recipe === "external_research")
 
-Additional issue kinds to raise against external-research articles:
-  * external_source_misused when a fact in the pack is marked \`status: "reported"\` or \`status: "rumored"\` and the article states it as confirmed news (no "reported", no "rumored", no attributive phrasing).
-  * external_source_misused when a fact has only Tier-3 (community) sourcing and the article treats it as an official/confirmed claim.
-  * inconsistent_with_evidence when \`pack.contradictions\` contains a claim under dispute and the article picks one side without surfacing the disagreement or naming at least one source per position.
-  * missing_required_caveat when the article omits an important \`researchGap\` — for a release/news piece, notable unknowns must be acknowledged.
+For external_research articles the authoritative research artefact is the pack's \`researchSummary\` (plus \`researchPrimaryText\` + \`researchSupportingText\` for depth). A structured \`verifiedFacts\` list may be empty and that is OK — do NOT flag every sentence as unsupported simply because there is no matching \`fact-*\` id. Instead:
+
+  * A claim is "supported" when it is stated (or implied) in the research prose AND at least one URL in \`pack.externalSources\` is a plausible source for it. That is the extractable standard.
+  * unsupported_factual_claim: raise when a claim appears in the article but has no plausible source in the pack (neither in the research prose nor an \`externalSources\` URL). Invented facts, invented URLs, invented publishers.
+  * external_source_misused: raise when the research prose treats a claim as reported/rumored/unconfirmed and the article states it as confirmed news. Or when the only support is a Tier-3 (community) URL and the article presents the claim as official.
+  * inconsistent_with_evidence: raise when \`pack.contradictions\` (if populated) contains a disputed claim and the article picks one side without surfacing the disagreement.
+  * missing_required_caveat: raise when the article omits an important \`researchGap\` — for release/news pieces, notable unknowns must be acknowledged.
 
 DO NOT
 
@@ -156,7 +158,12 @@ function compactPackForChecker(pack: EvidencePack): unknown {
     // silent contradiction-picks and rumor→confirmation upgrades.
     contradictions:    pack.contradictions,
     researchQuestions: pack.researchQuestions,
-    webResearch:       pack.webResearch,
+    webResearch:       pack.webResearch ? { researchedAt: pack.webResearch.researchedAt, searchesUsed: pack.webResearch.searchesUsed, model: pack.webResearch.model } : undefined,
+    // v5 — research prose so the checker can verify claims against
+    // context, not just the (often empty) verifiedFacts list.
+    researchSummary:        pack.researchSummary ? pack.researchSummary.slice(0, 10_000) : undefined,
+    researchPrimaryText:    pack.externalResearchRun?.primaryText    ? pack.externalResearchRun.primaryText.slice(0, 10_000) : undefined,
+    researchSupportingText: pack.externalResearchRun?.supportingText ? pack.externalResearchRun.supportingText.slice(0, 8_000)  : undefined,
   }
 }
 

@@ -45,7 +45,7 @@ import {
 } from './externalResearchAnalyst'
 import {
   classifySourceTier, computeExternalQuality,
-  buildExternalMethodology, domainOf,
+  buildExternalMethodology, buildResearchSummaryFromRun, domainOf,
 } from './externalResearch'
 import type { ExtractionDiagnostics } from './types'
 
@@ -73,8 +73,8 @@ const STAGE_LABEL: Record<ExternalResearchStage, string> = {
   queued:                 'Queued',
   researching_primary:    'Searching official sources',
   researching_supporting: 'Researching supporting sources',
-  extracting:             'Building evidence',
-  finalizing:             'Checking source quality',
+  extracting:             'Building structured evidence (advanced)',
+  finalizing:             'Building research summary',
   complete:               'Complete',
   failed:                 'Failed',
 }
@@ -195,6 +195,34 @@ export async function advanceExternalResearchRun(projectId: number, adminEmail: 
   return { ok: true, row: persisted, pack: updatedPack, run: nextRun, finished }
 }
 
+/** External Research Fix v5 — non-destructive refinalize.
+ *
+ *  Rebuilds researchSummary + recomputes quality from the pack's
+ *  ALREADY-PERSISTED run data. No web_search, no AI calls. Fixes
+ *  packs finalized under the old rules (project 12 in particular)
+ *  where 44 sources + 0 facts left publishable=false. The staged
+ *  run's primaryText/supportingText/discoveredSources are all
+ *  preserved verbatim.
+ *
+ *  Idempotent — safe to call any number of times. */
+export async function refinalizeExternalResearch(projectId: number, _adminEmail: string): Promise<StageAdvanceResult> {
+  const supa = getSupabaseServiceClient()
+  const { data: rRow, error } = await supa.from('editorial_research').select('*').eq('project_id', projectId).maybeSingle()
+  if (error) throw new Error(`fetchResearch: ${error.message}`)
+  if (!rRow || !(rRow as any).evidence_json) throw new Error('no evidence pack')
+  const pack = (rRow as any).evidence_json as EvidencePack
+  if (pack.recipe !== 'external_research') throw new Error('refinalize is only for external_research packs')
+  if (!pack.externalResearchRun) throw new Error('no completed research run to refinalize from')
+  const run = pack.externalResearchRun
+  if (run.stage !== 'complete' && run.stage !== 'finalizing') {
+    throw new Error(`refinalize expects a complete/finalizing run (this one is ${run.stage}) — use Retry or Resume instead`)
+  }
+
+  const refinalized = stageFinalize(pack, Date.now())
+  const persisted = await persistPack(supa, projectId, refinalized, existingStatusFor(refinalized.quality.status))
+  return { ok: true, row: persisted, pack: refinalized, run: refinalized.externalResearchRun!, finished: true }
+}
+
 /** Retry the most recent failed run from its failedStage. If the
  *  run isn't in failed state, this is a no-op returning current
  *  state. Never repeats successful stages. */
@@ -301,10 +329,14 @@ async function stageSupporting(pack: EvidencePack, adminEmail: string, stageStar
 
   const seenUrls = new Set(run.discoveredSources.map(s => normUrl(s.url)))
   const discoveredFromCitations = citationsToSources(call.citations ?? [], seenUrls, new Date().toISOString())
+  // External Research Fix v5 — supporting stage now advances
+  // straight to finalizing. The Haiku extractor is no longer part of
+  // the default happy path; it remains available on-demand via the
+  // Advanced "Re-extract facts" action.
   const nextRun: ExternalResearchRun = {
     ...run,
-    stage:         'extracting',
-    stageLabel:    STAGE_LABEL['extracting'],
+    stage:         'finalizing',
+    stageLabel:    STAGE_LABEL['finalizing'],
     searchesUsed:  run.searchesUsed + (call.webSearch?.searchesUsed ?? 0),
     costUsd:       round6(run.costUsd + call.cost_usd),
     tokens: {
@@ -436,8 +468,8 @@ function stageFinalize(pack: EvidencePack, stageStartMs: number): EvidencePack {
   const manualSources = pack.externalSources.filter(s => (s.origin ?? 'manual') === 'manual')
   const manualIds     = new Set(manualSources.map(s => s.id))
   // Preserve facts sourced purely by manual evidence + the bootstrap
-  // fact; drop the prior discovered-fact set and replace with the
-  // extractor's output.
+  // fact. Discovered/extracted facts are only present when someone
+  // has run the optional Haiku extractor (Advanced) at some point.
   const survivingManualFacts = pack.verifiedFacts.filter(f => {
     if (f.evidenceRefs.length === 0) return true
     return f.evidenceRefs.every(r => manualIds.has(r))
@@ -446,27 +478,36 @@ function stageFinalize(pack: EvidencePack, stageStartMs: number): EvidencePack {
 
   const nextExternal: ExternalSource[] = [...manualSources, ...run.discoveredSources]
 
+  // v5 — build the human-facing summary from the cited Sonnet prose.
+  // This is what editors actually read; structured facts are optional.
+  const researchSummary = buildResearchSummaryFromRun({
+    primaryText:    run.primaryText,
+    supportingText: run.supportingText,
+  })
+
   const webMeta: WebResearchMeta = {
     researchedAt:    new Date().toISOString(),
     searchesUsed:    run.searchesUsed,
+    // v5 — extractor is optional, so the "model" label now reflects
+    // just the discovery stages by default. Extracted diagnostics
+    // are still mirrored if a run happened to include the extractor.
     costUsd:         run.costUsd,
-    model:           `${PRIMARY_MODEL} + ${EXTRACTOR_MODEL}`,
+    model:           run.extractedFacts != null ? `${PRIMARY_MODEL} + ${EXTRACTOR_MODEL}` : PRIMARY_MODEL,
     latencyMs:       sumTimings(run.stageTimings),
     responsePreview: [run.primaryText ?? '', run.supportingText ?? ''].filter(Boolean).join('\n\n---\n\n').slice(0, PROSE_CAP),
-    fallbackUsed:    true,
-    fallbackModel:   EXTRACTOR_MODEL,
-    // External Research Fix v4 — mirror the run's extraction
-    // diagnostics onto webResearch so the Advanced panel can render
-    // them without needing to inspect the run subobject.
+    fallbackUsed:    run.extractedFacts != null,
+    fallbackModel:   run.extractedFacts != null ? EXTRACTOR_MODEL : undefined,
     extractionDiagnostics: run.extractionDiagnostics,
   }
 
   const quality = computeExternalQuality({
-    externalSources:  nextExternal,
-    verifiedFacts:    nextFacts,
-    hasWebResearch:   true,
-    today:            pack.dataAsOf,
-    webResearchedAt:  webMeta.researchedAt.slice(0, 10),
+    externalSources:     nextExternal,
+    verifiedFacts:       nextFacts,
+    hasWebResearch:      true,
+    hasResearchSummary:  researchSummary.length > 0,
+    contradictions:      run.extractedContradictions ?? pack.contradictions ?? [],
+    today:               pack.dataAsOf,
+    webResearchedAt:     webMeta.researchedAt.slice(0, 10),
   })
 
   const methodology = buildExternalMethodology({
@@ -489,9 +530,10 @@ function stageFinalize(pack: EvidencePack, stageStartMs: number): EvidencePack {
     ...pack,
     externalSources:  nextExternal,
     verifiedFacts:    nextFacts,
-    contradictions:   run.extractedContradictions ?? [],
+    contradictions:   run.extractedContradictions ?? pack.contradictions ?? [],
     researchQuestions: run.extractedQuestions ?? pack.researchQuestions ?? [],
     researchGaps:     Array.from(new Set([...pack.researchGaps, ...(run.extractedGaps ?? [])])),
+    researchSummary,
     webResearch:      webMeta,
     methodology,
     quality,

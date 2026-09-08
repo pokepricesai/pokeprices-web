@@ -72,13 +72,13 @@ The pack has already filtered out cards outside the editorial band ([-60%, +200%
 
 EXTERNAL-RESEARCH ARTICLES (recipe = external_research)
 
-When the pack recipe is \`external_research\`, facts come from reputable external sources rather than PokePrices data. Extra rules apply:
+When the pack recipe is \`external_research\`, facts come from reputable external sources rather than PokePrices data. The authoritative research artefact is the pack's \`researchSummary\` (plus \`researchPrimaryText\` + \`researchSupportingText\` if you need more depth), not a structured \`verifiedFacts\` list. Extra rules apply:
 
-  * Facts carry a \`status\` field: "confirmed", "reported", "rumored", "unverified". You MUST preserve the language of that status in prose. A "reported" fact reads as "TCGplayer reports…". A "rumored" fact reads as "community leaks suggest…" or "unconfirmed reports point to…". You may not upgrade a "reported" fact to a confirmed statement.
-  * Facts also carry a \`sourceTier\`: 1 (official/authoritative), 2 (specialist), 3 (community). Tier-3 alone cannot establish a release-critical fact — phrase such claims as reports or rumors, not confirmed news.
-  * The pack's \`contradictions\` array lists claims where sources disagree. You MUST surface each contradiction in prose, name at least one source per position, and not silently pick a side. Example: "Official channels have not confirmed a release date. Retailer listings currently point to November, but these should not be presented as confirmed."
-  * The pack's \`researchQuestions\` array shows what was actually investigated. Use it as a scaffold for the article's structure, not verbatim as headings.
-  * Every externally-sourced claim in prose MUST link to (or be traceable via evidenceTrace to) one of the pack's \`externalSources\`. Never invent a source, publisher, or URL.
+  * Read \`researchSummary\` — it's a synthesis of the primary + supporting web research with inline citations. That is your source of truth.
+  * Every externally-sourced claim in prose MUST be traceable to one of the pack's \`externalSources\` and must appear (or be implied) in the research prose. Never invent a source, publisher, URL, or fact that is not in the research.
+  * If \`verifiedFacts\` is populated on this pack, those facts carry \`status\` (confirmed/reported/rumored/unverified) and \`sourceTier\` (1/2/3). Preserve status language — do NOT upgrade "reported" to "confirmed", do NOT present Tier-3 alone as official news. If \`verifiedFacts\` is empty, apply the same discipline based on the research prose's own hedging.
+  * The pack's \`contradictions\` array (when populated) lists claims where sources disagree. You MUST surface each contradiction in prose, name at least one source per position, and not silently pick a side. Example: "Official channels have not confirmed a release date. Retailer listings currently point to November, but these should not be presented as confirmed."
+  * The pack's \`researchQuestions\` array shows what was actually investigated. Use it as a scaffold for structure, not verbatim as headings.
   * Synthesize into original PokePrices prose. Do not closely reproduce or paraphrase source wording; write as an editorial synthesis of what is known, reported, and unknown.
   * Explicitly cover \`researchGaps\` — a "What we do not know yet" section is expected on release/news pieces.
 
@@ -199,7 +199,16 @@ export function compactWriterInputs(bundle: WriterInputBundle): unknown {
       // handling on pack.recipe.
       researchQuestions: pack.researchQuestions,
       contradictions:    pack.contradictions,
-      webResearch:       pack.webResearch,
+      webResearch:       pack.webResearch ? { researchedAt: pack.webResearch.researchedAt, searchesUsed: pack.webResearch.searchesUsed, model: pack.webResearch.model } : undefined,
+      // v5 — human-facing research synthesis. This is the primary
+      // artefact for external_research articles. Bounded to keep the
+      // Writer prompt lean; full prose lives on the run.
+      researchSummary:   pack.researchSummary ? pack.researchSummary.slice(0, 10_000) : undefined,
+      researchFindings:  pack.researchFindings,
+      // Also expose raw stage prose when present so the Writer can
+      // consult specific claims verbatim. Bounded per side.
+      researchPrimaryText:    pack.externalResearchRun?.primaryText    ? pack.externalResearchRun.primaryText.slice(0, 10_000) : undefined,
+      researchSupportingText: pack.externalResearchRun?.supportingText ? pack.externalResearchRun.supportingText.slice(0, 8_000)  : undefined,
       quarantinedRowsSummary: {
         count:  pack.quarantinedRows.length,
         reasons: countBy(pack.quarantinedRows.map(q => q.reason)),
