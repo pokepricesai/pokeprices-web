@@ -11,6 +11,7 @@
 
 import { POKEPRICES_EDITORIAL_PROFILE } from '../strategistPrompt'
 import { stripCitationMarkup } from './sanitizeCitations'
+import type { EditorialContextArticle } from '../context'
 
 export const RESEARCH_AND_WRITE_ROLE_RULES = `You are the PokePrices AI Writer. Your job is to research and write ONE Pokémon collector article in a single pass.
 
@@ -45,6 +46,12 @@ FACTUAL DISCIPLINE
   * Rumor / leak / unconfirmed information MUST be clearly labelled: "Community leaks suggest…", "Not yet confirmed by Pokémon…".
   * Where credible sources materially disagree, mention both sides briefly in prose. Do not silently pick one.
 
+INTERNAL LINKS
+
+  * The brief includes an \`internalLinks\` list of existing PokePrices pages (title + URL) that may be relevant to this topic. Where genuinely useful, include 2-5 natural internal links to those pages using normal Markdown link syntax: \`[anchor text](/insights/example)\`.
+  * Do NOT invent an internal URL. If a URL is not in the supplied \`internalLinks\` list, do not link to it.
+  * Do NOT force a link where it does not fit the sentence. Zero internal links is fine if none of the supplied pages are actually relevant.
+
 SEO
 
   * title: article H1, ~60 characters, natural not clickbait.
@@ -74,16 +81,22 @@ export const RESEARCH_AND_WRITE_SYSTEM_PROMPT = `${POKEPRICES_EDITORIAL_PROFILE}
 ${RESEARCH_AND_WRITE_ROLE_RULES}`
 
 /** Small user brief. No EvidencePack, no verifiedFacts, no source
- *  provenance — just what the model needs to research and write. */
+ *  provenance — just what the model needs to research and write.
+ *  Optionally includes a bounded internalLinks candidate list so
+ *  the model can weave 2-5 natural PokePrices links where useful. */
 export function buildResearchAndWriteUserTurn(args: {
-  project: { id: number; title: string; angle: string | null; articleType: string }
-  today:   string
+  project:       { id: number; title: string; angle: string | null; articleType: string }
+  today:         string
+  internalLinks?: Array<{ title: string; url: string }>
 }): string {
-  const brief = {
+  const brief: Record<string, unknown> = {
     topic:       args.project.title,
     articleType: args.project.articleType,
     angle:       args.project.angle || undefined,
     todaysDate:  args.today,
+  }
+  if (args.internalLinks && args.internalLinks.length > 0) {
+    brief.internalLinks = args.internalLinks
   }
   return [
     'MODE=research_and_write',
@@ -94,6 +107,59 @@ export function buildResearchAndWriteUserTurn(args: {
     JSON.stringify(brief, null, 2),
     '```',
   ].join('\n')
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Internal-link candidate picker
+// ─────────────────────────────────────────────────────────────────
+//
+// Cheap keyword-overlap ranker over published PokePrices articles.
+// No AI stage, no scoring framework, no schema — just an ordered
+// list of { title, url } the Writer can link into where useful.
+// Zero candidates is a fine result — the prompt already tells the
+// model that zero links is acceptable.
+
+const INTERNAL_LINK_STOP_WORDS = new Set([
+  'the','and','for','with','from','that','this','have','been','will','their','other','more','some','into','they','than','when','where','which','about','across','over','under','through','among','while','also','only','many','most','both','made','make','around','after','before','because','though','what','know','still','ever','farm','pokemon','pokémon','tcg','pokeprices','article','update','guide','everything','collection',
+])
+
+export function pickInternalLinkCandidates(args: {
+  project:  { title: string; angle: string | null; articleType: string }
+  articles: readonly EditorialContextArticle[]
+  limit?:   number
+}): Array<{ title: string; url: string }> {
+  const limit = args.limit ?? 10
+  if (!args.articles || args.articles.length === 0) return []
+  const projectTokens = tokenizeForInternalLinks(`${args.project.title} ${args.project.angle ?? ''} ${args.project.articleType}`)
+  if (projectTokens.size === 0) {
+    // Fall back to the most recently published articles (up to
+    // limit) — better than empty when we can't score.
+    return [...args.articles]
+      .sort((a, b) => String(b.publishedAt ?? '').localeCompare(String(a.publishedAt ?? '')))
+      .slice(0, limit)
+      .map(a => ({ title: a.headline, url: a.publicUrl }))
+  }
+  const scored = args.articles.map(a => {
+    const t = tokenizeForInternalLinks(`${a.headline} ${a.intro ?? ''} ${a.themeLabel ?? ''}`)
+    let overlap = 0
+    for (const tok of Array.from(projectTokens)) if (t.has(tok)) overlap += 1
+    return { a, overlap, published: String(a.publishedAt ?? '') }
+  })
+  scored.sort((x, y) => (y.overlap - x.overlap) || y.published.localeCompare(x.published))
+  return scored
+    .filter(s => s.overlap > 0)          // any overlap qualifies; zero-overlap articles omitted
+    .slice(0, limit)
+    .map(s => ({ title: s.a.headline, url: s.a.publicUrl }))
+}
+
+function tokenizeForInternalLinks(s: string): Set<string> {
+  const out = new Set<string>()
+  for (const raw of String(s ?? '').toLowerCase().split(/[^a-z0-9]+/)) {
+    if (raw.length < 4) continue
+    if (INTERNAL_LINK_STOP_WORDS.has(raw)) continue
+    out.add(raw)
+  }
+  return out
 }
 
 // ─────────────────────────────────────────────────────────────────

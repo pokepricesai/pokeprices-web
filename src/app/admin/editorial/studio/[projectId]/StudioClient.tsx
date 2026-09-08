@@ -671,7 +671,7 @@ function SettingsPanel({ project, doc, mutate }: { project: ProjectRow; doc: Stu
       if (!file) return
       setHeroUploading(true)
       try {
-        const url = await uploadArticleImage(file)
+        const url = await uploadArticleImage(file, 'hero')
         const alt = window.prompt('Alt text for the hero image:', doc.heroImage?.alt ?? '') ?? ''
         mutate({ heroImage: { url, alt, caption: doc.heroImage?.caption } })
       } catch (e) {
@@ -762,13 +762,19 @@ function plainTextFromDoc(node: any): string {
   return node.content.map(plainTextFromDoc).join(' ')
 }
 
-async function uploadArticleImage(file: File): Promise<string> {
+async function uploadArticleImage(file: File, purpose: 'hero' | 'body' = 'body'): Promise<string> {
+  // The server validator (/api/admin/insights/upload) rejects
+  // requests that don't include purpose: 'hero' | 'body'. This call
+  // previously omitted the field entirely and every upload failed
+  // with `purpose must be "hero" or "body"`. Hero-image control
+  // must pass 'hero'; the TipTap in-body image insert defaults to
+  // 'body'.
   const auth = await authHeader()
   const filename = `studio-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]+/g, '_')}`
   const signRes = await fetch('/api/admin/insights/upload', {
     method: 'POST',
     headers: { ...auth, 'content-type': 'application/json' },
-    body: JSON.stringify({ filename, contentType: file.type, sizeBytes: file.size }),
+    body: JSON.stringify({ filename, contentType: file.type, sizeBytes: file.size, purpose }),
   })
   const signJson = await signRes.json().catch(() => ({}))
   if (!signRes.ok || !signJson?.uploadUrl || !signJson?.publicUrl) {

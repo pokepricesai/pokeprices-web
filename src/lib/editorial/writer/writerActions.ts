@@ -49,6 +49,7 @@ import {
   RESEARCH_AND_WRITE_SYSTEM_PROMPT,
   buildResearchAndWriteUserTurn,
   parseResearchAndWriteResponse,
+  pickInternalLinkCandidates,
 } from './researchAndWrite'
 import {
   CHECK_AND_FIX_SYSTEM_PROMPT,
@@ -599,9 +600,25 @@ function readScratchpad(rawText: string | undefined): Scratchpad {
 
 async function stageResearchAndWrite(writer: WriterMetadata, project: any, adminEmail: string, stageStartMs: number): Promise<WriterMetadata> {
   const today = new Date().toISOString().slice(0, 10)
+  // Best-effort — fetch existing published PokePrices insights and
+  // pick up to ~10 keyword-matched candidates the model may weave
+  // into the article as natural internal links. Failure is silent
+  // (zero candidates is a fine result per the prompt).
+  let internalLinks: Array<{ title: string; url: string }> = []
+  try {
+    const ctx = await buildEditorialContext()
+    internalLinks = pickInternalLinkCandidates({
+      project:  { title: String(project.title), angle: project.angle ?? null, articleType: String(project.article_type) },
+      articles: ctx.articles,
+      limit:    10,
+    })
+  } catch (e) {
+    console.warn('[writer_research_and_write] internal-link candidate fetch failed, continuing without:', e instanceof Error ? e.message : 'unknown')
+  }
   const userTurn = buildResearchAndWriteUserTurn({
     project: { id: Number(project.id), title: String(project.title), angle: project.angle ?? null, articleType: String(project.article_type) },
     today,
+    internalLinks,
   })
 
   const call = await callAnthropicAndLog({

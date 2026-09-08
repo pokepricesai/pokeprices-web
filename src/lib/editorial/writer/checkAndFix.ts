@@ -43,6 +43,8 @@ If no meaningful problems exist, return the article UNCHANGED and set correction
 
 Do NOT include <cite>, citation-index, tool-citation, or source-reference markup in the returned article body. Use normal Markdown links only when useful. Any such markup will be stripped downstream anyway.
 
+PRESERVE valid internal links. Internal PokePrices links (Markdown of the form \`[anchor](/path)\`) already in the article are curated on purpose — do NOT strip them. You may leave, keep, or (rarely) fix an anchor text if it's factually wrong, but do not remove the link itself.
+
 OUTPUT FORMAT
 
 Reply with ONE JSON object wrapped in a fenced code block tagged \`json\`. Nothing outside the block.
