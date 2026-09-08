@@ -23,12 +23,28 @@ async function authHeader(): Promise<Record<string, string>> {
 
 type Props = {
   projectId:          number
+  /** EIC — used to bypass the in-Studio Generate Draft flow for
+   *  external opportunities. External articles are researched
+   *  and written in ChatGPT Deep Research via the button on
+   *  Editorial HQ; this panel becomes a paste target instead. */
+  articleType?:       string
+  projectTitle?:      string
   researchStatus:     string
   hasMeaningfulBody:  boolean
   writer:             WriterMetadata | null
   factCheckStale:     boolean
   onWriterResult:     (writer: WriterMetadata, studio: StudioDocument | null) => void
   onFactCheckResult:  (result: FactCheckResult) => void
+}
+
+const EXTERNAL_ARTICLE_TYPES = new Set<string>([
+  'upcoming_set', 'new_set', 'news', 'release_news',
+  'product_announcement', 'set_preview', 'evergreen_guide',
+  'external_research',
+])
+function isExternalArticleType(articleType: string | undefined): boolean {
+  if (!articleType) return false
+  return EXTERNAL_ARTICLE_TYPES.has(articleType.toLowerCase())
 }
 
 // Block 9B/9C — real server stages. Progress UI reflects
@@ -147,19 +163,32 @@ export function GenerateAndFactCheckPanel(props: Props) {
     }
   }, [projectId, props])
 
+  // EIC — for external opportunities, the in-Studio Generate Draft
+  // flow is intentionally bypassed. Admin uses the Copy Deep
+  // Research Prompt button on Editorial HQ, pastes the returned
+  // article into Studio manually, then optionally runs Fact Check.
+  const isExternal = isExternalArticleType(props.articleType)
+
   return (
     <div style={S.wrap}>
       <div style={S.section}>
         <div style={S.title}>Generate draft</div>
-        {!approved && (
+        {isExternal ? (
+          <div style={S.gateNotice}>
+            <strong>External article — generation is done in ChatGPT Deep Research.</strong>
+            <div style={{ marginTop: 6, fontWeight: 400 }}>
+              Open <a href="/admin/editorial" style={{ color: 'var(--primary, #0369a1)', textDecoration: 'underline' }}>Editorial HQ</a>, click <em>Copy Deep Research Prompt</em> on this project, paste the returned article into the editor here, then run Fact Check if you want an extra safety pass.
+            </div>
+          </div>
+        ) : !approved ? (
           <div style={S.gateNotice}>
             Approved research required. Current research status: <strong>{researchStatus}</strong>. Approve the pack in the Research Room before generating.
           </div>
-        )}
-        {approved && !busy && !confirming && (
+        ) : null}
+        {!isExternal && approved && !busy && !confirming && (
           <button style={S.btnPrimary} onClick={() => generate(!hasMeaningfulBody)}>Generate draft</button>
         )}
-        {approved && !busy && confirming && (
+        {!isExternal && approved && !busy && confirming && (
           <div style={S.confirmBox}>
             <div style={{ marginBottom: 8, fontWeight: 700 }}>Replace current draft with a newly generated article?</div>
             <div style={{ display: 'flex', gap: 6 }}>

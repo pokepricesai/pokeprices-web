@@ -237,6 +237,8 @@ export default function StudioClient({ project, initialDoc, research, initialWri
             {tab === 'writer'   && (
               <GenerateAndFactCheckPanel
                 projectId={project.id}
+                articleType={project.article_type}
+                projectTitle={project.title}
                 researchStatus={research?.status ?? 'not_started'}
                 hasMeaningfulBody={hasMeaningfulBodyClient(doc)}
                 writer={writer}

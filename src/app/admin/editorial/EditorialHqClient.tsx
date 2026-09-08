@@ -109,6 +109,105 @@ async function apiDeleteRelease(id: number): Promise<void> {
   await apiJson(`/api/admin/editorial/release-calendar/${id}`, { method: 'DELETE' })
 }
 
+// ── Deep Research prompt (external articles) ────────────────────
+//
+// Mirrors the article-type routing used server-side by
+// chooseRecipe(project). For external types the EIC no longer
+// runs an AI writer or fact checker — admin copies the Deep
+// Research prompt and pastes it into ChatGPT Deep Research.
+
+const EXTERNAL_ARTICLE_TYPES = new Set<string>([
+  'upcoming_set', 'new_set', 'news', 'release_news',
+  'product_announcement', 'set_preview', 'evergreen_guide',
+  'external_research',
+])
+const EXTERNAL_TITLE_HINT = /\b(everything we know|coming soon|announced|announcement|revealed|reveal|preview|leak|leaked|rumou?r|upcoming|release date|preorder|pre-order|drop date|drops)\b/i
+
+function isExternalOpportunity(project: { article_type?: string; articleType?: string; title?: string; angle?: string | null }): boolean {
+  const t = String((project as any).article_type ?? (project as any).articleType ?? '').toLowerCase()
+  if (EXTERNAL_ARTICLE_TYPES.has(t)) return true
+  const combined = `${project.title ?? ''} ${project.angle ?? ''}`
+  return EXTERNAL_TITLE_HINT.test(combined)
+}
+
+function DeepResearchPromptButton({ project, compact }: { project: { id: number; title: string; article_type?: string; angle?: string | null }; compact?: boolean }) {
+  const [busy,    setBusy]    = useState(false)
+  const [open,    setOpen]    = useState(false)
+  const [prompt,  setPrompt]  = useState<string | null>(null)
+  const [copied,  setCopied]  = useState(false)
+  const [error,   setError]   = useState<string | null>(null)
+  const [linkCount, setLinkCount] = useState<number | null>(null)
+  if (!isExternalOpportunity(project)) return null
+
+  const fetchPrompt = async () => {
+    setBusy(true); setError(null); setCopied(false)
+    try {
+      const j = await apiJson<{ prompt: string; internalLinkCount?: number }>(`/api/admin/editorial/deep-research-prompt/${project.id}`)
+      setPrompt(j.prompt)
+      setLinkCount(j.internalLinkCount ?? null)
+      setOpen(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'unknown')
+    } finally { setBusy(false) }
+  }
+
+  const copy = async () => {
+    if (!prompt) return
+    try {
+      await navigator.clipboard.writeText(prompt)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Clipboard permission denied — surface the prompt so admin can select it manually.
+      setError('Clipboard blocked — select the text below manually.')
+    }
+  }
+
+  const btnStyle = compact
+    ? { padding: '4px 8px', fontSize: 11, borderRadius: 6, background: 'var(--primary, #0369a1)', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' as any }
+    : { padding: '6px 12px', fontSize: 12, borderRadius: 6, background: 'var(--primary, #0369a1)', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' as any }
+
+  return (
+    <>
+      <button style={btnStyle} disabled={busy} onClick={fetchPrompt} title="External article — copy a Deep Research prompt to paste into ChatGPT Deep Research">
+        {busy ? 'Generating…' : (compact ? 'Deep Research' : 'Copy Deep Research Prompt')}
+      </button>
+      {error && !open && <span style={{ marginLeft: 8, fontSize: 12, color: '#b91c1c' }}>{error}</span>}
+      {open && prompt && (
+        <div
+          onClick={() => setOpen(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 1000 }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{ background: 'white', maxWidth: 900, width: '100%', maxHeight: '90vh', borderRadius: 10, padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+              <h2 style={{ margin: 0, fontFamily: "'Outfit', sans-serif", fontSize: 18 }}>Deep Research prompt</h2>
+              <button style={{ background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', color: '#64748b' }} onClick={() => setOpen(false)}>×</button>
+            </div>
+            <div style={{ fontSize: 12, color: '#64748b' }}>
+              {project.title} · paste this into ChatGPT Deep Research{linkCount != null ? ` · ${linkCount} internal link candidate(s) included` : ''}
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button style={{ padding: '8px 14px', borderRadius: 6, background: copied ? '#16a34a' : '#0f172a', color: 'white', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600 }} onClick={copy}>
+                {copied ? '✓ Copied to clipboard' : 'Copy to clipboard'}
+              </button>
+              {error && <span style={{ fontSize: 12, color: '#b91c1c' }}>{error}</span>}
+            </div>
+            <textarea
+              value={prompt}
+              readOnly
+              style={{ flex: 1, minHeight: 400, width: '100%', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, lineHeight: 1.5, padding: 12, border: '1px solid #cbd5e1', borderRadius: 6, background: '#f8fafc', color: '#0f172a', resize: 'vertical' as any }}
+              onClick={e => (e.target as HTMLTextAreaElement).select()}
+            />
+            <div style={{ fontSize: 11, color: '#64748b' }}>
+              External articles are researched and written in ChatGPT Deep Research, not inside the EIC. Paste the returned article + sources into Studio when ready.
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
 // ── Display helpers ──────────────────────────────────────────────
 
 function fmtDate(iso: string | null | undefined, opts?: Intl.DateTimeFormatOptions): string {
@@ -592,6 +691,7 @@ function SlotCard({
             <p style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'pre-wrap', margin: '0 0 12px', lineHeight: 1.5 }}>{project.notes}</p>
           )}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <DeepResearchPromptButton project={project} />
             <button style={btnGhost} onClick={() => setEditing(true)}>Edit</button>
             <StatusPicker current={project.status} onPick={s => onUpdate(project.id, { status: s })} />
             <button style={btnDanger} onClick={() => onArchive(project)}>Archive</button>
@@ -635,7 +735,8 @@ function ProjectRow({ project, onUpdate, onArchive, onDelete, researchStatus }: 
       <StudioChip projectId={project.id} />
       <PublicationChip project={project} />
       <PriorityDot priority={project.priority} />
-      <div style={{ display: 'flex', gap: 6 }}>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <DeepResearchPromptButton project={project} compact />
         <button style={btnGhost} onClick={() => setEditing(true)}>Edit</button>
         <button style={btnGhost} onClick={() => onArchive(project)}>Archive</button>
         <button style={btnDanger} onClick={() => onDelete(project.id, project.title)}>Delete</button>
