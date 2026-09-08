@@ -44,6 +44,20 @@ import {
   parseExternalArticleResponse,
   buildStudioDocFromExternalArticle,
 } from './externalWriter'
+// EIC two-stage external Writer — the current normal path
+import {
+  RESEARCH_AND_WRITE_SYSTEM_PROMPT,
+  buildResearchAndWriteUserTurn,
+  parseResearchAndWriteResponse,
+} from './researchAndWrite'
+import {
+  CHECK_AND_FIX_SYSTEM_PROMPT,
+  buildCheckAndFixUserTurn,
+  parseCheckAndFixResponse,
+} from './checkAndFix'
+import { markdownToStudioBodyDoc } from './externalWriter'
+import { STUDIO_DOCUMENT_VERSION } from '@/lib/studio/types'
+import { chooseRecipe } from '../research/dispatch'
 import { assembleStudioFromDraft } from './assembler'
 import { auditStudioNumerics } from './numericAudit'
 import {
@@ -71,6 +85,13 @@ const WRITER_PART_MAX_TOKENS = 5000
 // Markdown wrapped in a tiny JSON envelope. ~1,500-2,500 output
 // tokens comfortably lands in 30-45s.
 const WRITER_EXTERNAL_MAX_TOKENS = 4500
+// EIC two-stage — Stage 1 does research + drafting in one call
+// (web_search enabled). Stage 2 checks + fixes with a bounded
+// web_search budget. Both use Sonnet 4.6.
+const RESEARCH_AND_WRITE_MAX_TOKENS = 5000
+const RESEARCH_AND_WRITE_MAX_SEARCHES = 5
+const CHECK_AND_FIX_MAX_TOKENS = 5000
+const CHECK_AND_FIX_MAX_SEARCHES = 3
 
 // ─────────────────────────────────────────────────────────────────
 // Public entry points
@@ -96,8 +117,23 @@ export type GenerateStartResult = {
 export async function startGeneration(projectId: number, adminEmail: string, opts: GenerateOptions = {}): Promise<GenerateStartResult> {
   const project = await fetchProject(projectId)
   if (!project) throw new Error('project not found')
-  const research = await fetchResearch(projectId)
-  ensureResearchApproved(research)
+
+  // EIC two-stage — external SEO/news articles do NOT require an
+  // approved EvidencePack. Live web_search inside research_and_write
+  // is the sole research surface. Internal-data articles still need
+  // the strict approval + pack flow because their numeric truth
+  // comes from deterministic PokePrices data.
+  const projectRef = {
+    id: project.id, title: project.title, angle: project.angle,
+    articleType: project.article_type, targetPublishAt: project.target_publish_at,
+  }
+  const isExternal = chooseRecipe(projectRef) === 'external_research'
+
+  let research: Awaited<ReturnType<typeof fetchResearch>> = null
+  if (!isExternal) {
+    research = await fetchResearch(projectId)
+    ensureResearchApproved(research)
+  }
 
   const supa = getSupabaseServiceClient()
   const { data: pRow } = await supa.from('editorial_projects').select('studio_json, writer_json').eq('id', projectId).maybeSingle()
@@ -115,13 +151,8 @@ export async function startGeneration(projectId: number, adminEmail: string, opt
     throw new Error('existing draft has meaningful content; call with overwriteExisting=true to replace')
   }
 
-  // EIC — external_research uses a single simple Sonnet call. The
-  // split-Writer machinery (plan → part1 → part2 → assemble) stays
-  // in place for internal-data articles where per-claim evidence
-  // bookkeeping is load-bearing.
-  const packRecipe = (research!.evidence_json as EvidencePack).recipe
-  const startingStage: GenerationStage = packRecipe === 'external_research' ? 'writer_external' : 'writer_plan'
-  const startingLabel = packRecipe === 'external_research' ? 'Writing article' : 'Planning article'
+  const startingStage: GenerationStage = isExternal ? 'research_and_write' : 'writer_plan'
+  const startingLabel = isExternal ? 'Researching & writing' : 'Planning article'
 
   const run: GenerationRun = {
     id:        `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -139,9 +170,9 @@ export async function startGeneration(projectId: number, adminEmail: string, opt
     version:              WRITER_METADATA_VERSION,
     generatedAt:          new Date().toISOString(),
     model:                WRITER_MODEL,
-    researchId:           Number(research!.id),
-    researchGeneratedAt:  (research!.evidence_json as EvidencePack).generatedAt,
-    packRecipe:           (research!.evidence_json as EvidencePack).recipe,
+    researchId:           research?.id ? Number(research.id) : undefined,
+    researchGeneratedAt:  research?.evidence_json ? (research.evidence_json as EvidencePack).generatedAt : undefined,
+    packRecipe:           research?.evidence_json ? (research.evidence_json as EvidencePack).recipe : (isExternal ? 'external_research' : undefined),
     claimTrace:           [],
     blockIntents:         [],
     assemblyWarnings:     [],
@@ -168,10 +199,28 @@ export async function runNextStage(projectId: number, adminEmail: string): Promi
 
   const project = await fetchProject(projectId)
   if (!project) throw new Error('project not found')
-  const research = await fetchResearch(projectId)
-  ensureResearchApproved(research)
-  const pack = research!.evidence_json as EvidencePack
-  const analysis = (research!.analyst_json ?? null) as ResearchAnalysis | null
+
+  // EIC two-stage — external articles skip the approved-EvidencePack
+  // gate. Internal-data articles still require it. Legacy in-flight
+  // external runs (writer_external / style / fact_check) may still
+  // read a pack when one exists; we tolerate its absence for the
+  // new research_and_write / check_and_fix stages.
+  const projectRef = {
+    id: project.id, title: project.title, angle: project.angle,
+    articleType: project.article_type, targetPublishAt: project.target_publish_at,
+  }
+  const isExternal = chooseRecipe(projectRef) === 'external_research'
+  let pack:     EvidencePack     | null = null
+  let analysis: ResearchAnalysis | null = null
+  const research = await fetchResearch(projectId).catch(() => null)
+  if (!isExternal) {
+    ensureResearchApproved(research)
+    pack     = research!.evidence_json as EvidencePack
+    analysis = (research!.analyst_json ?? null) as ResearchAnalysis | null
+  } else if (research?.evidence_json) {
+    pack     = research.evidence_json as EvidencePack
+    analysis = (research.analyst_json ?? null) as ResearchAnalysis | null
+  }
 
   const { data: pRow } = await supa.from('editorial_projects').select('studio_json, writer_json').eq('id', projectId).maybeSingle()
   const currentStudio = ((pRow as any)?.studio_json ?? null) as StudioDocument | null
@@ -186,41 +235,52 @@ export async function runNextStage(projectId: number, adminEmail: string): Promi
   try {
     switch (writer.currentRun.stage) {
       case 'queued': {
-        // External runs → writer_external. Internal → writer_plan.
-        const nextStage: GenerationStage = pack.recipe === 'external_research' ? 'writer_external' : 'writer_plan'
-        const nextLabel = pack.recipe === 'external_research' ? 'Writing article' : 'Planning article'
+        // External → research_and_write (two-stage). Internal → writer_plan.
+        const nextStage: GenerationStage = isExternal ? 'research_and_write' : 'writer_plan'
+        const nextLabel = isExternal ? 'Researching & writing' : 'Planning article'
         writer = advance(writer, nextStage, nextLabel, stageStartMs)
         break
       }
+      // EIC two-stage external path
+      case 'research_and_write':
+        writer = await stageResearchAndWrite(writer, project, adminEmail, stageStartMs)
+        break
+      case 'check_and_fix':
+        writer = await stageCheckAndFix(writer, project, adminEmail, stageStartMs)
+        break
+      // Internal-data path (unchanged) — pack is guaranteed non-null
+      // by the ensureResearchApproved gate above.
       case 'writer':
-        writer = await stageWriter(writer, project, pack, analysis, adminEmail, stageStartMs)
+        writer = await stageWriter(writer, project, pack!, analysis, adminEmail, stageStartMs)
         break
       case 'writer_plan':
-        writer = await stageWriterPlan(writer, project, pack, analysis, adminEmail, stageStartMs)
+        writer = await stageWriterPlan(writer, project, pack!, analysis, adminEmail, stageStartMs)
         break
       case 'writer_part1':
-        writer = await stageWriterPart(writer, project, pack, analysis, 'part1', adminEmail, stageStartMs)
+        writer = await stageWriterPart(writer, project, pack!, analysis, 'part1', adminEmail, stageStartMs)
         break
       case 'writer_part2':
-        writer = await stageWriterPart(writer, project, pack, analysis, 'part2', adminEmail, stageStartMs)
+        writer = await stageWriterPart(writer, project, pack!, analysis, 'part2', adminEmail, stageStartMs)
         break
       case 'writer_assemble':
         writer = stageWriterAssemble(writer, stageStartMs)
         break
+      // Legacy external one-shot path — kept for in-flight runs
+      // created before the two-stage split shipped. Requires a pack.
       case 'writer_external':
-        writer = await stageWriterExternal(writer, project, pack, adminEmail, stageStartMs)
+        writer = await stageWriterExternal(writer, project, pack!, adminEmail, stageStartMs)
         break
       case 'style':
-        writer = await stageStyleAndAssemble(writer, project, pack, adminEmail, stageStartMs)
+        writer = await stageStyleAndAssemble(writer, project, pack!, adminEmail, stageStartMs)
         break
       case 'fact_check':
-        writer = await stageFactCheck(writer, projectId, pack, adminEmail, stageStartMs)
+        writer = await stageFactCheck(writer, projectId, pack!, adminEmail, stageStartMs)
         break
       case 'repair':
-        writer = await stageRepair(writer, project, pack, adminEmail, stageStartMs)
+        writer = await stageRepair(writer, project, pack!, adminEmail, stageStartMs)
         break
       case 'finalize':
-        writer = await stageFinalize(writer, projectId, pack, adminEmail, stageStartMs)
+        writer = await stageFinalize(writer, projectId, pack!, adminEmail, stageStartMs)
         break
     }
   } catch (err) {
@@ -523,7 +583,254 @@ function readScratchpad(rawText: string | undefined): Scratchpad {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// EIC — simplified external-research Writer path
+// EIC two-stage external Writer (the current normal path)
+// ─────────────────────────────────────────────────────────────────
+//
+// Stage 1 — research_and_write. ONE Sonnet call with web_search
+// enabled. Model researches live and drafts the article in the
+// same call. Output is a tiny JSON envelope; salvaged from
+// Markdown if malformed. Deterministic Markdown → TipTap builds
+// the StudioDocument.
+//
+// Stage 2 — check_and_fix. ONE Sonnet call with a small bounded
+// web_search budget. Directly fixes meaningful factual risks and
+// returns the corrected article. Short correctionsSummary is
+// persisted; NO forensic issue list.
+
+async function stageResearchAndWrite(writer: WriterMetadata, project: any, adminEmail: string, stageStartMs: number): Promise<WriterMetadata> {
+  const today = new Date().toISOString().slice(0, 10)
+  const userTurn = buildResearchAndWriteUserTurn({
+    project: { id: Number(project.id), title: String(project.title), angle: project.angle ?? null, articleType: String(project.article_type) },
+    today,
+  })
+
+  const call = await callAnthropicAndLog({
+    feature: 'editorial_writer_research_and_write',
+    model: WRITER_MODEL, system: RESEARCH_AND_WRITE_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: userTurn }],
+    max_tokens: RESEARCH_AND_WRITE_MAX_TOKENS,
+    temperature: 0.55,
+    cacheSystem: true,
+    webSearch: { max_uses: RESEARCH_AND_WRITE_MAX_SEARCHES },
+    adminEmail, sessionId: `writer-r+w-${project.id}-${Date.now()}`,
+  })
+  if (!call.ok) throw new Error(`research_and_write call failed: ${call.error || 'unknown'}`)
+
+  const parsed = parseResearchAndWriteResponse(call.text)
+  if (!parsed) throw new Error('research_and_write produced no parsable article (even after salvage)')
+
+  // Build a permissive external-URL allowlist from the sources
+  // the model returned, so [anchor](href) links to those URLs
+  // survive markdown → tiptap conversion.
+  const allowed = new Set<string>()
+  for (const s of parsed.sources) if (/^https:\/\//i.test(s.url)) allowed.add(s.url)
+  const bodyDoc = markdownToStudioBodyDoc(parsed.bodyMarkdown, allowed)
+
+  const studio: StudioDocument = {
+    version:    STUDIO_DOCUMENT_VERSION,
+    headline:   parsed.title,
+    intro:      deriveIntroFromMarkdown(parsed.bodyMarkdown, parsed.metaDescription),
+    themeKey:   'market',
+    themeLabel: 'Market',
+    authorName: 'PokePrices',
+    seo:        { title: parsed.metaTitle || parsed.title, description: parsed.metaDescription },
+    heroImage:  null,
+    bodyDoc,
+    updatedAt:  new Date().toISOString(),
+  }
+
+  // Persist studio_json immediately so a mid-flow browser refresh
+  // sees the drafted article before the checker runs.
+  const supa = getSupabaseServiceClient()
+  await supa.from('editorial_projects').update({ studio_json: studio }).eq('id', project.id)
+
+  const usage = mergeCallUsage(writer.currentRun!.usage, call)
+  const run: GenerationRun = {
+    ...writer.currentRun!,
+    stage: 'check_and_fix', stageLabel: 'Checking & fixing',
+    rawWriterText: call.text,   // preserved so checker can reference the model's original response
+    usage, updatedAt: new Date().toISOString(),
+    stageTimings: { ...writer.currentRun!.stageTimings, research_and_write: Date.now() - stageStartMs },
+  }
+  return {
+    ...writer,
+    claimTrace:       [],
+    blockIntents:     [],
+    assemblyWarnings: [],
+    generationCost:   usage,
+    externalSourceUrls: parsed.sources.map(s => s.url),
+    currentRun:       run,
+  }
+}
+
+async function stageCheckAndFix(writer: WriterMetadata, project: any, adminEmail: string, stageStartMs: number): Promise<WriterMetadata> {
+  const today = new Date().toISOString().slice(0, 10)
+  const supa = getSupabaseServiceClient()
+  const { data: pRow } = await supa.from('editorial_projects').select('studio_json').eq('id', project.id).maybeSingle()
+  const studio = ((pRow as any)?.studio_json ?? null) as StudioDocument | null
+  if (!studio) throw new Error('check_and_fix: no studio_json to check')
+
+  const article = {
+    title:           studio.headline,
+    metaTitle:       studio.seo.title,
+    metaDescription: studio.seo.description,
+    bodyMarkdown:    studioBodyDocToMarkdown(studio.bodyDoc),
+    sources:         (writer.externalSourceUrls ?? []).map(url => ({ url })),
+  }
+
+  const call = await callAnthropicAndLog({
+    feature: 'editorial_writer_check_and_fix',
+    model: WRITER_MODEL, system: CHECK_AND_FIX_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: buildCheckAndFixUserTurn({ article, today }) }],
+    max_tokens: CHECK_AND_FIX_MAX_TOKENS,
+    temperature: 0.2,
+    cacheSystem: true,
+    webSearch: { max_uses: CHECK_AND_FIX_MAX_SEARCHES },
+    adminEmail, sessionId: `writer-check-${project.id}-${Date.now()}`,
+  })
+
+  const usage = mergeCallUsage(writer.currentRun!.usage, call)
+  const studioHash = hashStudioBody(studio.bodyDoc)
+
+  // If the checker call itself failed, keep the drafted article
+  // as-is and record a soft review-required factCheck so the human
+  // knows to re-check manually. Do NOT nuke the draft.
+  if (!call.ok) {
+    const softFc: FactCheckResult = {
+      version: 1, status: 'review_required', checkedAt: new Date().toISOString(),
+      packRecipe: writer.packRecipe,
+      issues: [{ kind: 'other', severity: 'minor', claim: 'Check & fix stage errored — draft preserved', reason: call.error ?? 'unknown', evidenceRefs: [] }],
+      numericAudit: { status: 'pass', checked: 0, matched: 0, issues: [] },
+      checkedStudioHash: studioHash, autoCheck: true,
+    }
+    const run: GenerationRun = {
+      ...writer.currentRun!, stage: 'complete', stageLabel: 'Ready',
+      usage, updatedAt: new Date().toISOString(),
+      stageTimings: { ...writer.currentRun!.stageTimings, check_and_fix: Date.now() - stageStartMs },
+    }
+    return { ...writer, factCheck: softFc, checkedStudioHash: studioHash, correctionsSummary: 'Check & fix stage errored — draft preserved.', generationCost: usage, currentRun: run }
+  }
+
+  const parsed = parseCheckAndFixResponse(call.text)
+  // Also tolerate a null parse — keep the drafted article and set
+  // status review_required with a note.
+  if (!parsed) {
+    const softFc: FactCheckResult = {
+      version: 1, status: 'review_required', checkedAt: new Date().toISOString(),
+      packRecipe: writer.packRecipe,
+      issues: [{ kind: 'other', severity: 'minor', claim: 'Checker output could not be parsed', reason: 'salvage failed', evidenceRefs: [] }],
+      numericAudit: { status: 'pass', checked: 0, matched: 0, issues: [] },
+      checkedStudioHash: studioHash, autoCheck: true,
+    }
+    const run: GenerationRun = {
+      ...writer.currentRun!, stage: 'complete', stageLabel: 'Ready',
+      usage, updatedAt: new Date().toISOString(),
+      stageTimings: { ...writer.currentRun!.stageTimings, check_and_fix: Date.now() - stageStartMs },
+    }
+    return { ...writer, factCheck: softFc, checkedStudioHash: studioHash, correctionsSummary: 'Checker output could not be parsed — draft preserved.', generationCost: usage, currentRun: run }
+  }
+
+  // Rebuild the studio document from the corrected article. The
+  // allowlist merges the pre-existing sources with any new URLs
+  // the checker returned so its edits can add / drop / adjust
+  // links without them being dropped.
+  const allowed = new Set<string>()
+  for (const url of writer.externalSourceUrls ?? []) if (/^https:\/\//i.test(url)) allowed.add(url)
+  for (const s of parsed.sources) if (/^https:\/\//i.test(s.url)) allowed.add(s.url)
+  const bodyDoc = markdownToStudioBodyDoc(parsed.bodyMarkdown, allowed)
+  const nextStudio: StudioDocument = {
+    ...studio,
+    headline:  parsed.title || studio.headline,
+    intro:     deriveIntroFromMarkdown(parsed.bodyMarkdown, parsed.metaDescription || studio.seo.description),
+    seo:       { title: parsed.metaTitle || studio.seo.title, description: parsed.metaDescription || studio.seo.description },
+    bodyDoc,
+    updatedAt: new Date().toISOString(),
+  }
+  await supa.from('editorial_projects').update({ studio_json: nextStudio }).eq('id', project.id)
+
+  const nextHash = hashStudioBody(nextStudio.bodyDoc)
+  const factCheck: FactCheckResult = {
+    version: 1, status: 'pass', checkedAt: new Date().toISOString(),
+    packRecipe: writer.packRecipe,
+    issues: [],
+    numericAudit: { status: 'pass', checked: 0, matched: 0, issues: [] },
+    checkedStudioHash: nextHash, autoCheck: true,
+  }
+  const nextUrls = Array.from(new Set([...(writer.externalSourceUrls ?? []), ...parsed.sources.map(s => s.url)]))
+  const run: GenerationRun = {
+    ...writer.currentRun!, stage: 'complete', stageLabel: 'Ready',
+    usage, updatedAt: new Date().toISOString(),
+    stageTimings: { ...writer.currentRun!.stageTimings, check_and_fix: Date.now() - stageStartMs },
+  }
+  return {
+    ...writer,
+    factCheck,
+    checkedStudioHash: nextHash,
+    correctionsSummary: parsed.correctionsSummary || 'No changes needed.',
+    externalSourceUrls: nextUrls,
+    generationCost: usage,
+    currentRun: run,
+  }
+}
+
+/** Shared with stageWriterExternal — derive the article deck from
+ *  the first body paragraph, falling back to metaDescription when
+ *  the body opens with a heading. */
+function deriveIntroFromMarkdown(markdown: string, fallback: string): string {
+  const blocks = (markdown ?? '').split(/\n\s*\n/).map(p => p.trim()).filter(Boolean)
+  for (const block of blocks) {
+    if (block.startsWith('#')) break
+    if (/^\s*([-*]|\d+\.)\s+/.test(block)) break
+    return block.replace(/[*_`>]/g, '').slice(0, 500)
+  }
+  return (fallback || '').slice(0, 500)
+}
+
+/** Inverse of markdownToStudioBodyDoc — flatten a TipTap bodyDoc
+ *  back to Markdown for the checker stage. Preserves headings,
+ *  paragraphs, and bullet/ordered lists. */
+function studioBodyDocToMarkdown(bodyDoc: unknown): string {
+  const parts: string[] = []
+  const b: any = bodyDoc
+  if (!b || !Array.isArray(b.content)) return ''
+  for (const node of b.content) {
+    if (!node) continue
+    if (node.type === 'heading') {
+      const level = Math.min(3, Math.max(2, Number(node.attrs?.level ?? 2)))
+      parts.push(`${'#'.repeat(level)} ${flattenInline(node.content)}`)
+    } else if (node.type === 'paragraph') {
+      const text = flattenInline(node.content)
+      if (text.trim()) parts.push(text)
+    } else if (node.type === 'bulletList') {
+      for (const li of node.content ?? []) parts.push(`- ${flattenListItem(li)}`)
+    } else if (node.type === 'orderedList') {
+      (node.content ?? []).forEach((li: any, i: number) => parts.push(`${i + 1}. ${flattenListItem(li)}`))
+    } else if (node.type === 'blockquote') {
+      parts.push(`> ${flattenInline(node.content?.[0]?.content ?? node.content)}`)
+    }
+  }
+  return parts.join('\n\n')
+}
+function flattenListItem(li: any): string {
+  const para = li?.content?.[0]
+  if (para?.type === 'paragraph') return flattenInline(para.content)
+  return flattenInline(li?.content)
+}
+function flattenInline(content: any[] | undefined): string {
+  if (!Array.isArray(content)) return ''
+  return content.map((c: any) => {
+    if (typeof c?.text !== 'string') return Array.isArray(c?.content) ? flattenInline(c.content) : ''
+    const text = c.text as string
+    const linkMark = (c.marks ?? []).find((m: any) => m.type === 'link')
+    if (linkMark && linkMark.attrs?.href) return `[${text}](${linkMark.attrs.href})`
+    if ((c.marks ?? []).some((m: any) => m.type === 'bold'))   return `**${text}**`
+    if ((c.marks ?? []).some((m: any) => m.type === 'italic')) return `*${text}*`
+    return text
+  }).join('')
+}
+
+// ─────────────────────────────────────────────────────────────────
+// EIC — legacy simplified external-research Writer path (v5)
 // ─────────────────────────────────────────────────────────────────
 //
 // ONE Sonnet call. Tiny JSON output. Deterministic Markdown-to-
@@ -532,6 +839,7 @@ function readScratchpad(rawText: string | undefined): Scratchpad {
 // traces / plan / parts. Skips the style-repair AI call and the
 // numeric audit (both were designed for internal-data articles).
 // After this stage, the run advances straight to fact_check.
+// Kept for in-flight runs from before the two-stage split shipped.
 
 async function stageWriterExternal(writer: WriterMetadata, project: any, pack: EvidencePack, adminEmail: string, stageStartMs: number): Promise<WriterMetadata> {
   const userTurn = buildExternalArticleUserTurn({

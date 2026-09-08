@@ -36,21 +36,25 @@ type Props = {
 // split-Writer stages (plan / part1 / part2 / assemble) replace
 // the old single 'writer' step for new runs; the legacy 'writer'
 // slot stays reachable for in-flight runs from the previous machine.
-const STAGE_ORDER: GenerationStage[] = ['queued', 'writer', 'writer_plan', 'writer_part1', 'writer_part2', 'writer_assemble', 'writer_external', 'style', 'fact_check', 'repair', 'finalize', 'complete']
+const STAGE_ORDER: GenerationStage[] = ['queued', 'research_and_write', 'check_and_fix', 'writer', 'writer_plan', 'writer_part1', 'writer_part2', 'writer_assemble', 'writer_external', 'style', 'fact_check', 'repair', 'finalize', 'complete']
 const STAGE_LABELS: Record<GenerationStage, string> = {
-  queued:          'Preparing',
-  writer:          'Writing draft',
-  writer_plan:     'Planning article',
-  writer_part1:    'Drafting part 1 of 2',
-  writer_part2:    'Drafting part 2 of 2',
-  writer_assemble: 'Assembling draft',
-  writer_external: 'Writing article',
-  style:           'Applying house style',
-  fact_check:      'Checking facts',
-  repair:          'Repairing draft',
-  finalize:        'Saving draft',
-  complete:        'Complete',
-  failed:          'Failed',
+  queued:             'Preparing',
+  // EIC two-stage external path (normal for SEO / news / new-set articles)
+  research_and_write: 'Researching & writing',
+  check_and_fix:      'Checking & fixing',
+  // Legacy stages — kept for in-flight runs from prior machines
+  writer:             'Writing draft',
+  writer_plan:        'Planning article',
+  writer_part1:       'Drafting part 1 of 2',
+  writer_part2:       'Drafting part 2 of 2',
+  writer_assemble:    'Assembling draft',
+  writer_external:    'Writing article',
+  style:              'Applying house style',
+  fact_check:         'Checking facts',
+  repair:             'Repairing draft',
+  finalize:           'Saving draft',
+  complete:           'Ready',
+  failed:             'Failed',
 }
 function stageIndex(s: GenerationStage): number { return STAGE_ORDER.indexOf(s) }
 

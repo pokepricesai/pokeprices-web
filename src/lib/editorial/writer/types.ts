@@ -109,6 +109,13 @@ export type WriterMetadata = {
   generationCost:        WriterUsage
   styleRepairFired?:     boolean
   repairFired?:          boolean
+  /** EIC two-stage external — short summary of what the check_and_fix
+   *  stage changed (or "No changes needed."). Never a forensic list. */
+  correctionsSummary?:   string
+  /** EIC two-stage external — source URLs the research_and_write
+   *  stage found via web_search, so the checker + downstream tooling
+   *  can render sources without re-searching. */
+  externalSourceUrls?:   string[]
   /** Block 9B — generation state machine.
    *  When present and not in {complete, failed}, generation is
    *  in progress and Studio should keep polling. When complete,
@@ -136,6 +143,12 @@ export type GenerationStage =
   // call → tiny JSON → deterministic Markdown-to-TipTap. No plan,
   // no parts, no evidence-ref bookkeeping.
   | 'writer_external' // pending: single Sonnet call for external_research articles
+  // EIC — external articles now use exactly TWO AI calls total, no
+  // EvidencePack, no research approval gate. Everything else in
+  // this file is legacy and stays only for internal-data articles
+  // and for in-flight runs created under the old machines.
+  | 'research_and_write' // pending: Sonnet + web_search researches AND drafts in one call
+  | 'check_and_fix'      // pending: Sonnet + bounded web_search directly fixes meaningful issues
   | 'style'           // pending: style guard + optional style repair + assemble + numeric audit
   | 'fact_check'      // pending: Fact Checker Claude call
   | 'repair'          // pending: Writer repair Claude call + reassemble + re-audit
