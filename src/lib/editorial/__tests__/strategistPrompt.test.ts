@@ -94,6 +94,48 @@ describe('buildStrategistSystemPrompt', () => {
     expect(system).not.toMatch(/UK TCG market/i)
   })
 
+  it('declares the two editorial lanes (internal and external) as valid', () => {
+    const { system } = buildStrategistSystemPrompt(emptyContext as any, emptyRadar as any)
+    expect(system).toMatch(/TWO EDITORIAL LANES/)
+    expect(system).toMatch(/INTERNAL/)
+    expect(system).toMatch(/EXTERNAL/)
+    // External must not require proprietary data.
+    expect(system).toMatch(/External articles do NOT require proprietary PokePrices data/i)
+    // Explicit callout that lacking data is not grounds to reject an
+    // external idea.
+    expect(system).toMatch(/Do NOT downgrade an external idea/i)
+  })
+
+  it('honors explicit user intent — do not re-argue an accepted external request', () => {
+    const { system } = buildStrategistSystemPrompt(emptyContext as any, emptyRadar as any)
+    expect(system).toMatch(/EXPLICIT USER INTENT WINS/)
+    expect(system).toMatch(/Do not re-argue/i)
+    // Common trigger phrases the strategist must respect.
+    expect(system).toMatch(/external article/i)
+    expect(system).toMatch(/general knowledge/i)
+    expect(system).toMatch(/save this idea/i)
+  })
+
+  it('lists external article types in the recommendation schema', () => {
+    const { system } = buildStrategistSystemPrompt(emptyContext as any, emptyRadar as any)
+    // The suggestedArticleType enum in the schema description must
+    // include both lanes.
+    expect(system).toMatch(/monthly_market_report/)   // internal
+    expect(system).toMatch(/evergreen_guide/)         // external
+    expect(system).toMatch(/upcoming_set/)            // external
+    // Recommendation shape must carry a mode field so the client can
+    // route the idea to the correct workflow.
+    expect(system).toMatch(/"mode":\s*"internal"\|"external"/)
+  })
+
+  it('does not blanket-downgrade "SEO filler" — only "SEO filler with no useful angle"', () => {
+    const { system } = buildStrategistSystemPrompt(emptyContext as any, emptyRadar as any)
+    // The old prompt said "SEO filler" without qualification, which
+    // caused the model to refuse legitimate external SEO articles.
+    // The new prompt scopes the downrank properly.
+    expect(system).toMatch(/SEO filler with no research/i)
+  })
+
   it('exposes POKEPRICES_EDITORIAL_PROFILE + STRATEGIST_ROLE_RULES for reuse', () => {
     expect(typeof POKEPRICES_EDITORIAL_PROFILE).toBe('string')
     expect(POKEPRICES_EDITORIAL_PROFILE.length).toBeGreaterThan(400)
@@ -164,5 +206,20 @@ describe('parseStrategistResponse', () => {
     const raw = '{"assistantMessage":"no fence"}'
     const parsed = parseStrategistResponse(raw)
     expect(parsed.assistantMessage).toBe('no fence')
+  })
+
+  it('accepts and preserves the mode field on recommendations', () => {
+    const raw = '```json\n{"assistantMessage":"ok","recommendations":{"summary":"","primary":[{"headline":"Pikachu history","mode":"external","angle":"","whyNow":"","whyUseful":"","evidenceAvailable":[],"evidenceStillNeeded":[],"citationPotential":"high","searchOrEditorialIntent":"","suggestedVisualsOrDataBlocks":[],"existingContentOverlap":{"risk":"low","related":[]},"recommendedPublishDay":"Tuesday","confidence":"high","suggestedArticleType":"evergreen_guide"}],"alternatives":[]}}\n```'
+    const parsed = parseStrategistResponse(raw)
+    const r = parsed.recommendations!.primary[0]
+    expect(r.mode).toBe('external')
+    expect(r.suggestedArticleType).toBe('evergreen_guide')
+  })
+
+  it('silently drops a garbage mode value rather than blowing up', () => {
+    const raw = '```json\n{"assistantMessage":"ok","recommendations":{"summary":"","primary":[{"headline":"H","mode":"purple","angle":"","whyNow":"","whyUseful":"","evidenceAvailable":[],"evidenceStillNeeded":[],"citationPotential":"medium","searchOrEditorialIntent":"","suggestedVisualsOrDataBlocks":[],"existingContentOverlap":{"risk":"none","related":[]},"recommendedPublishDay":"","confidence":"medium"}],"alternatives":[]}}\n```'
+    const parsed = parseStrategistResponse(raw)
+    const r = parsed.recommendations!.primary[0]
+    expect(r.mode).toBeUndefined()
   })
 })

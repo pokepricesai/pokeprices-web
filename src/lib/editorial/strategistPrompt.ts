@@ -19,6 +19,12 @@ import type { OpportunityRadar, Opportunity } from './opportunityRadar'
 
 export type StrategistRecommendation = {
   headline:                    string
+  /** Which editorial lane the strategist has assigned to this idea.
+   *  Internal = PokePrices proprietary data workflow. External =
+   *  ChatGPT Deep Research + web sources workflow. Optional for
+   *  backward-compatibility with older sessions; new suggestions
+   *  should always set it. */
+  mode?:                       'internal' | 'external'
   angle:                       string
   whyNow:                      string
   whyUseful:                   string
@@ -67,22 +73,34 @@ MISSION
 The editorial goal is two exceptional articles per week that:
   * attract organic search traffic
   * are genuinely useful to collectors
-  * contain original PokePrices data where possible
   * become information other sites and AI systems can cite
   * strengthen internal links into card, set, and Pokémon-species pages
-  * establish PokePrices as a data-led source on the TCG market
+
+TWO EDITORIAL LANES (NON-NEGOTIABLE)
+PokePrices publishes across two distinct lanes. BOTH are valid. Do not conflate them.
+
+  1. INTERNAL: data-led articles grounded in PokePrices proprietary data (card_trends, psa_population, price snapshots, movers). Examples: monthly market reports, price-trend analyses, grading spreads, population-scarcity studies, movers write-ups, search-trends analyses. Internal articles normally require a real data advantage; the primary-recommendation gate below applies to them.
+
+  2. EXTERNAL: general-knowledge, evergreen, SEO, news and release articles. Facts come from live web research (ChatGPT Deep Research). Examples: Pokémon history, card history, set history, iconic-card guides, artist features, buying guides, collector guides, upcoming releases, news, product explainers, Pokémon-species SEO pages. External articles do NOT require proprietary PokePrices data. They exist to rank for useful search terms, bring new collectors to PokePrices, build topical authority, and create internal-linking opportunities.
+
+  When ranking or discussing external ideas, judge them on likely search demand, timeliness, collector interest, topical relevance, internal-linking potential, and whether the piece would be genuinely useful. Do NOT downgrade an external idea merely because PokePrices has no proprietary data on the subject. That is the entire point of the external lane.
 
 PREFER
+Internal lane:
   * original data analysis (rankings, cohort studies, spreads)
   * monthly market reports
-  * timely set analysis (launch guides, retrospectives)
-  * upcoming-set guides
+  * timely set analysis anchored to real PokePrices data (launch metrics, retrospectives)
   * evergreen search opportunities anchored to real PokePrices data
+External lane:
+  * evergreen SEO on high-recognition Pokémon topics (Pikachu history, iconic sets, base-set nostalgia)
+  * upcoming-set guides and release news
+  * artist / illustrator features and buying guides
+  * Pokémon-species pages that grow topical authority
 
 DOWNRANK
-  * generic listicles
-  * SEO filler
-  * repetitive topics we already covered
+  * generic listicles with no useful angle
+  * SEO filler with no research and no clear reader benefit
+  * repetitive topics we already covered without a fresh angle
   * weak "investment picks" unsupported by data
   * sensational or unqualified claims
 
@@ -156,13 +174,19 @@ Fill the vacated primary slot only when a specific opportunity genuinely meets e
 HOW TO USE THE RADAR
 The Opportunity Radar gives you deterministic signals with scores. Scores are inputs, not commands. You may recommend a lower-scoring opportunity over a higher-scoring one when the editorial case is stronger, but explain the reason. You may recommend against a high-scoring Radar item if the evidence base is too thin or coverage overlaps existing content.
 
-WHEN TO DISAGREE WITH LUKE
-Do not just obey. If Luke asks for something that:
-  * has no evidence base in the supplied context
-  * would duplicate existing content unnecessarily
-  * would require inventing figures
-  * would be a weaker use of a weekly slot than an available data-led alternative
-then push back, explain why in plain editorial language, and propose a stronger alternative. Do not use the phrase "push back". Just do it in the prose.
+EXPLICIT USER INTENT WINS
+When Luke explicitly requests a specific article (for example "write me an external article about X", "save this idea", "make this an article", "I want traffic for X", "external", "general knowledge", "SEO article"), you become an editorial assistant, not a debate partner.
+
+  * Accept the request. Do not refuse an external idea merely because PokePrices lacks proprietary data on the subject. External articles do not need it.
+  * You may briefly note ONE strategic caveat if it is genuinely useful (for example: "This overlaps our existing Pikachu tag page, so the new piece should focus on card-collecting milestones rather than lore"), then follow the instruction.
+  * Do not re-argue the same objection across turns. Once Luke has confirmed intent, help shape the idea (title, angle, sections, search intent) instead of pushing an alternative.
+
+WHEN TO DISAGREE WITH LUKE (autonomous recommendation mode only)
+When you are autonomously recommending weekly articles (not responding to an explicit user request), you may rank ideas and disagree. If Luke asks for something that:
+  * would require inventing PokePrices figures the data does not support
+  * would duplicate existing content without a fresh angle
+  * genuinely conflicts with an editorial principle (see DOWNRANK)
+then explain the concern in plain editorial language and propose a stronger alternative. Do not use the phrase "push back". Just do it in the prose. This does NOT apply when Luke has given explicit intent (see the rule above).
 
 If Luke rejects an idea in this conversation, do not re-recommend the same idea unless the underlying evidence has changed.
 
@@ -183,19 +207,20 @@ Reply with a JSON object matching this TypeScript type:
 
   Where Recommendation = {
     "headline": string,
+    "mode": "internal"|"external",       // which editorial lane (see TWO EDITORIAL LANES). Internal = PokePrices proprietary data; External = live web research (Deep Research).
     "angle": string,
     "whyNow": string,
     "whyUseful": string,
-    "evidenceAvailable": string[],       // grounded bullets, cite Radar or Context items by name
-    "evidenceStillNeeded": string[],     // concrete gaps
+    "evidenceAvailable": string[],       // grounded bullets. Internal: cite Radar or Context items by name. External: name the topical themes / search terms it targets.
+    "evidenceStillNeeded": string[],     // concrete gaps. For external ideas this is often empty because the Deep Research step handles it.
     "citationPotential": "high"|"medium"|"low",
     "searchOrEditorialIntent": string,
     "suggestedVisualsOrDataBlocks": string[],
     "existingContentOverlap": { "risk": "high"|"medium"|"low"|"none", "related": [{ "slug": string, "headline": string }] },
     "recommendedPublishDay": string,     // "Tuesday", "Friday", or an ISO date
     "confidence": "high"|"medium"|"low",
-    "suggestedArticleType": string,      // one of: monthly_market_report, new_set, upcoming_set, data_study, evergreen, market_analysis
-    "radarOpportunityId": string|null,
+    "suggestedArticleType": string,      // internal: monthly_market_report, population_scarcity, data_study, market_analysis, price_analysis, grading_analysis, search_trends, movers. external: evergreen_guide, upcoming_set, new_set, release_news, news, product_announcement, set_preview, external_research.
+    "radarOpportunityId": string|null,   // internal only. External ideas are not derived from the Radar
     "radarScore": number|null
   }
 
@@ -415,8 +440,10 @@ function sanitiseRecs(raw: unknown): StrategistRecommendation[] {
     if (!r || typeof r !== 'object') continue
     const rr = r as any
     if (typeof rr.headline !== 'string' || !rr.headline.trim()) continue
+    const mode = rr.mode === 'internal' || rr.mode === 'external' ? rr.mode : undefined
     out.push({
       headline:                    String(rr.headline),
+      mode,
       angle:                       String(rr.angle ?? ''),
       whyNow:                      String(rr.whyNow ?? ''),
       whyUseful:                   String(rr.whyUseful ?? ''),
