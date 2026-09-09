@@ -383,14 +383,15 @@ function WorkflowBar({ project, research, writer, factCheckStale, onOpenTab }: {
   // Derive stage states + primary next action from persisted state.
   const researchOk = research?.status === 'approved'
   const draftOk    = !!(writer && writer.currentRun && writer.currentRun.stage === 'complete')
-  const factOk     = !!(writer?.factCheck && writer.factCheck.status === 'pass' && !factCheckStale)
+  const overrideActive = !!writer?.editorialOverride?.active
+  const factOk     = !!(writer?.factCheck && writer.factCheck.status === 'pass' && !factCheckStale) || overrideActive
   const publishOk  = project.status === 'published'
 
   type Step = { key: string; label: string; ok: boolean; active: boolean }
   const steps: Step[] = [
     { key: 'research', label: 'Research',    ok: researchOk, active: !researchOk },
     { key: 'draft',    label: 'Draft',       ok: draftOk,    active:  researchOk && !draftOk },
-    { key: 'review',   label: 'Fact check',  ok: factOk,     active:  draftOk    && !factOk },
+    { key: 'review',   label: overrideActive ? 'Fact check (overridden)' : 'Fact check', ok: factOk, active:  draftOk && !factOk },
     { key: 'publish',  label: 'Publish',     ok: publishOk,  active:  factOk     && !publishOk },
   ]
 
@@ -402,7 +403,7 @@ function WorkflowBar({ project, research, writer, factCheckStale, onOpenTab }: {
   } else if (!draftOk) {
     cta = { label: 'Generate draft', tab: 'writer' }
     ctaHint = 'Research is approved. Generate the first draft.'
-  } else if (factCheckStale) {
+  } else if (factCheckStale && !overrideActive) {
     cta = { label: 'Rerun fact check', tab: 'writer' }
     ctaHint = 'Draft has changed since the last fact check.'
   } else if (!factOk) {
@@ -410,7 +411,9 @@ function WorkflowBar({ project, research, writer, factCheckStale, onOpenTab }: {
     ctaHint = 'Fact check has issues or has not been run.'
   } else if (!publishOk) {
     cta = { label: 'Review & publish', tab: 'publish' }
-    ctaHint = 'Ready to publish.'
+    ctaHint = overrideActive
+      ? `Ready to publish · Checks overridden by ${writer!.editorialOverride!.overriddenBy} on ${writer!.editorialOverride!.overriddenAt.slice(0, 10)}.`
+      : 'Ready to publish.'
   } else {
     cta = { label: 'Update published', tab: 'publish' }
     ctaHint = 'Live article. Edit + republish when needed.'

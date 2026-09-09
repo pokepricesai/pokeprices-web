@@ -10,7 +10,7 @@ import 'server-only'
 import { getSupabaseServiceClient } from '@/lib/supabaseService'
 import { fetchProject, fetchResearch } from '../research/serverActions'
 import type { StudioDocument } from '@/lib/studio/types'
-import type { WriterMetadata, FactCheckResult } from '@/lib/editorial/writer/types'
+import type { WriterMetadata, FactCheckResult, EditorialOverride } from '@/lib/editorial/writer/types'
 import type { EvidencePack } from '../research/types'
 import { studioProjectToInsightPayload, type InsightPayload } from './payload'
 import { generateSlug, isValidSlug } from './slug'
@@ -38,6 +38,11 @@ export type PreflightResult = {
   linkedInsightsId: string | null
   suggestedSlug: string
   currentStudioHash: string
+  /** Present when the admin has recorded an editorial override for
+   *  the current draft. Studio UI uses this to render the
+   *  attribution banner + suppress "Override" affordances when
+   *  already overridden. Internal projects only. */
+  editorialOverride?: (EditorialOverride & { boundToCurrentDraft: boolean }) | null
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -132,28 +137,46 @@ export async function runPublicationPreflight(projectId: number, opts: Preflight
   }
 
   // ── Fact check present, pass, and current (INTERNAL ONLY) ──
+  //
+  // Automated fact/numeric gates are advisory when the admin has
+  // recorded an explicit editorial override for THIS EXACT draft
+  // (matched by studio body hash). The override never bypasses
+  // research approval, CMS essentials, slug validity, or adapter
+  // conversion — see below.
   const fc = writer?.factCheck ?? null
   const currentStudioHash = hashStudioBody(studio.bodyDoc)
+  const override = writer?.editorialOverride ?? null
+  const overrideActive = !!(override && override.active && override.overriddenBodyHash === currentStudioHash)
+  const factSeverity: PreflightSeverity = overrideActive ? 'warning' : 'blocker'
+  const overrideNote  = overrideActive ? ` — overridden by ${override!.overriddenBy} on ${override!.overriddenAt.slice(0, 10)}` : ''
   if (!isExternal) {
     if (!fc) {
-      checks.push({ id: 'factcheck.present', label: 'Fact check has been run', severity: 'blocker', detail: 'no fact check recorded' })
+      checks.push({ id: 'factcheck.present', label: 'Fact check has been run', severity: factSeverity, detail: `no fact check recorded${overrideNote}` })
     } else {
       checks.push({ id: 'factcheck.present', label: 'Fact check has been run', severity: 'ok' })
       if (fc.status !== 'pass') {
-        checks.push({ id: 'factcheck.pass', label: 'Fact check status = pass', severity: 'blocker', detail: `status: ${fc.status}` })
+        checks.push({ id: 'factcheck.pass', label: 'Fact check status = pass', severity: factSeverity, detail: `status: ${fc.status}${overrideNote}` })
       } else {
         checks.push({ id: 'factcheck.pass', label: 'Fact check status = pass', severity: 'ok' })
       }
       if (writer?.checkedStudioHash && writer.checkedStudioHash !== currentStudioHash) {
-        checks.push({ id: 'factcheck.current', label: 'Fact check matches current draft', severity: 'blocker', detail: 'Fact check is out of date — draft has changed since the last check' })
+        checks.push({ id: 'factcheck.current', label: 'Fact check matches current draft', severity: factSeverity, detail: `Fact check is out of date — draft has changed since the last check${overrideNote}` })
       } else {
         checks.push({ id: 'factcheck.current', label: 'Fact check matches current draft', severity: 'ok' })
       }
       if (fc.numericAudit.issues.length > 0) {
-        checks.push({ id: 'factcheck.numeric', label: '0 unsupported numeric claims', severity: 'blocker', detail: `${fc.numericAudit.issues.length} numeric issue(s) unresolved` })
+        checks.push({ id: 'factcheck.numeric', label: '0 unsupported numeric claims', severity: factSeverity, detail: `${fc.numericAudit.issues.length} numeric issue(s) unresolved${overrideNote}` })
       } else {
         checks.push({ id: 'factcheck.numeric', label: '0 unsupported numeric claims', severity: 'ok' })
       }
+    }
+    if (overrideActive) {
+      warnings.push({
+        id: 'factcheck.override',
+        label: `Automated checks overridden`,
+        severity: 'warning',
+        detail: `${override!.overriddenBy} on ${override!.overriddenAt.slice(0, 10)}${override!.unresolvedIssueCount ? ` — ${override!.unresolvedIssueCount} unresolved issue(s) at time of override` : ''}. Override is bound to the current draft; regenerating the article will clear it.`,
+      })
     }
   }
 
@@ -248,6 +271,7 @@ export async function runPublicationPreflight(projectId: number, opts: Preflight
     linkedInsightsId,
     suggestedSlug,
     currentStudioHash,
+    editorialOverride: override ? { ...override, boundToCurrentDraft: overrideActive } : null,
   }
 }
 
@@ -257,7 +281,7 @@ export async function runPublicationPreflight(projectId: number, opts: Preflight
 
 function earlyReturn(checks: PreflightCheck[], warnings: PreflightCheck[], payload: InsightPayload | null, linked: string | null, slug: string, hash: string): PreflightResult {
   const blocked = checks.some(c => c.severity === 'blocker')
-  return { status: blocked ? 'blocked' : 'pass', checks, warnings, payloadPreview: payload, linkedInsightsId: linked, suggestedSlug: slug, currentStudioHash: hash }
+  return { status: blocked ? 'blocked' : 'pass', checks, warnings, payloadPreview: payload, linkedInsightsId: linked, suggestedSlug: slug, currentStudioHash: hash, editorialOverride: null }
 }
 
 function hasMeaningfulBody(doc: StudioDocument | null): boolean {

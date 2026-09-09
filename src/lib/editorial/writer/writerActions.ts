@@ -1058,8 +1058,12 @@ async function stageValidateAndFix(writer: WriterMetadata, project: any, pack: E
     usage, updatedAt: new Date().toISOString(),
     stageTimings: { ...writer.currentRun!.stageTimings, validate_and_fix: Date.now() - stageStartMs },
   }
+  // Any prior editorial override was bound to the PREVIOUS body
+  // hash — the validator just rewrote the body, so drop the field
+  // outright. The admin must re-review + override the new draft.
+  const { editorialOverride: _dropOverride, ...writerBase } = writer
   return {
-    ...writer,
+    ...writerBase,
     factCheck,
     checkedStudioHash: nextHash,
     correctionsSummary: parsed.correctionsSummary || 'No changes needed.',

@@ -28,7 +28,7 @@ function parseId(raw: string): number | null {
   const n = Number(raw); return Number.isSafeInteger(n) && n > 0 ? n : null
 }
 function isAction(v: unknown): v is PublicationActionKind {
-  return v === 'prepare_draft' || v === 'publish' || v === 'update_published' || v === 'unpublish' || v === 'mark_ready'
+  return v === 'prepare_draft' || v === 'publish' || v === 'update_published' || v === 'unpublish' || v === 'mark_ready' || v === 'override_checks' || v === 'clear_override'
 }
 
 export async function POST(req: Request, ctx: Ctx) {

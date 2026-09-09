@@ -133,7 +133,7 @@ describe('fetchAllPages: error diagnostics', () => {
   it('surfaces status / code / message / details / hint verbatim', async () => {
     await expect(fetchAllPages(makeErroringBuilder({
       code: 'PGRST202', message: 'Could not find a match', details: 'set_name column absent', hint: 'try card_url_slug',
-    }, 400, 'Bad Request'), { label: 'test:cards' })).rejects.toThrow(/status: 400 Bad Request.+code: PGRST202.+message: Could not find a match.+details: set_name column absent.+hint: try card_url_slug/s)
+    }, 400, 'Bad Request'), { label: 'test:cards' })).rejects.toThrow(/status: 400 Bad Request[\s\S]+code: PGRST202[\s\S]+message: Could not find a match[\s\S]+details: set_name column absent[\s\S]+hint: try card_url_slug/)
   })
 
   it('414 hints at the real root cause (oversized .in())', async () => {

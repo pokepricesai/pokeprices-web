@@ -122,6 +122,30 @@ export type WriterMetadata = {
    *  the other fields on WriterMetadata are the authoritative
    *  final output. When failed, `run.error` explains why. */
   currentRun?:           GenerationRun
+  /** Editorial override — an admin has manually reviewed this exact
+   *  draft and consciously decided to publish it despite unresolved
+   *  automated fact-check / numeric-audit issues. The override is
+   *  bound to the studio body hash it was taken against; any
+   *  subsequent regeneration or validate_and_fix run clears it.
+   *
+   *  INTERNAL projects only. External articles do not run the
+   *  internal factcheck gates and therefore do not need this. */
+  editorialOverride?:    EditorialOverride
+}
+
+export type EditorialOverride = {
+  active:                true
+  overriddenAt:          string   // ISO datetime
+  overriddenBy:          string   // admin email
+  reason:                'manual_editorial_review'
+  /** Studio bodyDoc hash at the moment of override. Any drift means
+   *  the article has been re-generated or re-validated since the
+   *  admin's review — the override no longer applies. */
+  overriddenBodyHash:    string
+  /** Snapshot of what the admin was overriding, for later audit. */
+  factCheckStatusAtOverride?: FactCheckStatus
+  unresolvedIssueCount?: number
+  numericIssueCount?:    number
 }
 
 // ─────────────────────────────────────────────────────────────────

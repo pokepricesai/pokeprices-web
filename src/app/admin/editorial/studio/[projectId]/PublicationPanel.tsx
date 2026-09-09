@@ -80,6 +80,8 @@ export function PublicationPanel({ projectId, projectStatus, projectTitle, insig
       if (action === 'publish' || action === 'update_published') onProjectStatusChange('published')
       if (action === 'unpublish') onProjectStatusChange('drafting')
       if (action === 'mark_ready') onProjectStatusChange('ready')
+      // Override does not itself change status — the admin still
+      // clicks Mark ready afterwards. Just close the confirmation.
       setConfirming(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'unknown')
@@ -90,6 +92,20 @@ export function PublicationPanel({ projectId, projectStatus, projectTitle, insig
   const canonicalUrl = slug ? `https://www.pokeprices.io/insights/${slug}` : ''
   const isReady = projectStatus === 'ready' || projectStatus === 'published'
   const hasPublished = !!insightsId && preflight?.checks.some(c => c.id === 'slug.unique' && c.severity === 'ok') && projectStatus === 'published'
+
+  // Editorial override affordance — internal projects only. The
+  // override lets an admin bypass the automated fact/numeric gates
+  // AFTER manually reviewing the article. It cannot bypass missing
+  // research approval, CMS essentials, invalid/duplicate slugs, or
+  // adapter conversion failures — those remain blockers.
+  const blockers = preflight?.checks.filter(c => c.severity === 'blocker') ?? []
+  const factBlockers  = blockers.filter(c => c.id.startsWith('factcheck.'))
+  const otherBlockers = blockers.filter(c => !c.id.startsWith('factcheck.'))
+  const isInternal = (preflight?.checks.some(c => c.id === 'research.approved') ?? false)
+    || (preflight?.checks.some(c => c.id.startsWith('factcheck.')) ?? false)
+    || !!preflight?.editorialOverride
+  const activeOverride = preflight?.editorialOverride && preflight.editorialOverride.boundToCurrentDraft ? preflight.editorialOverride : null
+  const canOverride = isInternal && !activeOverride && factBlockers.length > 0 && otherBlockers.length === 0
 
   return (
     <div style={S.wrap}>
@@ -140,6 +156,50 @@ export function PublicationPanel({ projectId, projectStatus, projectTitle, insig
           </>
         )}
       </div>
+
+      {activeOverride && (
+        <div style={S.overrideBanner}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>Automated checks overridden</div>
+          <div style={{ fontSize: 12, marginBottom: 8 }}>
+            {activeOverride.overriddenBy} on {activeOverride.overriddenAt.slice(0, 10)}
+            {activeOverride.unresolvedIssueCount ? ` · ${activeOverride.unresolvedIssueCount} unresolved issue(s) at time of override` : ''}
+          </div>
+          <div style={{ fontSize: 11, color: '#78350f', marginBottom: 8 }}>
+            The override applies to the current draft only. Regenerating the article will clear it automatically and require a fresh review.
+          </div>
+          <button style={S.btnGhost} disabled={!!busy} onClick={() => runAction('clear_override')} title="Retract the override and require automated checks to pass again">
+            {busy === 'clear_override' ? 'Clearing…' : 'Clear override'}
+          </button>
+        </div>
+      )}
+
+      {canOverride && (
+        confirming === 'override' ? (
+          <div style={S.overrideConfirm}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Override automated checks?</div>
+            <div style={{ fontSize: 12, marginBottom: 10 }}>
+              This article still has unresolved automated fact/data checks. You are confirming that you have manually reviewed the article and want to publish it anyway.
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button style={S.btnPrimary} disabled={!!busy} onClick={() => runAction('override_checks')}>
+                {busy === 'override_checks' ? 'Overriding…' : 'Override & Mark Ready'}
+              </button>
+              <button style={S.btnGhost} onClick={() => setConfirming(null)}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <div style={S.overridePrompt}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Automated checks found unresolved issues.</div>
+            <ul style={{ ...S.list, marginBottom: 8, color: '#991b1b' }}>
+              {factBlockers.map(b => <li key={b.id}>✗ {b.label}{b.detail ? ` — ${b.detail}` : ''}</li>)}
+            </ul>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button style={S.btnGhost} disabled={!!busy} onClick={() => load(slug)}>Retry Validation</button>
+              <button style={S.btnGhost} disabled={!!busy} onClick={() => setConfirming('override')}>Override Checks &amp; Mark Ready</button>
+            </div>
+          </div>
+        )
+      )}
 
       <div style={S.section}>
         <div style={S.title}>Actions</div>
@@ -249,6 +309,9 @@ const S: Record<string, React.CSSProperties> = {
   btnGhost:    { padding: '6px 12px', borderRadius: 4, background: 'white', color: '#334155', border: '1px solid #cbd5e1', cursor: 'pointer', fontSize: 12, fontWeight: 600 },
   btnDisabled: { padding: '6px 12px', borderRadius: 4, background: '#cbd5e1', color: '#475569', border: 'none', cursor: 'not-allowed', fontSize: 12, fontWeight: 600 },
   confirmBox:  { display: 'inline-block', padding: 10, background: '#fffbeb', border: '1px solid #fbbf24', borderRadius: 4, marginTop: 6 },
+  overrideBanner:  { padding: 12, marginBottom: 10, background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: 6, color: '#92400e' },
+  overridePrompt:  { padding: 12, marginBottom: 10, background: '#fff7ed', border: '1px solid #fdba74', borderRadius: 6, color: '#9a3412' },
+  overrideConfirm: { padding: 12, marginBottom: 10, background: '#fef3c7', border: '2px solid #f59e0b', borderRadius: 6, color: '#78350f' },
   previewTable:{ width: '100%', fontSize: 11, borderCollapse: 'collapse' },
   previewKey:  { padding: '3px 6px', color: '#64748b', fontWeight: 600, width: 130, verticalAlign: 'top' },
   previewVal:  { padding: '3px 6px', color: '#0f172a', wordBreak: 'break-all' },

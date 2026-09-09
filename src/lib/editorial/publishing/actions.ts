@@ -15,6 +15,11 @@ import { getSupabaseServiceClient } from '@/lib/supabaseService'
 import { runPublicationPreflight, type PreflightResult } from './preflight'
 import type { InsightPayload } from './payload'
 import { runPostPublish, revalidateInsightPaths, type PostPublishWarning } from './revalidate'
+import { hashStudioBody } from '@/lib/editorial/writer/hash'
+import type { StudioDocument } from '@/lib/studio/types'
+import type { WriterMetadata, EditorialOverride } from '@/lib/editorial/writer/types'
+import { getEditorialMode } from '../editorialMode'
+import { fetchProject } from '../research/serverActions'
 
 export type PublicationActionKind =
   | 'prepare_draft'
@@ -22,6 +27,13 @@ export type PublicationActionKind =
   | 'update_published'
   | 'unpublish'
   | 'mark_ready'
+  /** Admin has manually reviewed the article and is consciously
+   *  overriding the automated fact-check / numeric-audit gates so
+   *  the article can proceed to Ready. Internal projects only. */
+  | 'override_checks'
+  /** Admin is retracting an active override — the normal automated
+   *  gates apply again. */
+  | 'clear_override'
 
 export type ActionResult = {
   ok:        true
@@ -38,6 +50,54 @@ export async function runPublicationAction(
   opts: { slugOverride?: string; adminEmail: string } = { adminEmail: '' },
 ): Promise<ActionResult> {
   const supa = getSupabaseServiceClient()
+
+  // ── override_checks — internal only; admin manually attests that
+  //    the article is publishable despite unresolved automated
+  //    checks. Records who / when / against which body hash so the
+  //    override is auto-cleared if the article is regenerated. Does
+  //    NOT bypass research approval, CMS essentials, slug validity,
+  //    or adapter conversion — see preflight.ts. ──
+  if (action === 'override_checks' || action === 'clear_override') {
+    const project = await fetchProject(projectId)
+    if (!project) throw new Error('project not found')
+    const isExternal = getEditorialMode({ article_type: project.article_type, title: project.title, angle: project.angle }) === 'external'
+    if (isExternal) throw new Error('editorial override is only supported on internal projects')
+
+    const { data: pRow } = await supa.from('editorial_projects').select('studio_json, writer_json').eq('id', projectId).maybeSingle()
+    const studio = ((pRow as any)?.studio_json ?? null) as StudioDocument | null
+    if (!studio) throw new Error('no studio_json — cannot override checks on an empty draft')
+    const writer = ((pRow as any)?.writer_json ?? null) as WriterMetadata | null
+    if (!writer) throw new Error('no writer_json — generate an article first')
+
+    let nextWriter: WriterMetadata
+    if (action === 'override_checks') {
+      const fc = writer.factCheck
+      const bodyHash = hashStudioBody(studio.bodyDoc)
+      const override: EditorialOverride = {
+        active:                true,
+        overriddenAt:          new Date().toISOString(),
+        overriddenBy:          opts.adminEmail || 'unknown',
+        reason:                'manual_editorial_review',
+        overriddenBodyHash:    bodyHash,
+        factCheckStatusAtOverride: fc?.status,
+        unresolvedIssueCount:  (fc?.issues?.length ?? 0) + (fc?.numericAudit?.issues?.length ?? 0),
+        numericIssueCount:     fc?.numericAudit?.issues?.length,
+      }
+      nextWriter = { ...writer, editorialOverride: override }
+    } else {
+      // clear_override — drop the field entirely.
+      const { editorialOverride: _drop, ...rest } = writer
+      nextWriter = rest as WriterMetadata
+    }
+
+    const { error } = await supa.from('editorial_projects')
+      .update({ writer_json: nextWriter, updated_at: new Date().toISOString() })
+      .eq('id', projectId)
+    if (error) throw new Error(error.message)
+
+    const pf = await runPublicationPreflight(projectId, { slugOverride: opts.slugOverride })
+    return { ok: true, action, preflight: pf }
+  }
 
   // ── mark_ready — the only action that does NOT touch insights ──
   if (action === 'mark_ready') {
