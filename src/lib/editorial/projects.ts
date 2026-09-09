@@ -24,13 +24,36 @@ export const EDITORIAL_STATUSES = [
 ] as const
 export type EditorialStatus = typeof EDITORIAL_STATUSES[number]
 
+// Canonical whitelist for article_type across the whole app: DB
+// writes, Strategist output, Opportunity Radar output, ProjectForm
+// dropdown, Studio, canonical mode routing (see editorialMode.ts).
+// Two lanes:
+//   INTERNAL: facts come from PokePrices proprietary data.
+//   EXTERNAL: facts come from live web research (Deep Research).
+// The list here is authoritative — extend BOTH the tuple and
+// ARTICLE_TYPE_LABELS below in the same commit.
 export const EDITORIAL_ARTICLE_TYPES = [
+  // Internal (data-led) types
   'monthly_market_report',
-  'new_set',
-  'upcoming_set',
+  'population_scarcity',
   'data_study',
-  'evergreen',
   'market_analysis',
+  'price_analysis',
+  'grading_analysis',
+  'search_trends',
+  'movers',
+  // External (SEO / news / evergreen / release) types
+  'upcoming_set',
+  'new_set',
+  'news',
+  'release_news',
+  'product_announcement',
+  'set_preview',
+  'evergreen_guide',
+  'external_research',
+  // Legacy — kept so old rows and manually-created "evergreen" ideas
+  // still round-trip. New code should prefer evergreen_guide.
+  'evergreen',
 ] as const
 export type EditorialArticleType = typeof EDITORIAL_ARTICLE_TYPES[number]
 
@@ -47,12 +70,26 @@ export const STATUS_LABELS: Record<EditorialStatus, string> = {
 }
 
 export const ARTICLE_TYPE_LABELS: Record<EditorialArticleType, string> = {
+  // Internal
   monthly_market_report: 'Monthly market report',
-  new_set:               'New-set report',
-  upcoming_set:          'Upcoming-set guide',
+  population_scarcity:   'Population scarcity',
   data_study:            'Data study',
-  evergreen:             'Evergreen guide',
   market_analysis:       'Market analysis',
+  price_analysis:        'Price analysis',
+  grading_analysis:      'Grading analysis',
+  search_trends:         'Search trends',
+  movers:                'Movers',
+  // External
+  upcoming_set:          'Upcoming-set guide',
+  new_set:               'New-set report',
+  news:                  'News',
+  release_news:          'Release news',
+  product_announcement:  'Product announcement',
+  set_preview:           'Set preview',
+  evergreen_guide:       'Evergreen guide',
+  external_research:     'External research',
+  // Legacy
+  evergreen:             'Evergreen (legacy)',
 }
 
 /** Buckets for the "backlog vs planned vs done" split in the UI. */

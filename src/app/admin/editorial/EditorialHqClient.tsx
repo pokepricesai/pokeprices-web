@@ -1745,6 +1745,7 @@ function EditorialStrategistPanel({
   const [session, setSession] = useState<StrategistSession>(newSession)
   const [loading, setLoading] = useState<'recommend' | 'chat' | null>(null)
   const [error, setError]     = useState<string | null>(null)
+  const [localActionError, setLocalActionError] = useState<string | null>(null)
   const [chatInput, setChatInput] = useState('')
   const chatRef = useRef<HTMLDivElement | null>(null)
 
@@ -1839,10 +1840,19 @@ function EditorialStrategistPanel({
   }, [runChat, activePlan])
 
   const planRec = useCallback(async (rec: StrategistRecommendation, targetDate: string) => {
+    // Prefer the strategist's explicit suggestion. When absent, fall
+    // back to a lane-appropriate default: external ideas default to
+    // evergreen_guide, internal ideas to data_study. Legacy fallback
+    // preserved only when neither field is set.
+    const fallback: EditorialArticleType = rec.mode === 'external'
+      ? 'evergreen_guide'
+      : rec.mode === 'internal'
+        ? 'data_study'
+        : 'evergreen'
     const payload: Partial<EditorialProject> = {
       title:              rec.headline,
       angle:              rec.angle,
-      article_type:       (rec.suggestedArticleType as EditorialArticleType | undefined) ?? 'evergreen',
+      article_type:       (rec.suggestedArticleType as EditorialArticleType | undefined) ?? fallback,
       status:             'planned',
       priority:           rec.confidence === 'high' ? 1 : rec.confidence === 'medium' ? 2 : 3,
       target_publish_at:  targetDate || null,
@@ -1861,7 +1871,14 @@ function EditorialStrategistPanel({
         rec.radarOpportunityId ? `\nDerived from Radar opportunity: ${rec.radarOpportunityId}${rec.radarScore != null ? ` (score ${rec.radarScore})` : ''}` : null,
       ].filter(Boolean).join('\n'),
     }
-    await onCreate(payload)
+    const created = await onCreate(payload)
+    // onCreate returns null when the server rejects the write (most
+    // commonly: article_type not in EDITORIAL_ARTICLE_TYPES). Surface
+    // that locally so the button isn't apparently silent — the
+    // parent's error banner is far up the page. The exact message is
+    // preserved in the parent-level error state as well.
+    if (created == null) setLocalActionError(`Could not save "${rec.headline}". See error at top of page.`)
+    else setLocalActionError(null)
   }, [onCreate])
 
   const saveAsIdea = useCallback((rec: StrategistRecommendation) => planRec(rec, ''), [planRec])
@@ -1895,6 +1912,11 @@ function EditorialStrategistPanel({
       {error && (
         <div role="alert" style={{ background: 'rgba(239,68,68,0.06)', color: '#b91c1c', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 10, padding: '10px 14px', fontSize: 13 }}>
           Strategist error: {error}
+        </div>
+      )}
+      {localActionError && (
+        <div role="alert" style={{ background: 'rgba(239,68,68,0.06)', color: '#b91c1c', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 10, padding: '10px 14px', fontSize: 13 }}>
+          {localActionError}
         </div>
       )}
 

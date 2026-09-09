@@ -14,7 +14,9 @@ import {
   isThisWeek,
   EDITORIAL_STATUSES,
   EDITORIAL_ARTICLE_TYPES,
+  ARTICLE_TYPE_LABELS,
 } from '../projects'
+import { getEditorialMode } from '../editorialMode'
 
 describe('pickWritableProjectFields', () => {
   it('keeps writable columns and drops server-controlled ones', () => {
@@ -61,6 +63,110 @@ describe('validateProjectWrite', () => {
   })
   it('rejects empty title string', () => {
     expect(validateProjectWrite({ title: '   ' } as any)).toMatch(/title/)
+  })
+
+  // ── Strategist materialization acceptance ─────────────────────
+  //
+  // Regression for the "Save as Idea / Add to Plan does nothing" bug
+  // on external Strategist recommendations. Root cause was that
+  // EDITORIAL_ARTICLE_TYPES was stale and didn't include the new
+  // external/internal types the Strategist can suggest, so every
+  // external recommendation failed validateProjectWrite and the UI
+  // showed no visible feedback.
+
+  it('accepts an external evergreen recommendation (Pikachu history)', () => {
+    expect(validateProjectWrite({
+      title: 'The History of Pikachu Pokémon Cards: From Base Set to Modern Chases',
+      angle: 'A collector-focused history of Pikachu cards from the earliest English and Japanese releases through major promos, iconic artworks and modern chase cards.',
+      article_type: 'evergreen_guide',
+      status: 'idea',
+      priority: 2,
+    } as any)).toBeNull()
+  })
+
+  it('accepts an external release recommendation (upcoming set)', () => {
+    expect(validateProjectWrite({
+      title: '30th Celebration: Everything We Know',
+      article_type: 'upcoming_set',
+      status: 'planned',
+      priority: 1,
+    } as any)).toBeNull()
+  })
+
+  it('accepts an internal price-analysis recommendation', () => {
+    expect(validateProjectWrite({
+      title: 'Pikachu Price Trends in PokePrices Data',
+      article_type: 'price_analysis',
+      status: 'idea',
+      priority: 2,
+    } as any)).toBeNull()
+  })
+
+  it('accepts every previously-suggested external type', () => {
+    for (const t of ['news', 'release_news', 'product_announcement', 'set_preview', 'external_research', 'new_set'] as const) {
+      expect(validateProjectWrite({ article_type: t } as any)).toBeNull()
+    }
+  })
+
+  it('accepts every previously-suggested internal type', () => {
+    for (const t of ['population_scarcity', 'market_analysis', 'grading_analysis', 'search_trends', 'movers', 'data_study'] as const) {
+      expect(validateProjectWrite({ article_type: t } as any)).toBeNull()
+    }
+  })
+
+  it('keeps the legacy "evergreen" value working for old rows', () => {
+    expect(validateProjectWrite({ article_type: 'evergreen' } as any)).toBeNull()
+  })
+})
+
+describe('EDITORIAL_ARTICLE_TYPES + ARTICLE_TYPE_LABELS', () => {
+  it('has a matching label for every declared type (no drift)', () => {
+    for (const t of EDITORIAL_ARTICLE_TYPES) {
+      expect(ARTICLE_TYPE_LABELS[t]).toBeTruthy()
+      expect(ARTICLE_TYPE_LABELS[t].length).toBeGreaterThan(0)
+    }
+  })
+})
+
+// ── Canonical routing round-trip ─────────────────────────────────
+//
+// Every whitelisted article_type must resolve to a lane via
+// getEditorialMode. Legacy 'evergreen' falls through the article-
+// type-first branch and lands on the "internal by default" bucket
+// (see editorialMode.ts) unless the title carries an external hint.
+
+describe('article_type → editorial mode routing', () => {
+  it('routes the Pikachu evergreen recommendation to external', () => {
+    expect(getEditorialMode({
+      article_type: 'evergreen_guide',
+      title: 'The History of Pikachu Pokémon Cards',
+    })).toBe('external')
+  })
+
+  it('routes an upcoming-set recommendation to external', () => {
+    expect(getEditorialMode({
+      article_type: 'upcoming_set',
+      title: '30th Celebration: Everything We Know',
+    })).toBe('external')
+  })
+
+  it('routes an internal price-analysis recommendation to internal', () => {
+    expect(getEditorialMode({
+      article_type: 'price_analysis',
+      title: 'Pikachu Price Trends in PokePrices Data',
+    })).toBe('internal')
+  })
+
+  it('routes every canonical external type to external', () => {
+    for (const t of ['upcoming_set', 'new_set', 'news', 'release_news', 'product_announcement', 'set_preview', 'evergreen_guide', 'external_research'] as const) {
+      expect(getEditorialMode({ article_type: t, title: 't' })).toBe('external')
+    }
+  })
+
+  it('routes every canonical internal type to internal', () => {
+    for (const t of ['monthly_market_report', 'population_scarcity', 'data_study', 'market_analysis', 'price_analysis', 'grading_analysis', 'search_trends', 'movers'] as const) {
+      expect(getEditorialMode({ article_type: t, title: 't' })).toBe('internal')
+    }
   })
 })
 

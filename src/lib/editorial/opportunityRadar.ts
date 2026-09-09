@@ -34,6 +34,7 @@ import type { EditorialContext } from './context'
 import type { ReleaseItem } from './releaseContext'
 import { computeOverlap, type OverlapReport } from './overlap'
 import { fetchAllPages } from './pageFetch'
+import type { EditorialArticleType } from './projects'
 
 // ─────────────────────────────────────────────────────────────────
 // Public output shape
@@ -64,13 +65,13 @@ export type OpportunityVisual =
   | 'market_index_chart'
   | 'population_scatter'
 
-export type SuggestedArticleType =
-  | 'monthly_market_report'
-  | 'new_set'
-  | 'upcoming_set'
-  | 'data_study'
-  | 'evergreen'
-  | 'market_analysis'
+// Alias the canonical whitelist so radar-suggested types can never
+// drift from the values the DB write layer accepts. See
+// EDITORIAL_ARTICLE_TYPES in ./projects.ts for the full list and
+// intent. Radar currently only emits a narrow internal subset, but
+// the type accepts every valid article_type so a future radar
+// detector can freely suggest external ideas.
+export type SuggestedArticleType = EditorialArticleType
 
 export type Opportunity = {
   id:                  string
