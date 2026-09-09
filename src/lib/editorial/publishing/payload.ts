@@ -18,6 +18,7 @@ import { studioDocumentToInsightBody } from '@/lib/studio/adapter'
 import type { InsightBlock } from '@/lib/studio/adapter'
 import type { EvidencePack } from '@/lib/editorial/research/types'
 import { generateSlug } from './slug'
+import { stripDashesFromText, stripDashesFromInsightBody } from './dashGuard'
 
 // ─────────────────────────────────────────────────────────────────
 // Insights payload shape
@@ -67,14 +68,23 @@ export function studioProjectToInsightPayload(input: PayloadBuildInput): Payload
   const { studio, writer, pack } = input
 
   // 1. Body via the Block 7 adapter (no second conversion path).
+  //    Then run the deterministic dash guard so em / en dashes can
+  //    never reach the published body — belt-and-braces against a
+  //    writer that ignored the prompt rule. Ordinary hyphens inside
+  //    compound words are preserved.
   const conversion = studioDocumentToInsightBody(studio.bodyDoc)
-  const body = conversion.body
+  const body = stripDashesFromInsightBody(conversion.body) as typeof conversion.body
 
-  // 2. SEO fallbacks — never publish empty <title>/description.
-  const seoTitleRaw = studio.seo?.title?.trim() ?? ''
-  const seoDescRaw  = studio.seo?.description?.trim() ?? ''
-  const seoTitle    = seoTitleRaw || studio.headline || 'PokePrices Insight'
-  const seoDesc     = seoDescRaw  || studio.intro    || 'PokePrices market intelligence.'
+  // 2. SEO fallbacks — never publish empty <title>/description. The
+  //    dash guard applies to headline / intro / seo fields too, so
+  //    the fallbacks stay clean even when they inherit from the
+  //    article title.
+  const cleanHeadline = stripDashesFromText(studio.headline)
+  const cleanIntro    = stripDashesFromText(studio.intro)
+  const seoTitleRaw   = stripDashesFromText(studio.seo?.title?.trim() ?? '')
+  const seoDescRaw    = stripDashesFromText(studio.seo?.description?.trim() ?? '')
+  const seoTitle      = seoTitleRaw || cleanHeadline || 'PokePrices Insight'
+  const seoDesc       = seoDescRaw  || cleanIntro    || 'PokePrices market intelligence.'
   if (!seoTitleRaw) warnings.push('seo_title was empty; falling back to article headline')
   if (!seoDescRaw)  warnings.push('seo_description was empty; falling back to article intro')
 
@@ -95,8 +105,8 @@ export function studioProjectToInsightPayload(input: PayloadBuildInput): Payload
 
   const payload: InsightPayload = {
     slug:              input.preferredSlug,
-    headline:          studio.headline.trim(),
-    intro:             studio.intro.trim(),
+    headline:          cleanHeadline.trim(),
+    intro:             cleanIntro.trim(),
     theme:             themeKey,
     theme_label:       themeLabel,
     meta_title:        seoTitle,

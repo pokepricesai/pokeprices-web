@@ -43,6 +43,12 @@ export type PreflightResult = {
    *  attribution banner + suppress "Override" affordances when
    *  already overridden. Internal projects only. */
   editorialOverride?: (EditorialOverride & { boundToCurrentDraft: boolean }) | null
+  /** Simplified-HQ scheduling state. The Studio Publication panel
+   *  reads these to decide whether to show Sign Off, Publish Now +
+   *  Schedule, or a Scheduled banner. */
+  signedOffAt?:        string | null
+  signedOffBy?:        string | null
+  scheduledPublishAt?: string | null
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -105,7 +111,7 @@ export async function runPublicationPreflight(projectId: number, opts: Preflight
 
   // ── Studio present + meaningful ──
   const supa = getSupabaseServiceClient()
-  const { data: pRow } = await supa.from('editorial_projects').select('studio_json, writer_json, insights_id, status').eq('id', projectId).maybeSingle()
+  const { data: pRow } = await supa.from('editorial_projects').select('studio_json, writer_json, insights_id, status, signed_off_at, signed_off_by, scheduled_publish_at').eq('id', projectId).maybeSingle()
   const studio = ((pRow as any)?.studio_json ?? null) as StudioDocument | null
   const writer = ((pRow as any)?.writer_json ?? null) as WriterMetadata | null
   const linkedInsightsId = (pRow as any)?.insights_id as string | null
@@ -270,6 +276,9 @@ export async function runPublicationPreflight(projectId: number, opts: Preflight
     suggestedSlug,
     currentStudioHash,
     editorialOverride: override ? { ...override, boundToCurrentDraft: overrideActive } : null,
+    signedOffAt:        (pRow as any)?.signed_off_at        ?? null,
+    signedOffBy:        (pRow as any)?.signed_off_by        ?? null,
+    scheduledPublishAt: (pRow as any)?.scheduled_publish_at ?? null,
   }
 }
 

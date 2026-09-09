@@ -28,7 +28,13 @@ function parseId(raw: string): number | null {
   const n = Number(raw); return Number.isSafeInteger(n) && n > 0 ? n : null
 }
 function isAction(v: unknown): v is PublicationActionKind {
-  return v === 'prepare_draft' || v === 'publish' || v === 'update_published' || v === 'unpublish' || v === 'mark_ready' || v === 'override_checks' || v === 'clear_override'
+  return (
+    v === 'prepare_draft'   || v === 'publish' || v === 'update_published' ||
+    v === 'unpublish'       || v === 'mark_ready' ||
+    v === 'override_checks' || v === 'clear_override' ||
+    v === 'sign_off'        || v === 'clear_sign_off' ||
+    v === 'schedule'        || v === 'unschedule'
+  )
 }
 
 export async function POST(req: Request, ctx: Ctx) {
@@ -45,9 +51,10 @@ export async function POST(req: Request, ctx: Ctx) {
   const action = body.action
   if (!isAction(action)) return bad(400, `invalid action: ${String(action ?? '')}`)
   const slugOverride = typeof body.slugOverride === 'string' ? body.slugOverride : undefined
+  const scheduledFor = typeof body.scheduledFor === 'string' ? body.scheduledFor : undefined
 
   try {
-    const result = await runPublicationAction(projectId, action, { slugOverride, adminEmail: admin.email })
+    const result = await runPublicationAction(projectId, action, { slugOverride, scheduledFor, adminEmail: admin.email })
     return NextResponse.json(result)
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'unknown'

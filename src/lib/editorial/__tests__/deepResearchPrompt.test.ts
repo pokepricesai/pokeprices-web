@@ -62,7 +62,9 @@ describe('buildDeepResearchPrompt template shape', () => {
   })
 
   it('tells the model to start body with opening paragraph and not repeat the title', () => {
-    expect(prompt).toContain('do NOT repeat the article title at the top')
+    // Case-insensitive so a minor "do" → "Do" edit does not break the
+    // regression assertion.
+    expect(prompt).toMatch(/do NOT repeat the article title at the top/i)
   })
 
   it('names all three source-priority tiers by their public names', () => {
@@ -73,11 +75,14 @@ describe('buildDeepResearchPrompt template shape', () => {
     expect(prompt).toContain('TCGplayer')
   })
 
-  it('includes the writing requirements verbatim (word target + no em dashes + American English)', () => {
-    expect(prompt).toContain('900–1,300 words')
-    expect(prompt).toContain('4–6 useful H2 sections')
+  it('includes the writing requirements (word target + no em/en dashes + American English)', () => {
+    // Wording of the word/heading targets is deliberately dash-free
+    // now — earlier drafts used en dashes ("900–1,300") which the
+    // model would then imitate. See dashPrompts.test.ts.
+    expect(prompt).toMatch(/900 to 1,300 words/)
+    expect(prompt).toMatch(/4 to 6 useful H2 sections/)
     expect(prompt).toContain('American English')
-    expect(prompt).toContain('Do not use em dashes')
+    expect(prompt).toMatch(/em dashes or en dashes/i)
     expect(prompt).toContain('Do not invent facts')
   })
 
@@ -112,7 +117,7 @@ describe('buildDeepResearchPrompt substitutions', () => {
     expect(p1).toContain('ANGLE:\nWhat collectors need to know about the anniversary release.')
 
     const p2 = buildDeepResearchPrompt({ project: project({ angle: null }), today: TODAY, internalLinks: [] })
-    expect(p2).toContain('ANGLE:\n(no angle specified — infer from title)')
+    expect(p2).toContain('ANGLE:\n(no angle specified. Infer from title)')
   })
 
   it('derives whyNow from targetPublishAt when present', () => {
@@ -145,8 +150,10 @@ describe('buildDeepResearchPrompt substitutions', () => {
         { title: 'Celebration Collection set page',     url: '/set/celebration-collection' },
       ],
     })
-    expect(prompt).toContain('- Anniversary sets in Pokémon history — https://www.pokeprices.io/insights/anniversary-history')
-    expect(prompt).toContain('- Celebration Collection set page — https://www.pokeprices.io/set/celebration-collection')
+    // Separator between title and URL is a colon now (em dash
+    // banished from the whole prompt — see dashPrompts.test.ts).
+    expect(prompt).toContain('- Anniversary sets in Pokémon history: https://www.pokeprices.io/insights/anniversary-history')
+    expect(prompt).toContain('- Celebration Collection set page: https://www.pokeprices.io/set/celebration-collection')
   })
 
   it('does NOT double-host already-absolute pokeprices.io URLs', () => {
@@ -162,8 +169,8 @@ describe('buildDeepResearchPrompt substitutions', () => {
         { title: 'Full URL B', url: 'https://www.pokeprices.io/set/b' },
       ],
     })
-    expect(prompt).toContain('- Full URL A — https://www.pokeprices.io/insights/a')
-    expect(prompt).toContain('- Full URL B — https://www.pokeprices.io/set/b')
+    expect(prompt).toContain('- Full URL A: https://www.pokeprices.io/insights/a')
+    expect(prompt).toContain('- Full URL B: https://www.pokeprices.io/set/b')
     // The regression string must NOT appear.
     expect(prompt).not.toContain('https://www.pokeprices.io/https://')
   })
@@ -171,7 +178,7 @@ describe('buildDeepResearchPrompt substitutions', () => {
   it('shows a friendly placeholder when there are no internal links', () => {
     const prompt = buildDeepResearchPrompt({ project: project(), today: TODAY, internalLinks: [] })
     expect(prompt).toContain('INTERNAL POKEPRICES LINKS AVAILABLE')
-    expect(prompt).toContain('(none — do not invent PokePrices URLs)')
+    expect(prompt).toContain('(none. Do not invent PokePrices URLs)')
   })
 })
 

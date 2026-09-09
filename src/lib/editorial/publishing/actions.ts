@@ -20,6 +20,8 @@ import type { StudioDocument } from '@/lib/studio/types'
 import type { WriterMetadata, EditorialOverride } from '@/lib/editorial/writer/types'
 import { getEditorialMode } from '../editorialMode'
 import { fetchProject } from '../research/serverActions'
+import type { EditorialProject } from '../projects'
+import { signOffProject, clearProjectSignOff, scheduleProject, unscheduleProject } from './signOff'
 
 export type PublicationActionKind =
   | 'prepare_draft'
@@ -34,6 +36,15 @@ export type PublicationActionKind =
   /** Admin is retracting an active override — the normal automated
    *  gates apply again. */
   | 'clear_override'
+  /** Simplified-HQ scheduling: admin explicitly signs off the
+   *  current draft. Required before Publish Now / Schedule. Cleared
+   *  automatically when material CMS content changes. */
+  | 'sign_off'
+  | 'clear_sign_off'
+  /** Schedule / cancel the automatic publisher. Requires a prior
+   *  sign_off before the cron will actually publish. */
+  | 'schedule'
+  | 'unschedule'
 
 export type ActionResult = {
   ok:        true
@@ -42,14 +53,47 @@ export type ActionResult = {
   insightsId?: string | null
   slug?:     string
   warnings?: PostPublishWarning[]
+  project?:  EditorialProject
 }
 
 export async function runPublicationAction(
   projectId: number,
   action: PublicationActionKind,
-  opts: { slugOverride?: string; adminEmail: string } = { adminEmail: '' },
+  opts: { slugOverride?: string; adminEmail: string; scheduledFor?: string } = { adminEmail: '' },
 ): Promise<ActionResult> {
   const supa = getSupabaseServiceClient()
+
+  // ── sign_off / clear_sign_off / schedule / unschedule ─────────
+  //
+  // These are the simplified-HQ scheduling verbs. sign_off requires
+  // preflight to pass so the admin cannot approve a broken draft.
+  // schedule / unschedule are lifecycle-only — they never publish
+  // by themselves (the cron does). clear_sign_off is a manual
+  // retraction; auto-clear on material edits lives in the studio
+  // PATCH route.
+  if (action === 'sign_off') {
+    const pf = await runPublicationPreflight(projectId, { slugOverride: opts.slugOverride })
+    if (pf.status !== 'pass') throw new Error(`preflight failed; cannot sign off: ${firstBlocker(pf)}`)
+    const project = await signOffProject(projectId, opts.adminEmail)
+    const pf2 = await runPublicationPreflight(projectId, { slugOverride: opts.slugOverride })
+    return { ok: true, action, preflight: pf2, project }
+  }
+  if (action === 'clear_sign_off') {
+    const project = await clearProjectSignOff(projectId)
+    const pf = await runPublicationPreflight(projectId, { slugOverride: opts.slugOverride })
+    return { ok: true, action, preflight: pf, project }
+  }
+  if (action === 'schedule') {
+    if (!opts.scheduledFor) throw new Error('scheduledFor (ISO datetime) is required')
+    const project = await scheduleProject(projectId, opts.scheduledFor)
+    const pf = await runPublicationPreflight(projectId, { slugOverride: opts.slugOverride })
+    return { ok: true, action, preflight: pf, project }
+  }
+  if (action === 'unschedule') {
+    const project = await unscheduleProject(projectId)
+    const pf = await runPublicationPreflight(projectId, { slugOverride: opts.slugOverride })
+    return { ok: true, action, preflight: pf, project }
+  }
 
   // ── override_checks — internal only; admin manually attests that
   //    the article is publishable despite unresolved automated
@@ -140,6 +184,15 @@ export async function runPublicationAction(
   const requiresPass = action === 'publish' || action === 'update_published'
   if (requiresPass && pf.status !== 'pass') {
     throw new Error(`preflight failed; cannot ${action}: ${firstBlocker(pf)}`)
+  }
+  // Simplified-HQ policy: Publish Now (and update_published, which
+  // re-publishes an existing article) require an active human
+  // sign-off. External + internal both. Prevents accidental "click
+  // Publish and see it live" without the sign-off gesture.
+  if (requiresPass) {
+    const { data: sRow } = await supa.from('editorial_projects').select('signed_off_at').eq('id', projectId).maybeSingle()
+    const signedOff = (sRow as any)?.signed_off_at
+    if (!signedOff) throw new Error(`cannot ${action}: article is not signed off. Click Sign Off first.`)
   }
   // Draft preparation may proceed with warnings but not with the
   // critical Studio-level blockers (missing headline/intro/body,

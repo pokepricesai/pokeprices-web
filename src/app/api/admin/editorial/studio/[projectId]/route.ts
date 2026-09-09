@@ -25,6 +25,7 @@ import { getSupabaseServiceClient } from '@/lib/supabaseService'
 import { fetchResearch } from '@/lib/editorial/research/serverActions'
 import type { StudioDocument } from '@/lib/studio/types'
 import { STUDIO_DOCUMENT_VERSION } from '@/lib/studio/types'
+import { materialContentChanged } from '@/lib/editorial/publishing/signOff'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -99,14 +100,25 @@ export async function POST(req: Request, ctx: Ctx) {
   try {
     const supa = getSupabaseServiceClient()
 
-    // Look at the current project so we know whether to bump status.
+    // Look at the current project so we know whether to bump status
+    // AND whether to clear a stale sign-off. Simplified-HQ policy:
+    // when material CMS content (headline / intro / body / seo
+    // title / seo description) changes on an already-signed-off
+    // draft, the sign-off is stale and must be revoked. Scheduled
+    // timestamp is preserved intentionally — the admin's publish
+    // intent survives an edit, but the cron won't fire until the
+    // article is signed off again.
     const { data: current, error: getErr } = await supa
       .from('editorial_projects')
-      .select('status')
+      .select('status, studio_json, signed_off_at')
       .eq('id', projectId)
       .maybeSingle()
     if (getErr) return bad(500, getErr.message)
     if (!current) return bad(404, 'project not found')
+
+    const prevDoc = (current as any).studio_json as StudioDocument | null
+    const wasSignedOff = !!(current as any).signed_off_at
+    const shouldClearSignOff = wasSignedOff && materialContentChanged(prevDoc, doc)
 
     const nextStatus = (
       statusHint === 'drafting' && (current.status === 'planned' || current.status === 'idea')
@@ -117,16 +129,26 @@ export async function POST(req: Request, ctx: Ctx) {
       updated_at:  new Date().toISOString(),
     }
     if (nextStatus !== current.status) patch.status = nextStatus
+    if (shouldClearSignOff) {
+      patch.signed_off_at = null
+      patch.signed_off_by = null
+    }
 
     const { data, error } = await supa
       .from('editorial_projects')
       .update(patch)
       .eq('id', projectId)
-      .select('id, status, updated_at, studio_json')
+      .select('id, status, updated_at, studio_json, signed_off_at, signed_off_by, scheduled_publish_at')
       .single()
     if (error) return bad(500, error.message)
 
-    return NextResponse.json({ ok: true, project: data, savedAt: (data as any).updated_at, statusChangedTo: nextStatus !== current.status ? nextStatus : null })
+    return NextResponse.json({
+      ok:               true,
+      project:          data,
+      savedAt:          (data as any).updated_at,
+      statusChangedTo:  nextStatus !== current.status ? nextStatus : null,
+      signOffCleared:   shouldClearSignOff,
+    })
   } catch (e) {
     return bad(500, e instanceof Error ? e.message : 'unknown')
   }

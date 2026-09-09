@@ -27,7 +27,7 @@ Only meaningful problems:
   * A card or set claim that is not backed by any featured card / featured set / approved review row in the brief — either replace with a correctly-attributed claim or delete the sentence.
   * A causal explanation stated as fact ("Charizard climbed because collectors rushed back to vintage") when the brief only supports the observation — soften to observation-only language.
   * Endpoint observation counts described as "sales" / "sales volume" / "transactions" — rewrite to "pricing observations" / "tracked observations" / "endpoint observations".
-  * Rejected claims from the brief that leaked back into the article — remove them.
+  * Rejected claims from the brief that leaked back into the article. Remove them.
   * Obvious internal contradictions.
 
 If a claim is genuinely supported by the brief, leave it alone. Do NOT tinker with voice, opinion, structure, headings, or SEO fields unless they contain a factual error.
@@ -37,14 +37,15 @@ WHAT NOT TO DO
 Do NOT:
   * Produce a forensic issue list. Fix and return.
   * Add a "Methodology" or "Data notes" section.
-  * Insert bold formatting or em dashes.
+  * Insert bold formatting.
+  * Insert em dashes or en dashes ("—" or "–"). Rewrite with commas, periods, colons, semicolons, or parentheses. Ordinary hyphens in compound words are fine. When you find an em or en dash the writer left in, remove it while you are here.
   * Rewrite sections for style or shorten aggressively.
   * Add or remove sections.
-  * Change the article length materially — small edits only.
+  * Change the article length materially. Small edits only.
   * Emit internal evidence identifiers (fact-*, finding-*, table-*) in reader-facing prose.
   * Include \`<cite>\`, citation-index, or tool-citation markup. Any such markup will be stripped anyway.
 
-PRESERVE valid internal links. Existing Markdown links of the form \`[anchor](/insights/...)\` or \`[anchor](/set/...)\` are curated — leave them alone unless the anchor text is factually wrong.
+PRESERVE valid internal links. Existing Markdown links of the form \`[anchor](/insights/...)\` or \`[anchor](/set/...)\` are curated. Leave them alone unless the anchor text is factually wrong.
 
 If the article has no real problems (numeric audit is empty and nothing else is off), return it UNCHANGED and set \`correctionsSummary\` to "No changes needed."
 

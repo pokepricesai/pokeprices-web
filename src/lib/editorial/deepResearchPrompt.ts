@@ -34,12 +34,12 @@ export type DeepResearchPromptInput = {
 }
 
 export function buildDeepResearchPrompt(args: DeepResearchPromptInput): string {
-  const angle = (args.project.angle ?? '').trim() || '(no angle specified — infer from title)'
+  const angle = (args.project.angle ?? '').trim() || '(no angle specified. Infer from title)'
   const whyNow = args.whyNow ?? defaultWhyNow(args)
   const questions = defaultResearchQuestions(args.project.articleType)
   const internalLinksBlock = args.internalLinks.length === 0
-    ? '(none — do not invent PokePrices URLs)'
-    : args.internalLinks.map(l => `- ${l.title} — ${normalisePokePricesUrl(l.url)}`).join('\n')
+    ? '(none. Do not invent PokePrices URLs)'
+    : args.internalLinks.map(l => `- ${l.title}: ${normalisePokePricesUrl(l.url)}`).join('\n')
 
   return TEMPLATE
     .replace('{{topic}}',             args.project.title)
@@ -102,21 +102,21 @@ WRITING REQUIREMENTS
 - Write for Pokémon card collectors and investors
 - Make it factual, useful and entertaining
 - Do not write like a research report or encyclopedia
-- Lead with the most interesting collector angle in the first paragraph — do NOT repeat the article title at the top of the body
+- Lead with the most interesting collector angle in the first paragraph. Do NOT repeat the article title at the top of the body
 - Explain why important facts matter
 - Use restrained editorial opinion where helpful
 - Clearly distinguish confirmed information from rumor or unconfirmed reporting
 - Do not invent facts
 - Prefer current information where the topic is time-sensitive
 - Use American English
-- Do not use em dashes
+- Do not use em dashes or en dashes anywhere in the article. Rewrite sentences using commas, periods, colons, semicolons, or parentheses instead. Ordinary hyphens inside compound words such as "30-year", "high-value", or "first-edition" are allowed where grammatically appropriate.
 - Avoid generic AI-style introductions and conclusions
 - Use short readable paragraphs
-- Aim for roughly 900–1,300 words unless the topic genuinely needs more
-- Use 4–6 useful H2 sections
+- Aim for roughly 900 to 1,300 words unless the topic genuinely needs more
+- Use 4 to 6 useful H2 sections
 - Optimize naturally for search without keyword stuffing
 
-FORMATTING RULES — READ CAREFULLY
+FORMATTING RULES (READ CAREFULLY)
 
 The article body must look like normal editorial writing, not AI-generated Markdown.
 
@@ -148,8 +148,9 @@ BEFORE FINALIZING
 - Re-check card/set numbers
 - Re-check anything described as officially confirmed
 - Remove unsupported claims
+- Search the finished prose for the em dash character "—" and the en dash character "–" and remove every occurrence. Rewrite the sentence using commas, periods, colons, semicolons, or parentheses so the article contains neither character in the final body.
 
-OUTPUT FORMAT — RETURN EXACTLY THIS STRUCTURE
+OUTPUT FORMAT (RETURN EXACTLY THIS STRUCTURE)
 
 Return the finished article as clearly labeled sections in this exact order. Use these section headers verbatim so the PokePrices CMS can pick each field cleanly:
 
@@ -157,7 +158,7 @@ ARTICLE TITLE
 [final article H1, 60-70 chars]
 
 INTRO SNIPPET
-[short 1-2 sentence standfirst / excerpt, ~150 chars — will render under the H1]
+[short 1-2 sentence standfirst / excerpt, ~150 chars. Will render under the H1]
 
 SEO TITLE
 [SEO title, ~50-60 chars, may vary from the article H1]
@@ -166,7 +167,7 @@ META DESCRIPTION
 [meta description, 140-160 chars]
 
 ARTICLE BODY
-[finished article, starting directly with the opening paragraph — do NOT repeat the article title at the top]
+[finished article, starting directly with the opening paragraph. Do NOT repeat the article title at the top]
 
 SOURCES
 [bulleted list of URLs actually used, one per line, in publication order]
@@ -182,10 +183,10 @@ function defaultWhyNow(args: DeepResearchPromptInput): string {
   if (target) {
     const days = daysBetween(args.today, target)
     if (Number.isFinite(days) && days > 0) return `Target publish in ${days} day(s), on ${target}. Time-sensitive coverage.`
-    if (Number.isFinite(days) && days <= 0) return `Target publish date (${target}) has passed — refresh with the latest information.`
+    if (Number.isFinite(days) && days <= 0) return `Target publish date (${target}) has passed. Refresh with the latest information.`
   }
   if (t === 'upcoming_set' || t === 'new_set' || t === 'set_preview' || t === 'product_announcement' || t === 'release_news' || t === 'news') {
-    return 'Time-sensitive coverage — collectors are actively searching for confirmed information.'
+    return 'Time-sensitive coverage. Collectors are actively searching for confirmed information.'
   }
   return 'Editorial opportunity identified by the PokePrices content pipeline.'
 }

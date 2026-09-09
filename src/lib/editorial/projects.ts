@@ -107,11 +107,16 @@ export type EditorialProject = {
   article_type:       string       // free text at DB layer; typed above
   status:             string
   priority:           number       // 1..5, 1 = highest
-  target_publish_at:  string | null // ISO date 'YYYY-MM-DD'
+  target_publish_at:  string | null // ISO date 'YYYY-MM-DD' (editorial planning date; not used by the auto publisher)
   notes:              string | null
   insights_id:        string | null // UUID
   created_at:         string
   updated_at:         string
+  // Simplified-HQ sign-off + scheduling. Added by
+  // migrations/2026-09-10-editorial-sign-off-schedule.sql.
+  signed_off_at?:        string | null   // ISO datetime; cleared on material edits
+  signed_off_by?:        string | null   // admin email at the moment of sign-off
+  scheduled_publish_at?: string | null   // ISO datetime (UTC) for auto-publish
 }
 
 // ── Input validation ─────────────────────────────────────────────
@@ -119,6 +124,7 @@ export type EditorialProject = {
 const WRITABLE = new Set<string>([
   'title', 'angle', 'article_type', 'status', 'priority',
   'target_publish_at', 'notes', 'insights_id',
+  'signed_off_at', 'signed_off_by', 'scheduled_publish_at',
 ])
 
 /** Whitelist writable columns so a compromised or buggy client can't
@@ -173,6 +179,15 @@ export function validateProjectWrite(payload: Record<string, unknown>): string |
   }
   if ('insights_id' in payload && payload.insights_id != null) {
     if (typeof payload.insights_id !== 'string' || !UUID_RE.test(payload.insights_id)) return 'insights_id must be a UUID or null'
+  }
+  for (const field of ['signed_off_at', 'scheduled_publish_at'] as const) {
+    if (field in payload && payload[field] != null) {
+      const v = payload[field]
+      if (typeof v !== 'string' || Number.isNaN(Date.parse(v))) return `${field} must be an ISO datetime or null`
+    }
+  }
+  if ('signed_off_by' in payload && payload.signed_off_by != null) {
+    if (typeof payload.signed_off_by !== 'string' || payload.signed_off_by.length > 320) return 'signed_off_by must be a string ≤ 320 chars or null'
   }
   return null
 }
