@@ -28,12 +28,26 @@ const EM_DASH = '—'
 const EN_DASH = '–'
 const DASH_REGEX = /\s*[—–]\s*/g
 
+// A numeric-ish token: optional $, digits with commas/decimals, optional
+// unit suffix (%, k/K/M/m/B/b). Matches "1996", "$50", "1.5", "12%",
+// "1,000", "$5k", "10M". Not exhaustive but covers the ranges the
+// writers actually produce.
+const NUMERIC_TOKEN = String.raw`\$?\d[\d,.]*[%kKmMbB]?`
+const NUMERIC_RANGE_EN_DASH = new RegExp(`(${NUMERIC_TOKEN})\\s*–\\s*(${NUMERIC_TOKEN})`, 'g')
+
 /** Strip em / en dashes from a single string. Returns the original
- *  string unchanged when it contains neither. */
+ *  string unchanged when it contains neither.
+ *
+ *  Numeric-range en dashes ("1996–2026", "$50–$100", "5–10 cards")
+ *  become " to " so ranges stay readable. All other em / en dashes
+ *  become ", " (with duplicate-comma + double-space collapse). Em
+ *  dashes are prose punctuation; they never mean "range". */
 export function stripDashesFromText(input: string): string {
   if (typeof input !== 'string' || input.length === 0) return input
   if (input.indexOf(EM_DASH) < 0 && input.indexOf(EN_DASH) < 0) return input
-  const withCommas = input.replace(DASH_REGEX, ', ')
+  // Ranges first, so the second pass doesn't turn them into commas.
+  const withRanges = input.replace(NUMERIC_RANGE_EN_DASH, '$1 to $2')
+  const withCommas = withRanges.replace(DASH_REGEX, ', ')
   return normaliseCommasAndSpaces(withCommas)
 }
 

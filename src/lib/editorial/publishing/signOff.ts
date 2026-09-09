@@ -9,6 +9,7 @@ import { getSupabaseServiceClient } from '@/lib/supabaseService'
 import { hashStudioBody } from '@/lib/editorial/writer/hash'
 import type { StudioDocument } from '@/lib/studio/types'
 import type { EditorialProject } from '../projects'
+import { generateSlug } from './slug'
 
 // ─────────────────────────────────────────────────────────────────
 // Material-content fingerprint
@@ -16,18 +17,34 @@ import type { EditorialProject } from '../projects'
 //
 // The sign-off attests to a specific version of the article. If any
 // user-visible CMS field (headline / intro / body / SEO title /
-// SEO description) changes afterwards, the sign-off is stale and
-// must be cleared. `signOffKeyForStudio` produces a stable hash of
-// those five fields so a saveStudio patch can compare "material
+// SEO description / slug) changes afterwards, the sign-off is stale
+// and must be cleared. `signOffKeyForStudio` produces a stable hash
+// of those six fields so a saveStudio patch can compare "material
 // content" between before + after.
+//
+// The slug is part of the URL identity. A slug change (even without
+// any body change) is a material editorial decision that requires
+// re-review. When the caller does not provide a slug, we derive one
+// from the headline via generateSlug — so a headline change also
+// naturally changes the derived slug. Explicit slug overrides can
+// be passed in via `opts.slug` when the caller knows the effective
+// slug already.
 
-export function signOffKeyForStudio(studio: StudioDocument): string {
+export type SignOffKeyOptions = {
+  /** The article's effective slug at this moment. Falls back to
+   *  `generateSlug(studio.headline)` when unspecified. */
+  slug?: string
+}
+
+export function signOffKeyForStudio(studio: StudioDocument, opts: SignOffKeyOptions = {}): string {
+  const effectiveSlug = opts.slug ?? generateSlug(studio.headline ?? '')
   const parts = [
     (studio.headline ?? '').trim(),
     (studio.intro ?? '').trim(),
     (studio.seo?.title ?? '').trim(),
     (studio.seo?.description ?? '').trim(),
     hashStudioBody(studio.bodyDoc),
+    `slug:${effectiveSlug}`,
   ].join('||')
   return parts
 }
@@ -107,15 +124,22 @@ export async function unscheduleProject(projectId: number): Promise<EditorialPro
 // admin's intent to publish at that time survives an edit; only the
 // sign-off has to be renewed.
 
-export function materialContentChanged(prev: StudioDocument | null, next: StudioDocument): boolean {
+export type MaterialChangeOptions = {
+  prevSlug?: string
+  nextSlug?: string
+}
+
+export function materialContentChanged(prev: StudioDocument | null, next: StudioDocument, opts: MaterialChangeOptions = {}): boolean {
   if (!prev) return true
-  return signOffKeyForStudio(prev) !== signOffKeyForStudio(next)
+  return signOffKeyForStudio(prev, { slug: opts.prevSlug }) !== signOffKeyForStudio(next, { slug: opts.nextSlug })
 }
 
 /** Clear sign-off if the material content changed AND the project is
- *  currently signed off. Idempotent no-op otherwise. */
-export async function clearSignOffIfMaterialChanged(projectId: number, prev: StudioDocument | null, next: StudioDocument): Promise<{ cleared: boolean }> {
-  if (!materialContentChanged(prev, next)) return { cleared: false }
+ *  currently signed off. Idempotent no-op otherwise. Preserves
+ *  scheduled_publish_at — the admin's publish intent survives an
+ *  edit; only the sign-off has to be renewed. */
+export async function clearSignOffIfMaterialChanged(projectId: number, prev: StudioDocument | null, next: StudioDocument, opts: MaterialChangeOptions = {}): Promise<{ cleared: boolean }> {
+  if (!materialContentChanged(prev, next, opts)) return { cleared: false }
   const supa = getSupabaseServiceClient()
   const { data } = await supa.from('editorial_projects').select('signed_off_at').eq('id', projectId).maybeSingle()
   const signedOffAt = (data as any)?.signed_off_at as string | null | undefined

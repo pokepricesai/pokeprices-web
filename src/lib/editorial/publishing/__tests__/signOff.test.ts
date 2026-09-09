@@ -73,6 +73,50 @@ describe('signOffKeyForStudio', () => {
     const b = makeStudio({ updatedAt: '2027-01-01T00:00:00Z', heroImage: { url: 'https://example.com/x.png', alt: 'hero' } })
     expect(signOffKeyForStudio(a)).toBe(signOffKeyForStudio(b))
   })
+
+  // ── Slug is a material field ─────────────────────────────────
+  //
+  // Regression: sign-off must be invalidated when the slug changes,
+  // even if every other field is byte-identical. The URL identity
+  // of the article is part of the editorial decision the admin
+  // signed off on. Ordinary flow — a headline edit changes the
+  // derived slug — is caught via the headline path. The explicit
+  // `opts.slug` parameter locks down the pure "slug only" case for
+  // future refactors where slug may be independent of headline.
+
+  it('includes the derived slug in the key so a headline change flips it', () => {
+    const a = makeStudio({ headline: 'Pikachu History' })
+    const b = makeStudio({ headline: 'Pikachu Adventure' })
+    // Bodies + intros + seo unchanged. The keys must still differ
+    // because the derived slug differs.
+    expect(signOffKeyForStudio(a)).not.toBe(signOffKeyForStudio(b))
+  })
+
+  it('key CONTAINS the derived slug so failures are easy to diagnose', () => {
+    const s = makeStudio({ headline: 'The History of Pikachu Cards' })
+    expect(signOffKeyForStudio(s)).toContain('slug:the-history-of-pikachu-cards')
+  })
+
+  it('slug-only change (opts.slug) invalidates the key even when the studio content is identical', () => {
+    const s = makeStudio()
+    const withSlugA = signOffKeyForStudio(s, { slug: 'pikachu-history-guide' })
+    const withSlugB = signOffKeyForStudio(s, { slug: 'pikachu-30-year-history' })
+    expect(withSlugA).not.toBe(withSlugB)
+  })
+
+  it('materialContentChanged flags a slug-only change (regression: signed-off → change slug only → sign-off invalidated)', () => {
+    const s = makeStudio()   // same document on both sides
+    expect(
+      materialContentChanged(s, s, { prevSlug: 'a-slug', nextSlug: 'a-different-slug' })
+    ).toBe(true)
+  })
+
+  it('materialContentChanged returns false when nothing (including slug) changed', () => {
+    const s = makeStudio()
+    expect(
+      materialContentChanged(s, s, { prevSlug: 'same-slug', nextSlug: 'same-slug' })
+    ).toBe(false)
+  })
 })
 
 describe('materialContentChanged', () => {

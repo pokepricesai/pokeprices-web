@@ -34,13 +34,56 @@ describe('stripDashesFromText', () => {
     expect(stripDashesFromText('Charizard climbed 12% — collectors piled in.')).toBe('Charizard climbed 12%, collectors piled in.')
   })
 
-  it('replaces " – " (en dash, spaced) with ", "', () => {
-    expect(stripDashesFromText('900–1300 words')).toBe('900, 1300 words')
+  it('rewrites bare-numeric en dash ranges as " to " instead of commas', () => {
+    expect(stripDashesFromText('900–1300 words')).toBe('900 to 1300 words')
   })
 
-  it('replaces multiple dashes in the same string', () => {
+  it('replaces multiple non-range dashes in the same string with commas', () => {
     expect(stripDashesFromText('one — two – three — four'))
       .toBe('one, two, three, four')
+  })
+
+  // ── Numeric range handling ─────────────────────────────────────
+  //
+  // En dashes between two numeric-ish tokens are ranges — replacing
+  // them with commas produced nonsense like "1996, 2026" or "$50, $100".
+  // The guard rewrites them as " to " so the finished prose stays
+  // readable. Em dashes never mean "range" and continue to become ", ".
+
+  it('rewrites a year range as " to "', () => {
+    expect(stripDashesFromText('The set spans 1996–2026 for the anniversary.')).toBe('The set spans 1996 to 2026 for the anniversary.')
+  })
+
+  it('rewrites a currency range as " to "', () => {
+    expect(stripDashesFromText('Chase cards sit in the $50–$100 band.')).toBe('Chase cards sit in the $50 to $100 band.')
+  })
+
+  it('rewrites a small quantity range as " to "', () => {
+    expect(stripDashesFromText('Grade 5–10 cards a session.')).toBe('Grade 5 to 10 cards a session.')
+  })
+
+  it('rewrites a percent range as " to "', () => {
+    expect(stripDashesFromText('Premiums of 12%–15% held steady.')).toBe('Premiums of 12% to 15% held steady.')
+  })
+
+  it('rewrites a shorthand-unit range as " to " ($5k–$10k, 1M–2M)', () => {
+    expect(stripDashesFromText('Prices moved from $5k–$10k range.')).toBe('Prices moved from $5k to $10k range.')
+    expect(stripDashesFromText('Population between 1M–2M copies.')).toBe('Population between 1M to 2M copies.')
+  })
+
+  it('tolerates surrounding whitespace around a range en dash', () => {
+    expect(stripDashesFromText('1996 – 2026 covered the whole span.')).toBe('1996 to 2026 covered the whole span.')
+  })
+
+  it('applies range rewriting FIRST, then converts remaining prose dashes to commas', () => {
+    expect(stripDashesFromText('From 1996–2026 the market grew — steadily.')).toBe('From 1996 to 2026 the market grew, steadily.')
+  })
+
+  it('does NOT rewrite an em dash between numbers as "to" (em dashes are prose, not ranges)', () => {
+    // "1996 — 2026" is ambiguous but em dashes are almost always
+    // prose (parenthetical). Keep the safe comma substitution.
+    expect(stripDashesFromText('The Base Set launched in 1996 — 30 years later, the anniversary set arrived.'))
+      .toBe('The Base Set launched in 1996, 30 years later, the anniversary set arrived.')
   })
 
   it('preserves hyphens inside compound words', () => {
