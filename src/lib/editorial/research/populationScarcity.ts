@@ -30,7 +30,7 @@
 
 import 'server-only'
 import { getSupabaseServiceClient } from '@/lib/supabaseService'
-import { fetchAllPages } from '../pageFetch'
+import { fetchAllPages, fetchInChunks } from '../pageFetch'
 import type {
   EvidencePack, VerifiedFact, DerivedFinding, DataTable, Warning,
   InternalSource, PackQuality, PackProjectRef, QuarantineEntry,
@@ -72,7 +72,7 @@ export async function runPopulationScarcityRecipe(
       .lt('psa_10', MAX_PSA10_POPULATION)
       .gte('total_graded', MIN_TOTAL_GRADED)
       .order('psa_10', { ascending: true }),
-    { hardMaxRows: 20_000 },
+    { hardMaxRows: 20_000, label: 'population_scarcity:psa_population' },
   )
   if (popPage.truncated) {
     warnings.push({
@@ -149,16 +149,21 @@ export async function runPopulationScarcityRecipe(
     kAll.push({ key1: k1, key2: k2, pop: r })
   }
 
-  // Fetch cards only for the sets involved (bounded query).
+  // Fetch cards only for the sets involved (bounded query). Chunked
+  // by set_name so a growing catalogue (currently 152 sets, sometimes
+  // longer set names) can never push the request URL past the edge
+  // proxy limit. Each per-chunk page still walks to completion so
+  // large per-set row counts (some sets have 400+ cards) do not hit
+  // PostgREST's silent 1,000-row cap.
   const setBareList = Array.from(new Set(editoriallyKeep.map(r => normalizeSetName(r.set_name)).filter(Boolean)))
-  const cardsRes = setBareList.length === 0
-    ? { rows: [] as any[], pagesFetched: 0, truncated: false }
-    : await fetchAllPages<any>(
-        () => supa.from('cards')
-          .select('card_slug, card_name, set_name, card_number, url_slug, card_url_slug, language, image_url')
-          .in('set_name', setBareList),
-        { hardMaxRows: 30_000 },
-      )
+  const cardRows: any[] = setBareList.length === 0 ? [] : await fetchInChunks<any>(
+    setBareList,
+    (chunk) => supa.from('cards')
+      .select('card_slug, card_name, set_name, card_number, url_slug, card_url_slug, language, image_url')
+      .in('set_name', chunk as string[]),
+    { chunkSize: 100, hardMaxRows: 60_000, label: 'population_scarcity:cards' },
+  )
+  const cardsRes = { rows: cardRows, pagesFetched: 1, truncated: cardRows.length >= 60_000 }
   if (cardsRes.truncated) {
     warnings.push({ id: 'cards-truncated', severity: 'minor', message: `cards fetch truncated at ${cardsRes.rows.length} rows — some pop rows may fail to attach a canonical url.` })
   }
@@ -187,14 +192,19 @@ export async function runPopulationScarcityRecipe(
   ))
   const pcSlugList = slugList.map(s => `pc-${s}`)
 
-  const pricesRes = slugList.length === 0
-    ? { rows: [] as any[], pagesFetched: 0, truncated: false }
-    : await fetchAllPages<any>(
-        () => supa.from('card_latest_prices')
-          .select('card_slug, price_date, raw_usd, psa9_usd, psa10_usd, updated_at')
-          .in('card_slug', pcSlugList),
-        { hardMaxRows: 50_000 },
-      )
+  // PRODUCTION FIX: this call was previously unchunked. With ~29k
+  // pc-prefixed slugs in the real dataset the single `.in(...)` URL
+  // exceeded Cloudflare's ~8KB proxy limit and returned 414 (surfaced
+  // as an opaque "Bad Request" via the generic HTML body). Chunk into
+  // ~400-slug requests so each URL stays comfortably under the limit.
+  const priceRows: any[] = slugList.length === 0 ? [] : await fetchInChunks<any>(
+    pcSlugList,
+    (chunk) => supa.from('card_latest_prices')
+      .select('card_slug, price_date, raw_usd, psa9_usd, psa10_usd, updated_at')
+      .in('card_slug', chunk as string[]),
+    { chunkSize: 400, hardMaxRows: 60_000, label: 'population_scarcity:card_latest_prices' },
+  )
+  const pricesRes = { rows: priceRows, pagesFetched: 1, truncated: priceRows.length >= 60_000 }
   const pricesBySlug = new Map<string, any>()
   for (const p of pricesRes.rows) {
     const bare = String(p.card_slug).replace(/^pc-/, '')

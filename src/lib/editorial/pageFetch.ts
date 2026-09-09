@@ -47,7 +47,7 @@ export type PagedResult<T> = { rows: T[]; pagesFetched: number; truncated: boole
 export async function fetchInChunks<T>(
   values: readonly (string | number)[],
   builderFactory: (chunk: readonly (string | number)[]) => any,
-  opts: { chunkSize?: number; concurrent?: number; pageSize?: number; hardMaxRows?: number } = {},
+  opts: { chunkSize?: number; concurrent?: number; pageSize?: number; hardMaxRows?: number; label?: string } = {},
 ): Promise<T[]> {
   const chunkSize   = Math.max(1, opts.chunkSize   ?? 400)
   const concurrent  = Math.max(1, opts.concurrent  ?? 1)
@@ -61,9 +61,13 @@ export async function fetchInChunks<T>(
   for (let i = 0; i < chunks.length; i += concurrent) {
     const batch = chunks.slice(i, i + concurrent)
     const results = await Promise.all(
-      batch.map(chunk => fetchAllPages<T>(
+      batch.map((chunk, j) => fetchAllPages<T>(
         () => builderFactory(chunk),
-        { pageSize: opts.pageSize, hardMaxRows: opts.hardMaxRows },
+        {
+          pageSize:    opts.pageSize,
+          hardMaxRows: opts.hardMaxRows,
+          label:       opts.label ? `${opts.label}#chunk${i + j}` : undefined,
+        },
       )),
     )
     for (const r of results) out.push(...r.rows)
@@ -71,13 +75,46 @@ export async function fetchInChunks<T>(
   return out
 }
 
+/** Format a Supabase / PostgREST error into a single-line diagnostic
+ *  string. Never includes credentials. Truncates giant HTML bodies
+ *  (e.g. Cloudflare's 414/500 HTML) so log lines stay usable. */
+function formatSupabaseError(err: any, status: number | undefined, statusText: string | undefined, label: string, page: number, from: number, to: number): string {
+  const rawMsg = String(err?.message ?? '')
+  // Cloudflare returns a full HTML page for 414/500. Distill it to a
+  // short signal instead of dumping the whole document into the log.
+  const isHtml = /^<!doctype|^<html|<title>/i.test(rawMsg)
+  let message = rawMsg
+  if (isHtml) {
+    const titleMatch = rawMsg.match(/<title>([^<]+)<\/title>/i)
+    message = `edge HTML error (likely CDN/proxy): ${titleMatch ? titleMatch[1] : 'HTML response body — see status'}`
+  }
+  if (message.length > 400) message = message.slice(0, 400) + '…'
+
+  const parts = [
+    `fetchAllPages(${label}): page ${page} failed`,
+    `range: ${from}-${to}`,
+    `status: ${status ?? '?'}${statusText ? ' ' + statusText : ''}`,
+    `code: ${err?.code ?? '?'}`,
+    `message: ${message || '?'}`,
+    `details: ${err?.details ?? '?'}`,
+    `hint: ${err?.hint ?? '?'}`,
+  ]
+  // 414 is almost always caused by an oversized .in() call. Add a
+  // hint so future readers do not have to re-diagnose from scratch.
+  if (status === 414 || /414/.test(message)) {
+    parts.push(`likely_cause: request URL exceeded the edge proxy limit — chunk large .in(...) lists via fetchInChunks`)
+  }
+  return parts.join(' — ')
+}
+
 export async function fetchAllPages<T>(
   builderFactory: () => any,
-  opts: { pageSize?: number; hardMaxRows?: number; maxPages?: number } = {},
+  opts: { pageSize?: number; hardMaxRows?: number; maxPages?: number; label?: string } = {},
 ): Promise<PagedResult<T>> {
   const pageSize    = opts.pageSize    ?? 1000
   const hardMaxRows = opts.hardMaxRows ?? 100_000
   const maxPages    = opts.maxPages    ?? 200
+  const label       = opts.label       ?? 'unnamed'
   const rows: T[]   = []
   let pagesFetched  = 0
   let truncated     = false
@@ -86,9 +123,15 @@ export async function fetchAllPages<T>(
     const from = p * pageSize
     const to   = from + pageSize - 1
     const q    = builderFactory().range(from, to)
-    const { data, error } = await q
+    const { data, error, status, statusText } = await q
     pagesFetched++
-    if (error) throw new Error(`fetchAllPages: page ${p} failed — ${error.message}`)
+    if (error) {
+      const line = formatSupabaseError(error, status, statusText, label, p, from, to)
+      // Log to server logs verbatim so Vercel captures it, then throw
+      // a clean single-line Error for the surfaced admin message.
+      console.error(line)
+      throw new Error(line)
+    }
     const batch = (data ?? []) as T[]
     if (batch.length === 0) break
     rows.push(...batch)

@@ -216,7 +216,7 @@ export async function runMonthlyMarketReportRecipe(
       .from('cards')
       .select('card_slug, card_name, set_name, card_number, url_slug, is_sealed, language')
       .in('card_slug', chunk as string[]),
-    { chunkSize: 400, hardMaxRows: 200_000 },
+    { chunkSize: 400, hardMaxRows: 200_000, label: 'monthly_market_report:cards' },
   )
   const cardBySlug = new Map<string, any>()
   for (const c of cardMetaRows) {
@@ -623,7 +623,7 @@ async function fetchDaysPaged(supa: ReturnType<typeof getSupabaseServiceClient>,
   for (const d of dates) {
     const page = await fetchAllPages<any>(
       () => supa.from('daily_prices').select('card_slug, date, raw_usd').eq('date', d),
-      { hardMaxRows: 200_000 },
+      { hardMaxRows: 200_000, label: `monthly_market_report:daily_prices@${d}` },
     )
     for (const r of page.rows) out.push({ card_slug: String(r.card_slug), date: String(r.date), raw_usd: r.raw_usd })
   }

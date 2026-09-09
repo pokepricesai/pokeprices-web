@@ -5,10 +5,10 @@
 // error that hit monthlyMarketReport when its .in('card_slug',
 // 30k-slugs) blew past PostgREST's URL length limit.
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 vi.mock('server-only', () => ({}))
 
-import { fetchInChunks } from '../pageFetch'
+import { fetchInChunks, fetchAllPages } from '../pageFetch'
 
 // Fake builder that records every chunk it was asked to fetch and
 // returns one fake row per value in the chunk. Simulates
@@ -98,5 +98,65 @@ describe('fetchInChunks: 414 regression', () => {
     const perValuePessimistic = 15 + 3
     const estUrlPessimistic = 200 + 400 * perValuePessimistic
     expect(estUrlPessimistic).toBeLessThan(8_000)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────
+// Diagnostic messages — code / message / details / hint + query label
+// ─────────────────────────────────────────────────────────────────
+
+/** Builds a query-builder chain that ALWAYS returns the given error
+ *  shape once .range() is awaited. */
+function makeErroringBuilder(err: { code?: string; message?: string; details?: string; hint?: string }, status?: number, statusText?: string) {
+  return () => {
+    const chain: any = {
+      range(_from: number, _to: number) { return chain },
+      then(resolve: (v: any) => any) {
+        return Promise.resolve({ data: null, error: err, status, statusText }).then(resolve)
+      },
+    }
+    return chain
+  }
+}
+
+describe('fetchAllPages: error diagnostics', () => {
+  const logs: string[] = []
+  let origError: any
+  beforeEach(() => { logs.length = 0; origError = console.error; console.error = (m: string) => { logs.push(String(m)) } })
+  afterEach(() => { console.error = origError })
+
+  it('includes the caller-supplied label so we know WHICH fetch failed', async () => {
+    await expect(fetchAllPages(makeErroringBuilder({ code: 'PGRST100', message: 'oh no' }, 400, 'Bad Request'), { label: 'population_scarcity:psa_population' }))
+      .rejects.toThrow(/fetchAllPages\(population_scarcity:psa_population\): page 0 failed/)
+  })
+
+  it('surfaces status / code / message / details / hint verbatim', async () => {
+    await expect(fetchAllPages(makeErroringBuilder({
+      code: 'PGRST202', message: 'Could not find a match', details: 'set_name column absent', hint: 'try card_url_slug',
+    }, 400, 'Bad Request'), { label: 'test:cards' })).rejects.toThrow(/status: 400 Bad Request.+code: PGRST202.+message: Could not find a match.+details: set_name column absent.+hint: try card_url_slug/s)
+  })
+
+  it('414 hints at the real root cause (oversized .in())', async () => {
+    await expect(fetchAllPages(
+      makeErroringBuilder({ message: '<html><head><title>414 Request-URI Too Large</title></head></html>' }, 414, 'Request-URI Too Large'),
+      { label: 'test:card_latest_prices' },
+    )).rejects.toThrow(/likely_cause: request URL exceeded the edge proxy limit — chunk large \.in\(\.\.\.\) lists via fetchInChunks/)
+  })
+
+  it('distills HTML error bodies to a short signal (no dumping the whole document)', async () => {
+    const html = '<html><head><title>500 Internal Server Error</title></head><body>' + 'x'.repeat(50_000) + '</body></html>'
+    await expect(fetchAllPages(makeErroringBuilder({ message: html }, 500, 'Internal Server Error'), { label: 'test:foo' }))
+      .rejects.toThrow(/edge HTML error \(likely CDN\/proxy\): 500 Internal Server Error/)
+    // Log line stays usable (well under a mb).
+    expect(logs[0].length).toBeLessThan(1_000)
+  })
+
+  it('emits the diagnostic to console.error as well as throwing', async () => {
+    await expect(fetchAllPages(makeErroringBuilder({ code: 'X', message: 'y' }, 400, 'Bad Request'), { label: 'test:z' })).rejects.toThrow()
+    expect(logs.some(l => /fetchAllPages\(test:z\): page 0 failed/.test(l))).toBe(true)
+  })
+
+  it('falls back to label="unnamed" when caller does not supply one', async () => {
+    await expect(fetchAllPages(makeErroringBuilder({ message: 'y' }, 400, 'Bad Request'))).rejects.toThrow(/fetchAllPages\(unnamed\)/)
   })
 })
