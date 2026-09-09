@@ -145,39 +145,50 @@ describe('runPublicationPreflight — editorial override (internal)', () => {
     state.slugTaken = false
   })
 
-  it('BLOCKS by default when factcheck.status !== pass (no override)', async () => {
+  // Simplified-HQ policy: internal fact-check / research-approval /
+  // numeric-audit issues surface as WARNINGS but never block. The
+  // "editorial override" mechanism is preserved for backward-compat
+  // (older drafts may still carry the field, and the attribution
+  // warning still fires) but is no longer required for publish.
+
+  it('never emits factcheck.* BLOCKERS on internal projects (simplified HQ)', async () => {
+    // A brand-new internal project with no fact check whatsoever
+    // must still be publishable when the CMS essentials are present.
+    // The old workflow blocked here; the new workflow surfaces
+    // warnings and lets the admin decide.
     const pf = await runPublicationPreflight(42)
-    expect(pf.status).toBe('blocked')
     const factBlockers = pf.checks.filter(c => c.severity === 'blocker' && c.id.startsWith('factcheck.'))
-    expect(factBlockers.length).toBeGreaterThan(0)
-    expect(pf.editorialOverride).toBeNull()
+    expect(factBlockers.length).toBe(0)
+    const researchBlockers = pf.checks.filter(c => c.severity === 'blocker' && c.id.startsWith('research.'))
+    expect(researchBlockers.length).toBe(0)
+    // Warnings still show the issues so Studio can surface them.
+    const factWarnings = pf.warnings.filter(w => w.id.startsWith('factcheck.'))
+    expect(factWarnings.length).toBeGreaterThan(0)
+    expect(pf.status).toBe('pass')
   })
 
-  it('PASSES when a matching-hash override is present — factcheck.* downgraded to warnings', async () => {
+  it('publishes cleanly when a matching-hash override is also present (override attribution surfaces)', async () => {
     state.writer = withOverride(makeWriter(), makeStudio().bodyDoc)
     const pf = await runPublicationPreflight(42)
     expect(pf.status).toBe('pass')
+    // Every factcheck signal is now a warning at most.
     for (const c of pf.checks.filter(c => c.id.startsWith('factcheck.'))) {
       expect(c.severity).not.toBe('blocker')
     }
-    // Override attribution surfaced in warnings.
+    // Override attribution warning is still emitted for audit.
     const attrib = pf.warnings.find(w => w.id === 'factcheck.override')
     expect(attrib?.detail).toMatch(/luke@pokeprices\.io/)
     expect(pf.editorialOverride?.boundToCurrentDraft).toBe(true)
   })
 
-  it('does NOT honor override when body hash has drifted since the override', async () => {
-    // Override was recorded against a DIFFERENT body — simulate a
-    // regenerate/validate_and_fix rewrite by binding the override to
-    // a mutated body doc.
+  it('does NOT block when a body-hash-drifted override is present (override no longer needed to publish)', async () => {
     const otherBody = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'different' }] }] }
     state.writer = withOverride(makeWriter(), otherBody)
     const pf = await runPublicationPreflight(42)
-    expect(pf.status).toBe('blocked')
-    // Blocker still present because the override is not bound to the current draft.
-    expect(pf.checks.some(c => c.id.startsWith('factcheck.') && c.severity === 'blocker')).toBe(true)
-    // Preflight surfaces the drift via boundToCurrentDraft=false so
-    // UI can hide the "active override" banner.
+    // Simplified HQ: publish succeeds regardless. Preflight still
+    // exposes boundToCurrentDraft=false so UI can hide the "active
+    // override" banner when the draft has drifted.
+    expect(pf.status).toBe('pass')
     expect(pf.editorialOverride?.boundToCurrentDraft).toBe(false)
   })
 
@@ -208,11 +219,15 @@ describe('runPublicationPreflight — editorial override (internal)', () => {
     expect(pf.checks.some(c => c.id === 'studio.body' && c.severity === 'blocker')).toBe(true)
   })
 
-  it('numeric-audit issues become warning (not blocker) under override', async () => {
+  it('numeric-audit issues surface as warnings (never blockers) under simplified HQ', async () => {
     state.writer = withOverride(makeWriter(), makeStudio().bodyDoc)
     const pf = await runPublicationPreflight(42)
-    const num = pf.checks.find(c => c.id === 'factcheck.numeric')
+    // Warnings collection carries the numeric-audit signal now — the
+    // old blocker in `pf.checks` is gone.
+    const num = pf.warnings.find(w => w.id === 'factcheck.numeric')
     expect(num?.severity).toBe('warning')
+    // No blocker with this id in checks any more.
+    expect(pf.checks.some(c => c.id === 'factcheck.numeric' && c.severity === 'blocker')).toBe(false)
   })
 
   it('records unresolved issue count in the override attribution warning', async () => {

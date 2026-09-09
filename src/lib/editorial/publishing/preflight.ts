@@ -82,20 +82,24 @@ export async function runPublicationPreflight(projectId: number, opts: Preflight
   const isExternal = mode === 'external'
 
   // ── Research approved (INTERNAL ONLY) ──
+  //
+  // Simplified-HQ policy: automated Research approval + pack quality
+  // no longer block publication. The admin decides. These checks
+  // still surface as informational warnings so the Studio UI can
+  // display whatever the pipeline learned, but they cannot veto
+  // Publish. External articles remain unaffected (they never ran
+  // these checks in the first place).
   const research = isExternal ? null : await fetchResearch(projectId)
   if (!isExternal) {
     if (!research || research.status !== 'approved') {
-      checks.push({ id: 'research.approved', label: 'Research is approved', severity: 'blocker', detail: `status: ${research?.status ?? 'not_started'}` })
-    } else {
-      checks.push({ id: 'research.approved', label: 'Research is approved', severity: 'ok' })
+      warnings.push({ id: 'research.approved', label: 'Research is approved', severity: 'warning', detail: `status: ${research?.status ?? 'not_started'}` })
     }
+    // No "ok" check emitted — this is a warning-only signal now.
   }
   const pack = (research?.evidence_json ?? null) as EvidencePack | null
   if (!isExternal) {
     if (pack && !pack.quality.publishable) {
-      checks.push({ id: 'research.publishable', label: 'Research pack is publishable', severity: 'blocker', detail: pack.quality.reasons.join(' · ').slice(0, 300) })
-    } else if (pack) {
-      checks.push({ id: 'research.publishable', label: 'Research pack is publishable', severity: 'ok' })
+      warnings.push({ id: 'research.publishable', label: 'Research pack is publishable', severity: 'warning', detail: pack.quality.reasons.join(' · ').slice(0, 300) })
     }
   }
 
@@ -138,36 +142,30 @@ export async function runPublicationPreflight(projectId: number, opts: Preflight
 
   // ── Fact check present, pass, and current (INTERNAL ONLY) ──
   //
-  // Automated fact/numeric gates are advisory when the admin has
-  // recorded an explicit editorial override for THIS EXACT draft
-  // (matched by studio body hash). The override never bypasses
-  // research approval, CMS essentials, slug validity, or adapter
-  // conversion — see below.
+  // Simplified-HQ policy: automated fact/numeric checks are advisory
+  // for internal projects. They surface as warnings so the Studio UI
+  // can still show what the checker learned, but they NEVER veto
+  // Publish. The editorial override is honoured for backward-
+  // compatibility (older drafts may still carry it) but is no longer
+  // required. External articles are unaffected — they don't run
+  // these checks at all.
   const fc = writer?.factCheck ?? null
   const currentStudioHash = hashStudioBody(studio.bodyDoc)
   const override = writer?.editorialOverride ?? null
   const overrideActive = !!(override && override.active && override.overriddenBodyHash === currentStudioHash)
-  const factSeverity: PreflightSeverity = overrideActive ? 'warning' : 'blocker'
   const overrideNote  = overrideActive ? ` — overridden by ${override!.overriddenBy} on ${override!.overriddenAt.slice(0, 10)}` : ''
   if (!isExternal) {
     if (!fc) {
-      checks.push({ id: 'factcheck.present', label: 'Fact check has been run', severity: factSeverity, detail: `no fact check recorded${overrideNote}` })
+      warnings.push({ id: 'factcheck.present', label: 'Fact check has been run', severity: 'warning', detail: `no fact check recorded${overrideNote}` })
     } else {
-      checks.push({ id: 'factcheck.present', label: 'Fact check has been run', severity: 'ok' })
       if (fc.status !== 'pass') {
-        checks.push({ id: 'factcheck.pass', label: 'Fact check status = pass', severity: factSeverity, detail: `status: ${fc.status}${overrideNote}` })
-      } else {
-        checks.push({ id: 'factcheck.pass', label: 'Fact check status = pass', severity: 'ok' })
+        warnings.push({ id: 'factcheck.pass', label: 'Fact check status = pass', severity: 'warning', detail: `status: ${fc.status}${overrideNote}` })
       }
       if (writer?.checkedStudioHash && writer.checkedStudioHash !== currentStudioHash) {
-        checks.push({ id: 'factcheck.current', label: 'Fact check matches current draft', severity: factSeverity, detail: `Fact check is out of date — draft has changed since the last check${overrideNote}` })
-      } else {
-        checks.push({ id: 'factcheck.current', label: 'Fact check matches current draft', severity: 'ok' })
+        warnings.push({ id: 'factcheck.current', label: 'Fact check matches current draft', severity: 'warning', detail: `Fact check is out of date — draft has changed since the last check${overrideNote}` })
       }
       if (fc.numericAudit.issues.length > 0) {
-        checks.push({ id: 'factcheck.numeric', label: '0 unsupported numeric claims', severity: factSeverity, detail: `${fc.numericAudit.issues.length} numeric issue(s) unresolved${overrideNote}` })
-      } else {
-        checks.push({ id: 'factcheck.numeric', label: '0 unsupported numeric claims', severity: 'ok' })
+        warnings.push({ id: 'factcheck.numeric', label: '0 unsupported numeric claims', severity: 'warning', detail: `${fc.numericAudit.issues.length} numeric issue(s) unresolved${overrideNote}` })
       }
     }
     if (overrideActive) {
