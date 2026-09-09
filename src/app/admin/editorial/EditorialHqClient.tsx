@@ -507,7 +507,7 @@ export default function EditorialHqClient(props: Props) {
             title="AI Editorial Strategist"
             subtitle="Editorial judgement over the current PokePrices Context + Opportunity Radar. Recommends what to actually publish, willing to disagree."
           />
-          <EditorialStrategistPanel context={context} radar={radar} onCreate={onCreate} />
+          <EditorialStrategistPanel context={context} radar={radar} onCreate={onCreate} onProjectUpserted={upsertProject} />
         </section>
 
         {/* Health strip */}
@@ -1693,6 +1693,11 @@ type StrategistCallResult = {
   response:  StrategistResponse
   rawText:   string
   usage:     { input_tokens: number; output_tokens: number; cost_usd: number; latency_ms: number; model: string }
+  /** Present when the server performed a real DB write in response
+   *  to a "create / save / plan this" command in the admin's turn. */
+  createdProject:     EditorialProject | null
+  duplicateOfProject: EditorialProject | null
+  createError:        string | null
 }
 async function callStrategist(body: {
   mode: 'recommend' | 'chat'
@@ -1722,6 +1727,9 @@ async function callStrategist(body: {
       response:  (j?.response ?? { assistantMessage: '' }) as StrategistResponse,
       rawText:   String(j?.rawText ?? ''),
       usage:     j?.usage ?? emptyUsage,
+      createdProject: (j?.createdProject ?? null) as EditorialProject | null,
+      duplicateOfProject: (j?.duplicateOfProject ?? null) as EditorialProject | null,
+      createError: typeof j?.createError === 'string' ? j.createError as string : null,
     }
   } catch (e: any) {
     return {
@@ -1731,16 +1739,24 @@ async function callStrategist(body: {
       response: { assistantMessage: '' },
       rawText: '',
       usage: emptyUsage,
+      createdProject: null,
+      duplicateOfProject: null,
+      createError: null,
     }
   }
 }
 
 function EditorialStrategistPanel({
-  context, radar, onCreate,
+  context, radar, onCreate, onProjectUpserted,
 }: {
   context: EditorialContext
   radar: OpportunityRadar
   onCreate: (payload: Partial<EditorialProject>) => Promise<any>
+  /** Passive upsert — called when the Strategist chat performed a
+   *  server-side create (or matched an existing duplicate) without
+   *  going through the client `onCreate` path. Lets HQ live-update
+   *  the project list without a hard refresh. */
+  onProjectUpserted: (p: EditorialProject) => void
 }) {
   const [session, setSession] = useState<StrategistSession>(newSession)
   const [loading, setLoading] = useState<'recommend' | 'chat' | null>(null)
@@ -1800,6 +1816,14 @@ function EditorialStrategistPanel({
     })
     setLoading(null)
     if (!res.ok) { setError(res.error); return }
+    // Server may have performed a real DB write in response to a
+    // "create this / save this / plan this" command. Merge the
+    // resulting project into HQ state so the UI updates without a
+    // hard refresh. Duplicate hits already exist — the upsert is a
+    // no-op for them but keeps the merge site consistent.
+    if (res.createdProject)     onProjectUpserted(res.createdProject)
+    if (res.duplicateOfProject) onProjectUpserted(res.duplicateOfProject)
+    if (res.createError) setError(`Could not create project: ${res.createError}`)
     setSession(prev => {
       const assistantTurn: ChatTurn = {
         role: 'assistant', content: res.rawText, ts: new Date().toISOString(),
@@ -1812,7 +1836,7 @@ function EditorialStrategistPanel({
         totalCostUsd: prev.totalCostUsd + res.usage.cost_usd,
       }
     })
-  }, [session, activePlan])
+  }, [session, activePlan, onProjectUpserted])
 
   const resetSession = useCallback(() => {
     if (!confirm('Start a new strategist session? The current conversation and rejected-idea memory will be cleared.')) return

@@ -28,6 +28,9 @@ import { buildOpportunityRadar } from '@/lib/editorial/opportunityRadar'
 import { buildStrategistSystemPrompt, parseStrategistResponse, type StrategistResponse } from '@/lib/editorial/strategistPrompt'
 import { auditStrategistStyle, buildStyleRepairUserTurn } from '@/lib/editorial/styleGuard'
 import { callAnthropicAndLog, type AnthropicMessage } from '@/lib/ai/anthropic'
+import { detectStrategistWriteIntent, extractLatestBriefFromHistory, buildGroundedConfirmation } from '@/lib/editorial/strategistIntents'
+import { insertEditorialProject, findActiveProjectByExactTitle } from '@/lib/editorial/serverProjects'
+import type { EditorialProject } from '@/lib/editorial/projects'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -220,6 +223,69 @@ export async function POST(req: Request) {
     }
   }
 
+  // ── Operational writes ─────────────────────────────────────────
+  //
+  // When the admin explicitly asks in chat to create / save / plan
+  // an article, actually perform the DB write. Do NOT let the model
+  // narrate a successful mutation without one. The intent detector
+  // and brief extractor are deterministic — no AI second pass.
+  let createdProject: EditorialProject | null = null
+  let duplicateOfProject: EditorialProject | null = null
+  let createError: string | null = null
+  const writeIntent = mode === 'chat' ? detectStrategistWriteIntent(userMessage) : null
+  if (writeIntent) {
+    // History for extraction includes the assistant turn we just
+    // produced, so a create-immediately-after-recommend also works.
+    const historyForExtract: Array<{ role: 'user' | 'assistant'; content: string }> = [
+      ...history.map(h => ({ role: h.role as 'user' | 'assistant', content: String(h.content ?? '') })),
+      { role: 'assistant', content: rawText },
+    ]
+    const brief = extractLatestBriefFromHistory(historyForExtract)
+    if (!brief) {
+      parsed = { ...parsed, assistantMessage: buildGroundedConfirmation({ kind: 'no_brief' }) }
+    } else {
+      try {
+        const existing = await findActiveProjectByExactTitle(brief.headline)
+        if (existing) {
+          duplicateOfProject = existing
+          parsed = { ...parsed, assistantMessage: buildGroundedConfirmation({
+            kind: 'duplicate', projectId: existing.id, title: existing.title, status: existing.status,
+          }) }
+        } else {
+          const notesLines = [
+            `Created by AI Editorial Strategist via chat (${new Date().toISOString().slice(0, 10)}).`,
+            brief.whyNow ? `Why now: ${brief.whyNow}` : null,
+            brief.whyUseful ? `Why useful: ${brief.whyUseful}` : null,
+            brief.intent ? `Intent: ${brief.intent}` : null,
+            brief.publishDayHint ? `Suggested day: ${brief.publishDayHint}` : null,
+            brief.citationPotential ? `Citation potential: ${brief.citationPotential}` : null,
+            brief.evidenceAvailable?.length ? '\nEvidence available:\n' + brief.evidenceAvailable.map(e => '• ' + e).join('\n') : null,
+            brief.evidenceStillNeeded?.length ? '\nEvidence still needed:\n' + brief.evidenceStillNeeded.map(e => '• ' + e).join('\n') : null,
+            brief.visuals?.length ? '\nSuggested visuals: ' + brief.visuals.join(', ') : null,
+            brief.radarOpportunityId ? `\n[radar-opportunity: ${brief.radarOpportunityId}]` : null,
+          ].filter(Boolean).join('\n')
+          const priority = brief.confidence === 'high' ? 1 : brief.confidence === 'medium' ? 2 : 3
+          createdProject = await insertEditorialProject({
+            title:        brief.headline,
+            angle:        brief.angle,
+            article_type: brief.articleType,
+            status:       writeIntent.targetStatus,
+            priority,
+            target_publish_at: null,
+            notes:        notesLines,
+          })
+          parsed = { ...parsed, assistantMessage: buildGroundedConfirmation({
+            kind: 'created', projectId: createdProject.id, title: createdProject.title,
+            articleType: brief.articleType, mode: brief.mode, status: createdProject.status,
+          }) }
+        }
+      } catch (e) {
+        createError = e instanceof Error ? e.message : 'unknown'
+        parsed = { ...parsed, assistantMessage: buildGroundedConfirmation({ kind: 'failed', error: createError }) }
+      }
+    }
+  }
+
   return NextResponse.json({
     ok:          true,
     sessionId,
@@ -227,6 +293,9 @@ export async function POST(req: Request) {
     rawText,
     styleRepairFired,
     styleViolationsBefore: audit.violations,
+    createdProject,
+    duplicateOfProject,
+    createError,
     usage: {
       model:                 result.model,
       input_tokens:          totalInput,
