@@ -1,4 +1,12 @@
 #!/usr/bin/env node
+/*
+ * HISTORICAL / DEPRECATED
+ * ------------------------
+ * This is a one-shot cohort builder from Block 5A-W-46x (Jul 2026).
+ * Do NOT re-run against production IndexNow. Preserved for audit trail only.
+ * For future IndexNow updates use: npm run indexnow:changed
+ * See Block 5A-W-58C.
+ */
 // scripts/seo/build-w46c-cohort.mjs
 // Block 5A-W-46C (with W46C-FIX1) — build the W46C evaluation cohorts
 // from the local GSC pages export.

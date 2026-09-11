@@ -1,4 +1,12 @@
 #!/usr/bin/env node
+/*
+ * HISTORICAL / DEPRECATED
+ * ------------------------
+ * This is a one-shot cohort builder from Block 5A-W-46x (Jul 2026).
+ * Do NOT re-run against production IndexNow. Preserved for audit trail only.
+ * For future IndexNow updates use: npm run indexnow:changed
+ * See Block 5A-W-58C.
+ */
 // scripts/seo/build-card-shows-indexnow.mjs
 //
 // Block 5A-W-54C — permanent helper for card-show IndexNow submissions.

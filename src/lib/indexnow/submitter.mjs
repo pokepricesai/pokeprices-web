@@ -164,6 +164,33 @@ export function diffSnapshots(previous, current) {
 }
 
 /**
+ * Compose the post-run snapshot from the acceptance results of the current batch.
+ *
+ * Rules:
+ *   * Unchanged URL (same hash in previous and current) → kept.
+ *   * Changed/new URL that IndexNow accepted this run → recorded with new hash.
+ *   * Changed URL whose submission FAILED → prior hash retained so next run retries.
+ *   * Brand-new URL whose submission FAILED → omitted so next run retries.
+ *   * URLs only in previous (deletions) → dropped; if the operator wants
+ *     deletions submitted they pass --include-deletions to the CLI.
+ *
+ * @param {ReadonlyMap<string, string>} previous
+ * @param {ReadonlyMap<string, string>} current
+ * @param {ReadonlySet<string>}         acceptedUrls
+ * @returns {Map<string, string>}
+ */
+export function composeSnapshotFromAccepted(previous, current, acceptedUrls) {
+  const out = new Map()
+  for (const [u, h] of Array.from(current.entries())) {
+    const prev = previous.get(u)
+    if (prev === h)                out.set(u, h)
+    else if (acceptedUrls.has(u))  out.set(u, h)
+    else if (prev != null)         out.set(u, prev)
+  }
+  return out
+}
+
+/**
  * @typedef {'ok' | 'accepted' | 'bad-request' | 'forbidden' | 'unprocessable'
  *           | 'rate-limited' | 'server-error' | 'unknown' | 'network-error'} IndexNowStatus
  */

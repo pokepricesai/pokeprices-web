@@ -98,10 +98,32 @@ Flags:
   --file <path>         Read one URL per line (with optional \\t<hash>).
   --changed-only        Compare against --snapshot; only submit new or
                         content-changed URLs.
-  --snapshot <path>     Snapshot JSON path (read + rewritten on success).
+  --snapshot <path>     Snapshot JSON path. Read at start; rewritten
+                        after batching so ONLY URLs that IndexNow
+                        accepted (HTTP 200/202) get their new hash
+                        recorded. Failed URLs keep their prior hash
+                        (or stay absent) so the next run retries them.
+                        Recommended default: .indexnow-snapshot.json
+                        at the repo root — tracked in git. After a
+                        successful run, commit the updated snapshot:
+                          git add .indexnow-snapshot.json
+                          git commit -m "chore(indexnow): update snapshot"
   --include-deletions   With --changed-only, also submit URLs missing
                         from the current input (were in snapshot).
   --help                This message.
+
+Endpoint policy:
+  Posts to https://api.indexnow.org/indexnow only (that endpoint fans
+  out to Bing and every other participating engine). We do NOT post to
+  www.bing.com/indexnow in addition — that was the source of the
+  Aug 2026 amplification.
+
+Retry policy:
+  Retries only on network-error / 429 / 5xx. Never retries on
+  200, 202, 400, 403, 422. Cap = 3 retries (4 total attempts).
+
+Preferred everyday command (Block 5A-W-58C):
+  npm run indexnow:changed -- --file <urls-and-hashes.tsv>
 `)
 }
 
@@ -157,7 +179,7 @@ async function submitBatch(urls, batchIdx, batchTotal) {
   let last = { status: 0, text: '' }
   while (attempt < MAX_ATTEMPTS) {
     attempt++
-    log(`${label} POST ${ENDPOINT} — ${urls.length} URL(s) attempt ${attempt}/${MAX_ATTEMPTS}`)
+    log(`${label} POST ${ENDPOINT} — batch size ${urls.length} attempt ${attempt}/${MAX_ATTEMPTS}`)
     try {
       const res = await fetch(ENDPOINT, {
         method:  'POST',
@@ -171,18 +193,23 @@ async function submitBatch(urls, batchIdx, batchTotal) {
     }
     const cls = classifyStatus(last.status)
     const bodyLog = safeLogBody(last.text, INDEXNOW_KEY)
-    log(`${label} status: ${last.status} (${cls})${bodyLog ? ' body: ' + bodyLog : ''}`)
-    if (!shouldRetry(cls) || attempt >= MAX_ATTEMPTS) return { ok: cls === 'ok' || cls === 'accepted', last, cls }
+    const outcome = (cls === 'ok' || cls === 'accepted') ? 'success' : 'failure'
+    log(`${label} status: ${last.status} (${cls} / ${outcome})${bodyLog ? ' body: ' + bodyLog : ''}`)
+    if (!shouldRetry(cls) || attempt >= MAX_ATTEMPTS) {
+      const retriesUsed = attempt - 1
+      log(`${label} done — retries used: ${retriesUsed}/${MAX_ATTEMPTS - 1}`)
+      return { ok: cls === 'ok' || cls === 'accepted', last, cls, attempts: attempt }
+    }
     const delay = RETRY_DELAY_SCHEDULE_MS[attempt - 1] ?? RETRY_DELAY_SCHEDULE_MS[RETRY_DELAY_SCHEDULE_MS.length - 1]
-    log(`${label} retrying after ${delay}ms`)
+    log(`${label} retrying after ${delay}ms (retryable status)`)
     await sleep(delay)
   }
-  return { ok: false, last, cls: classifyStatus(last.status) }
+  return { ok: false, last, cls: classifyStatus(last.status), attempts: attempt }
 }
 
 async function main() {
   const s = await loadSubmitter()
-  const { collectValidUrls, batchUrls, diffSnapshots } = s
+  const { collectValidUrls, batchUrls, diffSnapshots, composeSnapshotFromAccepted } = s
   const opts = parseArgs(process.argv.slice(2))
 
   // 1. Gather input rows.
@@ -194,12 +221,17 @@ async function main() {
     return
   }
 
+  const inputCount = inputRows.length
+  log(`Input URLs (raw rows read): ${inputCount}`)
+
   // 2. Change detection.
   let toSubmit = inputRows.map(r => r.url)
   let deletions = []
+  let unchangedSkipped = 0
+  let prevMap = new Map()
+  const curMap = new Map()
   if (opts.changedOnly) {
-    const prevMap = readSnapshot(opts.snapshotPath)
-    const curMap  = new Map()
+    prevMap = readSnapshot(opts.snapshotPath)
     for (const r of inputRows) {
       if (r.hash == null) {
         warn(`--changed-only requires every input row to carry a hash; missing on ${r.url} — skipping.`)
@@ -210,23 +242,28 @@ async function main() {
     const diff = diffSnapshots(prevMap, curMap)
     toSubmit  = diff.changed
     deletions = diff.deleted
-    log(`Change detection: ${toSubmit.length} changed, ${deletions.length} deleted.`)
+    unchangedSkipped = Math.max(0, curMap.size - diff.changed.length)
+    log(`Change detection: ${toSubmit.length} changed/new, ${unchangedSkipped} unchanged skipped, ${deletions.length} deleted.`)
     if (opts.includeDeletions) toSubmit = toSubmit.concat(deletions)
-    // Snapshot rewrite on the current input, regardless of send outcome —
-    // if a URL genuinely never changes, we don't want to keep resubmitting
-    // it on every run just because a network hiccup broke the previous
-    // attempt. If the current run fails, the operator re-runs; the diff
-    // will still be empty because content hasn't moved.
-    writeSnapshot(opts.snapshotPath, curMap)
+    // Snapshot is NOT written here. It is written after batching so
+    // only URLs actually accepted by IndexNow (200/202) get their new
+    // hash recorded. Failed URLs keep their previous hash — or stay
+    // absent — so the next run diffs them again and retries.
   }
 
   // 3. Validate + dedupe.
   const val = collectValidUrls(toSubmit, { allowDeletions: opts.includeDeletions })
-  log(`Accepted: ${val.accepted.length}. Rejected: ${val.rejected.length}.`)
+  const droppedDuplicates = Math.max(0, toSubmit.length - val.accepted.length - val.rejected.length)
+  log('Batch preparation:')
+  log(`  Post-change-detection URLs: ${toSubmit.length}`)
+  log(`  Unique URLs (after validate + dedupe): ${val.accepted.length}`)
+  log(`  Dropped duplicates: ${droppedDuplicates}`)
+  log(`  Rejected (invalid / disallowed path): ${val.rejected.length}`)
+  log(`  URLs actually submitted: ${opts.dryRun ? 0 : val.accepted.length}`)
   if (val.rejected.length > 0) {
     const byReason = new Map()
     for (const r of val.rejected) byReason.set(r.reason, (byReason.get(r.reason) ?? 0) + 1)
-    for (const [reason, count] of byReason.entries()) log(`  ${reason}: ${count}`)
+    for (const [reason, count] of byReason.entries()) log(`    ${reason}: ${count}`)
   }
 
   // 4. Dry run — stop before network.
@@ -247,9 +284,23 @@ async function main() {
   // 5. Batch + POST.
   const batches = batchUrls(val.accepted)
   const failures = []
+  const acceptedUrls = new Set()
   for (let i = 0; i < batches.length; i++) {
     const result = await submitBatch(batches[i], i, batches.length)
-    if (!result.ok) failures.push({ batch: i + 1, cls: result.cls, status: result.last.status })
+    if (!result.ok) {
+      failures.push({ batch: i + 1, cls: result.cls, status: result.last.status })
+    } else {
+      for (const u of batches[i]) acceptedUrls.add(u)
+    }
+  }
+
+  // 6. Persist snapshot from accepted URLs only. See
+  //    composeSnapshotFromAccepted in submitter.mjs for the exact rules.
+  if (opts.changedOnly && opts.snapshotPath) {
+    const newMap = composeSnapshotFromAccepted(prevMap, curMap, acceptedUrls)
+    writeSnapshot(opts.snapshotPath, newMap)
+    log(`Snapshot updated: ${newMap.size} URL(s) at ${opts.snapshotPath} — accepted this run: ${acceptedUrls.size}.`)
+    log('Remember to `git add .indexnow-snapshot.json && git commit` after a successful run so the next operator inherits the state.')
   }
 
   log('')

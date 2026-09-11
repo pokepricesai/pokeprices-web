@@ -84,13 +84,16 @@ be relied upon.
 
 | Field | Value |
 |---|---|
-| Source | `scripts/submit-indexnow.js` (run via `npm run indexnow`) |
-| Trigger | Manual `npm run indexnow` |
+| Source | `scripts/submit-indexnow.js` (run via `npm run indexnow:changed`) |
+| Trigger | Manual `npm run indexnow:changed -- --file <urls-and-hashes.tsv>` |
 | Required secret | None visible; uses a static key at `public/<key>.txt` (already deployed) |
-| Expected frequency | Ad-hoc after large content changes |
-| Idempotency | Safe to re-run |
-| Retry | n/a |
-| Current scheduler | Manual |
+| Expected frequency | Ad-hoc after content changes |
+| Idempotency | Safe to re-run. `--changed-only` diffs against `.indexnow-snapshot.json` (tracked in git) so an unchanged cohort re-submits zero URLs. |
+| Snapshot write | Written AFTER batching. Only URLs that IndexNow accepted (HTTP 200/202) this run get their new hash recorded. Failed URLs keep their prior hash (or stay absent) so the next run diffs them again and retries. After a successful run, commit the updated snapshot: `git add .indexnow-snapshot.json && git commit -m "chore(indexnow): update snapshot"`. |
+| Retry | Bounded backoff. Retries ONLY on `network-error` / `429` / `5xx`. Never retries `200`/`202`/`400`/`403`/`422`. Cap = 3 retries (4 total attempts). |
+| Endpoint | `https://api.indexnow.org/indexnow` ONLY. That endpoint fans out to Bing and every other participating engine. We deliberately do NOT also POST to `https://www.bing.com/indexnow` (see Block 5A-W-58C — that dual-endpoint pattern caused the ~21k Aug 2026 amplification spike). |
+| Current scheduler | Manual. `npm run indexnow` is preserved for backwards-compat; the recommended path is `npm run indexnow:changed`. |
+| Historical cohort scripts | `scripts/seo/build-w46c-cohort.mjs`, `scripts/seo/build-w46e-lite-fix1-indexnow.mjs`, `scripts/seo/build-card-shows-indexnow.mjs` are HISTORICAL / DEPRECATED (see the header comment on each). Do not re-run against production. `build-w46e-lite-fix1-indexnow.mjs --submit` now throws unless `--i-know-this-is-historical` is passed. |
 
 ## Open ownership questions
 
