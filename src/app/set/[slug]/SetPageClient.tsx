@@ -28,6 +28,9 @@ import { useUserPlan } from '@/lib/account/useUserPlan'
 import { peekIntendedAction, consumeIntendedAction } from '@/lib/intendedAction'
 import { performWatchlistAdd } from '@/lib/watchlistOps'
 import { trackEvent } from '@/lib/analytics'
+// Block 5A-W-58D.1 — retry helper for the primary set-cards RPC. See
+// loadSetCards.ts for the retry + isLive semantics.
+import { fetchPrimarySetCardsWithRetry } from './loadSetCards'
 // Block 5A-W-50C — per-set portfolio completion bar in the header.
 import SetCompletionProgress from '@/components/SetCompletionProgress'
 // Block 5A-W-50E — URL-backed sort + scroll restoration + smart back.
@@ -467,26 +470,50 @@ export default function SetPageClient({ slug }: { slug: string }) {
   }
 
   useEffect(() => {
+    // Block 5A-W-58D.1 — cancellation guard for the primary loader. If
+    // setName / sort changes while a fetch is in flight, `live` flips
+    // false and every downstream setState is gated so a stale response
+    // cannot overwrite the fresh effect's result — the root cause of
+    // the intermittent blank-until-refresh symptom.
+    let live = true
+    const isLive = () => live
+
     async function loadData() {
       setLoading(true); setError(false)
 
-      const { data, error: err } = await supabase.rpc('get_set_cards_sortable', { set_text: setName, sort_col: sort })
-      if (err || !data) setError(true)
-      else {
-        const normalised = data.map((c: any) => ({
-          ...c,
-          is_sealed: c.is_sealed === true || c.is_sealed === 'true',
-        }))
-        setCards(normalised)
-        const dateCard = normalised.find((c: any) => c.set_release_date)
-        if (dateCard?.set_release_date) setReleaseDate(dateCard.set_release_date)
+      // Attempt primary RPC with exactly one retry after ~500ms.
+      const primary = await fetchPrimarySetCardsWithRetry(
+        async (n, s) => {
+          const { data, error } = await supabase.rpc('get_set_cards_sortable', { set_text: n, sort_col: s })
+          return { data, error }
+        },
+        setName,
+        sort,
+        isLive,
+      )
+      if (!live) return
+      if (primary.status === 'aborted') return
+      if (primary.status === 'failed') {
+        setError(true)
+        setLoading(false)
+        return
       }
+
+      const normalised = (primary.data as any[]).map((c: any) => ({
+        ...c,
+        is_sealed: c.is_sealed === true || c.is_sealed === 'true',
+      }))
+      if (!live) return
+      setCards(normalised)
+      const dateCard = normalised.find((c: any) => c.set_release_date)
+      if (dateCard?.set_release_date) setReleaseDate(dateCard.set_release_date)
 
       if (!releaseDate) {
         const { data: rdData } = await supabase
           .from('cards').select('set_release_date')
           .eq('set_name', setName).not('set_release_date', 'is', null)
           .limit(1).single()
+        if (!live) return
         if (rdData?.set_release_date) setReleaseDate(rdData.set_release_date)
       }
 
@@ -498,6 +525,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
         const { data: metaLangData } = await supabase
           .from('set_metadata').select('language')
           .eq('set_name', setName).maybeSingle()
+        if (!live) return
         if (metaLangData && (metaLangData as any).language) {
           setSetLanguage(((metaLangData as any).language ?? 'en').toString())
         }
@@ -506,15 +534,18 @@ export default function SetPageClient({ slug }: { slug: string }) {
       }
 
       const { data: insightData } = await supabase.rpc('get_set_insight', { set_text: setName })
+      if (!live) return
       if (insightData) setInsight(insightData)
 
       const { data: histData } = await supabase.rpc('get_set_price_history', { set_text: setName })
+      if (!live) return
       if (histData) setPriceHistory(histData.map((d: any) => ({ ...d, value_usd: d.value_usd ? d.value_usd * 100 : null })))
 
       const { data: popData } = await supabase
         .from('psa_set_totals').select('*')
         .or(`set_name.eq.Pokemon ${setName},set_name.ilike.%${setName}%`)
         .order('snapshot_date', { ascending: false }).limit(1)
+      if (!live) return
       if (popData && popData.length > 0) {
         const pop = popData[0]
         setPopStats({ total_graded: pop.total_graded || 0, gem_rate: pop.gem_rate || 0, total_psa10: pop.total_psa_10 || 0 })
@@ -525,6 +556,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
         .from('card_trends').select('card_name, card_slug, current_raw, raw_pct_30d')
         .eq('set_name', setName).not('raw_pct_30d', 'is', null).gt('current_raw', 500)
         .order('raw_pct_30d', { ascending: false }).limit(200)
+      if (!live) return
 
       if (trendData && trendData.length > 0) {
         const slugs = trendData.map((t: any) => t.card_slug)
@@ -534,6 +566,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
           supabase.from('cards').select('card_slug, image_url, card_url_slug, is_sealed').in('card_slug', slugs),
           supabase.from('card_volume').select('card_slug, sales_30d, volume_label').in('card_slug', slugs).eq('grade', 'Ungraded'),
         ])
+        if (!live) return
 
         const imgMap: Record<string, any> = {}
         ;(imgRes.data || []).forEach((c: any) => { imgMap[c.card_slug] = c })
@@ -572,9 +605,11 @@ export default function SetPageClient({ slug }: { slug: string }) {
         setTopSealedMovers(sealedEnriched.filter((t: any) => (t.raw_pct_30d ?? 0) > 0 && isReliable(t)).slice(0, 5))
       }
 
+      if (!live) return
       setLoading(false)
     }
     loadData()
+    return () => { live = false }
   }, [setName, sort])
 
   // Block 5A-W-50E — sync state -> URL for sort. Only the sort key is
