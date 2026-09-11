@@ -204,10 +204,19 @@ describe('SetPageClient — Block 5A-W-58D.1 wiring', () => {
   })
 
   it('guards state writes after awaits with `if (!live) return`', () => {
-    // Count guards in the primary loader region. Six or more matches
-    // means every await point between setState calls has a guard.
+    // Block 5A-W-58D.2 folded the previously-serial secondary chain
+    // into a single Promise.allSettled group. That group is protected
+    // by ONE guard immediately after the settle. Combined with the
+    // guards around the primary RPC and the movers enrichment, every
+    // `await` in the loader is still gated. The count is therefore
+    // >= 4 rather than >= 6 (which was the pre-58D.2 shape).
+    //
+    // If any guard drops out of the loader — primary, primary post-
+    // normalise, post-allSettled, post-movers-enrichment — this test
+    // will fail with a lower count and the parallel-loader test file
+    // will fail on its explicit position assertions.
     const matches = SET_CLIENT_SRC.match(/if \(!live\) return/g) ?? []
-    expect(matches.length).toBeGreaterThanOrEqual(6)
+    expect(matches.length).toBeGreaterThanOrEqual(4)
   })
 
   it('handles the failed / aborted outcomes from the retry helper', () => {

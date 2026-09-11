@@ -508,101 +508,142 @@ export default function SetPageClient({ slug }: { slug: string }) {
       const dateCard = normalised.find((c: any) => c.set_release_date)
       if (dateCard?.set_release_date) setReleaseDate(dateCard.set_release_date)
 
-      if (!releaseDate) {
-        const { data: rdData } = await supabase
-          .from('cards').select('set_release_date')
-          .eq('set_name', setName).not('set_release_date', 'is', null)
-          .limit(1).single()
-        if (!live) return
+      // Block 5A-W-58D.2 — after the primary set-cards RPC returns, the
+      // remaining loader work is a set of INDEPENDENT queries. Prior to
+      // 58D.2 they ran serially, which added ~200-350ms of avoidable
+      // wall-clock. They are now fired in one Promise.allSettled group
+      // so a single slow query (or a single failure) can no longer
+      // block the others. `live` is re-checked once all have settled
+      // and before every state write, preserving the 58D.1 cancellation
+      // guarantees.
+      //
+      // Each state update below is derived from exactly one settled
+      // result: a failure in psa_set_totals cannot hide movers, a
+      // failure in card_trends cannot suppress set_insight, and so on.
+      // Fallback fires only when neither this fetch's rows nor the
+      // component's existing state already carry a set_release_date.
+      // Matches the pre-58D.2 conditional exactly (no extra query on
+      // sort changes when the date is already known).
+      const needsReleaseFallback = !dateCard?.set_release_date && !releaseDate
+      const [
+        releaseFallbackRes,
+        metaLangRes,
+        insightRes,
+        histRes,
+        popRes,
+        trendRes,
+      ] = await Promise.allSettled([
+        // Release-date fallback — only fires when the release date
+        // is unknown after the primary RPC and no earlier render set it.
+        needsReleaseFallback
+          ? supabase
+              .from('cards').select('set_release_date')
+              .eq('set_name', setName).not('set_release_date', 'is', null)
+              .limit(1).single()
+          : Promise.resolve({ data: null, error: null } as any),
+        // set_metadata.language — pre-migration deploys may error; the
+        // consumer below tolerates a rejected promise as "unknown".
+        supabase.from('set_metadata').select('language').eq('set_name', setName).maybeSingle(),
+        supabase.rpc('get_set_insight', { set_text: setName }),
+        supabase.rpc('get_set_price_history', { set_text: setName }),
+        supabase
+          .from('psa_set_totals').select('*')
+          .or(`set_name.eq.Pokemon ${setName},set_name.ilike.%${setName}%`)
+          .order('snapshot_date', { ascending: false }).limit(1),
+        supabase
+          .from('card_trends').select('card_name, card_slug, current_raw, raw_pct_30d')
+          .eq('set_name', setName).not('raw_pct_30d', 'is', null).gt('current_raw', 500)
+          .order('raw_pct_30d', { ascending: false }).limit(200),
+      ])
+      if (!live) return
+
+      // ── release-date fallback ────────────────────────────────────────
+      if (releaseFallbackRes.status === 'fulfilled') {
+        const rdData = (releaseFallbackRes.value as any)?.data
         if (rdData?.set_release_date) setReleaseDate(rdData.set_release_date)
       }
 
-      // Block 5A-W-48B — pull the language flag from set_metadata.
-      // Safe defensively: if the column doesn't exist yet (pre-migration
-      // deploy) the query errors and we fall through to null, which
-      // renders as the existing English-styled header.
-      try {
-        const { data: metaLangData } = await supabase
-          .from('set_metadata').select('language')
-          .eq('set_name', setName).maybeSingle()
-        if (!live) return
+      // ── set_metadata.language ────────────────────────────────────────
+      if (metaLangRes.status === 'fulfilled') {
+        const metaLangData = (metaLangRes.value as any)?.data
         if (metaLangData && (metaLangData as any).language) {
           setSetLanguage(((metaLangData as any).language ?? 'en').toString())
         }
-      } catch {
-        /* pre-migration deploys land here; silently leave setLanguage=null */
       }
 
-      const { data: insightData } = await supabase.rpc('get_set_insight', { set_text: setName })
-      if (!live) return
-      if (insightData) setInsight(insightData)
-
-      const { data: histData } = await supabase.rpc('get_set_price_history', { set_text: setName })
-      if (!live) return
-      if (histData) setPriceHistory(histData.map((d: any) => ({ ...d, value_usd: d.value_usd ? d.value_usd * 100 : null })))
-
-      const { data: popData } = await supabase
-        .from('psa_set_totals').select('*')
-        .or(`set_name.eq.Pokemon ${setName},set_name.ilike.%${setName}%`)
-        .order('snapshot_date', { ascending: false }).limit(1)
-      if (!live) return
-      if (popData && popData.length > 0) {
-        const pop = popData[0]
-        setPopStats({ total_graded: pop.total_graded || 0, gem_rate: pop.gem_rate || 0, total_psa10: pop.total_psa_10 || 0 })
+      // ── set insight ──────────────────────────────────────────────────
+      if (insightRes.status === 'fulfilled') {
+        const insightData = (insightRes.value as any)?.data
+        if (insightData) setInsight(insightData)
       }
 
-      // Fetch trends — join with card_volume to ensure min 1 sale/month
-      const { data: trendData } = await supabase
-        .from('card_trends').select('card_name, card_slug, current_raw, raw_pct_30d')
-        .eq('set_name', setName).not('raw_pct_30d', 'is', null).gt('current_raw', 500)
-        .order('raw_pct_30d', { ascending: false }).limit(200)
-      if (!live) return
+      // ── price history ────────────────────────────────────────────────
+      if (histRes.status === 'fulfilled') {
+        const histData = (histRes.value as any)?.data
+        if (histData) setPriceHistory(histData.map((d: any) => ({ ...d, value_usd: d.value_usd ? d.value_usd * 100 : null })))
+      }
 
-      if (trendData && trendData.length > 0) {
-        const slugs = trendData.map((t: any) => t.card_slug)
+      // ── PSA population totals ────────────────────────────────────────
+      if (popRes.status === 'fulfilled') {
+        const popData = (popRes.value as any)?.data
+        if (popData && popData.length > 0) {
+          const pop = popData[0]
+          setPopStats({ total_graded: pop.total_graded || 0, gem_rate: pop.gem_rate || 0, total_psa10: pop.total_psa_10 || 0 })
+        }
+      }
 
-        // Fetch images + sealed status + volume in parallel
-        const [imgRes, volRes] = await Promise.all([
-          supabase.from('cards').select('card_slug, image_url, card_url_slug, is_sealed').in('card_slug', slugs),
-          supabase.from('card_volume').select('card_slug, sales_30d, volume_label').in('card_slug', slugs).eq('grade', 'Ungraded'),
-        ])
-        if (!live) return
+      // ── movers (card_trends + enrichment) ────────────────────────────
+      // card_trends returns the shortlist; the two enrichment queries
+      // (cards.in / card_volume.in) still need those slugs so this
+      // remains a two-step chain — but the two enrichment queries fire
+      // in parallel and only after the primary parallel group.
+      if (trendRes.status === 'fulfilled') {
+        const trendData = (trendRes.value as any)?.data
+        if (trendData && trendData.length > 0) {
+          const slugs = trendData.map((t: any) => t.card_slug)
 
-        const imgMap: Record<string, any> = {}
-        ;(imgRes.data || []).forEach((c: any) => { imgMap[c.card_slug] = c })
+          const [imgRes, volRes] = await Promise.all([
+            supabase.from('cards').select('card_slug, image_url, card_url_slug, is_sealed').in('card_slug', slugs),
+            supabase.from('card_volume').select('card_slug, sales_30d, volume_label').in('card_slug', slugs).eq('grade', 'Ungraded'),
+          ])
+          if (!live) return
 
-        const volMap: Record<string, any> = {}
-        ;(volRes.data || []).forEach((v: any) => { volMap[v.card_slug] = v })
+          const imgMap: Record<string, any> = {}
+          ;(imgRes.data || []).forEach((c: any) => { imgMap[c.card_slug] = c })
 
-        const allEnriched = trendData
-          .filter((t: any) => {
-            // Must have at least 1 sale per month
-            const vol = volMap[t.card_slug]
-            return vol && vol.sales_30d >= 1
-          })
-          .map((t: any) => ({
-            card_slug: t.card_slug,
-            card_name: t.card_name,
-            card_url_slug: imgMap[t.card_slug]?.card_url_slug ?? null,
-            raw_usd: t.current_raw / 100,
-            raw_pct_30d: t.raw_pct_30d,
-            image_url: imgMap[t.card_slug]?.image_url ?? null,
-            is_sealed: imgMap[t.card_slug]?.is_sealed === true || imgMap[t.card_slug]?.is_sealed === 'true',
-            volume_label: volMap[t.card_slug]?.volume_label ?? null,
-          }))
+          const volMap: Record<string, any> = {}
+          ;(volRes.data || []).forEach((v: any) => { volMap[v.card_slug] = v })
 
-        const isReliable = (t: any) => Math.abs(t.raw_pct_30d ?? 0) <= 300
-        const cardEnriched = allEnriched.filter((t: any) => !t.is_sealed)
-        const sealedEnriched = allEnriched.filter((t: any) => t.is_sealed)
+          const allEnriched = trendData
+            .filter((t: any) => {
+              // Must have at least 1 sale per month
+              const vol = volMap[t.card_slug]
+              return vol && vol.sales_30d >= 1
+            })
+            .map((t: any) => ({
+              card_slug: t.card_slug,
+              card_name: t.card_name,
+              card_url_slug: imgMap[t.card_slug]?.card_url_slug ?? null,
+              raw_usd: t.current_raw / 100,
+              raw_pct_30d: t.raw_pct_30d,
+              image_url: imgMap[t.card_slug]?.image_url ?? null,
+              is_sealed: imgMap[t.card_slug]?.is_sealed === true || imgMap[t.card_slug]?.is_sealed === 'true',
+              volume_label: volMap[t.card_slug]?.volume_label ?? null,
+            }))
 
-        setTopMovers(cardEnriched.filter((t: any) => (t.raw_pct_30d ?? 0) > 0 && isReliable(t)).slice(0, 5))
-        setTopFallers(
-          cardEnriched
-            .filter((t: any) => (t.raw_pct_30d ?? 0) < 0 && isReliable(t))
-            .sort((a: any, b: any) => (a.raw_pct_30d ?? 0) - (b.raw_pct_30d ?? 0))
-            .slice(0, 5)
-        )
-        setTopSealedMovers(sealedEnriched.filter((t: any) => (t.raw_pct_30d ?? 0) > 0 && isReliable(t)).slice(0, 5))
+          const isReliable = (t: any) => Math.abs(t.raw_pct_30d ?? 0) <= 300
+          const cardEnriched = allEnriched.filter((t: any) => !t.is_sealed)
+          const sealedEnriched = allEnriched.filter((t: any) => t.is_sealed)
+
+          setTopMovers(cardEnriched.filter((t: any) => (t.raw_pct_30d ?? 0) > 0 && isReliable(t)).slice(0, 5))
+          setTopFallers(
+            cardEnriched
+              .filter((t: any) => (t.raw_pct_30d ?? 0) < 0 && isReliable(t))
+              .sort((a: any, b: any) => (a.raw_pct_30d ?? 0) - (b.raw_pct_30d ?? 0))
+              .slice(0, 5)
+          )
+          setTopSealedMovers(sealedEnriched.filter((t: any) => (t.raw_pct_30d ?? 0) > 0 && isReliable(t)).slice(0, 5))
+        }
       }
 
       if (!live) return
