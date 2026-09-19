@@ -16,7 +16,7 @@ export default function SiteStructuredData() {
           width: 512,
           height: 512,
         },
-        description: 'Free Pokémon TCG price guide with live raw and PSA 10 values, PSA population data and grading analysis for 40,000+ cards.',
+        description: 'Free Pokémon TCG price guide with live raw and PSA 10 values, PSA population data and grading analysis for 65,000+ cards across 280+ sets.',
       },
       {
         '@type': 'WebSite',
