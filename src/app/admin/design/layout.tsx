@@ -71,6 +71,7 @@ export default function DesignLayout({ children }: { children: React.ReactNode }
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 12 }}>
           <Link href="/admin/design/card-layout-a" style={{ color: 'var(--text)', textDecoration: 'none' }}>Layout A</Link>
           <Link href="/admin/design/card-layout-b" style={{ color: 'var(--text)', textDecoration: 'none' }}>Layout B</Link>
+          <Link href="/admin/design/card-layout-b2" style={{ color: 'var(--text)', textDecoration: 'none' }}>Layout B2</Link>
           <Link href="/admin/design/card-layout-c" style={{ color: 'var(--text)', textDecoration: 'none' }}>Layout C</Link>
           <Link href={PROTOTYPE_LIVE_HREF} target="_blank" rel="noopener noreferrer"
                 style={{ color: 'var(--text-muted)', textDecoration: 'none' }}>
