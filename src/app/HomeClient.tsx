@@ -231,14 +231,10 @@ const upcomingReleases: UpcomingRelease[] = [
     // plain outbound link (target=_blank, rel=noopener noreferrer).
     ctaHref: 'https://www.tcgplayer.com/product/695400/pokemon-first-partner-collection-2026-first-partner-illustration-collection-series-3',
   },
-  {
-    name: '30th Anniversary Set',
-    contextLabel: 'Worldwide',
-    date: '16 September 2026',
-    description: 'More details to be released soon, but products expected include Elite Trainer Boxes, the 30th Celebration Premium Deck Set featuring Espeon and Umbreon, and an Ultra-Premium Collection.',
-    ctaLabel: 'Preview the 30th Anniversary Card List',
-    ctaHref: null,
-  },
+  // 30th Anniversary Set entry removed 2026-09-19 — set launched as
+  // Pokémon 30th Celebration on 2026-09-16 and now has its own live
+  // catalogue at /set/30th%20Celebration (promoted from this "coming
+  // next" list into the primary New Release banner below).
   {
     name: 'Delta Reign',
     date: '6 November 2026',
@@ -495,66 +491,14 @@ export default function HomeClient() {
               )}
             </div>
 
-            {/* ── PITCH BLACK NEW-RELEASE FEATURE ──
-                Block 5A-W-47D. Compact card sitting directly beneath
-                the auth-aware Dashboard/Watchlist/Portfolio row (or the
-                signed-out Sign-up/Log-in row), inside the hero's left
-                column. Positioned OUTSIDE the isAuthed conditional so
-                the feature appears for both signed-in and signed-out
-                visitors — the two auth-conditional CTA groups occupy
-                roughly the same vertical footprint, keeping the layout
-                stable regardless of session state. Whole card is a
-                single Next.js <Link> to the canonical Pitch Black
-                route (URL-encoded, mirroring the existing Chaos Rising
-                "Just Released" banner). "View the set" is inline text,
-                not a nested link, so keyboard focus lands once and
-                screen readers announce a single actionable region. */}
-            <Link href="/set/Pitch%20Black" style={{
-              display: 'flex', alignItems: 'center', gap: 12,
-              marginTop: 18, padding: '10px 12px', borderRadius: 14,
-              background: 'rgba(255,255,255,0.10)',
-              border: '1px solid rgba(255,255,255,0.20)',
-              textDecoration: 'none', color: '#fff',
-              fontFamily: "'Figtree', sans-serif",
-              maxWidth: 380, minWidth: 0,
-              transition: 'background 0.15s',
-            }}
-              onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(255,255,255,0.16)'}
-              onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(255,255,255,0.10)'}
-            >
-              <img
-                src="/set-assets/logos/Pitch Black.webp"
-                alt="Pitch Black — Pokémon TCG set logo"
-                style={{
-                  height: 40, width: 'auto', maxWidth: 84,
-                  objectFit: 'contain', flexShrink: 0,
-                  filter: 'drop-shadow(0 1px 4px rgba(0,0,0,0.30))',
-                }}
-              />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={{
-                  display: 'block', fontSize: 9, fontWeight: 800,
-                  letterSpacing: 1.4, textTransform: 'uppercase',
-                  color: 'rgba(255,255,255,0.75)',
-                }}>New Release</span>
-                <span style={{
-                  display: 'block', fontSize: 15, fontWeight: 800,
-                  color: '#fff', fontFamily: "'Outfit', sans-serif",
-                  lineHeight: 1.2, marginTop: 1,
-                }}>Pitch Black</span>
-                <span style={{
-                  display: 'block', fontSize: 11.5,
-                  color: 'rgba(255,255,255,0.75)', marginTop: 2,
-                }}>Released 17 July 2026</span>
-              </div>
-              <span style={{
-                fontSize: 12, fontWeight: 700, color: '#fff',
-                padding: '6px 10px', borderRadius: 8,
-                background: 'rgba(255,255,255,0.12)',
-                border: '1px solid rgba(255,255,255,0.22)',
-                whiteSpace: 'nowrap', flexShrink: 0,
-              }}>View the set →</span>
-            </Link>
+            {/* Small hero "NEW RELEASE" chip removed 2026-09-19.
+                It had been promoting Pitch Black, which is no longer
+                the newest set (Pokémon 30th Celebration launched
+                2026-09-16). Rather than reword the chip for a stale
+                or duplicate promotion, the whole latest-set slot is
+                now consolidated into the larger banner further down
+                the page (search for "30TH CELEBRATION NEW-RELEASE
+                BANNER"). One prominent feature, no duplication. */}
           </div>
 
           {/* ── RIGHT COLUMN: AI panel + Market pulse card ── */}
@@ -839,42 +783,77 @@ export default function HomeClient() {
         </section>
       )}
 
-      {/* ── JUST RELEASED (Chaos Rising) ── */}
+      {/* ── 30TH CELEBRATION NEW-RELEASE BANNER ──
+          Replaces the previous Chaos Rising "Just Released" banner
+          on 2026-09-19. This is now THE single primary latest-set
+          feature on the homepage. Whole banner is a single Next.js
+          <Link> to /set/30th%20Celebration (URL-encoded), so it's a
+          normal crawlable internal link — no JS-only navigation.
+
+          Design: no external image asset (there is no 30th
+          Celebration logo in public/set-assets/logos/), so a text-
+          only treatment with a large decorative "30" numeric mark
+          on the left. Larger H1 (fontSize 30) and richer copy vs
+          the prior Chaos Rising banner (fontSize 22). Reuses the
+          same var(--card), var(--border), var(--accent) tokens as
+          the rest of the page — no new dependency, no new asset. */}
       <section style={{ padding: '36px 24px 8px', maxWidth: 900, margin: '0 auto' }}>
-        <div style={{ background: 'var(--card)', borderRadius: 18, border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 2px 15px rgba(37,99,168,0.06)' }}>
-          <Link href="/set/Chaos%20Rising" style={{
-            display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap',
-            background: 'linear-gradient(135deg, #1a5fad, #2874c8)', padding: '22px 24px',
+        <div style={{ background: 'var(--card)', borderRadius: 18, border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 4px 22px rgba(37,99,168,0.10)' }}>
+          <Link href="/set/30th%20Celebration" style={{
+            display: 'flex', alignItems: 'center', gap: 22, flexWrap: 'wrap',
+            background: 'linear-gradient(135deg, #b8791a 0%, #d99525 45%, #b8791a 100%)',
+            padding: '28px 28px',
             textDecoration: 'none', transition: 'filter 0.15s',
           }}
             onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.filter = 'brightness(1.08)'}
             onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.filter = ''}
           >
-            <img src="/set-assets/logos/Chaos Rising.webp" alt="Chaos Rising"
-              style={{ height: 64, width: 'auto', maxWidth: 220, objectFit: 'contain',
-                filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.25))', flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 200 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            {/* Text-only decorative "30" mark stands in for the missing
+                set-logo asset. Uses the same Outfit display font as the
+                site-wide H1s, so it feels at home in the design system. */}
+            <div aria-hidden="true" style={{
+              flexShrink: 0, width: 96, height: 96, borderRadius: '50%',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'rgba(255,255,255,0.14)',
+              border: '2px solid rgba(255,255,255,0.35)',
+              boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.15)',
+            }}>
+              <span style={{
+                fontFamily: "'Outfit', sans-serif", fontWeight: 900,
+                fontSize: 48, color: '#fff', lineHeight: 1,
+                letterSpacing: -1, textShadow: '0 2px 6px rgba(0,0,0,0.25)',
+              }}>30</span>
+            </div>
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                 <span style={{
                   background: 'var(--accent)', color: '#1a1a1a', fontSize: 10, fontWeight: 900,
                   padding: '3px 8px', borderRadius: 4, letterSpacing: 1, textTransform: 'uppercase',
                   fontFamily: "'Figtree', sans-serif",
-                }}>New Set</span>
-                <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>
+                }}>New Release</span>
+                <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 11, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>
                   Just Released
                 </span>
               </div>
-              <h3 style={{ color: '#fff', fontSize: 22, margin: 0, fontWeight: 800, fontFamily: "'Outfit', sans-serif" }}>Chaos Rising</h3>
-              <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, margin: '2px 0 0', fontFamily: "'Figtree', sans-serif" }}>
-                Released May 22, 2026 · Mega Evolution era
+              <h3 style={{
+                color: '#fff', fontSize: 30, margin: 0, fontWeight: 800,
+                fontFamily: "'Outfit', sans-serif", lineHeight: 1.15,
+                letterSpacing: -0.3,
+              }}>Pokémon 30th Celebration</h3>
+              <p style={{
+                color: 'rgba(255,255,255,0.85)', fontSize: 14, margin: '8px 0 0',
+                fontFamily: "'Figtree', sans-serif", lineHeight: 1.5,
+              }}>
+                Released 16 September 2026 · 158 main-set cards plus 30 Classic Collection reprints.
+                Live prices, PSA / CGC / BGS grade ladders and market data — updated nightly.
               </p>
             </div>
             <span style={{
-              background: 'rgba(255,255,255,0.15)', color: '#fff', fontSize: 13, fontWeight: 800,
-              padding: '10px 18px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.25)',
+              background: 'rgba(255,255,255,0.18)', color: '#fff', fontSize: 14, fontWeight: 800,
+              padding: '12px 20px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.32)',
               fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap',
             }}>
-              Explore the set →
+              Explore 30th Celebration →
             </span>
           </Link>
           <div style={{ padding: '16px 24px' }}>
