@@ -149,17 +149,23 @@ async function loadLatestGscDate(): Promise<{ date: string | null; source: 'goog
   return { date: data ? isoDay(data.date) : null, source: data ? 'google' : null }
 }
 
-/** Per-day aggregates of seo_gsc_page_daily. Paged + summed in Node. */
+/** Per-day aggregates of seo_gsc_page_daily. Paged + summed in Node.
+ *  Ordered by (date, url) so pagination is stable — a `.order('date')`
+ *  alone lets rows with the same date shuffle across page boundaries,
+ *  duplicating some and skipping others, which produces phantom
+ *  inflated totals. seo_gsc_page_daily.PK is (site_key, source, url,
+ *  date) so (date, url) is a unique sort key within our filter. */
 async function loadDailyTrend(): Promise<DailyPoint[]> {
   const supa = getSupabaseServiceClient()
-  const rows = await pagedRead<{ date: string; impressions: number; clicks: number; sum_position: number }>(
+  const rows = await pagedRead<{ date: string; url: string; impressions: number; clicks: number; sum_position: number }>(
     async (offset, chunk) => {
       const res = await supa
         .from('seo_gsc_page_daily')
-        .select('date, impressions, clicks, sum_position')
+        .select('date, url, impressions, clicks, sum_position')
         .eq('site_key', SITE_KEY)
         .eq('source', SOURCE)
         .order('date', { ascending: true })
+        .order('url', { ascending: true })
         .range(offset, offset + chunk - 1)
       return { data: res.data as any, error: res.error }
     },
@@ -257,13 +263,18 @@ async function loadPagesMap(): Promise<Map<string, PageRow>> {
 
 async function loadRollups(): Promise<RollupRow[]> {
   const supa = getSupabaseServiceClient()
+  // Order by `url` (which is unique per row within our filter — the PK
+  // of seo_page_rollups is (site_key, source, url)) so pagination is
+  // stable. Ordering by clicks_28d desc alone was NOT stable — most
+  // rows share the same clicks_28d (usually 0) and rows shuffle across
+  // page boundaries, producing phantom duplicated/skipped rows.
   return pagedRead<RollupRow>(async (offset, chunk) => {
     const res = await supa
       .from('seo_page_rollups')
       .select('url, clicks_7d, clicks_28d, impressions_7d, impressions_28d, sum_position_28d, productive_28d')
       .eq('site_key', SITE_KEY)
       .eq('source', SOURCE)
-      .order('clicks_28d', { ascending: false })
+      .order('url', { ascending: true })
       .range(offset, offset + chunk - 1)
     return { data: res.data as any, error: res.error }
   })
