@@ -138,6 +138,7 @@ const LOGO_MAP: Record<string, string> = {
   'Perfect Order':          'Perfect Order.webp',
   'Chaos Rising':           'Chaos Rising.webp',
   'Pitch Black':            'Pitch Black.webp',
+  '30th Celebration':       '30th Celebration.webp',
   // ── Misc / promos ─────────────────────────────────────────────────────────
   'Rumble':                 'Pokemon Rumble.webp',
   'Southern Islands':       'Southern Islands.webp',
@@ -405,6 +406,7 @@ const SYMBOL_MAP: Record<string, string> = {
   'Perfect Order':          'Perfect Order.png',
   'Chaos Rising':           'Chaos Rising.png',
   'Pitch Black':            'Pitch Black.png',
+  '30th Celebration':       '30th Celebration.png',
   // ── Misc ──────────────────────────────────────────────────────────────────
   'Southern Islands':       'Southern Islands.png',
   'Pikachu Libre & Suicune':'Pikachu Libre & Suicune.png',
@@ -590,7 +592,7 @@ const ERA_MAP: Record<string, string> = {
   // ── Mega Evolution era ────────────────────────────────────────────────────
   'Phantasmal Flames': 'Mega Evolution', 'Perfect Order': 'Mega Evolution',
   'Ascended Heroes': 'Mega Evolution',   'Chaos Rising': 'Mega Evolution',
-  'Pitch Black':     'Mega Evolution',
+  'Pitch Black':     'Mega Evolution',   '30th Celebration': 'Mega Evolution',
 }
 
 // Chronological order, oldest → newest. The current Mega Evolution era sits at

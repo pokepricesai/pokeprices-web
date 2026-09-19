@@ -8,6 +8,7 @@ import InlineChat from '@/components/InlineChat'
 import NewsletterSignup from '@/components/NewsletterSignup'
 import FAQ from '@/components/FAQ'
 import { getHomeFaqItems } from '@/lib/faqs'
+import { getSetAssets } from '@/lib/setAssets'
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -496,19 +497,23 @@ export default function HomeClient() {
               onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.filter = 'brightness(1.08)'}
               onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.filter = ''}
             >
-              <div aria-hidden="true" style={{
-                flexShrink: 0, width: 72, height: 72, borderRadius: '50%',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'rgba(255,255,255,0.14)',
-                border: '2px solid rgba(255,255,255,0.35)',
-                boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.15)',
-              }}>
-                <span style={{
-                  fontFamily: "'Outfit', sans-serif", fontWeight: 900,
-                  fontSize: 36, color: '#fff', lineHeight: 1,
-                  letterSpacing: -1, textShadow: '0 2px 6px rgba(0,0,0,0.25)',
-                }}>30</span>
-              </div>
+              {/* Real 30th Celebration set logo — dropped in on
+                  2026-09-19, replacing the temporary text-only "30"
+                  mark used on launch day. Sized to sit comfortably
+                  alongside the copy on desktop and reflow to top of
+                  the stack on mobile via the parent flexWrap. Height
+                  is capped and objectFit keeps the aspect ratio, so
+                  a wider or narrower logo cannot warp. */}
+              <img
+                src="/set-assets/logos/30th Celebration.webp"
+                alt="Pokémon 30th Celebration — set logo"
+                style={{
+                  flexShrink: 0, height: 68, width: 'auto',
+                  maxWidth: 200, objectFit: 'contain',
+                  filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.28))',
+                }}
+                loading="eager"
+              />
               <div style={{ flex: 1, minWidth: 200 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                   <span style={{
@@ -841,7 +846,13 @@ export default function HomeClient() {
             </Link>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
-            {recentEnglishSets.map(s => (
+            {recentEnglishSets.map(s => {
+              // Reuses the same LOGO_MAP / SYMBOL_MAP the set page and
+              // card page consume — no special-case rendering, just a
+              // small symbol adornment next to each set name to match
+              // the visual convention elsewhere on the site.
+              const { symbolUrl } = getSetAssets(s.name)
+              return (
               <Link key={s.name} href={`/set/${encodeURIComponent(s.name)}`} style={{
                 display: 'flex', flexDirection: 'column',
                 padding: '14px 16px', background: 'var(--bg-light)',
@@ -852,9 +863,19 @@ export default function HomeClient() {
                 onMouseEnter={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.transform = 'translateY(-2px)'; el.style.boxShadow = '0 6px 20px rgba(0,0,0,0.08)' }}
                 onMouseLeave={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.transform = ''; el.style.boxShadow = '' }}
               >
-                <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)', fontFamily: "'Outfit', sans-serif", lineHeight: 1.2 }}>
-                  {s.name}
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                  {symbolUrl && (
+                    <img
+                      src={symbolUrl}
+                      alt=""
+                      style={{ width: 22, height: 22, objectFit: 'contain', flexShrink: 0 }}
+                      loading="lazy"
+                    />
+                  )}
+                  <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)', fontFamily: "'Outfit', sans-serif", lineHeight: 1.2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {s.name}
+                  </span>
+                </div>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 4 }}>
                   {s.date}
                 </span>
@@ -862,7 +883,8 @@ export default function HomeClient() {
                   Explore set →
                 </span>
               </Link>
-            ))}
+              )
+            })}
           </div>
         </div>
       </section>
