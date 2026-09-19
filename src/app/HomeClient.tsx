@@ -189,59 +189,38 @@ function formatInsightDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-// Block 5A-W-47D — Pitch Black shipped 2026-07-17, so it moved out of
-// this "coming next" list and into a dedicated New Release feature in
-// the hero left column. Dates and descriptions are the editorial
-// source of truth handed down for this block — do not silently rewrite
-// them from other repository content.
+// The `upcomingReleases` / "coming next" list was retired on 2026-09-19.
+// It sat below the previous "Just Released" banner, promoted planned
+// English sets, and required manual editorial updates that reliably
+// went stale (First Partner Series 3 shipped in August; the 30th
+// Anniversary entry was still marked "coming next" the day the set
+// actually launched). It has been replaced by a Recently Added Sets
+// strip further down the page which surfaces live catalogue content
+// instead of speculating about future releases.
 //
-// ctaHref semantics:
-//   * absolute URL (http[s]://…) — renders as a real outbound <a> with
-//     target="_blank" and rel="noopener noreferrer". No search-engine
-//     or tracking query strings; no affiliate parameters. This is a
-//     plain outbound link, not an affiliate link, so no affiliate
-//     disclosure surfaces around it.
-//   * null — renders as a disabled "Coming soon" pill preserving the
-//     CTA wording. Use this while no valid destination exists (no
-//     PokePrices preview route yet, no affiliate helper for the
-//     partner, etc.). When a valid destination lands later, wire it
-//     in and the CTA promotes to a real link automatically.
-//
-// Block 5A-W-47D-FIX1 — the First Partner CTA is now a real outbound
-// TCGPlayer product-page link (not an affiliate link — the site has
-// no TCGPlayer affiliate integration yet). The other two CTAs remain
-// null because no valid PokePrices preview route exists for them.
-type UpcomingRelease = {
-  name: string
-  contextLabel?: string
-  date: string
-  description: string
-  ctaLabel: string
-  ctaHref: string | null
-}
+// If you want to bring the upcoming-releases list back, restore the
+// `type UpcomingRelease` + `upcomingReleases` const from git history
+// and reintroduce the render block that used to live below the
+// Just Released banner (see commit 6c22a36 for the full shape).
 
-const upcomingReleases: UpcomingRelease[] = [
-  {
-    name: 'First Partner Illustration Collection – Series 3',
-    date: '7 August 2026',
-    description: 'To feature the starters from Hoenn, Kalos and Paldea.',
-    ctaLabel: 'Shop Presale on TCGPlayer',
-    // Block 5A-W-47D-FIX1 — clean TCGPlayer product-page URL with no
-    // query string, no srsltid, no affiliate parameters. Rendered as a
-    // plain outbound link (target=_blank, rel=noopener noreferrer).
-    ctaHref: 'https://www.tcgplayer.com/product/695400/pokemon-first-partner-collection-2026-first-partner-illustration-collection-series-3',
-  },
-  // 30th Anniversary Set entry removed 2026-09-19 — set launched as
-  // Pokémon 30th Celebration on 2026-09-16 and now has its own live
-  // catalogue at /set/30th%20Celebration (promoted from this "coming
-  // next" list into the primary New Release banner below).
-  {
-    name: 'Delta Reign',
-    date: '6 November 2026',
-    description: 'The sixth Mega Evolution set, featuring Mega Rayquaza ex, releases in English.',
-    ctaLabel: 'Preview the Delta Reign Card List as it becomes available',
-    ctaHref: null,
-  },
+// Recently added English sets — displayed in the "Recently added"
+// strip that replaced the "Coming next" list.
+//
+// Source (refresh when a new English set launches — usually 4–6× a
+// year, on the same day the scraper batch line is added):
+//     SELECT set_name, MAX(set_release_date) AS d
+//     FROM   cards
+//     WHERE  language = 'en' AND set_release_date IS NOT NULL
+//     GROUP  BY set_name
+//     ORDER  BY d DESC
+//     LIMIT  4
+// Last refreshed: 2026-09-19.
+type RecentSet = { name: string; date: string; releaseISO: string }
+const recentEnglishSets: RecentSet[] = [
+  { name: '30th Celebration', date: 'Released 16 September 2026', releaseISO: '2026-09-16' },
+  { name: 'Pitch Black',      date: 'Released 17 July 2026',      releaseISO: '2026-07-17' },
+  { name: 'Chaos Rising',     date: 'Released 22 May 2026',       releaseISO: '2026-05-22' },
+  { name: 'Perfect Order',    date: 'Released 27 March 2026',     releaseISO: '2026-03-27' },
 ]
 
 // Block 5A-W-40B — dropped the leading emoji glyphs. Feature-tile
@@ -396,7 +375,7 @@ export default function HomeClient() {
               color: 'rgba(255,255,255,0.9)', fontSize: 15, margin: '0 0 20px',
               lineHeight: 1.55, fontFamily: "'Figtree', sans-serif", fontWeight: 600,
             }}>
-              Live values · PSA 10 data · grading insights · 40,000+ cards · English & Japanese sets
+              Live values · PSA 10 data · grading insights · 65,000+ cards · English & Japanese sets
             </p>
 
             <div style={{ maxWidth: 560, marginBottom: 10 }}>
@@ -491,14 +470,75 @@ export default function HomeClient() {
               )}
             </div>
 
-            {/* Small hero "NEW RELEASE" chip removed 2026-09-19.
-                It had been promoting Pitch Black, which is no longer
-                the newest set (Pokémon 30th Celebration launched
-                2026-09-16). Rather than reword the chip for a stale
-                or duplicate promotion, the whole latest-set slot is
-                now consolidated into the larger banner further down
-                the page (search for "30TH CELEBRATION NEW-RELEASE
-                BANNER"). One prominent feature, no duplication. */}
+            {/* ── 30TH CELEBRATION NEW-RELEASE HERO BANNER ──
+                Primary new-release promotion. Sits inside the hero
+                left column beneath the auth-aware CTA row, so it's
+                visible without any scroll on desktop AND mobile.
+                Whole banner is a single crawlable Next.js <Link>
+                to /set/30th%20Celebration — no JS-only navigation.
+                There is only ONE new-release feature on the page;
+                the earlier lower banner was removed as part of the
+                same change (see git commit history for the diff).
+                No 30th Celebration logo exists in
+                public/set-assets/logos/, so the visual anchor is a
+                text-only "30" mark in the Outfit display font —
+                nothing invented or hotlinked. */}
+            <Link href="/set/30th%20Celebration" style={{
+              display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
+              marginTop: 20, padding: '18px 20px', borderRadius: 18,
+              background: 'linear-gradient(135deg, #b8791a 0%, #d99525 45%, #b8791a 100%)',
+              border: '1px solid rgba(255,255,255,0.22)',
+              boxShadow: '0 6px 22px rgba(0,0,0,0.18)',
+              textDecoration: 'none', color: '#fff',
+              transition: 'filter 0.15s',
+              maxWidth: 560,
+            }}
+              onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.filter = 'brightness(1.08)'}
+              onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.filter = ''}
+            >
+              <div aria-hidden="true" style={{
+                flexShrink: 0, width: 72, height: 72, borderRadius: '50%',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'rgba(255,255,255,0.14)',
+                border: '2px solid rgba(255,255,255,0.35)',
+                boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.15)',
+              }}>
+                <span style={{
+                  fontFamily: "'Outfit', sans-serif", fontWeight: 900,
+                  fontSize: 36, color: '#fff', lineHeight: 1,
+                  letterSpacing: -1, textShadow: '0 2px 6px rgba(0,0,0,0.25)',
+                }}>30</span>
+              </div>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span style={{
+                    background: 'var(--accent)', color: '#1a1a1a', fontSize: 10, fontWeight: 900,
+                    padding: '3px 8px', borderRadius: 4, letterSpacing: 1, textTransform: 'uppercase',
+                    fontFamily: "'Figtree', sans-serif",
+                  }}>New Release</span>
+                </div>
+                <span style={{
+                  display: 'block', fontSize: 22, fontWeight: 800,
+                  color: '#fff', fontFamily: "'Outfit', sans-serif",
+                  lineHeight: 1.15, letterSpacing: -0.2,
+                }}>Pokémon 30th Celebration</span>
+                <span style={{
+                  display: 'block', fontSize: 12.5,
+                  color: 'rgba(255,255,255,0.90)', marginTop: 4,
+                  fontFamily: "'Figtree', sans-serif", lineHeight: 1.45,
+                }}>
+                  158-card main set + 30 Classic Collection reprints · live prices and graded values
+                </span>
+              </div>
+              <span style={{
+                fontSize: 13, fontWeight: 800, color: '#fff',
+                padding: '9px 14px', borderRadius: 10,
+                background: 'rgba(255,255,255,0.18)',
+                border: '1px solid rgba(255,255,255,0.32)',
+                whiteSpace: 'nowrap', flexShrink: 0,
+                fontFamily: "'Figtree', sans-serif",
+              }}>Explore 30th Celebration →</span>
+            </Link>
           </div>
 
           {/* ── RIGHT COLUMN: AI panel + Market pulse card ── */}
@@ -578,7 +618,7 @@ export default function HomeClient() {
                 <p style={{
                   color: 'var(--text-muted)', fontSize: 11.5, margin: '6px 0 0', lineHeight: 1.5,
                 }}>
-                  40,000+ cards · 156+ sets · updated nightly
+                  65,000+ cards · 280+ sets · updated nightly
                 </p>
               </div>
             )}
@@ -656,7 +696,7 @@ export default function HomeClient() {
         <h2 style={{ fontSize: 22, margin: '0 0 14px', fontFamily: "'Outfit', sans-serif" }}>Start browsing</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
           {[
-            { title: 'Browse Cards & Sets',   desc: '40,000+ Pokémon cards across 156+ sets. Live raw and PSA 10 prices, grading data, and set completion tools.', href: '/browse'         },
+            { title: 'Browse Cards & Sets',   desc: '65,000+ Pokémon cards across 280+ sets. Live raw and PSA 10 prices, grading data, and set completion tools.', href: '/browse'         },
             { title: 'Browse Pokémon',        desc: "Every Pokémon species with all its cards, prices and grading history in one place.",                       href: '/pokemon'        },
             { title: 'Follow Market Movers',  desc: 'This week’s top risers, fallers, most volatile and most-traded cards — volume-verified.',            href: '#market-movers'  },
             { title: 'Read Market Insights',  desc: 'Grading guides, PSA 10 value gaps, chase-card analysis and market breakdowns.',                              href: '/insights'       },
@@ -783,170 +823,46 @@ export default function HomeClient() {
         </section>
       )}
 
-      {/* ── 30TH CELEBRATION NEW-RELEASE BANNER ──
-          Replaces the previous Chaos Rising "Just Released" banner
-          on 2026-09-19. This is now THE single primary latest-set
-          feature on the homepage. Whole banner is a single Next.js
-          <Link> to /set/30th%20Celebration (URL-encoded), so it's a
-          normal crawlable internal link — no JS-only navigation.
-
-          Design: no external image asset (there is no 30th
-          Celebration logo in public/set-assets/logos/), so a text-
-          only treatment with a large decorative "30" numeric mark
-          on the left. Larger H1 (fontSize 30) and richer copy vs
-          the prior Chaos Rising banner (fontSize 22). Reuses the
-          same var(--card), var(--border), var(--accent) tokens as
-          the rest of the page — no new dependency, no new asset. */}
+      {/* ── RECENTLY ADDED SETS ──
+          Replaces the previous "Coming next" / upcoming-releases strip
+          (retired 2026-09-19 — it kept going stale). This strip surfaces
+          the four most recently added English catalogue sets instead,
+          each a normal Next.js <Link> to its live set page. The list is
+          hardcoded from a DB query at deploy time (see the comment on
+          `recentEnglishSets`); refresh when a new English set launches. */}
       <section style={{ padding: '36px 24px 8px', maxWidth: 900, margin: '0 auto' }}>
-        <div style={{ background: 'var(--card)', borderRadius: 18, border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 4px 22px rgba(37,99,168,0.10)' }}>
-          <Link href="/set/30th%20Celebration" style={{
-            display: 'flex', alignItems: 'center', gap: 22, flexWrap: 'wrap',
-            background: 'linear-gradient(135deg, #b8791a 0%, #d99525 45%, #b8791a 100%)',
-            padding: '28px 28px',
-            textDecoration: 'none', transition: 'filter 0.15s',
-          }}
-            onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.filter = 'brightness(1.08)'}
-            onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.filter = ''}
-          >
-            {/* Text-only decorative "30" mark stands in for the missing
-                set-logo asset. Uses the same Outfit display font as the
-                site-wide H1s, so it feels at home in the design system. */}
-            <div aria-hidden="true" style={{
-              flexShrink: 0, width: 96, height: 96, borderRadius: '50%',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'rgba(255,255,255,0.14)',
-              border: '2px solid rgba(255,255,255,0.35)',
-              boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.15)',
-            }}>
-              <span style={{
-                fontFamily: "'Outfit', sans-serif", fontWeight: 900,
-                fontSize: 48, color: '#fff', lineHeight: 1,
-                letterSpacing: -1, textShadow: '0 2px 6px rgba(0,0,0,0.25)',
-              }}>30</span>
-            </div>
-            <div style={{ flex: 1, minWidth: 240 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <span style={{
-                  background: 'var(--accent)', color: '#1a1a1a', fontSize: 10, fontWeight: 900,
-                  padding: '3px 8px', borderRadius: 4, letterSpacing: 1, textTransform: 'uppercase',
-                  fontFamily: "'Figtree', sans-serif",
-                }}>New Release</span>
-                <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 11, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 700, fontFamily: "'Figtree', sans-serif" }}>
-                  Just Released
+        <div style={{ background: 'var(--card)', borderRadius: 18, border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 2px 15px rgba(37,99,168,0.06)', padding: '20px 24px' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+            <h2 style={{ fontSize: 16, margin: 0, fontFamily: "'Figtree', sans-serif", fontWeight: 800, color: 'var(--text)', letterSpacing: 0.3, textTransform: 'uppercase' }}>
+              Recently added sets
+            </h2>
+            <Link href="/browse" style={{ fontSize: 12, fontWeight: 800, color: 'var(--primary)', textDecoration: 'none', letterSpacing: 0.4 }}>
+              Browse all sets →
+            </Link>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+            {recentEnglishSets.map(s => (
+              <Link key={s.name} href={`/set/${encodeURIComponent(s.name)}`} style={{
+                display: 'flex', flexDirection: 'column',
+                padding: '14px 16px', background: 'var(--bg-light)',
+                borderRadius: 12, border: '1px solid var(--border-light)',
+                textDecoration: 'none', color: 'inherit',
+                transition: 'transform 0.15s, box-shadow 0.15s',
+              }}
+                onMouseEnter={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.transform = 'translateY(-2px)'; el.style.boxShadow = '0 6px 20px rgba(0,0,0,0.08)' }}
+                onMouseLeave={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.transform = ''; el.style.boxShadow = '' }}
+              >
+                <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)', fontFamily: "'Outfit', sans-serif", lineHeight: 1.2 }}>
+                  {s.name}
                 </span>
-              </div>
-              <h3 style={{
-                color: '#fff', fontSize: 30, margin: 0, fontWeight: 800,
-                fontFamily: "'Outfit', sans-serif", lineHeight: 1.15,
-                letterSpacing: -0.3,
-              }}>Pokémon 30th Celebration</h3>
-              <p style={{
-                color: 'rgba(255,255,255,0.85)', fontSize: 14, margin: '8px 0 0',
-                fontFamily: "'Figtree', sans-serif", lineHeight: 1.5,
-              }}>
-                Released 16 September 2026 · 158 main-set cards plus 30 Classic Collection reprints.
-                Live prices, PSA / CGC / BGS grade ladders and market data — updated nightly.
-              </p>
-            </div>
-            <span style={{
-              background: 'rgba(255,255,255,0.18)', color: '#fff', fontSize: 14, fontWeight: 800,
-              padding: '12px 20px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.32)',
-              fontFamily: "'Figtree', sans-serif", whiteSpace: 'nowrap',
-            }}>
-              Explore 30th Celebration →
-            </span>
-          </Link>
-          <div style={{ padding: '16px 24px' }}>
-            <p style={{ color: 'var(--text-muted)', fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', margin: '0 0 10px', fontFamily: "'Figtree', sans-serif" }}>
-              Coming next
-            </p>
-            {/* Block 5A-W-47D — expanded card layout so each entry can
-                carry the release date, a short description, and its
-                supplied CTA. CTAs render as disabled "Coming soon"
-                pills while no valid destination is wired up (see the
-                comment on `upcomingReleases`). Cards keep a single-
-                column stack on narrow viewports and grow to a
-                responsive multi-column grid at ~500px+. */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
-              {upcomingReleases.map(r => (
-                <div key={r.name} style={{
-                  display: 'flex', flexDirection: 'column',
-                  padding: '14px 16px', background: 'var(--bg-light)',
-                  borderRadius: 12, border: '1px solid var(--border-light)',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 6, marginBottom: 2 }}>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.25 }}>{r.name}</span>
-                    {r.contextLabel && (
-                      <span style={{
-                        fontSize: 10, fontWeight: 700, color: 'var(--text-muted)',
-                        background: 'var(--card)', border: '1px solid var(--border-light)',
-                        padding: '1px 6px', borderRadius: 4, letterSpacing: 0.3,
-                        fontFamily: "'Figtree', sans-serif", textTransform: 'uppercase',
-                      }}>{r.contextLabel}</span>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>
-                    {r.date}
-                  </div>
-                  <p style={{
-                    fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 10px',
-                    fontFamily: "'Figtree', sans-serif", lineHeight: 1.5,
-                  }}>
-                    {r.description}
-                  </p>
-                  {r.ctaHref ? (
-                    // Block 5A-W-47D-FIX1 — outbound absolute URLs
-                    // render as a plain <a> with target="_blank" and
-                    // rel="noopener noreferrer". Internal href strings
-                    // (should any land later — e.g. a PokePrices card-
-                    // list preview route) fall through to the
-                    // Next.js <Link> branch for client-side nav.
-                    /^https?:\/\//.test(r.ctaHref) ? (
-                      <a
-                        href={r.ctaHref}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{
-                          alignSelf: 'flex-start', marginTop: 'auto',
-                          fontSize: 12, fontWeight: 700,
-                          color: '#fff', background: 'var(--primary)',
-                          padding: '7px 12px', borderRadius: 8,
-                          textDecoration: 'none', border: '1px solid var(--primary)',
-                          fontFamily: "'Figtree', sans-serif",
-                        }}
-                      >{r.ctaLabel} →</a>
-                    ) : (
-                      <Link href={r.ctaHref} style={{
-                        alignSelf: 'flex-start', marginTop: 'auto',
-                        fontSize: 12, fontWeight: 700,
-                        color: '#fff', background: 'var(--primary)',
-                        padding: '7px 12px', borderRadius: 8,
-                        textDecoration: 'none', border: '1px solid var(--primary)',
-                        fontFamily: "'Figtree', sans-serif",
-                      }}>{r.ctaLabel} →</Link>
-                    )
-                  ) : (
-                    <span
-                      aria-disabled="true"
-                      title={`${r.ctaLabel} — coming soon`}
-                      style={{
-                        alignSelf: 'flex-start', marginTop: 'auto',
-                        display: 'inline-flex', alignItems: 'center', gap: 6,
-                        fontSize: 11.5, fontWeight: 700,
-                        color: 'var(--text-muted)',
-                        background: 'transparent',
-                        padding: '6px 10px', borderRadius: 8,
-                        border: '1px dashed var(--border-light)',
-                        fontFamily: "'Figtree', sans-serif",
-                        cursor: 'default',
-                      }}>
-                      {r.ctaLabel}
-                      <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6, opacity: 0.75 }}>· Coming soon</span>
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 4 }}>
+                  {s.date}
+                </span>
+                <span style={{ fontSize: 11.5, color: 'var(--primary)', fontWeight: 800, marginTop: 10, letterSpacing: 0.3, fontFamily: "'Figtree', sans-serif" }}>
+                  Explore set →
+                </span>
+              </Link>
+            ))}
           </div>
         </div>
       </section>
@@ -1021,8 +937,12 @@ export default function HomeClient() {
       <section style={{ background: 'linear-gradient(135deg, #1a5fad, #2874c8)', padding: '30px 24px' }}>
         <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', justifyContent: 'space-around', flexWrap: 'wrap', gap: 20 }}>
           {[
-            { val: '40,000+',  label: 'Cards Tracked'  },
-            { val: '156+',     label: 'Sets Covered'   },
+            // Numbers refreshed 2026-09-19 from the live DB:
+            //   SELECT COUNT(*)                 FROM cards → 65,040
+            //   SELECT COUNT(DISTINCT set_name) FROM cards → 288
+            // Rounded down slightly for the "+" phrasing.
+            { val: '65,000+',  label: 'Cards Tracked'  },
+            { val: '280+',     label: 'Sets Covered'   },
             { val: '5+ Years', label: 'Price History'  },
             { val: 'Nightly',  label: 'Price Updates'  },
             { val: totalMarket ? formatMarketTotal(totalMarket.value) : '—', label: 'Market Tracked' },

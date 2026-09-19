@@ -273,7 +273,11 @@ export function getHomeFaqItems(): FAQItem[] {
     },
     {
       question: 'How often are Pokémon card prices updated?',
-      answer: 'Raw, PSA 9 and PSA 10 prices for every tracked card refresh nightly. The 7-day, 30-day and 90-day percentage moves are recomputed at the same time. PSA population numbers are updated biweekly from PSA.com.',
+      answer: 'Raw, PSA 9 and PSA 10 prices for every tracked card refresh nightly from PriceCharting sold-listing data — the scraper runs at 08:00 UTC every day. The 7-day, 30-day and 90-day percentage moves are recomputed at the same time. PSA population numbers are updated biweekly from PSA.com. Prices are nightly, not real-time.',
+    },
+    {
+      question: 'How quickly are new Pokémon sets added to PokePrices?',
+      answer: 'New English sets are typically added within a day or two of release — the 30th Celebration set (16 September 2026) went live the same day, joining a catalogue of 65,000+ cards across 280+ sets. Once a new set is catalogued, it flows into the same nightly PriceCharting scrape as every other set, so raw and graded prices appear from the next scheduled run onward.',
     },
     {
       question: 'How do I know the PSA population data is accurate?',
