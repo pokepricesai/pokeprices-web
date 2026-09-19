@@ -369,12 +369,25 @@ function Momentum({ payload }: { payload: MissionControlPayload }) {
 
 // ─── section: page-type breakdown ──────────────────────────────────────
 
-function PageTypeBreakdown({ rows }: { rows: PageTypeRow[] }) {
-  // Suppress page types with 0 known AND 0 clicks — they add noise.
-  const shown = rows.filter(r => r.urls_known > 0 || r.clicks_28d > 0)
+function PageTypeBreakdown({ rows, reconciliation }: { rows: PageTypeRow[]; reconciliation: MissionControlPayload['reconciliation'] }) {
+  // Suppress page types with 0 known AND 0 clicks AND 0 impressions —
+  // they add noise. The `unmatched` bucket is always shown when it
+  // has any rollup activity so no data is silently hidden.
+  const shown = rows.filter(r => r.urls_known > 0 || r.clicks_28d > 0 || r.impressions_28d > 0)
+  const totals = shown.reduce((acc, r) => ({
+    urls_known: acc.urls_known + r.urls_known,
+    visible: acc.visible + r.urls_visible_28d,
+    clicks: acc.clicks + r.clicks_28d,
+    impressions: acc.impressions + r.impressions_28d,
+    productive: acc.productive + r.productive_28d,
+  }), { urls_known: 0, visible: 0, clicks: 0, impressions: 0, productive: 0 })
+  const inv = reconciliation.invariants
+  const allInvariantsPass =
+    inv.clicks_match_rollup && inv.impressions_match_rollup &&
+    inv.visible_match_rollup && inv.productive_match_rollup
   return (
     <Section title="Page-type performance · 28 days"
-             subtitle="Rollups joined with seo_pages.page_type. Sorted by 28d clicks. Zero-known-zero-clicks types hidden.">
+             subtitle="Rollups (canonicalised, deduped) joined with seo_pages.page_type. Sorted by 28d clicks. The `unmatched` bucket carries rollup rows whose canonical URL has no registry row.">
       <CardShell style={{ padding: 0, overflowX: 'auto' }}>
         <table style={{ width: '100%', minWidth: 720, borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
@@ -391,8 +404,15 @@ function PageTypeBreakdown({ rows }: { rows: PageTypeRow[] }) {
           </thead>
           <tbody>
             {shown.map(r => (
-              <tr key={r.page_type} style={{ borderTop: '1px solid var(--border)' }}>
-                <Td>{r.page_type}</Td>
+              <tr key={r.page_type} style={{
+                borderTop: '1px solid var(--border)',
+                background: r.page_type === 'unmatched' ? '#fff8e1' : undefined,
+              }}>
+                <Td>
+                  {r.page_type === 'unmatched'
+                    ? <span style={{ color: '#8a6d1a', fontWeight: 800 }}>unmatched</span>
+                    : r.page_type}
+                </Td>
                 <Td right>{int(r.urls_known)}</Td>
                 <Td right>{int(r.urls_visible_28d)}</Td>
                 <Td right>{int(r.clicks_28d)}</Td>
@@ -402,9 +422,37 @@ function PageTypeBreakdown({ rows }: { rows: PageTypeRow[] }) {
                 <Td right>{int(r.productive_28d)}</Td>
               </tr>
             ))}
+            <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg-light)' }}>
+              <Td><strong>Totals (displayed rows)</strong></Td>
+              <Td right><strong>{int(totals.urls_known)}</strong></Td>
+              <Td right><strong>{int(totals.visible)}</strong></Td>
+              <Td right><strong>{int(totals.clicks)}</strong></Td>
+              <Td right><strong>{int(totals.impressions)}</strong></Td>
+              <Td right>{totals.impressions > 0 ? pct(totals.clicks / totals.impressions) : '—'}</Td>
+              <Td right>—</Td>
+              <Td right><strong>{int(totals.productive)}</strong></Td>
+            </tr>
           </tbody>
         </table>
       </CardShell>
+      <div style={{
+        marginTop: 10, padding: '10px 12px', borderRadius: 10,
+        background: allInvariantsPass ? '#f0fdf4' : '#fef2f2',
+        border: `1px solid ${allInvariantsPass ? '#bbf7d0' : '#fecaca'}`,
+        fontSize: 12.5, lineHeight: 1.55,
+      }}>
+        <strong style={{ color: allInvariantsPass ? '#15803d' : '#b91c1c' }}>
+          {allInvariantsPass
+            ? 'Reconciliation OK — page-type sums equal the canonical-deduped rollup totals exactly.'
+            : 'Reconciliation FAILURE — page-type sums do not equal canonical-deduped rollup totals. Table is incomplete.'}
+        </strong>
+        <div style={{ color: 'var(--text-muted)', marginTop: 4, display: 'grid', gap: 2 }}>
+          <span>Σ page_types.clicks_28d      = {int(totals.clicks)}      vs rollup {int(reconciliation.rollup_clicks_28d)}      {inv.clicks_match_rollup ? '✓' : '✗'}</span>
+          <span>Σ page_types.impressions_28d = {int(totals.impressions)} vs rollup {int(reconciliation.rollup_impressions_28d)} {inv.impressions_match_rollup ? '✓' : '✗'}</span>
+          <span>Σ page_types.urls_visible_28d = {int(totals.visible)}     vs rollup {int(reconciliation.rollup_visible_28d)}     {inv.visible_match_rollup ? '✓' : '✗'}</span>
+          <span>Σ page_types.productive_28d  = {int(totals.productive)}  vs rollup {int(reconciliation.rollup_productive_28d)}  {inv.productive_match_rollup ? '✓' : '✗'}</span>
+        </div>
+      </div>
     </Section>
   )
 }
@@ -480,22 +528,36 @@ function TopPages({ rows }: { rows: TopPageRow[] }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
-              <tr key={r.url} style={{ borderTop: '1px solid var(--border)' }}>
-                <Td>
-                  <a href={r.url} target="_blank" rel="noopener noreferrer"
-                     style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 600 }}>
-                    {r.url.replace('https://www.pokeprices.io', '')}
-                  </a>
-                </Td>
-                <Td>{r.page_type}</Td>
-                <Td right>{int(r.clicks_28d)}</Td>
-                <Td right>{int(r.impressions_28d)}</Td>
-                <Td right>{pct(r.ctr_28d)}</Td>
-                <Td right>{pos(r.avg_position_28d)}</Td>
-                <Td right>{r.productive_28d ? '✓' : ''}</Td>
-              </tr>
-            ))}
+            {rows.map(r => {
+              const folded = r.raw_urls.length > 1
+              return (
+                <tr key={r.url} style={{ borderTop: '1px solid var(--border)' }}>
+                  <Td>
+                    <a href={r.url} target="_blank" rel="noopener noreferrer"
+                       style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 600 }}>
+                      {r.url.replace('https://www.pokeprices.io', '') || '/'}
+                    </a>
+                    {folded ? (
+                      <span title={r.raw_urls.join('\n')} style={{
+                        marginLeft: 6, fontSize: 10, padding: '1px 6px',
+                        borderRadius: 999, background: 'var(--bg-light)',
+                        color: 'var(--text-muted)', border: '1px solid var(--border)',
+                      }}>+{r.raw_urls.length - 1} variant{r.raw_urls.length > 2 ? 's' : ''}</span>
+                    ) : null}
+                  </Td>
+                  <Td>
+                    {r.page_type === 'unmatched'
+                      ? <span style={{ color: '#8a6d1a', fontWeight: 700 }}>unmatched</span>
+                      : r.page_type}
+                  </Td>
+                  <Td right>{int(r.clicks_28d)}</Td>
+                  <Td right>{int(r.impressions_28d)}</Td>
+                  <Td right>{pct(r.ctr_28d)}</Td>
+                  <Td right>{pos(r.avg_position_28d)}</Td>
+                  <Td right>{r.productive_28d ? '✓' : ''}</Td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </CardShell>
@@ -507,9 +569,14 @@ function TopPages({ rows }: { rows: TopPageRow[] }) {
 
 function DataHealth({ payload }: { payload: MissionControlPayload }) {
   const h = payload.data_health
+  const r = payload.reconciliation
+  const kpiDelta = r.kpi_vs_rollup_delta
+  const kpiDrift =
+    kpiDelta.clicks !== 0 || kpiDelta.impressions !== 0 ||
+    kpiDelta.visible !== 0 || kpiDelta.productive !== 0
   return (
     <Section title="Data health"
-             subtitle="Ingest freshness and recent failures. If any of these are stale, the numbers above are stale too.">
+             subtitle="Ingest freshness, recent failures, and rollup/KPI reconciliation. If any of these are stale or diverge, the numbers above are stale too.">
       <div style={{
         display: 'grid', gap: 12,
         gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
@@ -523,6 +590,52 @@ function DataHealth({ payload }: { payload: MissionControlPayload }) {
         <KpiCard label="Registry"
                  value={int(h.registry_size)}
                  sub={h.registry_last_seen_max ? `last_seen ${shortDateTime(h.registry_last_seen_max)}` : ''} />
+      </div>
+
+      {/* Canonical join audit + KPI/rollup drift — surfaced here so the
+          dashboard is honest about the state of its own aggregation. */}
+      <div style={{ marginTop: 12 }}>
+        <CardShell>
+          <div style={{
+            fontSize: 10, fontWeight: 900, letterSpacing: 1.3,
+            textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8,
+          }}>Join audit · rollup ↔ registry</div>
+          <div style={{ display: 'grid', gap: 4, fontSize: 12.5, lineHeight: 1.55 }}>
+            <span>Rollup rows loaded:                 <strong style={{ fontFeatureSettings: '"tnum"' }}>{int(r.rollup_rows_loaded)}</strong></span>
+            <span>Canonicalisation failures (dropped host / unparseable): <strong>{int(r.rollup_rows_canonicalisation_failed)}</strong></span>
+            <span>Distinct canonical URLs after dedup: <strong>{int(r.rollup_canonical_urls)}</strong>  <span style={{ color: 'var(--text-muted)' }}>({int(r.rollup_rows_loaded - r.rollup_canonical_urls)} raw variants folded)</span></span>
+            <span>Canonical URLs matched to seo_pages:  <strong style={{ color: r.unmatched_pages_lookup === 0 ? '#15803d' : '#b91c1c' }}>{int(r.matched_pages_lookup)}</strong></span>
+            <span>Canonical URLs unmatched (unmatched bucket): <strong style={{ color: r.unmatched_pages_lookup === 0 ? '#15803d' : '#b91c1c' }}>{int(r.unmatched_pages_lookup)}</strong>{r.unmatched_pages_lookup > 0
+              ? ` — ${int(r.unmatched_visible_28d)} visible, ${int(r.unmatched_clicks_28d)} clicks, ${int(r.unmatched_impressions_28d)} impressions`
+              : ''}</span>
+          </div>
+        </CardShell>
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <CardShell>
+          <div style={{
+            fontSize: 10, fontWeight: 900, letterSpacing: 1.3,
+            textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8,
+          }}>Rollup ↔ KPI cross-check</div>
+          <div style={{ fontSize: 12.5, lineHeight: 1.55 }}>
+            {kpiDrift ? (
+              <div style={{ color: '#b91c1c', fontWeight: 700, marginBottom: 6 }}>
+                Warning: canonical-deduped rollup totals differ from the KPI row for {shortDate(h.latest_kpi_date)}.
+              </div>
+            ) : (
+              <div style={{ color: '#15803d', fontWeight: 700, marginBottom: 6 }}>
+                Rollup totals match the KPI row exactly.
+              </div>
+            )}
+            <div style={{ color: 'var(--text-muted)', display: 'grid', gap: 2 }}>
+              <span>clicks_28d       — rollup {int(r.rollup_clicks_28d)}       · KPI {int(r.kpi_clicks_28d)}       · Δ {kpiDelta.clicks >= 0 ? '+' : ''}{int(kpiDelta.clicks)}</span>
+              <span>impressions_28d  — rollup {int(r.rollup_impressions_28d)}  · KPI {int(r.kpi_impressions_28d)}  · Δ {kpiDelta.impressions >= 0 ? '+' : ''}{int(kpiDelta.impressions)}</span>
+              <span>pages_visible_28d — rollup {int(r.rollup_visible_28d)}     · KPI {int(r.kpi_visible_28d)}     · Δ {kpiDelta.visible >= 0 ? '+' : ''}{int(kpiDelta.visible)}</span>
+              <span>pages_productive — rollup {int(r.rollup_productive_28d)}  · KPI {int(r.kpi_productive_28d)}  · Δ {kpiDelta.productive >= 0 ? '+' : ''}{int(kpiDelta.productive)}</span>
+            </div>
+          </div>
+        </CardShell>
       </div>
       {h.recent_failures.length > 0 ? (
         <div style={{ marginTop: 12 }}>
@@ -568,7 +681,7 @@ export default function SeoMissionControlClient({ payload }: { payload: MissionC
       <Funnel payload={payload} />
       <DailyTrend payload={payload} />
       <Momentum payload={payload} />
-      <PageTypeBreakdown rows={payload.page_types} />
+      <PageTypeBreakdown rows={payload.page_types} reconciliation={payload.reconciliation} />
       <VisibilityGap payload={payload} />
       <TopPages rows={payload.top_pages} />
       <DataHealth payload={payload} />

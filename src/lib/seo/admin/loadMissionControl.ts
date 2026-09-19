@@ -28,8 +28,8 @@ import 'server-only'
 import { getSupabaseServiceClient } from '@/lib/supabaseService'
 import type {
   MissionControlPayload, LatestKpi, DailyPoint, PeriodTotals,
-  MomentumBlock, PageTypeRow, TopPageRow, PageTypeKey,
-  FunnelBlock, VisibilityBlock, DataHealthBlock,
+  MomentumBlock, PageTypeRow, TopPageRow, PageTypeKey, PageTypeBucketKey,
+  FunnelBlock, VisibilityBlock, DataHealthBlock, ReconciliationBlock,
 } from './types'
 
 const SITE_KEY = 'pokeprices'
@@ -38,6 +38,29 @@ const TARGET_DATE = '2026-12-25'
 const TARGET_MIN  = 4000
 const TARGET_MAX  = 5000
 const BQ_EXPORT_STARTED_ON = '2026-09-16'   // annotation for the chart
+
+// Canonical URL constants — mirror scripts/seo/refresh-page-registry.mjs
+// exactly. Do NOT invent a second normalisation model; the registry
+// writes canonical URLs under these rules and the dashboard must join
+// against those same canonicals.
+const CANONICAL_ORIGIN = 'https://www.pokeprices.io'
+const CANONICAL_HOST   = 'www.pokeprices.io'
+
+/** Fold a raw GSC/rollup URL to the same canonical form used by
+ *  seo_pages. Returns null when the URL is not one of ours (wrong host
+ *  or unparseable). Mirrors refresh-page-registry.mjs canonicaliseUrl. */
+function canonicaliseUrl(u: string | null | undefined): string | null {
+  if (typeof u !== 'string' || u.length === 0) return null
+  try {
+    const parsed = new URL(u)
+    if (parsed.host !== CANONICAL_HOST && parsed.host !== 'pokeprices.io') return null
+    let p = parsed.pathname || '/'
+    if (p !== '/' && p.endsWith('/')) p = p.slice(0, -1)
+    return `${CANONICAL_ORIGIN}${p}`
+  } catch {
+    return null
+  }
+}
 
 // ── date helpers ─────────────────────────────────────────────────────────
 function isoDay(d: Date | string): string {
@@ -246,54 +269,111 @@ async function loadRollups(): Promise<RollupRow[]> {
   })
 }
 
-/** Join seo_pages with seo_page_rollups + rank by page_type. Only
- *  non-zero-visibility page types are surfaced. */
+/** Canonical-URL-keyed aggregate of one or more rollup rows. */
+type CanonicalRollup = {
+  canonical_url: string
+  raw_urls: string[]                  // one or more raw variants folded here
+  clicks_7d: number
+  clicks_28d: number
+  impressions_7d: number
+  impressions_28d: number
+  sum_position_28d: number
+  productive_28d: boolean             // recomputed from summed clicks
+}
+
+/**
+ * Fold raw rollup URLs to canonical form and sum any duplicates. This
+ * matters because seo_page_rollups is keyed on the RAW URL that was
+ * ingested from GSC — non-www and query-string variants show up as
+ * separate rollup rows even though they represent the same page. The
+ * dashboard must dedup to the same canonical form the registry uses
+ * or the page-type totals over-count.
+ */
+function canonicalisRollups(rollups: RollupRow[]): {
+  canonical: Map<string, CanonicalRollup>
+  parseFailedRows: RollupRow[]
+} {
+  const canonical = new Map<string, CanonicalRollup>()
+  const parseFailedRows: RollupRow[] = []
+  for (const r of rollups) {
+    const c = canonicaliseUrl(r.url)
+    if (!c) { parseFailedRows.push(r); continue }
+    const entry = canonical.get(c) ?? {
+      canonical_url: c, raw_urls: [],
+      clicks_7d: 0, clicks_28d: 0,
+      impressions_7d: 0, impressions_28d: 0,
+      sum_position_28d: 0, productive_28d: false,
+    }
+    entry.raw_urls.push(r.url)
+    entry.clicks_7d       += Number(r.clicks_7d ?? 0)
+    entry.clicks_28d      += Number(r.clicks_28d ?? 0)
+    entry.impressions_7d  += Number(r.impressions_7d ?? 0)
+    entry.impressions_28d += Number(r.impressions_28d ?? 0)
+    entry.sum_position_28d += Number(r.sum_position_28d ?? 0)
+    canonical.set(c, entry)
+  }
+  // Recompute productive_28d from the deduped click totals so it stays
+  // consistent with the summed value (a URL might cross the 28-click
+  // threshold only after its variants are combined).
+  canonical.forEach(e => { e.productive_28d = e.clicks_28d >= 28 })
+  return { canonical, parseFailedRows }
+}
+
+/** Join canonical-deduped rollups with seo_pages + rank by page_type.
+ *  Every canonical rollup lands in exactly one bucket — either the
+ *  page's `page_type` from the registry, or the explicit `unmatched`
+ *  bucket. Nothing is silently dropped. */
 function computePageTypeBreakdown(
   pagesByUrl: Map<string, PageRow>,
-  rollups: RollupRow[],
-): { rows: PageTypeRow[]; topPages: TopPageRow[] } {
-  const perType = new Map<PageTypeKey, PageTypeRow>()
+  canonicalRollups: Map<string, CanonicalRollup>,
+): { rows: PageTypeRow[]; topPages: TopPageRow[]; unmatched: {
+    visible: number; clicks: number; impressions: number; page_lookup_fails: number
+  } } {
+  const perType = new Map<PageTypeBucketKey, PageTypeRow>()
+
+  // urls_known counted across the whole registry per page_type.
   const knownByType = new Map<PageTypeKey, number>()
   pagesByUrl.forEach(p => {
     const pt = p.page_type as PageTypeKey
     knownByType.set(pt, (knownByType.get(pt) ?? 0) + 1)
   })
-  const rollupByUrl = new Map<string, RollupRow>()
-  for (const r of rollups) rollupByUrl.set(r.url, r)
 
-  for (const r of rollups) {
-    const page = pagesByUrl.get(r.url)
-    const pt = (page?.page_type as PageTypeKey | undefined) ?? 'other'
-    const acc = perType.get(pt) ?? {
-      page_type: pt,
-      urls_known: knownByType.get(pt) ?? 0,
-      urls_visible_28d: 0,
-      clicks_28d: 0,
-      impressions_28d: 0,
-      sum_position_28d: 0,
-      productive_28d: 0,
-      ctr_28d: null,
-      avg_position_28d: null,
-    }
-    if (Number(r.impressions_28d) > 0) acc.urls_visible_28d++
-    acc.clicks_28d      += Number(r.clicks_28d      ?? 0)
-    acc.impressions_28d += Number(r.impressions_28d ?? 0)
-    acc.sum_position_28d += Number(r.sum_position_28d ?? 0)
-    if (r.productive_28d) acc.productive_28d++
-    perType.set(pt, acc)
-  }
-  // Also ensure page_types that exist in the registry but have no
-  // visibility appear (with zero metrics) so the "known" column is
-  // truthful.
-  knownByType.forEach((known, pt) => {
-    if (!perType.has(pt)) {
-      perType.set(pt, {
-        page_type: pt, urls_known: known, urls_visible_28d: 0,
-        clicks_28d: 0, impressions_28d: 0, sum_position_28d: 0,
-        productive_28d: 0, ctr_28d: null, avg_position_28d: null,
-      })
-    }
+  const unmatched = { visible: 0, clicks: 0, impressions: 0, page_lookup_fails: 0 }
+
+  const empty = (page_type: PageTypeBucketKey, urls_known: number): PageTypeRow => ({
+    page_type, urls_known, urls_visible_28d: 0,
+    clicks_28d: 0, impressions_28d: 0, sum_position_28d: 0,
+    productive_28d: 0, ctr_28d: null, avg_position_28d: null,
   })
+
+  canonicalRollups.forEach(entry => {
+    const page = pagesByUrl.get(entry.canonical_url)
+    const pt: PageTypeBucketKey =
+      page ? (page.page_type as PageTypeKey) : 'unmatched'
+    if (!page) {
+      unmatched.page_lookup_fails++
+      unmatched.clicks      += entry.clicks_28d
+      unmatched.impressions += entry.impressions_28d
+      if (entry.impressions_28d > 0) unmatched.visible++
+    }
+    const acc = perType.get(pt) ?? empty(
+      pt,
+      pt === 'unmatched' ? 0 : (knownByType.get(pt as PageTypeKey) ?? 0),
+    )
+    if (entry.impressions_28d > 0) acc.urls_visible_28d++
+    acc.clicks_28d       += entry.clicks_28d
+    acc.impressions_28d  += entry.impressions_28d
+    acc.sum_position_28d += entry.sum_position_28d
+    if (entry.productive_28d) acc.productive_28d++
+    perType.set(pt, acc)
+  })
+
+  // Registry page_types that carry no rollup rows still appear with
+  // zero visibility metrics — makes the "known URLs" column honest.
+  knownByType.forEach((known, pt) => {
+    if (!perType.has(pt)) perType.set(pt, empty(pt, known))
+  })
+
   const rows = Array.from(perType.values())
     .map(a => ({
       ...a,
@@ -302,49 +382,33 @@ function computePageTypeBreakdown(
     }))
     .sort((a, b) => b.clicks_28d - a.clicks_28d || b.impressions_28d - a.impressions_28d)
 
-  // Top pages by 28d clicks, then impressions.
-  const top: TopPageRow[] = rollups
-    .slice()
-    .sort((a, b) => Number(b.clicks_28d) - Number(a.clicks_28d) || Number(b.impressions_28d) - Number(a.impressions_28d))
+  // Top pages ranked by 28d clicks, then impressions. Uses canonical
+  // rollups so www/non-www variants of the same page count once.
+  const top: TopPageRow[] = Array.from(canonicalRollups.values())
+    .sort((a, b) => b.clicks_28d - a.clicks_28d || b.impressions_28d - a.impressions_28d)
     .slice(0, 20)
-    .map(r => {
-      const page = pagesByUrl.get(r.url)
-      const pt: PageTypeRow['page_type'] | 'unknown' =
-        (page?.page_type as PageTypeKey | undefined) ?? 'unknown'
-      const imp = Number(r.impressions_28d ?? 0)
-      const clk = Number(r.clicks_28d ?? 0)
-      const sp = Number(r.sum_position_28d ?? 0)
+    .map(entry => {
+      const page = pagesByUrl.get(entry.canonical_url)
+      const pt: PageTypeBucketKey =
+        page ? (page.page_type as PageTypeKey) : 'unmatched'
+      const imp = entry.impressions_28d
+      const clk = entry.clicks_28d
+      const sp = entry.sum_position_28d
       return {
-        url: r.url,
-        page_type: pt as TopPageRow['page_type'],
+        url: entry.canonical_url,
+        raw_urls: entry.raw_urls,
+        page_type: pt,
         entity_id: page?.entity_id ?? null,
         clicks_28d: clk,
         impressions_28d: imp,
         sum_position_28d: sp,
         ctr_28d: imp > 0 ? clk / imp : null,
         avg_position_28d: imp > 0 ? sp / imp + 1 : null,
-        productive_28d: !!r.productive_28d,
+        productive_28d: entry.productive_28d,
       }
     })
 
-  return { rows, topPages: top }
-}
-
-/** Visibility gap counters. */
-function computeVisibility(pagesByUrl: Map<string, PageRow>, rollups: RollupRow[]): VisibilityBlock {
-  const rollupByUrl = new Map<string, RollupRow>()
-  for (const r of rollups) rollupByUrl.set(r.url, r)
-  let known_zero_visibility = 0
-  let sitemap_zero_visibility = 0
-  let visible_no_clicks = 0
-  let visible_ge1_click = 0
-  let visible_productive = 0
-  // We need to know in_sitemap per URL, which is a separate field on
-  // seo_pages. Passed via pagesByUrl below.
-  return {
-    known_zero_visibility, sitemap_zero_visibility,
-    visible_no_clicks, visible_ge1_click, visible_productive,
-  }
+  return { rows, topPages: top, unmatched }
 }
 
 /** Full pages+rollups+in_sitemap join for the visibility block. Small
@@ -442,19 +506,27 @@ export async function loadMissionControl(): Promise<MissionControlPayload> {
     loadInSitemapFlags(),
   ])
 
-  const { rows: page_types, topPages } = computePageTypeBreakdown(pagesByUrl, rollups)
+  // Fold www / non-www / query-string variants of the same URL to the
+  // single canonical form used by seo_pages. Every downstream aggregate
+  // (page-type breakdown, top pages, visibility, reconciliation) works
+  // off `canonicalRollups` — no raw-URL lookups against seo_pages.
+  const { canonical: canonicalRollups, parseFailedRows } = canonicalisRollups(rollups)
 
-  // Visibility block — computed here where we hold both maps.
-  const rollupByUrl = new Map(rollups.map(r => [r.url, r]))
+  const { rows: page_types, topPages, unmatched } =
+    computePageTypeBreakdown(pagesByUrl, canonicalRollups)
+
+  // Visibility block — join canonical rollups with the registry so
+  // www/non-www duplicates in the rollup table don't inflate the
+  // "known URLs with zero visibility" count.
   let known_zero_visibility = 0
   let sitemap_zero_visibility = 0
   let visible_no_clicks = 0
   let visible_ge1_click = 0
   let visible_productive = 0
   pagesByUrl.forEach(p => {
-    const r = rollupByUrl.get(p.url)
-    const impressions_28d = r ? Number(r.impressions_28d ?? 0) : 0
-    const clicks_28d      = r ? Number(r.clicks_28d ?? 0) : 0
+    const r = canonicalRollups.get(p.url)
+    const impressions_28d = r ? r.impressions_28d : 0
+    const clicks_28d      = r ? r.clicks_28d      : 0
     const in_sitemap      = !!inSitemapFlags.get(p.url)
     if (impressions_28d === 0) {
       known_zero_visibility++
@@ -469,6 +541,66 @@ export async function loadMissionControl(): Promise<MissionControlPayload> {
     known_zero_visibility,
     sitemap_zero_visibility,
     visible_no_clicks, visible_ge1_click, visible_productive,
+  }
+
+  // ── Reconciliation block ────────────────────────────────────────
+  // Canonical-deduped rollup totals — the "truth" the page-type table
+  // must reconcile to. Any discrepancy between these and the
+  // per-page-type sums indicates a bug in the aggregation, not an
+  // upstream data issue.
+  let rollup_clicks_28d = 0
+  let rollup_impressions_28d = 0
+  let rollup_visible_28d = 0
+  let rollup_productive_28d = 0
+  canonicalRollups.forEach(e => {
+    rollup_clicks_28d      += e.clicks_28d
+    rollup_impressions_28d += e.impressions_28d
+    if (e.impressions_28d > 0) rollup_visible_28d++
+    if (e.productive_28d) rollup_productive_28d++
+  })
+
+  let pt_clicks = 0, pt_impressions = 0, pt_visible = 0, pt_productive = 0
+  for (const row of page_types) {
+    pt_clicks      += row.clicks_28d
+    pt_impressions += row.impressions_28d
+    pt_visible     += row.urls_visible_28d
+    pt_productive  += row.productive_28d
+  }
+
+  let matched_pages_lookup = 0
+  canonicalRollups.forEach(e => {
+    if (pagesByUrl.get(e.canonical_url)) matched_pages_lookup++
+  })
+
+  const reconciliation: ReconciliationBlock = {
+    rollup_clicks_28d,
+    rollup_impressions_28d,
+    rollup_visible_28d,
+    rollup_productive_28d,
+    rollup_rows_loaded: rollups.length,
+    rollup_rows_canonicalisation_failed: parseFailedRows.length,
+    rollup_canonical_urls: canonicalRollups.size,
+    matched_pages_lookup,
+    unmatched_pages_lookup: unmatched.page_lookup_fails,
+    unmatched_visible_28d: unmatched.visible,
+    unmatched_clicks_28d: unmatched.clicks,
+    unmatched_impressions_28d: unmatched.impressions,
+    invariants: {
+      clicks_match_rollup:     pt_clicks      === rollup_clicks_28d,
+      impressions_match_rollup: pt_impressions === rollup_impressions_28d,
+      visible_match_rollup:    pt_visible     === rollup_visible_28d,
+      productive_match_rollup: pt_productive  === rollup_productive_28d,
+    },
+    kpi_clicks_28d:      kpi.clicks_28d,
+    kpi_impressions_28d: kpi.impressions_28d,
+    kpi_visible_28d:     kpi.pages_with_impressions_28d,
+    kpi_productive_28d:  kpi.pages_ge28_click_28d,
+    kpi_vs_rollup_delta: {
+      clicks:      rollup_clicks_28d      - kpi.clicks_28d,
+      impressions: rollup_impressions_28d - kpi.impressions_28d,
+      visible:     rollup_visible_28d     - kpi.pages_with_impressions_28d,
+      productive:  rollup_productive_28d  - kpi.pages_ge28_click_28d,
+    },
   }
 
   // Data health — uses count of pages already fetched.
@@ -503,6 +635,7 @@ export async function loadMissionControl(): Promise<MissionControlPayload> {
     momentum,
     page_types,
     top_pages: topPages,
+    reconciliation,
     data_health,
   }
 }

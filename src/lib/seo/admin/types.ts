@@ -11,6 +11,12 @@ export type PageTypeKey =
   | 'creator'  | 'insight' | 'card_show' | 'vendor'
   | 'dashboard' | 'ai_assistant' | 'browse'
   | 'quick_price' | 'grading' | 'auth' | 'other'
+// Not a registry page_type — used only in the page-type breakdown to
+// carry rollup rows whose canonical URL has no matching row in
+// seo_pages (e.g. legacy /card/[slug] URLs Google still cites).
+// Kept as an explicit bucket rather than silently dropped so the
+// dashboard totals reconcile to the rollup table.
+export type PageTypeBucketKey = PageTypeKey | 'unmatched'
 
 /** Site-wide KPI snapshot for the latest `seo_kpi_daily` (source=google). */
 export type LatestKpi = {
@@ -64,7 +70,7 @@ export type MomentumBlock = {
 
 /** Per-page-type aggregate (28-day window). */
 export type PageTypeRow = {
-  page_type: PageTypeKey
+  page_type: PageTypeBucketKey
   urls_known: number                  // count in seo_pages
   urls_visible_28d: number            // pages with impressions_28d > 0
   clicks_28d: number
@@ -77,8 +83,9 @@ export type PageTypeRow = {
 
 /** Row shown in the top-pages table. */
 export type TopPageRow = {
-  url: string
-  page_type: PageTypeKey | 'unknown'
+  url: string                         // canonical URL
+  raw_urls: string[]                  // one or more raw variants that folded to this canonical
+  page_type: PageTypeBucketKey
   entity_id: string | null
   clicks_28d: number
   impressions_28d: number
@@ -86,6 +93,56 @@ export type TopPageRow = {
   ctr_28d: number | null
   avg_position_28d: number | null
   productive_28d: boolean
+}
+
+/** Reconciliation results for the page-type aggregation. All numbers
+ *  are from `seo_page_rollups` (canonically deduped). If any invariant
+ *  is `false`, the client should surface it in the data-health section
+ *  rather than silently displaying an incomplete table. */
+export type ReconciliationBlock = {
+  // Aggregate totals from the canonical-deduped rollups.
+  rollup_clicks_28d: number
+  rollup_impressions_28d: number
+  rollup_visible_28d: number
+  rollup_productive_28d: number
+
+  // Canonicalisation stats.
+  rollup_rows_loaded: number
+  rollup_rows_canonicalisation_failed: number   // URL parse or wrong host
+  rollup_canonical_urls: number                 // after dedup
+
+  // Match stats vs seo_pages (all lookups performed on canonical URL).
+  matched_pages_lookup: number
+  unmatched_pages_lookup: number
+  unmatched_visible_28d: number
+  unmatched_clicks_28d: number
+  unmatched_impressions_28d: number
+
+  // Page-type breakdown reconciliation. These are TRUE iff
+  // SUM(page_types.<metric>) === rollup_<metric>. If any is false, the
+  // dashboard is dropping rollup data somewhere and the table must not
+  // be trusted.
+  invariants: {
+    clicks_match_rollup: boolean
+    impressions_match_rollup: boolean
+    visible_match_rollup: boolean
+    productive_match_rollup: boolean
+  }
+
+  // KPI vs rollup — advisory only. The KPI row is a separate write
+  // path and can drift from the rollup snapshot in rare cases (e.g.
+  // stale rollup rows carried across --as-of-date changes; see the
+  // "aging-out deferred" note in refresh-rollups-and-kpi.mjs).
+  kpi_clicks_28d: number
+  kpi_impressions_28d: number
+  kpi_visible_28d: number
+  kpi_productive_28d: number
+  kpi_vs_rollup_delta: {
+    clicks: number
+    impressions: number
+    visible: number
+    productive: number
+  }
 }
 
 /** Funnel numbers — every value read from the latest KPI row or from
@@ -144,5 +201,6 @@ export type MissionControlPayload = {
   momentum: MomentumBlock | null
   page_types: PageTypeRow[]
   top_pages: TopPageRow[]
+  reconciliation: ReconciliationBlock
   data_health: DataHealthBlock
 }
