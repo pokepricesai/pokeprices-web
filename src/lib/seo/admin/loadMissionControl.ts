@@ -203,6 +203,26 @@ async function loadDataHealth(
     .limit(10)
   if (e2) throw new Error(`data health (failures): ${e2.message}`)
 
+  // Most-recent page_daily_ingest run (any status).
+  const { data: lastPageDaily, error: e3 } = await supa
+    .from('seo_bq_ingest_runs')
+    .select('started_at, ended_at, status, rows_ingested, bytes_scanned, estimated_cost_usd, error')
+    .eq('site_key', SITE_KEY)
+    .eq('job_kind', 'page_daily_ingest')
+    .order('started_at', { ascending: false })
+    .limit(1).maybeSingle()
+  if (e3) throw new Error(`data health (page_daily_ingest): ${e3.message}`)
+
+  // Most-recent rollup_refresh run (any status).
+  const { data: lastRefresh, error: e4 } = await supa
+    .from('seo_bq_ingest_runs')
+    .select('started_at, ended_at, status, error')
+    .eq('site_key', SITE_KEY)
+    .eq('job_kind', 'rollup_refresh')
+    .order('started_at', { ascending: false })
+    .limit(1).maybeSingle()
+  if (e4) throw new Error(`data health (rollup_refresh): ${e4.message}`)
+
   return {
     latest_gsc_date: latestGscDate,
     latest_gsc_date_source: latestGscDate ? 'google' : null,
@@ -213,6 +233,21 @@ async function loadDataHealth(
     latest_ingest_status: (lastRun?.status as string | undefined) ?? null,
     registry_size: registrySize,
     registry_last_seen_max,
+    latest_page_daily_run: lastPageDaily ? {
+      started_at:  lastPageDaily.started_at as string,
+      ended_at:    (lastPageDaily.ended_at as string | null) ?? null,
+      status:      lastPageDaily.status as string,
+      rows_ingested: (lastPageDaily.rows_ingested as number | null) ?? null,
+      bytes_scanned: (lastPageDaily.bytes_scanned as number | null) ?? null,
+      estimated_cost_usd: (lastPageDaily.estimated_cost_usd as number | null) ?? null,
+      error:       (lastPageDaily.error as string | null) ?? null,
+    } : null,
+    latest_rollup_refresh_run: lastRefresh ? {
+      started_at:  lastRefresh.started_at as string,
+      ended_at:    (lastRefresh.ended_at as string | null) ?? null,
+      status:      lastRefresh.status as string,
+      error:       (lastRefresh.error as string | null) ?? null,
+    } : null,
     recent_failures: (fails ?? []).map(r => ({
       started_at: r.started_at as string,
       ended_at:   (r.ended_at as string | null) ?? null,

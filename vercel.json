@@ -16,6 +16,10 @@
     {
       "path": "/api/cron/publish-scheduled",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/seo-daily",
+      "schedule": "0 6 * * *"
     }
   ]
 }

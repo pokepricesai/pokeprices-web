@@ -176,6 +176,25 @@ export type DataHealthBlock = {
   latest_ingest_status: string | null
   registry_size: number               // count of seo_pages rows
   registry_last_seen_max: string | null    // MAX(last_seen_at) proxy for last refresh
+  /** Most-recent page_daily_ingest run (any status). Set by the
+   *  automation cron; visibility here is how the operator confirms
+   *  the daily pipeline is firing. Null when no run recorded yet. */
+  latest_page_daily_run: {
+    started_at: string
+    ended_at: string | null
+    status: string
+    rows_ingested: number | null
+    bytes_scanned: number | null
+    estimated_cost_usd: number | null
+    error: string | null
+  } | null
+  /** Most-recent rollup_refresh run (any status). */
+  latest_rollup_refresh_run: {
+    started_at: string
+    ended_at: string | null
+    status: string
+    error: string | null
+  } | null
   recent_failures: Array<{
     started_at: string
     ended_at: string | null

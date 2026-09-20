@@ -669,6 +669,63 @@ function DataHealth({ payload }: { payload: MissionControlPayload }) {
                  sub={h.registry_last_seen_max ? `last_seen ${shortDateTime(h.registry_last_seen_max)}` : ''} />
       </div>
 
+      {/* Daily-pipeline automation state. Shows the last Vercel-Cron
+          firing of /api/cron/seo-daily so the operator can see whether
+          the automation is healthy without opening Vercel dashboards. */}
+      <div style={{ marginTop: 12 }}>
+        <CardShell>
+          <div style={{
+            fontSize: 10, fontWeight: 900, letterSpacing: 1.3,
+            textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8,
+          }}>Automation · daily pipeline</div>
+          <div style={{ fontSize: 12.5, lineHeight: 1.55 }}>
+            {(() => {
+              const p = h.latest_page_daily_run
+              const r = h.latest_rollup_refresh_run
+              const stalePipeline =
+                (h.latest_gsc_date && h.latest_kpi_date && h.latest_gsc_date !== h.latest_kpi_date)
+              const anyError = (p?.status === 'error' || p?.status === 'aborted_budget'
+                              || r?.status === 'error')
+              const state =
+                anyError       ? { color: '#b91c1c', label: 'last run failed' } :
+                stalePipeline  ? { color: '#8a6d1a', label: 'KPI refresh pending — raw daily is ahead' } :
+                (p && r)       ? { color: '#15803d', label: 'healthy · latest ingest and refresh both current' } :
+                                 { color: 'var(--text-muted)', label: 'no automation history yet' }
+              return (
+                <div style={{ color: state.color, fontWeight: 700, marginBottom: 6 }}>{state.label}</div>
+              )
+            })()}
+            <div style={{ display: 'grid', gap: 4, color: 'var(--text-muted)' }}>
+              <span>
+                page_daily_ingest — {h.latest_page_daily_run ? (
+                  <>
+                    <strong style={{ color: h.latest_page_daily_run.status === 'ok' ? '#15803d' : '#b91c1c' }}>
+                      {h.latest_page_daily_run.status}
+                    </strong>
+                    {' at '}<strong style={{ color: 'var(--text)' }}>{shortDateTime(h.latest_page_daily_run.started_at)}</strong>
+                    {h.latest_page_daily_run.rows_ingested != null ? ` · ${int(h.latest_page_daily_run.rows_ingested)} rows` : ''}
+                    {h.latest_page_daily_run.bytes_scanned != null ? ` · ${int(h.latest_page_daily_run.bytes_scanned / 1024 / 1024)} MB scanned` : ''}
+                    {h.latest_page_daily_run.error ? ` · error: ${h.latest_page_daily_run.error.slice(0, 100)}` : ''}
+                  </>
+                ) : 'never run'}
+              </span>
+              <span>
+                rollup_refresh — {h.latest_rollup_refresh_run ? (
+                  <>
+                    <strong style={{ color: h.latest_rollup_refresh_run.status === 'ok' ? '#15803d' : '#b91c1c' }}>
+                      {h.latest_rollup_refresh_run.status}
+                    </strong>
+                    {' at '}<strong style={{ color: 'var(--text)' }}>{shortDateTime(h.latest_rollup_refresh_run.started_at)}</strong>
+                    {h.latest_rollup_refresh_run.error ? ` · error: ${h.latest_rollup_refresh_run.error.slice(0, 100)}` : ''}
+                  </>
+                ) : 'never run'}
+              </span>
+              <span style={{ opacity: 0.7 }}>Schedule: 06:00 UTC daily · /api/cron/seo-daily</span>
+            </div>
+          </div>
+        </CardShell>
+      </div>
+
       {/* Canonical join audit + KPI/rollup drift — surfaced here so the
           dashboard is honest about the state of its own aggregation. */}
       <div style={{ marginTop: 12 }}>
