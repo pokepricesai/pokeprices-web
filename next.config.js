@@ -8,6 +8,24 @@ const nextConfig = {
     // checked separately via `npm run typecheck:edge:diagnostic`.
     ignoreBuildErrors: false,
   },
+
+  // Stage 4C — SEO daily automation. The /api/cron/seo-daily route
+  // dynamically imports @google-cloud/bigquery, google-auth-library
+  // and @vercel/oidc for the Vercel-OIDC → WIF → SA-impersonation
+  // auth flow. Next.js file tracing on Linux (Vercel) trips ENOENT
+  // on optional/platform-specific bindings inside these packages —
+  // deployment cb14e08 build failed with exactly that. Marking them
+  // as serverExternalPackages tells Next.js to keep them as plain
+  // node_modules require() at runtime instead of tracing/bundling
+  // them, which is the Vercel-recommended pattern for Google Cloud
+  // SDKs. Not needed for the CLI script (scripts/seo/ingest-bq-page-
+  // daily.mjs), which is not part of the Next.js build.
+  serverExternalPackages: [
+    '@google-cloud/bigquery',
+    'google-auth-library',
+    '@vercel/oidc',
+  ],
+
   images: {
     remotePatterns: [
       {
