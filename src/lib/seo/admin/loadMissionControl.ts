@@ -629,7 +629,21 @@ export async function loadMissionControl(): Promise<MissionControlPayload> {
   }
 
   const asOf = kpi.as_of_date
-  const days_to_target = Math.max(0, daysBetween(asOf, TARGET_DATE))
+  // Days-to-target counts down from the actual server-render date, NOT
+  // the KPI as-of date. The KPI date can lag ingest by 1-3 days; a
+  // countdown anchored to it would drift as data refreshes. UTC "today"
+  // is stable within the revalidate window (5 min).
+  const nowDate = new Date()
+  const today_iso = isoDay(nowDate)
+  const generated_at = nowDate.toISOString()
+  const days_to_target = Math.max(0, daysBetween(today_iso, TARGET_DATE))
+  // Number of GSC daily dates beyond the current KPI snapshot. When
+  // this is > 0 the dashboard renders a "newer data ingested, KPI
+  // awaiting refresh" advisory so the mixed dates are not mistaken
+  // for one coherent current snapshot.
+  const newer_gsc_days = (latestGscInfo.date && latestGscInfo.date > asOf)
+    ? Math.max(0, daysBetween(asOf, latestGscInfo.date))
+    : 0
 
   return {
     target_date: TARGET_DATE,
@@ -637,7 +651,10 @@ export async function loadMissionControl(): Promise<MissionControlPayload> {
     target_clicks_per_day_max: TARGET_MAX,
     as_of_date: asOf,
     latest_gsc_date: latestGscInfo.date,
+    today_iso,
+    generated_at,
     days_to_target,
+    newer_gsc_days,
     bq_export_started_on: BQ_EXPORT_STARTED_ON,
     kpi,
     funnel,

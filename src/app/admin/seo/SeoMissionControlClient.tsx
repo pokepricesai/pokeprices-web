@@ -111,6 +111,55 @@ function DeltaChip({ label, value, color }: { label: string; value: string; colo
   )
 }
 
+// ─── section: freshness bar ───────────────────────────────────────────
+
+/** Top-of-page freshness strip. Always shown so the operator can see at
+ *  a glance which point-in-time the numbers below refer to and how
+ *  stale the cached render might be. Yellow advisory appears when the
+ *  latest GSC daily date is beyond the KPI snapshot date — the 7d and
+ *  daily-trend metrics reflect the newer data while the 28d/KPI-driven
+ *  metrics still reflect the older snapshot. */
+function FreshnessBar({ payload }: { payload: MissionControlPayload }) {
+  const generatedAt = new Date(payload.generated_at)
+  const generatedLabel = generatedAt.toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', timeZone: 'UTC',
+  }) + ' UTC'
+  const mixed = payload.newer_gsc_days > 0
+  return (
+    <div style={{
+      background: mixed ? '#fff8e1' : 'var(--bg-light)',
+      borderBottom: `1px solid ${mixed ? '#ffd97a' : 'var(--border)'}`,
+      padding: '8px 16px',
+      display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center',
+      fontSize: 12, fontFamily: "'Figtree', sans-serif",
+    }}>
+      <span style={{ color: 'var(--text-muted)' }}>
+        Generated at <strong style={{ color: 'var(--text)' }}>{generatedLabel}</strong>
+      </span>
+      <span style={{ color: 'var(--text-muted)' }}>·</span>
+      <span style={{ color: 'var(--text-muted)' }}>
+        Latest GSC daily date: <strong style={{ color: 'var(--text)' }}>{shortDate(payload.latest_gsc_date)}</strong>
+      </span>
+      <span style={{ color: 'var(--text-muted)' }}>·</span>
+      <span style={{ color: 'var(--text-muted)' }}>
+        KPI snapshot: <strong style={{ color: 'var(--text)' }}>{shortDate(payload.as_of_date)}</strong>
+      </span>
+      {mixed ? (
+        <span style={{
+          marginLeft: 'auto',
+          padding: '3px 10px', borderRadius: 20,
+          background: '#fff3cd', color: '#8a6d1a',
+          border: '1px solid #ffd97a',
+          fontWeight: 700, fontSize: 11.5,
+        }}>
+          {payload.newer_gsc_days} newer Google data day{payload.newer_gsc_days === 1 ? '' : 's'} ingested · 28-day KPI snapshot awaiting refresh
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
 // ─── section: mission header ───────────────────────────────────────────
 
 function MissionHeader({ payload }: { payload: MissionControlPayload }) {
@@ -118,6 +167,7 @@ function MissionHeader({ payload }: { payload: MissionControlPayload }) {
   const runRate7  = payload.momentum?.current.days ? payload.momentum.current.clicks / payload.momentum.current.days : null
   const progressMin = payload.target_clicks_per_day_min > 0 ? runRate28 / payload.target_clicks_per_day_min * 100 : 0
   const progressMax = payload.target_clicks_per_day_max > 0 ? runRate28 / payload.target_clicks_per_day_max * 100 : 0
+  const stale28d = payload.newer_gsc_days > 0
   return (
     <header style={{
       padding: '22px 20px 12px', maxWidth: 1400, margin: '0 auto',
@@ -141,20 +191,25 @@ function MissionHeader({ payload }: { payload: MissionControlPayload }) {
             Target: <strong style={{ color: 'var(--text)' }}>{shortDate(payload.target_date)}</strong>
             {'  ·  '}
             <strong style={{ color: 'var(--text)' }}>{payload.days_to_target}</strong> days remaining
+            {'  ·  '}
+            <span style={{ opacity: 0.75 }}>counted from {shortDate(payload.today_iso)}</span>
           </div>
         </div>
         <div style={{
           display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
           gap: 10, flex: '1 1 480px',
         }}>
-          <KpiCard label="Latest data (Google)" value={shortDate(payload.latest_gsc_date ?? payload.as_of_date)}
+          <KpiCard label="Latest Google daily"
+                   value={shortDate(payload.latest_gsc_date ?? payload.as_of_date)}
                    sub={payload.latest_gsc_date && payload.latest_gsc_date !== payload.as_of_date
-                     ? `KPI snapshot: ${shortDate(payload.as_of_date)}` : `KPI snapshot`} />
-          <KpiCard label="Current 28d run rate" value={`${int(runRate28)} /day`}
-                   sub={`= ${int(payload.kpi.clicks_28d)} clicks / 28 days`} />
+                     ? `KPI snapshot lags: ${shortDate(payload.as_of_date)}`
+                     : `matches KPI snapshot`} />
+          <KpiCard label={stale28d ? 'KPI-snapshot 28d run rate' : 'Current 28d run rate'}
+                   value={`${int(runRate28)} /day`}
+                   sub={`= ${int(payload.kpi.clicks_28d)} clicks / 28 days · as of ${shortDate(payload.as_of_date)}`} />
           <KpiCard label="Current 7d run rate"  value={runRate7 != null ? `${int(runRate7)} /day` : '—'}
-                   sub={payload.momentum ? `= ${int(payload.momentum.current.clicks)} / ${payload.momentum.current.days}d` : ''} />
-          <KpiCard label="Progress to target"
+                   sub={payload.momentum ? `= ${int(payload.momentum.current.clicks)} / ${payload.momentum.current.days}d · through ${shortDate(payload.momentum.current.to)}` : ''} />
+          <KpiCard label={stale28d ? 'Progress to target (KPI-snapshot)' : 'Progress to target'}
                    value={`${progressMax.toFixed(1)}–${progressMin.toFixed(1)}%`}
                    sub={`vs ${payload.target_clicks_per_day_min}–${payload.target_clicks_per_day_max} /day`} />
         </div>
@@ -171,9 +226,11 @@ function KpiScoreboard({ payload }: { payload: MissionControlPayload }) {
   const productiveShare = k.total_urls_known > 0 ? k.pages_ge28_click_28d / k.total_urls_known : 0
   const visibleShareOfKnown = k.total_urls_known > 0 ? k.pages_with_impressions_28d / k.total_urls_known : 0
   const visibleShareOfSitemap = k.urls_in_sitemap > 0 ? k.pages_with_impressions_28d / k.urls_in_sitemap : 0
+  const asOfLabel = shortDate(payload.as_of_date)
 
   return (
-    <Section title="Scoreboard" subtitle="Live numbers from seo_kpi_daily · seo_page_rollups · seo_pages.">
+    <Section title="Scoreboard"
+             subtitle={`Sum / CTR / position metrics from seo_kpi_daily. Per-URL counts are RAW GSC URLs (www + non-www variants each count once). 28d values are as of ${asOfLabel}${payload.newer_gsc_days > 0 ? ' — newer daily data is ingested but the KPI snapshot has not been refreshed yet.' : '.'}`}>
       <div style={{
         display: 'grid', gap: 12,
         gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
@@ -190,16 +247,16 @@ function KpiScoreboard({ payload }: { payload: MissionControlPayload }) {
         <KpiCard label="Avg position · 7d"
                  value={pos(m?.current.avg_position ?? null)}
                  sub={`28d: ${pos(k.avg_position_28d)}    (lower is better)`} />
-        <KpiCard label="Productive pages (≥28 clicks 28d)"
+        <KpiCard label="Productive GSC URLs (≥28 clicks · 28d)"
                  value={int(k.pages_ge28_click_28d)}
-                 sub={`${(productiveShare * 100).toFixed(3)}% of ${int(k.total_urls_known)} known URLs`} />
-        <KpiCard label="Visible pages (impressions 28d)"
+                 sub={`${(productiveShare * 100).toFixed(3)}% of ${int(k.total_urls_known)} known canonical URLs`} />
+        <KpiCard label="Visible GSC URLs (28d)"
                  value={int(k.pages_with_impressions_28d)}
-                 sub={`${(visibleShareOfKnown * 100).toFixed(1)}% of known · ${(visibleShareOfSitemap * 100).toFixed(1)}% of sitemap`} />
-        <KpiCard label="Clicking pages"
+                 sub={`${(visibleShareOfKnown * 100).toFixed(1)}% of canonical known · ${(visibleShareOfSitemap * 100).toFixed(1)}% of sitemap`} />
+        <KpiCard label="GSC URLs with clicks (28d)"
                  value={int(k.pages_ge1_click_28d)}
                  sub={`≥10 clicks: ${int(k.pages_ge10_click_28d)} · ≥28 clicks: ${int(k.pages_ge28_click_28d)}`} />
-        <KpiCard label="Catalogue coverage"
+        <KpiCard label="Catalogue coverage (canonical)"
                  value={int(k.total_urls_known)}
                  sub={`Sitemap: ${int(k.urls_in_sitemap)} · Cards confirmed indexable: ${int(k.urls_indexable)}`} />
       </div>
@@ -211,18 +268,25 @@ function KpiScoreboard({ payload }: { payload: MissionControlPayload }) {
 
 function Funnel({ payload }: { payload: MissionControlPayload }) {
   const f = payload.funnel
+  const v = payload.visibility
+  // Top two stages are canonical URL counts (from seo_pages); the four
+  // GSC-driven stages are RAW GSC URL counts (from seo_kpi_daily's
+  // per-URL accumulator, which keys on raw ingested URLs). We surface
+  // the raw↔canonical delta inline where applicable so the ~50-URL
+  // gap between kpi.pages_with_impressions_28d and the dashboard's
+  // canonical visible count is not mistaken for a bug.
   const stages = [
-    { label: 'Known URLs',            value: f.known,            base: f.known },
-    { label: 'In sitemap',            value: f.in_sitemap,       base: f.known },
-    { label: 'Visible in Google (28d impressions)', value: f.visible_28d,    base: f.in_sitemap },
-    { label: 'Got ≥1 click (28d)',    value: f.clicks_ge1_28d,   base: f.visible_28d },
-    { label: 'Got ≥10 clicks (28d)',  value: f.clicks_ge10_28d,  base: f.clicks_ge1_28d },
-    { label: 'Productive (≥28 clicks 28d)', value: f.clicks_ge28_28d, base: f.clicks_ge10_28d },
+    { label: 'Known canonical URLs',              value: f.known,          base: f.known,          scope: 'canonical' as const },
+    { label: 'In sitemap (canonical)',            value: f.in_sitemap,     base: f.known,          scope: 'canonical' as const },
+    { label: 'Visible GSC URLs (28d)',            value: f.visible_28d,    base: f.in_sitemap,     scope: 'raw' as const,       canonicalCounterpart: v.visible_ge1_click + v.visible_no_clicks },
+    { label: 'GSC URLs with ≥1 click (28d)',      value: f.clicks_ge1_28d, base: f.visible_28d,    scope: 'raw' as const,       canonicalCounterpart: v.visible_ge1_click },
+    { label: 'GSC URLs with ≥10 clicks (28d)',    value: f.clicks_ge10_28d, base: f.clicks_ge1_28d, scope: 'raw' as const },
+    { label: 'Productive GSC URLs (≥28 clicks · 28d)', value: f.clicks_ge28_28d, base: f.clicks_ge10_28d, scope: 'raw' as const },
   ]
   const globalMax = stages[0].value || 1
   return (
     <Section title="Discovery → visibility → productivity funnel"
-             subtitle="Every stage read from live DB values. Percentages are conversion from the previous stage.">
+             subtitle="Top two stages count canonical URLs from the registry (seo_pages). Lower four stages count RAW GSC URLs from the KPI snapshot — www/non-www variants of the same page each count once. Percentages are conversion from the previous stage.">
       <div style={{ display: 'grid', gap: 8 }}>
         {stages.map((s, i) => {
           const share = globalMax > 0 ? s.value / globalMax : 0
@@ -230,7 +294,7 @@ function Funnel({ payload }: { payload: MissionControlPayload }) {
           return (
             <div key={s.label} style={{
               display: 'grid', gap: 8,
-              gridTemplateColumns: 'minmax(260px, 1fr) minmax(120px, 130px) minmax(90px, 100px)',
+              gridTemplateColumns: 'minmax(260px, 1fr) minmax(150px, 170px) minmax(90px, 100px)',
               alignItems: 'center',
               background: 'var(--card)', border: '1px solid var(--border)',
               borderRadius: 10, padding: '8px 12px',
@@ -253,7 +317,14 @@ function Funnel({ payload }: { payload: MissionControlPayload }) {
                   }}>{s.label}</div>
                 </div>
               </div>
-              <div style={{ fontSize: 15, fontWeight: 900, fontFeatureSettings: '"tnum"' }}>{int(s.value)}</div>
+              <div style={{ fontFeatureSettings: '"tnum"' }}>
+                <div style={{ fontSize: 15, fontWeight: 900 }}>{int(s.value)}</div>
+                {s.scope === 'raw' && s.canonicalCounterpart != null ? (
+                  <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
+                    ≈ {int(s.canonicalCounterpart)} canonical
+                  </div>
+                ) : null}
+              </div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFeatureSettings: '"tnum"' }}>
                 {stepPct == null ? '—' : `${(stepPct * 100).toFixed(2)}%`}
                 {stepPct != null ? <span style={{ opacity: 0.7 }}> from prev</span> : null}
@@ -482,27 +553,28 @@ function Td({ children, right }: { children: React.ReactNode; right?: boolean })
 function VisibilityGap({ payload }: { payload: MissionControlPayload }) {
   const v = payload.visibility
   const total = payload.kpi.total_urls_known
+  const k = payload.kpi
   return (
-    <Section title="Visibility gap · catalogue coverage"
-             subtitle="How much of the catalogue Google is actually rendering. Zeroes point to the expansion opportunity.">
+    <Section title="Visibility gap · canonical catalogue coverage"
+             subtitle="Canonical pages joined with the canonical-deduped rollup. Every count below is a distinct canonical URL, not a raw GSC URL variant. Zeroes point to the expansion opportunity.">
       <div style={{
         display: 'grid', gap: 12,
         gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
       }}>
-        <KpiCard label="Known URLs with zero 28d visibility"
+        <KpiCard label="Canonical pages with zero 28d visibility"
                  value={int(v.known_zero_visibility)}
-                 sub={total > 0 ? `${(v.known_zero_visibility / total * 100).toFixed(1)}% of all known URLs` : ''} />
+                 sub={total > 0 ? `${(v.known_zero_visibility / total * 100).toFixed(1)}% of all known canonical URLs` : ''} />
         <KpiCard label="Sitemap URLs with zero 28d visibility"
                  value={int(v.sitemap_zero_visibility)}
                  sub={payload.kpi.urls_in_sitemap > 0
-                   ? `${(v.sitemap_zero_visibility / payload.kpi.urls_in_sitemap * 100).toFixed(1)}% of sitemap URLs`
+                   ? `${(v.sitemap_zero_visibility / payload.kpi.urls_in_sitemap * 100).toFixed(1)}% of sitemap URLs (canonical)`
                    : ''} />
-        <KpiCard label="Visible but zero clicks (28d)"
+        <KpiCard label="Canonical pages visible but no clicks (28d)"
                  value={int(v.visible_no_clicks)}
                  sub="Impressions but no engagement — CTR opportunity" />
-        <KpiCard label="Clicking pages (≥1 click 28d)"
+        <KpiCard label="Canonical pages with ≥1 click (28d)"
                  value={int(v.visible_ge1_click)}
-                 sub={`Productive (≥28 clicks): ${int(v.visible_productive)}`} />
+                 sub={`Productive canonical pages (≥28 clicks): ${int(v.visible_productive)}    ·    KPI (raw): ${int(k.pages_ge1_click_28d)} / ${int(k.pages_ge28_click_28d)}`} />
       </div>
     </Section>
   )
@@ -571,9 +643,13 @@ function DataHealth({ payload }: { payload: MissionControlPayload }) {
   const h = payload.data_health
   const r = payload.reconciliation
   const kpiDelta = r.kpi_vs_rollup_delta
+  // NOTE: visible-count delta is expected non-zero when non-www
+  // variants of the same page appear as separate raw GSC rows —
+  // canonicalisation folds them for the dashboard's counts but the
+  // KPI's per-URL count keeps the variants separate. It is not drift.
   const kpiDrift =
     kpiDelta.clicks !== 0 || kpiDelta.impressions !== 0 ||
-    kpiDelta.visible !== 0 || kpiDelta.productive !== 0
+    kpiDelta.productive !== 0
   return (
     <Section title="Data health"
              subtitle="Ingest freshness, recent failures, and rollup/KPI reconciliation. If any of these are stale or diverge, the numbers above are stale too.">
@@ -617,22 +693,39 @@ function DataHealth({ payload }: { payload: MissionControlPayload }) {
           <div style={{
             fontSize: 10, fontWeight: 900, letterSpacing: 1.3,
             textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8,
-          }}>Rollup ↔ KPI cross-check</div>
+          }}>Rollup ↔ KPI cross-check (canonical-deduped rollup vs raw KPI counts)</div>
           <div style={{ fontSize: 12.5, lineHeight: 1.55 }}>
-            {kpiDrift ? (
-              <div style={{ color: '#b91c1c', fontWeight: 700, marginBottom: 6 }}>
-                Warning: canonical-deduped rollup totals differ from the KPI row for {shortDate(h.latest_kpi_date)}.
-              </div>
-            ) : (
-              <div style={{ color: '#15803d', fontWeight: 700, marginBottom: 6 }}>
-                Rollup totals match the KPI row exactly.
-              </div>
-            )}
+            {(() => {
+              // Sums (clicks / impressions / productive) MUST match the
+              // KPI — canonicalisation is a set-membership operation
+              // that never adds or drops rows from a sum. The visible
+              // count is expected to differ when non-www variants have
+              // impressions: raw counts them as separate URLs, canonical
+              // folds them.
+              const nonSumDrift =
+                kpiDelta.clicks !== 0 || kpiDelta.impressions !== 0 || kpiDelta.productive !== 0
+              const visibleDeltaOnly = !nonSumDrift && kpiDelta.visible !== 0
+              if (nonSumDrift) return (
+                <div style={{ color: '#b91c1c', fontWeight: 700, marginBottom: 6 }}>
+                  Warning: rollup sums differ from the KPI row for {shortDate(h.latest_kpi_date)}.
+                </div>
+              )
+              if (visibleDeltaOnly) return (
+                <div style={{ color: '#8a6d1a', fontWeight: 700, marginBottom: 6 }}>
+                  Rollup sums match KPI exactly. Visible-count differs by {int(Math.abs(kpiDelta.visible))} — expected canonicalisation dedup, not drift.
+                </div>
+              )
+              return (
+                <div style={{ color: '#15803d', fontWeight: 700, marginBottom: 6 }}>
+                  Rollup totals match the KPI row exactly.
+                </div>
+              )
+            })()}
             <div style={{ color: 'var(--text-muted)', display: 'grid', gap: 2 }}>
               <span>clicks_28d       — rollup {int(r.rollup_clicks_28d)}       · KPI {int(r.kpi_clicks_28d)}       · Δ {kpiDelta.clicks >= 0 ? '+' : ''}{int(kpiDelta.clicks)}</span>
               <span>impressions_28d  — rollup {int(r.rollup_impressions_28d)}  · KPI {int(r.kpi_impressions_28d)}  · Δ {kpiDelta.impressions >= 0 ? '+' : ''}{int(kpiDelta.impressions)}</span>
-              <span>pages_visible_28d — rollup {int(r.rollup_visible_28d)}     · KPI {int(r.kpi_visible_28d)}     · Δ {kpiDelta.visible >= 0 ? '+' : ''}{int(kpiDelta.visible)}</span>
-              <span>pages_productive — rollup {int(r.rollup_productive_28d)}  · KPI {int(r.kpi_productive_28d)}  · Δ {kpiDelta.productive >= 0 ? '+' : ''}{int(kpiDelta.productive)}</span>
+              <span>visible_28d      — canonical-rollup {int(r.rollup_visible_28d)}  · KPI (raw) {int(r.kpi_visible_28d)}  · Δ {kpiDelta.visible >= 0 ? '+' : ''}{int(kpiDelta.visible)}   {kpiDelta.visible !== 0 ? '(canonicalisation dedup — expected)' : ''}</span>
+              <span>productive       — rollup {int(r.rollup_productive_28d)}  · KPI {int(r.kpi_productive_28d)}  · Δ {kpiDelta.productive >= 0 ? '+' : ''}{int(kpiDelta.productive)}</span>
             </div>
           </div>
         </CardShell>
@@ -676,6 +769,7 @@ function DataHealth({ payload }: { payload: MissionControlPayload }) {
 export default function SeoMissionControlClient({ payload }: { payload: MissionControlPayload }) {
   return (
     <div style={{ fontFamily: "'Figtree', sans-serif", background: 'var(--bg)', minHeight: '100vh' }}>
+      <FreshnessBar payload={payload} />
       <MissionHeader payload={payload} />
       <KpiScoreboard payload={payload} />
       <Funnel payload={payload} />
@@ -687,9 +781,11 @@ export default function SeoMissionControlClient({ payload }: { payload: MissionC
       <DataHealth payload={payload} />
       <div style={{
         color: 'var(--text-muted)', fontSize: 11, textAlign: 'center',
-        padding: '20px 20px 40px',
+        padding: '20px 20px 40px', lineHeight: 1.7,
       }}>
         Admin-only · noindex · every number read from seo_kpi_daily · seo_page_rollups · seo_gsc_page_daily · seo_pages · seo_bq_ingest_runs
+        <br />
+        Payload cached for up to 5 minutes on Vercel · see the freshness bar at the top of the page for generation time and data-date state.
       </div>
     </div>
   )

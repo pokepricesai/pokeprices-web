@@ -190,9 +190,12 @@ export type MissionControlPayload = {
   target_date: string                 // '2026-12-25'
   target_clicks_per_day_min: number   // 4000
   target_clicks_per_day_max: number   // 5000
-  as_of_date: string                  // latest KPI date
-  latest_gsc_date: string | null
-  days_to_target: number
+  as_of_date: string                  // latest KPI date (may lag latest_gsc_date)
+  latest_gsc_date: string | null      // latest date in seo_gsc_page_daily
+  today_iso: string                   // server render-time date, UTC YYYY-MM-DD
+  generated_at: string                // full ISO timestamp of this payload build
+  days_to_target: number              // countdown from `today_iso` (not `as_of_date`)
+  newer_gsc_days: number              // count of GSC daily dates beyond as_of_date
   bq_export_started_on: string        // '2026-09-16' — annotation only
   kpi: LatestKpi
   funnel: FunnelBlock

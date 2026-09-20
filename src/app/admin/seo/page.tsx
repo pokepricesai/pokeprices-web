@@ -21,11 +21,15 @@ export const metadata: Metadata = {
   alternates: { canonical: null },
 }
 
-// Long-ish revalidate window — the underlying data refreshes at most daily
-// (BigQuery ingest runs nightly, KPI/rollup refresh after that). Serving a
-// slightly stale snapshot for up to an hour keeps the page snappy and
-// avoids re-aggregating 146k rows on every hit.
-export const revalidate = 1800
+// Revalidate every 5 minutes. The underlying data refreshes at most
+// daily (BigQuery ingest is nightly, KPI/rollup refresh follows), but a
+// 30-minute window was long enough that a fresh ingest could sit
+// invisible for a noticeable time. 5 minutes keeps the DB cost trivial
+// — this is an admin-only page with a single user, and Vercel dedups
+// concurrent renders — while making cache staleness easy to spot.
+// Anyone worried about a rendered snapshot's freshness can consult the
+// "Generated at" footer and the two data dates in the header.
+export const revalidate = 300
 
 export default async function SeoMissionControlPage() {
   await requireAdminPage('/admin/seo')
