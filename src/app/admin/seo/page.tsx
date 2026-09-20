@@ -21,15 +21,17 @@ export const metadata: Metadata = {
   alternates: { canonical: null },
 }
 
-// Revalidate every 5 minutes. The underlying data refreshes at most
-// daily (BigQuery ingest is nightly, KPI/rollup refresh follows), but a
-// 30-minute window was long enough that a fresh ingest could sit
-// invisible for a noticeable time. 5 minutes keeps the DB cost trivial
-// — this is an admin-only page with a single user, and Vercel dedups
-// concurrent renders — while making cache staleness easy to spot.
-// Anyone worried about a rendered snapshot's freshness can consult the
-// "Generated at" footer and the two data dates in the header.
-export const revalidate = 300
+// Revalidate every 30 minutes. Restored from the 5-minute value
+// earlier this stage — the current Node-side aggregation is expensive
+// (paged reads across seo_gsc_page_daily / seo_page_rollups /
+// seo_pages producing 300+ Supabase requests per cold rebuild), so
+// firing it every 5 minutes made cold renders visible to the user.
+// The Stage 4A-perf follow-up will move aggregation into Postgres
+// RPCs, after which revalidate can be tightened again if desired.
+// Underlying search data updates at most daily so 30 minutes is
+// comfortable for freshness. The "Generated at" bar at the top of
+// the page tells the operator exactly which snapshot they're seeing.
+export const revalidate = 1800
 
 export default async function SeoMissionControlPage() {
   await requireAdminPage('/admin/seo')
