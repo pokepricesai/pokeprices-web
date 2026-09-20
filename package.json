@@ -19,6 +19,7 @@
     "audit:jp-manual-assets": "node scripts/set-assets/jp-manual-audit.mjs"
   },
   "dependencies": {
+    "@google-cloud/bigquery": "^7.9.0",
     "@react-email/components": "^1.0.12",
     "@react-email/render": "^2.0.8",
     "@supabase/ssr": "^0.12.0",
@@ -30,7 +31,9 @@
     "@tiptap/pm": "^2.27.3",
     "@tiptap/react": "^2.27.3",
     "@tiptap/starter-kit": "^2.27.3",
+    "@vercel/oidc": "^3.0.4",
     "@vercel/og": "^0.11.1",
+    "google-auth-library": "^9.14.0",
     "html2canvas": "^1.4.1",
     "next": "^16.0.10",
     "react": "^18.3.0",

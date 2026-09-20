@@ -23,3 +23,16 @@ seo/exports/
 # never committed. The scaffold script recreates the folder structure
 # locally. Only manual-assets/jp/README.md + the two indexes ship.
 manual-assets/jp/inbox/
+.vercel
+
+# SEO Mission Control — never commit BigQuery / GSC exports or credentials.
+# NOTE: production auth uses Vercel OIDC → Google Workload Identity Federation.
+# No service-account JSON key is expected to exist anywhere. The *.json /
+# credentials/ patterns below are defence-in-depth against an accidental key
+# arriving from an unrelated context.
+credentials/
+*.serviceaccount.json
+gcp-*.json
+seo-bq-inspection-*.json
+reports/seo-bq-inspection-*.json
+reports/seo-bq-*.json
