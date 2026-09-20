@@ -20,6 +20,7 @@ import {
 import type {
   MissionControlPayload, PageTypeRow, TopPageRow, DailyPoint,
 } from '@/lib/seo/admin/types'
+import OpportunitiesPanel from './OpportunitiesPanel'
 
 // ─── formatting helpers ─────────────────────────────────────────────────
 const nf = new Intl.NumberFormat('en-GB')
@@ -777,6 +778,7 @@ export default function SeoMissionControlClient({ payload }: { payload: MissionC
       <Momentum payload={payload} />
       <PageTypeBreakdown rows={payload.page_types} reconciliation={payload.reconciliation} />
       <VisibilityGap payload={payload} />
+      <OpportunitiesPanel />
       <TopPages rows={payload.top_pages} />
       <DataHealth payload={payload} />
       <div style={{
