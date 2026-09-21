@@ -20,6 +20,7 @@
 
 import 'server-only'
 import { getSupabaseServiceClient } from '@/lib/supabaseService'
+import { canonicaliseUrl } from '@/lib/seo/canonicaliseUrl'
 import type {
   MissionControlPayload, LatestKpi, DailyPoint,
   MomentumBlock, PageTypeRow, TopPageRow, PageTypeKey, PageTypeBucketKey,
@@ -32,24 +33,6 @@ const TARGET_DATE = '2026-12-25'
 const TARGET_MIN  = 4000
 const TARGET_MAX  = 5000
 const BQ_EXPORT_STARTED_ON = '2026-09-16'   // annotation for the chart
-
-// Canonical URL constants — mirror scripts/seo/refresh-page-registry.mjs
-// AND public.seo_admin_canonical_url in the migration.
-const CANONICAL_ORIGIN = 'https://www.pokeprices.io'
-const CANONICAL_HOST   = 'www.pokeprices.io'
-
-function canonicaliseUrl(u: string | null | undefined): string | null {
-  if (typeof u !== 'string' || u.length === 0) return null
-  try {
-    const parsed = new URL(u)
-    if (parsed.host !== CANONICAL_HOST && parsed.host !== 'pokeprices.io') return null
-    let p = parsed.pathname || '/'
-    if (p !== '/' && p.endsWith('/')) p = p.slice(0, -1)
-    return `${CANONICAL_ORIGIN}${p}`
-  } catch {
-    return null
-  }
-}
 
 // ── date helpers ─────────────────────────────────────────────────────────
 function isoDay(d: Date | string): string {

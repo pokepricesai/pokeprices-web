@@ -20,6 +20,10 @@
     {
       "path": "/api/cron/seo-daily",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/seo-bing-daily",
+      "schedule": "0 7 * * *"
     }
   ]
 }
