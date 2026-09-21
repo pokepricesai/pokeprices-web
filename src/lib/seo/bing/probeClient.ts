@@ -34,6 +34,52 @@ export function sanitiseUrl(u: string): string {
   return u.replace(/([?&])apikey=[^&]*/i, '$1apikey=[REDACTED]')
 }
 
+/** Any field whose name matches this pattern is unconditionally
+ *  replaced with '[REDACTED]' before it leaves the server. Bing's
+ *  GetUserSites returns AuthenticationCode + DnsVerificationCode
+ *  values on every row — those are effectively secrets. */
+const SENSITIVE_FIELD_RE = /authentication|verification|password|secret|token|cookie|api[_-]?key/i
+
+/** Replace our production origins with `<site>` in URL-shaped strings so
+ *  probe output does not accidentally dump raw canonical URLs. Preserves
+ *  the path so the reader can still see the SHAPE (e.g. /pokemon/psyduck)
+ *  which is useful for judging response semantics. */
+function stripOurOrigin(s: string): string {
+  return s
+    .replace(/https?:\/\/(?:www\.)?pokeprices\.io/gi, '<site>')
+    // Also handle percent-encoded variants that appear inside query params.
+    .replace(/https%3A(?:%2F%2F|\/\/)(?:www%2E)?pokeprices%2Eio/gi, '<site>')
+}
+
+/** Deep-sanitise a sample row before it leaves the server. Redacts
+ *  sensitive fields wholesale; strips our origin from URL-shaped
+ *  string values so paths remain visible but the exact scheme/host
+ *  variant is not leaked; leaves numbers and dates untouched. */
+export function sanitiseSampleRow(row: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  if (!row) return {}
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(row)) {
+    if (SENSITIVE_FIELD_RE.test(k)) {
+      out[k] = '[REDACTED]'
+      continue
+    }
+    if (typeof v === 'string') {
+      out[k] = stripOurOrigin(v)
+    } else if (Array.isArray(v)) {
+      out[k] = v.slice(0, 3).map(x =>
+        typeof x === 'string' ? stripOurOrigin(x) :
+        (x && typeof x === 'object') ? sanitiseSampleRow(x as Record<string, unknown>) :
+        x
+      )
+    } else if (v && typeof v === 'object') {
+      out[k] = sanitiseSampleRow(v as Record<string, unknown>)
+    } else {
+      out[k] = v
+    }
+  }
+  return out
+}
+
 export type BingProbe = {
   name: string
   method: string
@@ -107,22 +153,25 @@ export async function probeOne(
           d_length = json.d.length
           if (json.d.length > 0 && typeof json.d[0] === 'object' && json.d[0] !== null) {
             first_row_keys = Object.keys(json.d[0] as Record<string, unknown>)
-            sample_row = { ...(json.d[0] as Record<string, unknown>) }
-            // Convert Bing's WCF date on the sample row for readability.
-            for (const [k, v] of Object.entries(sample_row)) {
+            // Convert Bing's WCF date fields to ISO for readability,
+            // then apply the full sensitive-field sanitiser.
+            const raw = { ...(json.d[0] as Record<string, unknown>) }
+            for (const [k, v] of Object.entries(raw)) {
               const iso = parseWcfDate(v)
-              if (iso) sample_row[k] = `${iso}  (raw ${v as string})`
+              if (iso) raw[k] = iso
             }
+            sample_row = sanitiseSampleRow(raw)
           }
         } else if (json && typeof json.d === 'object' && json.d !== null) {
           parsed_ok = true
           const obj = json.d as Record<string, unknown>
           first_row_keys = Object.keys(obj)
-          sample_row = { ...obj }
-          for (const [k, v] of Object.entries(sample_row)) {
+          const raw = { ...obj }
+          for (const [k, v] of Object.entries(raw)) {
             const iso = parseWcfDate(v)
-            if (iso) sample_row[k] = `${iso}  (raw ${v as string})`
+            if (iso) raw[k] = iso
           }
+          sample_row = sanitiseSampleRow(raw)
         } else {
           error = 'response has no `d` field or unexpected shape'
         }
