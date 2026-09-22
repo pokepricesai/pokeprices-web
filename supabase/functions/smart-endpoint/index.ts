@@ -183,10 +183,80 @@ const TOOLS = [
       },
       required: ["vendor_type"]
     }
+  },
+  {
+    // 2026-09-22 audit: database-driven latest-set retrieval so the
+    // prompt never needs manual set updates. Also used to look up a
+    // specific named set via name_filter, which returns the same
+    // structured record so the assistant can quote the semantically
+    // correct card count (official_set_size vs catalog_total).
+    name: "get_latest_sets",
+    description: "Recent Pokemon sets from the PokePrices database (default: latest by release date). Also use with name_filter to look up a specific named set — returns official_set_size (printed denominator, the collector-facing card count) AND catalog_total (PokePrices catalogue entries). These are DIFFERENT numbers — see prompt rules.",
+    input_schema: {
+      type: "object",
+      properties: {
+        language: {
+          type: "string",
+          enum: ["en", "jp"],
+          description: "Optional. Omit to include both English and Japanese sets. Do NOT guess language from a set name — use name_filter instead."
+        },
+        limit: {
+          type: "number",
+          description: "How many sets to return. Default 8, max 20."
+        },
+        name_filter: {
+          type: "string",
+          description: "Optional case-insensitive substring match on set_name. Use this when the user names a specific set (e.g. 'Perfect Order') and you need its details."
+        }
+      }
+    }
+  },
+  {
+    // 2026-09-22 audit: on-demand historic price summary so the LLM
+    // stops inferring trends from card_trends deltas or model memory.
+    // Answers "has this gone up in 90d", "near its high", "what was
+    // it worth a year ago", etc. — with real observation counts.
+    name: "get_price_history_summary",
+    description: "Compact price summary for one card over a chosen window. Returns latest/high/low/change/observation count for raw + PSA 10. Use for trend and 'has it moved' questions. Call search_cards first to find the card_slug.",
+    input_schema: {
+      type: "object",
+      properties: {
+        card_slug: {
+          type: "string",
+          description: "Bare PriceCharting product id (e.g. '959616'). Take this from a prior search_cards result."
+        },
+        period_days: {
+          type: "number",
+          description: "Window size. Default 90. Common values: 7, 30, 90, 365."
+        }
+      },
+      required: ["card_slug"]
+    }
   }
 ];
 
-const SYSTEM = `You are PokePrices - a Pokemon TCG pricing assistant for real UK collectors. Direct, confident, occasionally opinionated. Never sycophantic. Never use AI marketing language.
+const SYSTEM = `You are PokePrices - a Pokemon TCG pricing assistant for real collectors in both the UK and the US. Direct, confident, occasionally opinionated. Never sycophantic. Never use AI marketing language.
+
+===========================================================================
+EVIDENCE HIERARCHY - NEVER INVENT DATA
+===========================================================================
+
+When facts conflict, use this order:
+1. Structured context on this turn (a loaded card record, a set_context) - authoritative for identity.
+2. Data returned by a tool call this turn - authoritative for prices, populations, sets, trends, dates.
+3. Static rules in this prompt - authoritative for tone, format, nicknames.
+4. Your own knowledge - LAST RESORT, and only for general education (grading concepts, era history, etc).
+
+Never invent:
+- Exact prices (raw, PSA 10, PSA 9, or any other grade)
+- PSA / CGC / BGS population counts
+- Set card counts or set release dates
+- Percentage price movements
+- Sales volume figures
+- Pull rates
+- Print quantities
+
+If a tool returned no data, or you have not called a tool, say the value is unknown / not available. Do not guess a number to sound useful.
 
 ===========================================================================
 HOW TO BEHAVE
@@ -244,18 +314,42 @@ get_deals - any good eBay deals right now, anything underpriced.
 
 get_vendors - card shop near me, where to buy in London, UK retailers.
 
+get_latest_sets - use when the user asks about the newest sets, current releases, recent sets, "the new one", "the set that came out last month", or when you need details for a specific named set. Pass language "en" or "jp" ONLY when the context makes it clearly one or the other. When the user names a specific set (e.g. "Perfect Order", "Chaos Rising"), use the name_filter parameter with that name - do NOT try to guess the language from the set name, do NOT rely on scanning through a long list.
+
+SET-SIZE SEMANTICS - the get_latest_sets result splits set size into THREE distinct fields. Never conflate them:
+
+  1. official_set_size - the printed denominator on the card (e.g. Perfect Order = 88, 30th Celebration = 128). THIS is what a collector means by "how many cards are in the set". Prefer it for user-facing answers.
+
+  2. catalog_total - PokePrices catalogue entries (e.g. 30th Celebration = 227). Includes sealed products, variants, parallel printings, and other catalogue records. You MAY quote this ONLY when your wording explicitly labels it as "PokePrices catalogue entries" or "PokePrices records". Never call this "the set size" or "cards in the set".
+
+  3. catalog_rows - COUNT of catalogue rows. Same shape as catalog_total; only mention if the user is asking about PokePrices coverage.
+
+RULES FOR ANSWERING "HOW MANY CARDS ARE IN X?":
+  * If official_set_size is present, quote that number and only that number. E.g. "Perfect Order has 88 cards" (not 219, not 204).
+  * NEVER infer "secret rares" or "extra cards" from catalog_rows - official_set_size or catalog_total - official_set_size. That delta contains sealed products, variants, and parallel printings - not just secret rares.
+  * If official_set_size is null, DO NOT substitute catalog_total in its place. Say the official numbered set size is not available in our data, and optionally mention the catalogue count separately with the correct label ("the PokePrices catalogue has N entries for that set").
+  * catalog_total may only be stated when the wording explicitly identifies it as catalogue entries/records - never as the set size.
+
+get_price_history_summary - use when the user asks for trend data (up/down over N days) AND either (a) the search_cards result you already have shows null for the pct_Xd field the user asked about, or (b) the user wants a specific window high/low, observation count, or comparison to a date. For plain "has it moved" questions where pct_7d / pct_30d / pct_90d / pct_365d ARE present in the search_cards result, use those directly instead. When you DO chain to get_price_history_summary, output only the tool call in your response - never accompany it with visible text.
+
+WHEN THE PCT FIELD IS NULL - if the search_cards result shows the pct field the user asked about as null / not set, and you have not called get_price_history_summary yet, either call it silently OR say "90-day movement data is not tracked for that card". Do NOT reply with "Let me get that" or any similar promise of a follow-up. The user will not see a second reply from you.
+
+SILENT TOOL CHAINING - never emit a visible text block that only announces intent to call another tool. If you plan to call a second tool, output only the tool_use block, with no text preamble. If the previous tool's result is enough to answer, write the complete final answer. A reply that reads "Let me check" / "Now let me get" / "Let me look up" / "I will now" with no data is a broken response, not a work-in-progress one. NEVER end an answer with "Let me pull that", "Let me get that for you", "Let me check that" or any similar promise of a follow-up - the user will not see a second reply. If the data you have is incomplete, say so and stop; do not promise more.
+
 ===========================================================================
 CUTTING THROUGH MESSY QUERIES
 ===========================================================================
 
 Users write messy. Your job is to pick out the card and search for it. Strip out everything else.
 
-dewgong holo rare in pack mega evolution prefect order - search Dewgong Mega Evolution
+dewgong holo rare in pack mega evolution perfect order - search Dewgong Mega Evolution
 Xerneas - 089/083 - M4: Ninja Spinner (m4) - search Xerneas 089 (Japanese set; secret rare X greater than Y is valid)
 my charizard from the old days worth anything - search Charizard Base Set
 got a shiny umbreon from the evolutions box - search Umbreon VMAX Evolving Skies
 is the gold lugia from like 2002 worth money - search Lugia Neo Genesis
 japanese rayquaza V from 2021 - search Rayquaza V (note the Japanese version)
+whats the new one everyone is opening - call get_latest_sets first, then answer
+did prices move on charizard 30th celebration - search_cards for Charizard 30th Celebration, then get_price_history_summary with the returned card_slug
 
 ===========================================================================
 NICKNAME RESOLUTION
@@ -299,7 +393,7 @@ Tag Team becomes [Tag Team] or [GX Tag Team]
 JAPANESE CARD DETECTION
 ===========================================================================
 
-Japanese set codes: M1, M2, M3, M4, SM-P, S, SV, SVL, CP, CHR, XY-P, BW-P, SR, UR, HR, RR, AR, CSR, sAR, sR. Also Eevee Heroes, VSTAR Universe, Shiny Treasure ex, Pokemon Card 151 (Japanese version), Crimson Haze.
+Common Japanese set-code prefixes: M1, M2, M3, M4, SM-P, S, SV, SVL, CP, CHR, XY-P, BW-P, SR, UR, HR, RR, AR, CSR, sAR, sR. Do not treat this list as exhaustive - new Japanese sets are added regularly. When unsure whether a Japanese set exists in PokePrices, call get_latest_sets with language "jp" instead of guessing.
 
 If you identify a Japanese card, still search for it. In your reply explain it appears to be a Japanese card, English market prices may not apply, and suggest TCGPlayer Japan or Mercari Japan for accurate Japanese pricing.
 
@@ -307,7 +401,7 @@ If you identify a Japanese card, still search for it. In your reply explain it a
 CARD NUMBER LOGIC
 ===========================================================================
 
-X/Y means card X in a set of Y total. When X is greater than Y, it is a secret rare - completely valid, never say it is impossible. New sets like Ascended Heroes (Jan 2026) and Perfect Order (Mar 2026) may not be in the database yet - if no results, say so plainly.
+X/Y means card X in a set of Y total. When X is greater than Y, it is a secret rare - completely valid, never say it is impossible. When a user names a set you are unsure about, do NOT declare it does or does not exist from memory - call get_latest_sets to check. If a specific card search returns no results after that check, say so plainly.
 
 ===========================================================================
 RESPONSE FORMAT - ABSOLUTE. VIOLATION = FAILURE.
@@ -350,6 +444,21 @@ volume_confidence low or unknown, or volume_warning present means caveat: volume
 For market movers: mention volume_label per card if present.
 
 If volume_label is null or missing, do not mention volume.
+
+===========================================================================
+TREND / PERCENT PHRASING
+===========================================================================
+
+Percent-change fields (raw_pct_change, psa10_pct_change, pct_7d, pct_30d, pct_90d, pct_365d) come from the database. Use them as given. Do NOT infer a trend from a single latest price or from your own knowledge.
+
+When a percent-change is present:
+- Positive above roughly +5%: "up around N% over the last M days".
+- Around zero (-5% to +5%): "flat" or "roughly steady".
+- Negative below roughly -5%: "down around N% over the last M days".
+
+When observation_count is under 5, or the summary tool returned message "No price observations in this window", say the signal is thin and do not quote a percentage as fact. Suggest the user check the card page for a longer view.
+
+When a user asks "is this near its high?" and you have raw_high_usd + latest_raw_usd from the summary tool, phrase it as "sitting at X against the M-day high of Y" - never invent a lifetime high you were not given.
 
 ===========================================================================
 CONTENT RULES
@@ -512,18 +621,26 @@ async function dbSearchCards(searchTerm: string): Promise<any> {
     })
     .filter((p: any) => p.cardName && p.setName);
 
-  if (!parsedCards.length) return { raw_results: lines.join(" --- ") };
+  if (!parsedCards.length) return parseSearchLinesAsCards(lines);
 
   const setNames = [...new Set(parsedCards.map((p: any) => p.setName))];
   const cardNames = [...new Set(parsedCards.map((p: any) => p.cardName))];
 
   // Block 5A-W-52A.3 — extend the projection with the identifier
   // fields the candidate-selection response needs (id, card_number,
-  // card_number_display, language, variant, image_url). Without
-  // these, the ambiguous-free-text short-circuit builds candidate
-  // objects with empty slugs and null PC ids, and the client's
-  // resend fails closed.
-  const CARD_SEL = "id, card_slug, card_name, set_name, card_url_slug, card_number, card_number_display, language, variant, image_url";
+  // card_number_display, language, image_url). Without these, the
+  // ambiguous-free-text short-circuit builds candidate objects with
+  // empty slugs and null PC ids, and the client's resend fails
+  // closed.
+  //
+  // 2026-09-22 audit fix: dropped `variant` from CARD_SEL. The cards
+  // table does not have a `variant` column — variant tags live INSIDE
+  // card_name as "Umbreon [Gold Star] #17". Requesting a non-existent
+  // column made every .select() here return { data: undefined,
+  // error: "column cards.variant does not exist" }, which silently
+  // forced ALL free-text searches through the raw_results fallback
+  // and leaked unformatted cent integers to the model.
+  const CARD_SEL = "id, card_slug, card_name, set_name, card_url_slug, card_number, card_number_display, language, image_url";
   const { data: cardRows } = await supabase
     .from("cards")
     .select(CARD_SEL)
@@ -543,12 +660,80 @@ async function dbSearchCards(searchTerm: string): Promise<any> {
       .ilike("card_name", `%${baseName}%`)
       .limit(20);
     if (!fallbackRows?.length) {
-      return { raw_results: lines.join(" --- ") };
+      return parseSearchLinesAsCards(lines);
     }
     return await enrichCards(lines, fallbackRows);
   }
 
   return await enrichCards(lines, cardRows);
+}
+
+// 2026-09-22 audit fix: structural units normalisation for the
+// fallback path. Previously this returned `raw_results: <pipe-string>`
+// which contained raw USD-cent integers ("raw:40127"). The model
+// then had to infer the units and sometimes leaked "raw 40127" or
+// interpreted "raw:6734" as "67 cents". Now we parse the RPC's
+// line format ourselves and emit ONLY typed, unit-labelled fields:
+//   * *_price_cents  — raw integer USD cents (for programmatic use)
+//   * *_usd          — pre-formatted display string ("$401.27")
+//   * *_gbp          — pre-formatted display string ("£317")
+// The model must never see a bare integer that could be mistaken
+// for either a dollar or cent amount.
+//
+// Source-of-truth for units: search_cards_json returns lines in the
+// format:
+//   "Card Name #NN | Set Name | raw:INT psa10:INT|null psa9:INT psa8:INT psa7:INT"
+// where every INT is USD cents. Confirmed against card_trends
+// (which also stores USD cents in current_raw / current_psa10 / etc.).
+function parseSearchLinesAsCards(lines: string[]): any {
+  const cards = lines
+    .slice(0, 8)
+    .map((line: string) => {
+      const parts = line.split(" | ");
+      const cardName = parts[0]?.trim() || "";
+      const setName  = parts[1]?.trim() || "";
+      const priceStr = parts[2] || "";
+      if (!cardName || !setName) return null;
+      const priceMap: Record<string, number | null> = {};
+      for (const m of priceStr.matchAll(/(raw|psa\d+):(null|-?\d+)/g)) {
+        priceMap[m[1]] = m[2] === "null" ? null : Number(m[2]);
+      }
+      const rawCents   = priceMap.raw   ?? null;
+      const psa10Cents = priceMap.psa10 ?? null;
+      const psa9Cents  = priceMap.psa9  ?? null;
+      const psa8Cents  = priceMap.psa8  ?? null;
+      const psa7Cents  = priceMap.psa7  ?? null;
+      return {
+        card_name:        cardName,
+        card_name_plain:  cardName,
+        set_name:         setName,
+        card_url:         null,
+        // Structured price fields with EXPLICIT units. Every _cents
+        // field is USD cents (integer). Every _usd / _gbp field is a
+        // pre-formatted human-readable string. The model must use the
+        // display fields; the _cents fields are for provenance /
+        // programmatic checks.
+        raw_price_cents:    rawCents,
+        raw_usd:            usdCentsToUsd(rawCents),
+        raw_gbp:            usdCentsToGbp(rawCents),
+        psa10_price_cents:  psa10Cents,
+        psa10_usd:          usdCentsToUsd(psa10Cents),
+        psa10_gbp:          usdCentsToGbp(psa10Cents),
+        psa9_price_cents:   psa9Cents,
+        psa9_usd:           usdCentsToUsd(psa9Cents),
+        psa9_gbp:           usdCentsToGbp(psa9Cents),
+        psa8_price_cents:   psa8Cents,
+        psa8_usd:           usdCentsToUsd(psa8Cents),
+        psa8_gbp:           usdCentsToGbp(psa8Cents),
+        psa7_price_cents:   psa7Cents,
+        psa7_usd:           usdCentsToUsd(psa7Cents),
+        psa7_gbp:           usdCentsToGbp(psa7Cents),
+        source: "search_snapshot",
+        note: "Search snapshot only — this card was not resolvable to a canonical PokePrices row, so trend/volume data is unavailable. Use the pre-formatted raw_usd / psa10_usd / etc. display strings verbatim; never quote the _cents integers directly.",
+      };
+    })
+    .filter(Boolean);
+  return { cards, snapshot_only: true };
 }
 
 async function enrichCards(
@@ -617,7 +802,10 @@ async function enrichCards(
       card_number: card.card_number,
       card_number_display: card.card_number_display,
       language: card.language,
-      variant: card.variant,
+      // cards has no `variant` column; the variant tag is embedded in
+      // card_name as "[X]". Explicit null keeps the response shape
+      // stable for the candidate-selection code path.
+      variant: null,
       image_url: card.image_url,
       raw_usd: usdCentsToUsd(trend?.current_raw),
       raw_gbp: usdCentsToGbp(trend?.current_raw),
@@ -888,14 +1076,169 @@ async function dbGetSetData(
 }
 
 async function dbGetGradingPop(searchTerm: string): Promise<any> {
-  const keyword = searchTerm.split(" ")[0];
+  // 2026-09-22 audit fix. Previous implementation used only the FIRST
+  // word of `searchTerm`, so "Umbreon VMAX Evolving Skies" collapsed to
+  // "Umbreon" and returned every Umbreon population row in the DB —
+  // the model then had to guess which one the user meant. Now:
+  //   1. Try to resolve the exact card via search_cards_json so we can
+  //      filter psa_population by BOTH name and set (psa_population's
+  //      set_name has a "Pokemon " prefix that cards.set_name does not
+  //      — see CLAUDE.md).
+  //   2. Fall back to a multi-token AND-ish ilike using up to 3 tokens
+  //      joined by %, which lets "Umbreon VMAX" find "Umbreon VMAX"
+  //      instead of every Umbreon.
+  const raw = String(searchTerm ?? "").trim();
+  if (!raw) return { results: [], match_method: "empty" };
+
+  let resolvedCardName: string | null = null;
+  let resolvedSetName:  string | null = null;
+  try {
+    const { data: rpcData } = await supabase.rpc("search_cards_json", {
+      search_text: raw,
+    });
+    const s = typeof rpcData?.results === "string" ? rpcData.results : "";
+    const first = s.split(" --- ")[0];
+    if (first) {
+      const parts = first.split(" | ");
+      const name = parts[0]?.trim();
+      const set  = parts[1]?.trim();
+      if (name && set) {
+        // Strip variant brackets and any trailing "#NN" so the ilike
+        // against psa_population.card_name has a shot.
+        resolvedCardName = name
+          .replace(/\s*\[[^\]]+\]/g, "")
+          .replace(/\s*#[A-Za-z0-9/-]+\s*$/, "")
+          .trim() || name;
+        resolvedSetName = set;
+      }
+    }
+  } catch { /* fall through to multi-token ilike */ }
+
+  if (resolvedCardName && resolvedSetName) {
+    // psa_population.set_name may be either "Set" or "Pokemon Set".
+    const setVariants = [resolvedSetName, `Pokemon ${resolvedSetName}`];
+    for (const sn of setVariants) {
+      const { data } = await supabase.from("psa_population")
+        .select(PSA_POP_COLS)
+        .ilike("card_name", `%${resolvedCardName}%`)
+        .eq("set_name", sn)
+        .gt("total_graded", 0)
+        .order("total_graded", { ascending: false })
+        .limit(10);
+      if (data?.length) {
+        return {
+          results: data,
+          match_method: "resolved",
+          resolved_card_name: resolvedCardName,
+          resolved_set_name: sn,
+        };
+      }
+    }
+  }
+
+  // Fallback: 2-3 token AND-ish ilike. "Umbreon VMAX Evolving Skies"
+  // becomes "%Umbreon%VMAX%Evolving%", which still hits.
+  const tokens = raw
+    .split(/\s+/)
+    .filter((t) => t.length >= 2 && !/^(the|and|of|a)$/i.test(t))
+    .slice(0, 3);
+  const pattern = tokens.length ? `%${tokens.join("%")}%` : `%${raw}%`;
   const { data } = await supabase.from("psa_population")
     .select(PSA_POP_COLS)
-    .ilike("card_name", `%${keyword}%`)
+    .ilike("card_name", pattern)
     .gt("total_graded", 0)
     .order("total_graded", { ascending: false })
     .limit(10);
-  return { results: data || [] };
+  return {
+    results: data || [],
+    match_method: "fallback_ilike",
+    tokens,
+  };
+}
+
+// 2026-09-22 audit: new tool — see get_latest_sets_for_ai RPC.
+// v3 (2026-09-22 audit follow-up): the RPC now splits set size into
+// three unambiguously-named fields:
+//   * official_set_size — printed denominator from cards.set_printed_total
+//                         (what a collector means by "cards in the set")
+//   * catalog_total     — set_metadata.total_cards (all catalogue entries)
+//   * catalog_rows      — COUNT(*) of cards rows (sanity check)
+// The handler forwards all three unchanged so the LLM can pick the
+// semantically correct one per the SYSTEM prompt.
+async function dbGetLatestSets(
+  language?: string,
+  limit?: number,
+  nameFilter?: string,
+): Promise<any> {
+  const lang = language === "en" || language === "jp" ? language : null;
+  const lim  = Math.max(1, Math.min(Number(limit) || 8, 20));
+  const nf   = typeof nameFilter === "string" && nameFilter.trim().length > 0
+    ? nameFilter.trim()
+    : null;
+  const { data, error } = await supabase.rpc("get_latest_sets_for_ai", {
+    lang, limit_count: lim, name_filter: nf,
+  });
+  if (error || !data) {
+    return { results: [], error: error?.message ?? "no data" };
+  }
+  return {
+    results: (data as any[]).map((r) => ({
+      set_name:          r.set_name,
+      language:          r.language,
+      release_date:      r.set_release_date,
+      release_year:      r.release_year,
+      official_set_size: r.official_set_size,   // printed denominator; nullable
+      catalog_total:     r.catalog_total,       // set_metadata.total_cards
+      catalog_rows:      r.catalog_rows,        // COUNT(*) from cards
+      print_run_era:     r.print_run_era,
+      set_url: `https://www.pokeprices.io/set/${encodeURIComponent(r.set_name)}`,
+    })),
+    filter_applied: nf,
+  };
+}
+
+// 2026-09-22 audit: new tool — see get_card_price_summary_for_ai RPC.
+async function dbGetPriceSummary(
+  cardSlug: string,
+  periodDays?: number,
+): Promise<any> {
+  const bare = String(cardSlug ?? "").replace(/^pc-/, "").trim();
+  if (!bare) return { error: "empty card_slug" };
+  const days = Math.max(1, Math.min(Number(periodDays) || 90, 730));
+  const { data, error } = await supabase.rpc("get_card_price_summary_for_ai", {
+    pc_slug: bare, period_days: days,
+  });
+  if (error) return { error: error.message, card_slug: bare };
+  if (!Array.isArray(data) || data.length === 0) {
+    return {
+      card_slug: bare, period_days: days,
+      message: "No price observations in this window",
+    };
+  }
+  const r = data[0];
+  return {
+    card_slug:          r.card_slug,
+    period_days:        r.period_days,
+    latest_date:        r.latest_date,
+    first_date:         r.first_date,
+    observation_count:  r.observation_count,
+    latest_raw_usd:     usdCentsToUsd(r.latest_raw_usd),
+    latest_raw_gbp:     usdCentsToGbp(r.latest_raw_usd),
+    latest_psa9_usd:    usdCentsToUsd(r.latest_psa9_usd),
+    latest_psa9_gbp:    usdCentsToGbp(r.latest_psa9_usd),
+    latest_psa10_usd:   usdCentsToUsd(r.latest_psa10_usd),
+    latest_psa10_gbp:   usdCentsToGbp(r.latest_psa10_usd),
+    raw_high_usd:       usdCentsToUsd(r.raw_high_usd),
+    raw_high_gbp:       usdCentsToGbp(r.raw_high_usd),
+    raw_low_usd:        usdCentsToUsd(r.raw_low_usd),
+    raw_low_gbp:        usdCentsToGbp(r.raw_low_usd),
+    raw_pct_change:     r.raw_pct_change,
+    psa10_high_usd:     usdCentsToUsd(r.psa10_high_usd),
+    psa10_high_gbp:     usdCentsToGbp(r.psa10_high_usd),
+    psa10_low_usd:      usdCentsToUsd(r.psa10_low_usd),
+    psa10_low_gbp:      usdCentsToGbp(r.psa10_low_usd),
+    psa10_pct_change:   r.psa10_pct_change,
+  };
 }
 
 async function dbGetBudgetPsa10(budgetGbp: number): Promise<any> {
@@ -1113,6 +1456,20 @@ async function executeTool(
           toolInput.country,
         ),
         queryType: "vendors",
+      };
+    case "get_latest_sets":
+      return {
+        data: await dbGetLatestSets(
+          toolInput.language,
+          toolInput.limit,
+          toolInput.name_filter,
+        ),
+        queryType: "latest_sets",
+      };
+    case "get_price_history_summary":
+      return {
+        data: await dbGetPriceSummary(toolInput.card_slug, toolInput.period_days),
+        queryType: "price_history_summary",
       };
     default:
       return { data: { error: "Unknown tool" }, queryType: "general" };
@@ -2153,14 +2510,37 @@ Deno.serve(async (req: Request) => {
               // Promise.all completes. Only the FIRST search_cards
               // ambiguity wins — later loop iterations won't happen
               // because we break out below.
-              if (!ambiguousCandidates) ambiguousCandidates = candidateArr;
+              //
+              // 2026-09-22 audit tune: only short-circuit to the
+              // selection UI on GENUINE ambiguity (more than 4
+              // candidates). For 2-4 candidates the enriched tool
+              // result already carries formatted prices and printing
+              // labels — let the model pick the most likely one and
+              // answer directly. Historically this path fired on any
+              // >1 result, which regressed common queries like
+              // "how much is Charizard Base Set?" into a picker UI.
+              // Threshold tuned to 7 so common disambiguated queries
+              // like "Charizard Base Set unlimited" (typically 5-6
+              // candidates from cards.in) can be answered directly,
+              // while genuinely open queries like "Umbreon" (many
+              // more candidates) still show the picker.
+              const AMBIGUOUS_THRESHOLD = 7;
+              if (!ambiguousCandidates && candidateArr.length >= AMBIGUOUS_THRESHOLD) {
+                ambiguousCandidates = candidateArr;
+              }
             }
           }
 
+          // 2026-09-22 audit: bumped from 1500 → 6000. enrichCards
+          // returns up to 8 cards with ~20 fields each (~350 chars per
+          // card), so 1500 was cutting the JSON mid-object and
+          // producing invalid tool results the model couldn't parse.
+          // 6000 covers the worst case while staying well under
+          // Haiku's context budget.
           return {
             type: "tool_result" as const,
             tool_use_id: tb.id,
-            content: JSON.stringify(data).substring(0, 1500),
+            content: JSON.stringify(data).substring(0, 6000),
           };
         })
       );
@@ -2187,6 +2567,61 @@ Deno.serve(async (req: Request) => {
 
     if (!answer) {
       answer = "I could not generate a response. Please try again.";
+    }
+
+    // 2026-09-22 audit: defensive aborted-chain / empty-answer
+    // recovery. Haiku sometimes returns a text block that only
+    // announces its next tool call ("Let me check…", "Now let me
+    // get…") or nothing at all (leaving the loop to emit the
+    // fallback "I could not process…"). Both leave the user staring
+    // at a broken response. If we have at least one tool result in
+    // the conversation, force one more model call with
+    // tool_choice=none and an explicit "answer with what you have"
+    // instruction. Bounded to a single extra call.
+    const looksAborted = (() => {
+      const s = (answer || '').trim();
+      if (!s) return false;
+      // Full-answer aborted chain (short + intent + no data).
+      if (s.length <= 220 &&
+          /(^|[.,]\s*)(let me (check|look|get|pull|see|grab|fetch)|now let me|i(?:'| wi)ll now)/i.test(s)
+          && !/\$|£|€|%/.test(s)) return true;
+      // Trailing-only aborted chain: last clause is an intent
+      // promise, regardless of what came before it. Allow it to
+      // be preceded by a comma (mid-sentence) or a period.
+      const tail = s.slice(-200);
+      return /(?:^|[.,]\s*)(let me (?:check|look|get|pull|see|grab|fetch|pull that|get that)|now let me|i(?:'| wi)ll now)[^.!?]*[.!?]?\s*$/i.test(tail);
+    })();
+    const looksFallback = (() => {
+      const s = (answer || '').trim();
+      return s === '' ||
+        s === 'I could not process that. Could you rephrase?' ||
+        s === 'I could not generate a response. Please try again.';
+    })();
+    const hadToolResult = agentMessages.some((m: any) =>
+      Array.isArray(m.content) && m.content.some((b: any) => b.type === 'tool_result')
+    );
+    if ((looksAborted || looksFallback) && hadToolResult) {
+      agentMessages.push({
+        role: 'user',
+        content: 'That reply only announced a next step — the user cannot see any data. Use the tool result you already have and write the complete final answer now. No preamble. If the data does not answer the question, say that plainly instead.',
+      });
+      try {
+        const resp2 = await callClaude({
+          messages: agentMessages,
+          toolChoice: { type: 'none' },
+          maxTokens: 600,
+        });
+        inputTokens         += resp2.usage?.input_tokens || 0;
+        outputTokens        += resp2.usage?.output_tokens || 0;
+        cacheCreationTokens += resp2.usage?.cache_creation_input_tokens || 0;
+        cacheReadTokens     += resp2.usage?.cache_read_input_tokens || 0;
+        const t2 = (resp2.content || []).find((b: any) => b.type === 'text');
+        if (t2?.text && t2.text.trim().length > 20) {
+          answer = t2.text;
+        }
+      } catch (e) {
+        console.error('aborted-chain recovery failed:', e);
+      }
     }
 
     const cost = calcCost(
