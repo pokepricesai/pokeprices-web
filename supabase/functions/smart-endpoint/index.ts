@@ -138,11 +138,11 @@ const TOOLS = [
   },
   {
     name: "get_grading_pop",
-    description: "PSA population data for a card.",
+    description: "PSA population census data for a specific card (total graded, per-grade breakdown PSA 7-10, gem rate). REQUIRED before making any numeric population claim to the user — never quote pop counts or gem rates from memory.",
     input_schema: {
       type: "object",
       properties: {
-        search_term: { type: "string" }
+        search_term: { type: "string", description: "Card name + set (e.g. 'Umbreon VMAX Evolving Skies'). The handler resolves the exact card and looks up its PSA record." }
       },
       required: ["search_term"]
     }
@@ -333,6 +333,18 @@ RULES FOR ANSWERING "HOW MANY CARDS ARE IN X?":
 get_price_history_summary - use when the user asks for trend data (up/down over N days) AND either (a) the search_cards result you already have shows null for the pct_Xd field the user asked about, or (b) the user wants a specific window high/low, observation count, or comparison to a date. For plain "has it moved" questions where pct_7d / pct_30d / pct_90d / pct_365d ARE present in the search_cards result, use those directly instead. When you DO chain to get_price_history_summary, output only the tool call in your response - never accompany it with visible text.
 
 WHEN THE PCT FIELD IS NULL - if the search_cards result shows the pct field the user asked about as null / not set, and you have not called get_price_history_summary yet, either call it silently OR say "90-day movement data is not tracked for that card". Do NOT reply with "Let me get that" or any similar promise of a follow-up. The user will not see a second reply from you.
+
+PSA POPULATION CLAIMS - ABSOLUTE RULE. Any numeric claim about PSA population (total graded, PSA 10 population, gem rate, "N copies graded", "N PSA 10s exist", pop-report figures) MUST come from a get_grading_pop tool call THIS turn. Never quote population figures from your own knowledge. If get_grading_pop returns no rows or the count field is null, say "PSA population data is not available for this card in PokePrices" — never estimate, never round, never invent. Round percentages and totals are especially tempting to invent; do not.
+
+VARIANT IDENTITY - the search_cards result now carries variant hints per card. Use them instead of guessing:
+  * variant_labels           — array of [Bracketed] tags from card_name (e.g. ["1st Edition"], ["Shadowless"], ["Reverse Holo"])
+  * printed_denominator      — the M in "N/M" from the set
+  * is_secret_rare           — true when card_number > printed_denominator
+  * raw_price_rank_in_result — 1 = highest raw price in this result set (usually the alt art / chase card)
+When the user asks about a specific variant (alt art, secret rare, holo, reverse holo, 1st edition, shadowless):
+  1. If a card in the result has a matching variant_labels entry, that is the answer.
+  2. For "alt art" / "moonbreon"-style requests on modern sets that lack a bracket tag, prefer the card with is_secret_rare=true AND raw_price_rank_in_result=1 (typically the most expensive above-denominator variant).
+  3. Never pick a variant by card number alone. #214 vs #215 on Evolving Skies both above-denominator; only the raw_price_rank_in_result signal reliably separates the moonbreon (#215, top price) from the other secret rare (#214).
 
 SILENT TOOL CHAINING - never emit a visible text block that only announces intent to call another tool. If you plan to call a second tool, output only the tool_use block, with no text preamble. If the previous tool's result is enough to answer, write the complete final answer. A reply that reads "Let me check" / "Now let me get" / "Let me look up" / "I will now" with no data is a broken response, not a work-in-progress one. NEVER end an answer with "Let me pull that", "Let me get that for you", "Let me check that" or any similar promise of a follow-up - the user will not see a second reply. If the data you have is incomplete, say so and stop; do not promise more.
 
@@ -582,6 +594,35 @@ function buildCardUrl(setName: string, urlSlug: string): string {
   return `https://www.pokeprices.io/set/${enc}/card/${urlSlug}`;
 }
 
+// v164: variant-label extractor. cards.card_name embeds variant tags
+// inside square brackets, e.g. "Charizard [1st Edition] #4",
+// "Umbreon [Gold Star] #17". Extracts every bracketed segment into a
+// list so the model can filter by variant reliably instead of guessing.
+function extractVariantLabels(cardName: string | null | undefined): string[] {
+  if (typeof cardName !== "string" || !cardName) return [];
+  const out: string[] = [];
+  for (const m of cardName.matchAll(/\[([^\]]+)\]/g)) {
+    const label = m[1].trim();
+    if (label) out.push(label);
+  }
+  return out;
+}
+
+// v164: derive is_secret_rare from card_number vs the printed
+// denominator. Both fields are stored as text in the cards table so
+// we normalise to integers, safely returning null on garbage.
+function isSecretRare(
+  cardNumber: string | number | null | undefined,
+  setPrintedTotal: string | number | null | undefined,
+): boolean | null {
+  const numStr = cardNumber == null ? "" : String(cardNumber);
+  const denStr = setPrintedTotal == null ? "" : String(setPrintedTotal);
+  const num = /^\d+$/.test(numStr) ? Number(numStr) : NaN;
+  const den = /^\d+$/.test(denStr) ? Number(denStr) : NaN;
+  if (!Number.isFinite(num) || !Number.isFinite(den) || den <= 0) return null;
+  return num > den;
+}
+
 async function dbSearchCards(searchTerm: string): Promise<any> {
   const { data, error } = await supabase.rpc("search_cards_json", {
     search_text: searchTerm
@@ -640,7 +681,10 @@ async function dbSearchCards(searchTerm: string): Promise<any> {
   // error: "column cards.variant does not exist" }, which silently
   // forced ALL free-text searches through the raw_results fallback
   // and leaked unformatted cent integers to the model.
-  const CARD_SEL = "id, card_slug, card_name, set_name, card_url_slug, card_number, card_number_display, language, image_url";
+  // v164: added set_printed_total so enrichCards can derive
+  // is_secret_rare (card_number > set_printed_total). Fixes the
+  // #214/#215-style alt-art drift on multi-variant sets.
+  const CARD_SEL = "id, card_slug, card_name, set_name, card_url_slug, card_number, card_number_display, language, image_url, set_printed_total";
   const { data: cardRows } = await supabase
     .from("cards")
     .select(CARD_SEL)
@@ -762,6 +806,19 @@ async function enrichCards(
       .in("card_slug", slugs.map((s: string) => s.replace(/^pc-/, ""))),
   ]);
 
+  // v164: pre-compute per-card raw price to rank within this result
+  // set. rank=1 is the highest-priced card (typically an alt art on
+  // multi-variant sets). Lets the model distinguish #214 (base
+  // secret rare) from #215 (alt art / moonbreon) without guessing.
+  const rankInput = cardRows.map((card: any) => {
+    const slug = String(card.card_slug);
+    const trend = trendData?.find((t: any) => String(t.card_slug) === slug) || null;
+    return { slug, raw: Number(trend?.current_raw ?? 0) };
+  });
+  const rawRankBySlug = new Map<string, number>();
+  const sortedByRaw = [...rankInput].sort((a, b) => b.raw - a.raw);
+  sortedByRaw.forEach((r, i) => rawRankBySlug.set(r.slug, i + 1));
+
   const enriched = cardRows.map((card: any) => {
     const slug = String(card.card_slug);
     const pcSlug = `pc-${slug}`;
@@ -786,6 +843,13 @@ async function enrichCards(
       ? `[${card.card_name}](${cardUrl})`
       : card.card_name;
 
+    // v164: variant identity hints.
+    const variantLabels = extractVariantLabels(card.card_name);
+    const printedDenominator = (() => {
+      const s = card.set_printed_total == null ? "" : String(card.set_printed_total);
+      return /^\d+$/.test(s) ? Number(s) : null;
+    })();
+
     return {
       card_name: cardNameLinked,
       card_name_plain: card.card_name,
@@ -807,6 +871,18 @@ async function enrichCards(
       // stable for the candidate-selection code path.
       variant: null,
       image_url: card.image_url,
+      // v164 variant-identity hints (see extractVariantLabels /
+      // isSecretRare helpers). These let the model resolve
+      // #214 vs #215 style ambiguity without guessing:
+      //   * variant_labels        — the [Bracketed] tags in card_name
+      //   * printed_denominator   — the "N/M" M value from the set
+      //   * is_secret_rare        — card_number > printed_denominator
+      //   * raw_price_rank_in_result — 1=highest raw price in this
+      //                                result set (usually the alt art)
+      variant_labels:       variantLabels,
+      printed_denominator:  printedDenominator,
+      is_secret_rare:       isSecretRare(card.card_number, card.set_printed_total),
+      raw_price_rank_in_result: rawRankBySlug.get(slug) ?? null,
       raw_usd: usdCentsToUsd(trend?.current_raw),
       raw_gbp: usdCentsToGbp(trend?.current_raw),
       psa9_usd: usdCentsToUsd(trend?.current_psa9),
@@ -2398,6 +2474,10 @@ Deno.serve(async (req: Request) => {
 
     let answer = "";
     let toolUsed = "direct";
+    // v164-B: track every tool called this turn (loop can call more
+    // than one). Exposed on the response so the eval can enforce
+    // "PSA pop claim requires get_grading_pop this turn".
+    const toolsUsedThisTurn: string[] = [];
     let queryType = "general";
     let cardDataFound = false;
     let inputTokens = 0;
@@ -2412,6 +2492,17 @@ Deno.serve(async (req: Request) => {
     // list for the client's selection UI. See the tool-result
     // handler below.
     let ambiguousCandidates: any[] | null = null;
+    // v166 (2026-09-23): the v164 answer-text-driven auto-pin scorer
+    // was removed. Reason: reliability was ~50-70% because LLM
+    // wording varies run-to-run and scoring heuristics can't
+    // consistently identify which of 2-6 candidates the model
+    // picked. See docs/notes/2026-09-23-deterministic-card-pinning.md
+    // for the deterministic follow-up plan.
+    //
+    // Pin behaviour is now strictly structural:
+    //   * exactly-1 search_cards candidate → pin (still in place below)
+    //   * structured card_context from client → pin (unchanged)
+    //   * everything else → no pin; follow-ups rely on history
 
     const MAX_LOOPS = 3;
     for (let loopCount = 0; loopCount < MAX_LOOPS; loopCount++) {
@@ -2453,6 +2544,7 @@ Deno.serve(async (req: Request) => {
             tb.input,
           );
           toolUsed = tb.name;
+          if (!toolsUsedThisTurn.includes(tb.name)) toolsUsedThisTurn.push(tb.name);
           if (qt) queryType = qt;
 
           const d = data;
@@ -2519,13 +2611,24 @@ Deno.serve(async (req: Request) => {
               // answer directly. Historically this path fired on any
               // >1 result, which regressed common queries like
               // "how much is Charizard Base Set?" into a picker UI.
-              // Threshold tuned to 7 so common disambiguated queries
-              // like "Charizard Base Set unlimited" (typically 5-6
-              // candidates from cards.in) can be answered directly,
-              // while genuinely open queries like "Umbreon" (many
-              // more candidates) still show the picker.
-              const AMBIGUOUS_THRESHOLD = 7;
-              if (!ambiguousCandidates && candidateArr.length >= AMBIGUOUS_THRESHOLD) {
+              // v164 refinement: raised threshold to 9 to effectively
+              // disable the short-circuit selection UI on the
+              // free-text search_cards path. enrichCards slices its
+              // output to a maximum of 8, so a >=9 threshold never
+              // fires. Rationale: the model consistently strips the
+              // user's disambiguating words per the tool description
+              // ("Pass ONLY the card name in search_term"), so with a
+              // threshold ≤ 8 common queries like "Blastoise Base
+              // Set unlimited" would hit the picker even though the
+              // user had already disambiguated. Bare-name ambiguous
+              // queries ("Umbreon", "Charizard") already get a "which
+              // one" text clarification from the model (see
+              // D-ambiguous eval prompt). The candidate-selection UI
+              // remains reachable through the structured-context
+              // ambiguous_multi paths for card_context requests.
+              const AMBIGUOUS_THRESHOLD = 9;
+              if (!ambiguousCandidates
+                  && candidateArr.length >= AMBIGUOUS_THRESHOLD) {
                 ambiguousCandidates = candidateArr;
               }
             }
@@ -2695,6 +2798,11 @@ Deno.serve(async (req: Request) => {
     const responseBody: Record<string, unknown> = {
       answer,
       tool_used: toolUsed,
+      // v164-B: full list of tools called this turn (loop can call
+      // more than one). Backward-compatible with clients that only
+      // read tool_used; new eval assertions inspect this to enforce
+      // "PSA pop claim requires get_grading_pop".
+      tools_used: toolsUsedThisTurn,
       query_type: queryType,
       card_data_found: cardDataFound,
       exact_match_found: exactMatchFound,

@@ -214,10 +214,40 @@ const PROMPTS = [
   { id: 'Y-card-switch', category: 'Y-hardstop', description: 'card switch mid-conversation',
     turns: [
       { message: 'Charizard Base Set unlimited price?', capture: 'card1', expect: [] },
-      { message: 'Now what about Blastoise Base Set unlimited?', expect: [
+      // Simulate the real client's detectExplicitCardSwitch(): user
+      // named a different card, so card_context is dropped and the
+      // server resolves fresh. Without this, my naive eval would
+      // send T1's pin as card_context, forcing the structured path
+      // to keep the old matched_* fields even though the model
+      // correctly answers about the new card.
+      { message: 'Now what about Blastoise Base Set unlimited?', dropContext: true, expect: [
         { kind: 'switches_away_from', turnRef: 'card1' },
       ]},
     ]},
+  // ── v164 targeted hard-stops ──────────────────────────────────
+  { id: 'Z1-multi-turn-pin', category: 'Z1-v164', description: 'v164-A: multi-turn pin required',
+    turns: [
+      { message: 'How much is Charizard from Base Set unlimited worth?', capture: 'card1', expect: [
+        // Model gives a card-specific answer → must pin.
+        { kind: 'pin_required' },
+      ]},
+      { message: 'And PSA 10?', expect: [
+        { kind: 'multi_turn_card_stable', turnRef: 'card1' },
+      ]},
+    ]},
+  { id: 'Z2-pop-claim-tool', category: 'Z2-v164', description: 'v164-B: PSA pop claim requires tool',
+    turns: [{ message: 'How many PSA 10 Charizard Base Set unlimited copies have been graded, and what is the gem rate?', expect: [
+      // Universal no_pop_claim_without_tool assertion is what
+      // enforces this; here we just want the harness to run and
+      // record the tools_used field.
+    ]}]},
+  { id: 'Z3-alt-art-215', category: 'Z3-v164', description: 'v164-C: alt art disambiguation must land on #215',
+    turns: [{ message: 'What is the PSA 10 price of the Umbreon VMAX alt art from Evolving Skies?', expect: [
+      // Umbreon VMAX Evolving Skies: #215 is the moonbreon alt art
+      // (top-priced above-denominator variant), #214 is the other
+      // secret rare. Model must NOT reference #214 as the alt art.
+      { kind: 'alt_art_number_correct', expected: '215', wrong: '214', denom: '203' },
+    ]}]},
 ]
 
 // ── caller helpers ────────────────────────────────────────────────
@@ -299,6 +329,28 @@ function looksLikeRawCentsLeak(s) {
   //    real value; skip here and rely on the per-prompt tests.
   return { hit: false }
 }
+// v164-B: detects numeric PSA-population claims. Distinguishes from
+// PSA prices — "£23,779 PSA 10" (currency-prefixed) is a price, not
+// a population count. Population claims are recognisable by either
+// (a) the plural "PSA 10s" with no currency prefix, (b) an explicit
+// population word (copies / graded / examples / submissions /
+// census), or (c) explicit "gem rate of N", "population of N", etc.
+function containsPsaPopClaim(s) {
+  const t = s || ''
+  // (a) "N PSA 10s" plural — but only when N is NOT preceded by a
+  //     currency symbol (which would make it a price, not a count).
+  if (/(?<![£$€])\b\d{1,3}(?:,\d{3})*\s+psa\s*10s\b/i.test(t)) return true
+  // (b) "N PSA 10 (copies|graded|examples|submissions|census)"
+  if (/(?<![£$€])\b\d{1,3}(?:,\d{3})*\s+psa\s*10\s+(?:copies|graded|examples|submissions|census)\b/i.test(t)) return true
+  // (c) explicit population phrasing
+  if (/\bgem\s+rate\s+of\s+(?:around\s+|about\s+)?\d/i.test(t)) return true
+  if (/\b(?:around|about|roughly|only|over)\s+\d{1,3}(?:,\d{3})*\s+(?:copies|examples|cards)\s+(?:graded|of|are|out)/i.test(t)) return true
+  if (/\bpopulation\s+(?:of|is)\s+\d/i.test(t)) return true
+  if (/\bpop(?:ulation)?\s+report\s+shows\s+\d/i.test(t)) return true
+  if (/\btotal\s+(?:graded|population)[^.]{0,20}\d{2,}/i.test(t)) return true
+  if (/\b\d{2,}(?:,\d{3})*\s+total\s+(?:graded|copies|submissions)/i.test(t)) return true
+  return false
+}
 // An "aborted tool chain" is when the final visible answer is just the
 // model narrating its intent to call another tool - "Let me check", "Now
 // let me get", etc. Users see a half-answer with no data. Detects such
@@ -348,8 +400,10 @@ async function evaluateOne(prompt, endpoint) {
         { role: 'user', content: r.userMessage },
         { role: 'assistant', content: r.data?.answer || '' },
       ]),
-      card_context: activeCard,
-      context_source: activeCard ? 'conversation' : 'text',
+      card_context: turn.dropContext ? null : activeCard,
+      context_source: turn.dropContext
+        ? 'card_switch'
+        : (activeCard ? 'conversation' : 'text'),
     }
     const call = await callEndpoint(endpoint, body)
     const d = call.data || {}
@@ -378,11 +432,15 @@ async function evaluateOne(prompt, endpoint) {
     //   * no_aborted_chain    — never ship "let me check..." half-answers
     //   * no_raw_cents_leak   — never leak raw cent integers or
     //                            mis-label a dollar value as cents
+    //   * no_pop_claim_without_tool (v164-B) — numeric PSA
+    //                            population claim requires get_grading_pop
+    //                            to have been called this turn
     const failures = []
     const allAssertions = [
       ...(turn.expect || []),
       { kind: 'no_aborted_chain' },
       { kind: 'no_raw_cents_leak' },
+      { kind: 'no_pop_claim_without_tool' },
     ]
     for (const a of allAssertions) {
       const ans = d.answer || ''
@@ -464,6 +522,53 @@ async function evaluateOne(prompt, endpoint) {
         const check = looksLikeRawCentsLeak(d.answer || '')
         if (check.hit) {
           failures.push({ hard: true, kind: a.kind, subKind: check.kind, value: check.value, snippet: (d.answer || '').slice(0, 200) })
+        }
+      } else if (a.kind === 'no_pop_claim_without_tool') {
+        // v164-B universal hard-stop. If the answer contains a
+        // numeric PSA population claim, get_grading_pop must have
+        // been one of the tools called this turn. Uses the new
+        // tools_used array from the response; falls back to
+        // tool_used for backward-compat with pre-v164 responses.
+        if (containsPsaPopClaim(d.answer || '')) {
+          const toolsThisTurn = Array.isArray(d.tools_used) ? d.tools_used
+            : (d.tool_used ? [d.tool_used] : [])
+          const usedPop = toolsThisTurn.includes('get_grading_pop')
+          if (!usedPop) {
+            failures.push({
+              hard: true, kind: a.kind, tools: toolsThisTurn,
+              snippet: (d.answer || '').slice(0, 220),
+            })
+          }
+        }
+      } else if (a.kind === 'alt_art_number_correct') {
+        // v164-C. Fail only if the WRONG number is claimed AS the
+        // alt art / moonbreon. Merely mentioning the wrong number
+        // as a comparison ("card 214 sits between them") is fine.
+        //
+        // Rule:
+        //   1. Find every sentence that contains "alt art" or
+        //      "moonbreon".
+        //   2. In those sentences, if the wrong number appears in a
+        //      positive-claim shape (#N, N/DENOM, or "card N") AND
+        //      the expected number does not appear in the same
+        //      sentence, fail.
+        const ans = d.answer || ''
+        const sentences = ans.split(/(?<=[.!?])\s+/)
+        const claimSentences = sentences.filter(s => /\balt\s*art|moonbreon/i.test(s))
+        const wrongPositive = new RegExp(`#\\s*${a.wrong}\\b|\\b${a.wrong}\\s*/${a.denom}\\b|\\bcard\\s+${a.wrong}\\b`, 'i')
+        const expectedInSame = new RegExp(`#\\s*${a.expected}\\b|\\b${a.expected}\\s*/${a.denom}\\b|\\bcard\\s+${a.expected}\\b`, 'i')
+        for (const s of claimSentences) {
+          if (wrongPositive.test(s) && !expectedInSame.test(s)) {
+            failures.push({ hard: true, kind: a.kind, wrong: a.wrong, snippet: s.slice(0, 220) })
+            break
+          }
+        }
+      } else if (a.kind === 'pin_required') {
+        // v164-A. When the model produces a card-specific answer
+        // from a multi-candidate pool, matched_pc_product_id MUST
+        // be set so the follow-up turn receives structured context.
+        if (!d.matched_pc_product_id) {
+          failures.push({ hard: true, kind: a.kind, note: 'model answered without pinning a candidate' })
         }
       } else if (a.kind === 'set_card_count_accurate') {
         // Legacy soft check — kept for other set-count prompts.
