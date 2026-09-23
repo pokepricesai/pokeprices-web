@@ -1,0 +1,168 @@
+{
+  "ts": "2026-09-23T23:44:44.264Z",
+  "endpoints": [
+    "smart-endpoint"
+  ],
+  "runs": {
+    "smart-endpoint": [
+      {
+        "prompt": "Z4-recommendation-baseline",
+        "endpoint": "smart-endpoint",
+        "turns": [
+          {
+            "userMessage": "I want to buy a Charizard for under $100 PSA 9",
+            "status": 200,
+            "ms": 4189,
+            "answer": "Here are 8 of 119 PSA 9 Charizard matches under $100. Most of the results are Japanese modern cards, which are quite affordable. The cheapest is the Charizard ex from Shiny Treasure ex at $11.79, followed by the 2020 Battle Academy version at $15.25. If you want English classic cards, those will sit higher in the price range and likely require you to browse the full list on PokePrices — the cheapest English option here is the Battle Academy copy. Japanese pricing does not directly translate to English market values, so confirm you're comfortable with Japanese cards before committing.",
+            "tools_used": [
+              "find_graded_cards"
+            ],
+            "recommendation_context": {
+              "subject": "Charizard",
+              "grader": "PSA",
+              "grade": "9",
+              "max_price_usd": 100
+            },
+            "failures": []
+          }
+        ]
+      },
+      {
+        "prompt": "Z5-grade-update",
+        "endpoint": "smart-endpoint",
+        "turns": [
+          {
+            "userMessage": "I want to buy a Charizard for under $100 PSA 9",
+            "status": 200,
+            "ms": 4681,
+            "answer": "Here are 8 of 119 PSA 9 Charizards under $100 from PokePrices' current price data.\n\nThe cheapest in this window is Charizard ex #115 from Japanese Shiny Treasure ex at $11.79, followed by Charizard #3 from 2020 Battle Academy at $15.25. The Battle Academy one is English, so if you want to stay domestic that's the option. The other cards shown are mostly newer Japanese releases, ranging up to Mega Charizard X ex from Phantasmal Flames at $19.63.\n\nNote that most of these cheaper PSA 9 copies are relatively modern printings. If you're after a vintage Base Set or other WotC-era Charizard PSA 9 in this price range, those are unlikely to exist — the classic stuff holds its value much harder.",
+            "tools_used": [
+              "find_graded_cards"
+            ],
+            "recommendation_context": {
+              "subject": "Charizard",
+              "grader": "PSA",
+              "grade": "9",
+              "max_price_usd": 100
+            },
+            "failures": []
+          },
+          {
+            "userMessage": "PSA 8 then",
+            "status": 200,
+            "ms": 4191,
+            "answer": "Here are the cheapest PSA 8 Charizards under $100 from PokePrices (out of 156 total matches). The cheapest is Charizard ex #115 from Japanese Shiny Treasure ex at $9.50, followed by Charizard EX #6 from Japanese Scarlet & Violet 151 at $10.00. If you want English only, the Battle Academy Charizard #3 is $10.54, and Vivid Voltage's Charizard #25 sits at $13.00. All of these are modern printings and well under your budget.",
+            "tools_used": [
+              "find_graded_cards"
+            ],
+            "recommendation_context": {
+              "subject": "Charizard",
+              "grader": "PSA",
+              "grade": "8",
+              "max_price_usd": 100
+            },
+            "failures": []
+          }
+        ]
+      },
+      {
+        "prompt": "Z6-budget-update",
+        "endpoint": "smart-endpoint",
+        "turns": [
+          {
+            "userMessage": "I want to buy a Charizard for under $100 PSA 9",
+            "status": 200,
+            "ms": 4718,
+            "answer": "Here are 8 of the 119 matches under $100 at PSA 9. The cheapest options are mostly Japanese recent releases: Charizard ex from Shiny Treasure ex at $11.79, Battle Academy Charizard at $15.25, and several Japanese ex and VSTAR versions in the $15-17 range. All of these are well under your budget. The only English card in this window is the Battle Academy Charizard at $15.25 and the Phantasmal Flames Mega Charizard X ex at $19.63.\n\nIf you want to stay with English cards from the classic era or chase variants like Base Set or alt arts, you'll need to check the full list on the card page — those tend to command premium prices beyond this window.",
+            "tools_used": [
+              "find_graded_cards"
+            ],
+            "recommendation_context": {
+              "subject": "Charizard",
+              "grader": "PSA",
+              "grade": "9",
+              "max_price_usd": 100
+            },
+            "failures": []
+          },
+          {
+            "userMessage": "make it $150",
+            "status": 200,
+            "ms": 4911,
+            "answer": "There are 147 Charizards at PSA 9 under $150. Here are the 8 cheapest of that set. The Japanese cards dominate the budget end: Shiny Treasure ex at $11.79, Japanese Go at $15.50, and Ruler of the Black Flame at $15.87. The two English options in this window are Battle Academy Charizard at $15.25 and the recent Phantasmal Flames Mega Charizard X ex at $19.63. All are well under your $150 limit, so if you want something older or from a specific set, check the full list on the card pages — there's plenty of room to move up into Base Set, vintage promos, or modern alt arts within your budget.",
+            "tools_used": [
+              "find_graded_cards"
+            ],
+            "recommendation_context": {
+              "subject": "Charizard",
+              "grader": "PSA",
+              "grade": "9",
+              "max_price_usd": 150
+            },
+            "failures": []
+          }
+        ]
+      },
+      {
+        "prompt": "Z7-subject-swap",
+        "endpoint": "smart-endpoint",
+        "turns": [
+          {
+            "userMessage": "I want to buy a Charizard for under $100 PSA 9",
+            "status": 200,
+            "ms": 4052,
+            "answer": "Here are the 8 cheapest PSA 9 Charizards under $100 from PokePrices' current price data (out of 119 total matches). Most of these are Japanese cards, so note that English market pricing won't apply to them — you'd want to check TCGPlayer Japan or Mercari Japan for accurate local pricing instead.\n\nThe cheapest English-language option in the window is the Charizard from 2020 Battle Academy at $15.25. If you want a classic English Charizard from the early sets in PSA 9 under $100, you'll have better luck further down the list — call out a specific era (Base Set, Jungle, Fossil, Shadowless, etc.) and I can narrow it for you.",
+            "tools_used": [
+              "find_graded_cards"
+            ],
+            "recommendation_context": {
+              "subject": "Charizard",
+              "grader": "PSA",
+              "grade": "9",
+              "max_price_usd": 100
+            },
+            "failures": []
+          },
+          {
+            "userMessage": "Blastoise instead",
+            "status": 200,
+            "ms": 4422,
+            "answer": "Here are 8 of 57 PSA 9 Blastoise matches under $100. Most are Japanese cards again. Your best English option is the Blastoise Spirit Link from Evolutions at $15.50. If you're after a classic Blastoise (the Base Set era holo), none of those show in this cheapest window — they'd be deeper in the list and likely over your budget in PSA 9. You might find them by checking the full results on the Blastoise page, or drop to PSA 8 or raw to stay under $100 for a Base Set copy.",
+            "tools_used": [
+              "find_graded_cards"
+            ],
+            "recommendation_context": {
+              "subject": "Blastoise",
+              "grader": "PSA",
+              "grade": "9",
+              "max_price_usd": 100
+            },
+            "failures": []
+          }
+        ]
+      },
+      {
+        "prompt": "Z8-zero-result-honesty",
+        "endpoint": "smart-endpoint",
+        "turns": [
+          {
+            "userMessage": "I want to buy a Pikaflarge for under $50 PSA 9",
+            "status": 200,
+            "ms": 3227,
+            "answer": "I don't currently have any PSA 9 Pikaflarge under $50 in PokePrices' current price data. You could raise your budget, drop to PSA 8, try raw, or search for a different Pikachu variant if you'd like me to check those options.",
+            "tools_used": [
+              "find_graded_cards"
+            ],
+            "recommendation_context": {
+              "subject": "Pikaflarge",
+              "grader": "PSA",
+              "grade": "9",
+              "max_price_usd": 50
+            },
+            "failures": []
+          }
+        ]
+      }
+    ]
+  }
+}

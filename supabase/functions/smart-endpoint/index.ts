@@ -232,6 +232,52 @@ const TOOLS = [
       },
       required: ["card_slug"]
     }
+  },
+  {
+    // v167 (2026-09-23): constrained graded-card discovery. Added
+    // because the model was hallucinating "no matches" for budgeted
+    // graded-card queries. THIS tool is now the only source of truth
+    // for statements like "there are/aren't Charizard PSA 9 cards
+    // under $100" — never make that claim without calling it.
+    name: "find_graded_cards",
+    description: "Deterministic constrained search of PokePrices' current graded-price snapshot. Use for buy-me-a-<card> queries with a grader / grade / budget, and for follow-ups like 'PSA 8 then', 'make it $150', 'Blastoise instead'. MUST be called before any claim about whether cards exist within a budget/grade constraint. Returns real card_slug + card_name + price_usd_cents rows.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name_filter: {
+          type: "string",
+          description: "Card / Pokemon name substring (e.g. 'Charizard'). Required for a scoped search."
+        },
+        grader: {
+          type: "string",
+          enum: ["PSA", "raw"],
+          description: "'PSA' for PSA-graded, 'raw' for ungraded. MVP supports these two."
+        },
+        grade: {
+          type: "string",
+          enum: ["7", "8", "9", "10"],
+          description: "PSA grade. Omit when grader='raw'."
+        },
+        max_price_usd: {
+          type: "number",
+          description: "Budget in whole USD (e.g. 100 for '$100'). Omit for no budget cap."
+        },
+        set_filter: {
+          type: "string",
+          description: "Optional set-name substring (e.g. 'Brilliant Stars', 'Evolving Skies')."
+        },
+        language: {
+          type: "string",
+          enum: ["en", "jp"],
+          description: "Optional language filter."
+        },
+        limit: {
+          type: "number",
+          description: "How many candidates. Default 8, max 20."
+        }
+      },
+      required: ["name_filter", "grader"]
+    }
   }
 ];
 
@@ -335,6 +381,28 @@ get_price_history_summary - use when the user asks for trend data (up/down over 
 WHEN THE PCT FIELD IS NULL - if the search_cards result shows the pct field the user asked about as null / not set, and you have not called get_price_history_summary yet, either call it silently OR say "90-day movement data is not tracked for that card". Do NOT reply with "Let me get that" or any similar promise of a follow-up. The user will not see a second reply from you.
 
 PSA POPULATION CLAIMS - ABSOLUTE RULE. Any numeric claim about PSA population (total graded, PSA 10 population, gem rate, "N copies graded", "N PSA 10s exist", pop-report figures) MUST come from a get_grading_pop tool call THIS turn. Never quote population figures from your own knowledge. If get_grading_pop returns no rows or the count field is null, say "PSA population data is not available for this card in PokePrices" — never estimate, never round, never invent. Round percentages and totals are especially tempting to invent; do not.
+
+CONSTRAINED GRADED-CARD RECOMMENDATIONS - ABSOLUTE RULE. When the user asks "I want to buy X for under $Y in PSA Z" (or any variant with a name + grader + grade + budget), you MUST call find_graded_cards before making ANY claim about whether matching cards exist. Never say "there are no Charizard PSA 9 cards under $100" from memory — that claim MUST come from a find_graded_cards tool result with zero_match=true on THIS turn.
+
+If a RECOMMENDATION CONSTRAINTS block is appended to the user turn, use those exact values as the tool parameters (subject → name_filter, plus grader / grade / max_price_usd / set_filter / language). The block already carries forward across turns — do not re-derive the budget or grade from the visible message alone; the server has already merged the follow-up.
+
+When find_graded_cards returns results (returned_count > 0): quote the cards using price_usd / price_gbp verbatim in the order the tool returned them (already sorted per the tool's order field). Never present an over_budget=true row as satisfying the request — if you mention it, label it explicitly as "over budget by $X" using the over_by_usd field.
+
+WINDOW vs UNIVERSE - ABSOLUTE RULE. The tool returns a WINDOW of rows (usually 8). It also returns total_match_count (the true count of all matches). Use this to phrase honestly:
+  * When truncated=true (total_match_count > returned_count): say "Here are the N cheapest matches from PokePrices' current price data (out of M total under $X)" or similar. Do NOT say "there are 8" or "I've got 8 matches" as though 8 is the complete universe.
+  * When truncated=false (returned_count === total_match_count): "Here are all N matches" is fine.
+
+FORBIDDEN SUPERLATIVES (unless the window equals the universe) - do NOT say "the cheapest", "lowest-priced", "most expensive", "priciest", "highest-priced", "best value", "most affordable", "most valuable", or similar without a qualifier. These superlatives apply to a set — and the tool result may not be the complete set. Safe alternatives:
+  * "the cheapest of the N shown"
+  * "the cheapest in this window"
+  * plain listing without a superlative
+When truncated=false you MAY use the superlatives, because the returned window IS the complete match set.
+
+Never claim an exact total-match number ("there are 8 matches", "I found 12 cards") unless total_match_count is present in the tool result and you are quoting IT.
+
+When find_graded_cards returns zero_match=true: say plainly "I don't currently have any matching PSA grade N subject under $BUDGET in PokePrices' current price data" using the actual values from the constraints. Do NOT phrase it as "available for sale" or "on the market" — the PokePrices data is a price snapshot, not a live listing feed. Then, and only then, offer alternatives: raise the budget, lower the grade, drop to raw, switch to a specific set, or switch subject.
+
+Never invent a card the tool did not return.
 
 VARIANT IDENTITY - the search_cards result now carries variant hints per card. Use them instead of guessing:
   * variant_labels           — array of [Bracketed] tags from card_name (e.g. ["1st Edition"], ["Shadowless"], ["Reverse Holo"])
@@ -1317,6 +1385,353 @@ async function dbGetPriceSummary(
   };
 }
 
+// v167 (2026-09-23): deterministic constrained graded-card
+// discovery. See migrations/2026-09-23-smart-endpoint-find-graded-
+// cards.sql for the underlying RPC.
+//
+// Behaviour:
+//   1. Call the RPC with the user's budget → in-budget results.
+//   2. If zero in-budget results AND a budget was set, make a second
+//      no-budget call to fetch the closest-over-budget candidate for
+//      an honest "over budget by $X" hedge.
+//   3. Emit structured, unit-typed output. Every price field is
+//      returned as both `_cents` (integer for programmatic use) and
+//      `_usd` (pre-formatted display string). No raw cent leaks.
+//
+// Prompt contract (see SYSTEM):
+//   * "there are/aren't matches under $X" claims MUST come from this
+//     tool's zero_match flag — never from model memory.
+//   * The over_budget row is labelled explicitly so the model can
+//     say "the closest over-budget match is $X (over budget by $Y)"
+//     without pretending it satisfies the request.
+async function dbFindGradedCards(params: {
+  name_filter?: string,
+  grader?:      string,
+  grade?:       string,
+  max_price_usd?: number,
+  set_filter?:  string,
+  language?:    string,
+  limit?:       number,
+}): Promise<any> {
+  const nameFilter = typeof params.name_filter === "string" && params.name_filter.trim().length > 0
+    ? params.name_filter.trim() : null;
+  if (!nameFilter) return { results: [], zero_match: true, error: "name_filter is required" };
+
+  const graderRaw = String(params.grader ?? "PSA").toUpperCase();
+  const grader    = graderRaw === "RAW" || graderRaw === "UNGRADED" ? "raw" : "PSA";
+  const grade     = grader === "PSA" ? String(params.grade ?? "9") : null;
+  const maxUsd    = typeof params.max_price_usd === "number" && isFinite(params.max_price_usd) && params.max_price_usd > 0
+    ? params.max_price_usd : null;
+  const maxCents  = maxUsd != null ? Math.round(maxUsd * 100) : null;
+  const setFilter = typeof params.set_filter === "string" && params.set_filter.trim().length > 0
+    ? params.set_filter.trim() : null;
+  const lang      = params.language === "en" || params.language === "jp" ? params.language : null;
+  const lim       = Math.max(1, Math.min(Number(params.limit) || 8, 20));
+
+  const shape = (r: any, over: boolean) => {
+    const price = r.price_usd_cents ?? null;
+    const cardUrl = r.card_url_slug
+      ? `https://www.pokeprices.io/set/${encodeURIComponent(r.set_name)}/card/${r.card_url_slug}`
+      : null;
+    return {
+      card_name:     r.card_name,
+      set_name:      r.set_name,
+      card_slug:     r.card_slug,
+      card_url_slug: r.card_url_slug,
+      card_url:      cardUrl,
+      card_number_display: r.card_number_display,
+      language:      r.language,
+      set_release_date: r.set_release_date,
+      price_usd_cents: price,
+      price_usd:     usdCentsToUsd(price),
+      price_gbp:     usdCentsToGbp(price),
+      raw_usd_cents:   r.raw_usd_cents ?? null,
+      raw_usd:       usdCentsToUsd(r.raw_usd_cents),
+      raw_gbp:       usdCentsToGbp(r.raw_usd_cents),
+      psa10_usd_cents: r.psa10_usd_cents ?? null,
+      psa10_usd:     usdCentsToUsd(r.psa10_usd_cents),
+      psa10_gbp:     usdCentsToGbp(r.psa10_usd_cents),
+      price_date:    r.price_date,
+      over_budget:   over,
+      over_by_usd_cents: over && maxCents != null && price != null ? price - maxCents : null,
+      over_by_usd:   over && maxCents != null && price != null
+        ? usdCentsToUsd(price - maxCents) : null,
+    };
+  };
+  // v167b (2026-09-23): expose the RPC's total_match_count so the
+  // model can distinguish the returned window from the complete
+  // universe. Without this, "$88 is the cheapest" was being said
+  // when $88 was actually the cheapest of the 8 returned, not the
+  // cheapest of ~20 total matches.
+  const readTotal = (rows: any[] | null | undefined): number | null => {
+    if (!rows || !rows.length) return 0;
+    const t = rows[0]?.total_match_count;
+    return typeof t === "number" ? t : null;
+  };
+
+  // In-budget query.
+  const { data: inBudget, error: err1 } = await supabase.rpc("find_graded_cards_for_ai", {
+    name_filter:      nameFilter,
+    grader:           grader,
+    grade:            grade,
+    max_price_cents:  maxCents,
+    set_filter:       setFilter,
+    language:         lang,
+    limit_count:      lim,
+  });
+  if (err1) return { results: [], zero_match: true, error: err1.message };
+
+  const matches = Array.isArray(inBudget) ? inBudget.map((r) => shape(r, false)) : [];
+  const zeroMatch = matches.length === 0;
+  const totalMatchCount = readTotal(inBudget as any[]);
+  const returnedCount = matches.length;
+  const truncated = totalMatchCount != null && totalMatchCount > returnedCount;
+
+  // Zero-match hedge: fetch the cheapest over-budget candidate.
+  let closestOver: any = null;
+  if (zeroMatch && maxCents != null) {
+    const { data: over } = await supabase.rpc("find_graded_cards_for_ai", {
+      name_filter:      nameFilter,
+      grader:           grader,
+      grade:            grade,
+      max_price_cents:  null,   // no budget
+      set_filter:       setFilter,
+      language:         lang,
+      limit_count:      1,
+    });
+    // The RPC orders by price DESC, so limit=1 returns the MOST
+    // expensive — not what we want for closest-over. Re-fetch with
+    // a wider window and pick the cheapest that's over budget.
+    const { data: overAll } = await supabase.rpc("find_graded_cards_for_ai", {
+      name_filter:      nameFilter,
+      grader:           grader,
+      grade:            grade,
+      max_price_cents:  null,
+      set_filter:       setFilter,
+      language:         lang,
+      limit_count:      20,
+    });
+    const sortedAsc = (overAll || []).slice().sort((a: any, b: any) =>
+      (a.price_usd_cents ?? Infinity) - (b.price_usd_cents ?? Infinity));
+    const cheapestOver = sortedAsc.find((r: any) =>
+      typeof r.price_usd_cents === "number" && r.price_usd_cents > (maxCents ?? 0));
+    if (cheapestOver) closestOver = shape(cheapestOver, true);
+  }
+
+  const orderNote = maxCents != null
+    ? "cheapest first (results ordered price ASC because a budget was supplied)"
+    : "highest-value first (results ordered price DESC because no budget was supplied)";
+
+  return {
+    query: {
+      name_filter: nameFilter,
+      grader,
+      grade,
+      max_price_usd: maxUsd,
+      set_filter: setFilter,
+      language: lang,
+    },
+    zero_match:  zeroMatch,
+    // v167b: `match_count` is retained for backward compatibility
+    // but is DEPRECATED. Use `returned_count` (rows in `results`)
+    // and `total_match_count` (true universe from the RPC) instead.
+    match_count: matches.length,
+    returned_count: returnedCount,
+    total_match_count: totalMatchCount,
+    truncated,
+    order:       orderNote,
+    results:     matches,
+    closest_over_budget: closestOver,
+    note: zeroMatch
+      ? `No ${grader}${grade ? " " + grade : ""} ${nameFilter} match is present in PokePrices' current price data under $${maxUsd ?? 0}. Say so plainly; do not invent a candidate. If closest_over_budget is set, mention it as "over budget by X" — do not present it as satisfying the request.`
+      : truncated
+        ? `Real PokePrices price-snapshot rows. Showing the ${returnedCount} cheapest of ${totalMatchCount} total matches. Say "here are ${returnedCount} of ${totalMatchCount} matches" (or similar) — do NOT say "there are ${returnedCount}" as though it were the complete universe. Do NOT claim "the cheapest overall" etc. based on this window; the tool returned only the lowest-priced ${returnedCount} in-budget rows.`
+        : `Real PokePrices price-snapshot rows. All ${returnedCount} matches shown (${orderNote}). Because the returned window IS the complete match set, superlative language like "the cheapest of these" is justified — but do not extrapolate beyond the tool result.`,
+  };
+}
+
+// ────────────────────────────────────────────────────────────────
+// v167: recommendation-intent constraint extraction + carryover.
+// Server-side deterministic parsing so the model cannot silently
+// drop a budget / grade / subject between turns.
+// ────────────────────────────────────────────────────────────────
+
+type RecommendationContext = {
+  subject?:         string;               // "Charizard"
+  grader?:          "PSA" | "raw";
+  grade?:           "7" | "8" | "9" | "10";
+  max_price_usd?:   number;
+  set_filter?:      string;
+  language?:        "en" | "jp";
+};
+
+// Curated subject list — top ~80 chase Pokemon TCG names. Simpler
+// than parsing free-form proper nouns and low-risk of false positives.
+// If a user names a Pokemon not on this list, the extractor falls
+// back to detecting a proper-noun-shaped token in the message.
+const SUBJECT_POKEMON = [
+  "Charizard","Blastoise","Venusaur","Pikachu","Mewtwo","Mew","Lugia","Ho-Oh","Rayquaza",
+  "Reshiram","Zekrom","Kyurem","Lucario","Gengar","Snorlax","Gardevoir","Sylveon","Umbreon",
+  "Espeon","Vaporeon","Jolteon","Flareon","Leafeon","Glaceon","Eevee","Groudon","Kyogre",
+  "Dialga","Palkia","Giratina","Arceus","Eternatus","Zacian","Zamazenta","Miraidon","Koraidon",
+  "Gholdengo","Iono","Mimikyu","Dragonite","Dragapult","Blissey","Regigigas","Necrozma","Solgaleo",
+  "Lunala","Hoopa","Volcanion","Marshadow","Mimikyu","Toxapex","Iron Valiant","Roaring Moon",
+  "Iron Bundle","Chien-Pao","Baxcalibur","Wugtrio","Terapagos","Meowscarada","Skeledirge","Quaquaval",
+  "Greninja","Decidueye","Incineroar","Primarina","Alakazam","Machamp","Golem","Nidoking","Nidoqueen",
+  "Clefable","Wigglytuff","Vileplume","Cloyster","Kingler","Weezing","Rhydon","Chansey","Kangaskhan",
+  "Tauros","Magmar","Electabuzz","Jynx","Ditto","Aerodactyl","Gyarados","Slowbro","Slowking",
+  "Farfetch'd","Scyther","Scizor","Pinsir","Heracross","Salamence","Metagross","Garchomp","Hydreigon",
+  "Trubbish","Latios","Latias","Bulbasaur","Ivysaur","Squirtle","Wartortle","Charmander","Charmeleon",
+];
+
+const BUY_INTENT_PATTERNS = [
+  /\bi\s+want\s+to\s+buy\b/i,
+  /\bi\s+want\s+a\b/i,
+  /\bi'?m\s+looking\s+to\s+buy\b/i,
+  /\blooking\s+for\s+a\b/i,
+  /\brecommend\b/i,
+  /\bwhat\s+can\s+i\s+get\b/i,
+  /\bfor\s+under\s+\$?\d/i,
+  /\bunder\s+\$?\d/i,
+  /\bless\s+than\s+\$?\d/i,
+  /\bwithin\s+\$?\d/i,
+  /\bwith\s+\$?\d/i,
+  /\bfor\s+\$?\d/i,
+  /\bbudget\b/i,
+  /\bcheap(?:est)?\b/i,
+  /\baffordable\b/i,
+];
+
+function extractPriceUsd(msg: string): number | null {
+  // Handles "under $100", "less than 150", "for $200", "make it $150",
+  // "up to $100", "budget of $200", "$300 max", "for 100 dollars"
+  const patterns = [
+    /(?:under|less\s+than|below|up\s+to|max(?:imum)?\s+of|budget\s+of|for)\s+\$?(\d{1,6})(?:\s*dollars?)?/i,
+    /make\s+it\s+\$?(\d{1,6})/i,
+    /\$?(\d{1,6})\s+(?:budget|max(?:imum)?|or\s+less)/i,
+    /\$(\d{1,6})\b/,
+    /\b(\d{1,6})\s*dollars?\b/i,
+  ];
+  for (const p of patterns) {
+    const m = msg.match(p);
+    if (m) {
+      const n = Number(m[1]);
+      if (isFinite(n) && n >= 1 && n <= 100000) return n;
+    }
+  }
+  return null;
+}
+
+function extractGrader(msg: string): "PSA" | "raw" | null {
+  if (/\braw\b|\bungraded\b/i.test(msg)) return "raw";
+  if (/\bpsa\s*\d/i.test(msg))            return "PSA";
+  return null;
+}
+
+function extractPsaGrade(msg: string): "7" | "8" | "9" | "10" | null {
+  // "PSA 8", "PSA-8", "psa 10", "grade 9", "in 9", "9 grade"
+  const patterns = [
+    /\bpsa\s*(\d{1,2})(?:\.\d)?\b/i,
+    /\bgrade\s+(\d{1,2})\b/i,
+    /\bin\s+(?:a\s+)?(\d{1,2})\b/i,   // "in 9"
+    /\bgraded\s+(\d{1,2})\b/i,
+  ];
+  for (const p of patterns) {
+    const m = msg.match(p);
+    if (m) {
+      const g = m[1];
+      if (["7","8","9","10"].includes(g)) return g as "7"|"8"|"9"|"10";
+    }
+  }
+  return null;
+}
+
+function extractSubject(msg: string): string | null {
+  // First check curated list.
+  for (const name of SUBJECT_POKEMON) {
+    const rx = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+    if (rx.test(msg)) return name;
+  }
+  // Fallback: capitalised proper-noun that isn't a common word,
+  // grader acronym, or article. Catches Pokemon not in the curated
+  // list AND typos / made-up names so the tool call still fires
+  // and returns zero_match honestly.
+  const stopWords = new Set([
+    "PSA","CGC","BGS","SGC","TAG","ACE","USD","GBP","EUR",
+    "The","That","This","These","Those","Some","Any","How","What","Where","When","Why","Who",
+    "But","And","Or","For","With","From","Into","Also","Just","Only",
+    "Charizard","Blastoise","Venusaur","Pikachu",  // in curated list already
+  ]);
+  const tokens = msg.split(/\s+/);
+  for (const raw of tokens) {
+    const clean = raw.replace(/[^A-Za-z-']/g, "");
+    if (clean.length >= 4 && /^[A-Z][A-Za-z-']+$/.test(clean) && !stopWords.has(clean)) {
+      return clean;
+    }
+  }
+  return null;
+}
+
+function extractLanguage(msg: string): "en" | "jp" | null {
+  if (/\bjapan(?:ese)?\b|\bjp\b(?!eg)/i.test(msg))  return "jp";
+  if (/\benglish\b|\ben\b(?!\w)/i.test(msg))         return "en";
+  return null;
+}
+
+function looksLikeBuyIntent(msg: string): boolean {
+  return BUY_INTENT_PATTERNS.some(p => p.test(msg));
+}
+
+// Merge previous + new. Only overwrite fields that were newly
+// extracted; keep everything else. Explicit replacements (subject
+// swap, grade swap, budget change) come through as newly-extracted
+// values.
+function mergeRecommendationContext(
+  prev: RecommendationContext | null | undefined,
+  next: RecommendationContext,
+): RecommendationContext {
+  const base = prev ?? {};
+  return {
+    subject:        next.subject        ?? base.subject,
+    grader:         next.grader         ?? base.grader,
+    grade:          next.grade          ?? base.grade,
+    max_price_usd:  next.max_price_usd  ?? base.max_price_usd,
+    set_filter:     next.set_filter     ?? base.set_filter,
+    language:       next.language       ?? base.language,
+  };
+}
+
+// Extract everything the current message contributes, then merge
+// with the previous context. Recommendation intent is only active
+// when there's a clear buy signal:
+//   * previous turn was itself a recommendation (hasPrev), OR
+//   * this turn has explicit buy-intent phrasing ("I want to buy",
+//     "looking for", "recommend", etc.), OR
+//   * this turn mentions a budget ("under $X", "for $X")
+//
+// A bare grader/grade/subject alone is NOT a recommendation turn —
+// e.g. "And PSA 10?" after asking "How much is Charizard worth?"
+// should stay on the normal card-history follow-up path, not fire
+// find_graded_cards.
+function computeRecommendationContext(
+  message: string,
+  prev:    RecommendationContext | null | undefined,
+): RecommendationContext | null {
+  const msg = String(message ?? "");
+  const extracted: RecommendationContext = {
+    subject:       extractSubject(msg) ?? undefined,
+    grader:        extractGrader(msg)  ?? undefined,
+    grade:         extractPsaGrade(msg) ?? undefined,
+    max_price_usd: extractPriceUsd(msg) ?? undefined,
+    language:      extractLanguage(msg) ?? undefined,
+  };
+  const hasPrev   = !!(prev && Object.values(prev).some(v => v !== undefined && v !== null));
+  const buyIntent = looksLikeBuyIntent(msg);
+  const hasBudget = extracted.max_price_usd != null;
+  if (!hasPrev && !buyIntent && !hasBudget) return null;
+  return mergeRecommendationContext(prev, extracted);
+}
+
 async function dbGetBudgetPsa10(budgetGbp: number): Promise<any> {
   const budgetUsdCents = Math.round((budgetGbp / GBP_RATE) * 100);
   const { data } = await supabase.from("card_trends")
@@ -1546,6 +1961,19 @@ async function executeTool(
       return {
         data: await dbGetPriceSummary(toolInput.card_slug, toolInput.period_days),
         queryType: "price_history_summary",
+      };
+    case "find_graded_cards":
+      return {
+        data: await dbFindGradedCards({
+          name_filter:   toolInput.name_filter,
+          grader:        toolInput.grader,
+          grade:         toolInput.grade,
+          max_price_usd: toolInput.max_price_usd,
+          set_filter:    toolInput.set_filter,
+          language:      toolInput.language,
+          limit:         toolInput.limit,
+        }),
+        queryType: "constrained_graded_search",
       };
     default:
       return { data: { error: "Unknown tool" }, queryType: "general" };
@@ -2161,6 +2589,18 @@ Deno.serve(async (req: Request) => {
     const setContextIn = body.set_context ?? null;
     const intentIn: string | null = typeof body.intent === "string" ? body.intent : null;
     const contextSourceIn: string | null = typeof body.context_source === "string" ? body.context_source : null;
+    // v167: recommendation-intent constraint carryover. The client
+    // sends the previous turn's merged context; the server merges
+    // in whatever the current message contributes and returns the
+    // updated context so the client can pass it on the next turn.
+    const recommendationContextIn: RecommendationContext | null =
+      body.recommendation_context && typeof body.recommendation_context === "object"
+        ? body.recommendation_context as RecommendationContext
+        : null;
+    const mergedRecommendationContext = computeRecommendationContext(
+      typeof body.message === "string" ? body.message : "",
+      recommendationContextIn,
+    );
 
     // Structured-context provenance for the response + chat_logs.
     let requestedCardRecordId: string | null = null;
@@ -2458,6 +2898,28 @@ Deno.serve(async (req: Request) => {
         `Question: ${cleanMessage}. Search for this card.`;
     } else {
       userContent = cleanMessage;
+    }
+
+    // v167: append the merged recommendation constraints as a
+    // structured block so the model MUST use them when it calls
+    // find_graded_cards. This is deterministic — the constraints
+    // come from the server-side extractor + previous-turn carryover,
+    // not model interpretation.
+    if (mergedRecommendationContext) {
+      const r = mergedRecommendationContext;
+      const parts: string[] = [];
+      if (r.subject)       parts.push(`subject=${r.subject}`);
+      if (r.grader)        parts.push(`grader=${r.grader}`);
+      if (r.grade)         parts.push(`grade=${r.grade}`);
+      if (r.max_price_usd != null) parts.push(`max_price_usd=${r.max_price_usd}`);
+      if (r.set_filter)    parts.push(`set_filter=${r.set_filter}`);
+      if (r.language)      parts.push(`language=${r.language}`);
+      if (parts.length > 0) {
+        userContent = userContent +
+          `\n\nRECOMMENDATION CONSTRAINTS (deterministic — carried from history + this message): ` +
+          parts.join(", ") +
+          `. Call find_graded_cards with these EXACT constraints. If the tool returns zero_match=true, say so plainly using the note field and mention closest_over_budget only when explicitly labelled as "over budget by $X". Never claim availability without a tool result.`;
+      }
     }
 
     const trimmedHistory = (history || []).slice(-8);
@@ -2803,6 +3265,11 @@ Deno.serve(async (req: Request) => {
       // read tool_used; new eval assertions inspect this to enforce
       // "PSA pop claim requires get_grading_pop".
       tools_used: toolsUsedThisTurn,
+      // v167: echo the merged recommendation context so the client
+      // can send it back verbatim on the next turn. Never overwrite
+      // the client's local copy silently — the client should replace
+      // its state with this value after each response.
+      recommendation_context: mergedRecommendationContext,
       query_type: queryType,
       card_data_found: cardDataFound,
       exact_match_found: exactMatchFound,
