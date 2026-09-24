@@ -1,0 +1,91 @@
+{
+  "ts": "2026-09-24T14:24:43.519Z",
+  "today": "2026-09-24",
+  "endpoints": [
+    "smart-endpoint"
+  ],
+  "runs": {
+    "smart-endpoint": [
+      {
+        "prompt": "F1-next-set-date",
+        "endpoint": "smart-endpoint",
+        "turns": [
+          {
+            "userMessage": "When is the next set coming out?",
+            "status": 200,
+            "ms": 17246,
+            "answer": "Mega Evolution: Delta Reign drops November 6, 2026, per CardPrice. It's the last expansion of the Mega era and features Mega Rayquaza ex as the headliner. English version of Japan's Storm Emeralda.",
+            "tools_used": [
+              "lookup_current_tcg_info"
+            ],
+            "failures": []
+          }
+        ]
+      },
+      {
+        "prompt": "F2-next-expansion",
+        "endpoint": "smart-endpoint",
+        "turns": [
+          {
+            "userMessage": "What's the next English Pokemon TCG expansion?",
+            "status": 200,
+            "ms": 17338,
+            "answer": "The next English Pokémon TCG expansion is Mega Evolution: Delta Reign, hitting shelves November 6, 2026. It's the sixth and final set of the Mega Evolution era, led by Mega Rayquaza ex and based on Japan's Storm Emeralda.",
+            "tools_used": [
+              "lookup_current_tcg_info"
+            ],
+            "failures": []
+          }
+        ]
+      },
+      {
+        "prompt": "F3-latest-released",
+        "endpoint": "smart-endpoint",
+        "turns": [
+          {
+            "userMessage": "What is the latest released Pokemon TCG set on PokePrices?",
+            "status": 200,
+            "ms": 2641,
+            "answer": "The latest set on PokePrices is 30th Celebration, the English set released on September 16, 2026. It has 128 cards in the official set.",
+            "tools_used": [
+              "get_latest_sets"
+            ],
+            "failures": []
+          }
+        ]
+      },
+      {
+        "prompt": "F4-delta-reign",
+        "endpoint": "smart-endpoint",
+        "turns": [
+          {
+            "userMessage": "When does Delta Reign come out?",
+            "status": 200,
+            "ms": 14657,
+            "answer": "Delta Reign releases November 6, 2026, per pokemon.com. Prereleases run October 24 through November 1. It's the sixth English Mega Evolution expansion, headlined by Mega Rayquaza ex.",
+            "tools_used": [
+              "lookup_current_tcg_info"
+            ],
+            "failures": []
+          }
+        ]
+      },
+      {
+        "prompt": "F5-stale-db-hypothetical",
+        "endpoint": "smart-endpoint",
+        "turns": [
+          {
+            "userMessage": "What's the next Pokemon set?",
+            "status": 200,
+            "ms": 14601,
+            "answer": "The next English expansion is Mega Evolution—Delta Reign, out November 6, 2026. It's headlined by Mega Rayquaza ex and closes out the Mega Evolution era as the sixth main set. Prerelease tournaments run October 24–November 1, per PokéBeach.",
+            "tools_used": [
+              "lookup_current_tcg_info"
+            ],
+            "failures": []
+          }
+        ]
+      }
+    ]
+  }
+}

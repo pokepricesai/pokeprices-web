@@ -234,6 +234,27 @@ const TOOLS = [
     }
   },
   {
+    // v168 (2026-09-24): live web lookup for CURRENT / UPCOMING
+    // Pokemon TCG information. Handler internally invokes Sonnet 4.6
+    // with Anthropic's server-side web_search tool; the smart-
+    // endpoint's Haiku model calls this tool whenever a question
+    // depends on today's date or forward-looking announcements.
+    // get_latest_sets remains DB-only and MUST NOT be used to
+    // answer future-release questions.
+    name: "lookup_current_tcg_info",
+    description: "Live web lookup for CURRENT and UPCOMING Pokemon TCG announcements, release dates, and product launches. Use for 'when is the next set', 'what's coming out', 'was X announced', 'when does X release', 'has the next expansion been confirmed', 'what did Pokemon Company announce this week'. Searches pokemon.com and PokéBeach first, then specialist sources. DO NOT use get_latest_sets for future-release questions — that tool only knows about sets already in the PokePrices DB and cannot see forward-looking announcements.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Focused freshness question in your own words, e.g. 'next English Pokemon TCG expansion release date', 'is Delta Reign confirmed', 'what did Pokemon announce this week'. Include any specific set name the user mentioned."
+        }
+      },
+      required: ["query"]
+    }
+  },
+  {
     // v167 (2026-09-23): constrained graded-card discovery. Added
     // because the model was hallucinating "no matches" for budgeted
     // graded-card queries. THIS tool is now the only source of truth
@@ -360,7 +381,17 @@ get_deals - any good eBay deals right now, anything underpriced.
 
 get_vendors - card shop near me, where to buy in London, UK retailers.
 
-get_latest_sets - use when the user asks about the newest sets, current releases, recent sets, "the new one", "the set that came out last month", or when you need details for a specific named set. Pass language "en" or "jp" ONLY when the context makes it clearly one or the other. When the user names a specific set (e.g. "Perfect Order", "Chaos Rising"), use the name_filter parameter with that name - do NOT try to guess the language from the set name, do NOT rely on scanning through a long list.
+get_latest_sets - use when the user asks about sets already IN the PokePrices DB. Answers "what's the latest set on PokePrices", "how many cards in Perfect Order", "release date of Chaos Rising". Pass language "en" or "jp" ONLY when the context makes it clearly one or the other. When the user names a specific set, use the name_filter parameter - do NOT guess the language from the set name. THIS TOOL IS DB-ONLY AND HISTORICAL — do NOT use it for future/upcoming/just-announced releases; call lookup_current_tcg_info instead.
+
+lookup_current_tcg_info - use for CURRENT and UPCOMING Pokemon TCG questions that depend on today's date or forward-looking announcements. Trigger words: "next set", "next expansion", "coming out", "coming soon", "upcoming", "just announced", "has X been announced", "when does X release", "what's the next Pokemon set", "what was announced this week". This tool performs a live web lookup via Sonnet 4.6 + web_search (pokemon.com first, then PokéBeach) and returns a structured envelope: confirmed_upcoming (set_name, release_date, source_url) OR null, additional_upcoming[], sources[], confidence, and a guidance field the caller must follow.
+
+FRESHNESS RULES - ABSOLUTE:
+* For "next/upcoming/coming out" questions, get_latest_sets is NOT sufficient evidence — it's a historical DB snapshot. Always call lookup_current_tcg_info.
+* Use the tool's queried_at as "today". Never describe a release_date earlier than queried_at as "next", "upcoming", "coming out", "coming soon", "releases on", "drops on", or "hits shelves".
+* If confirmed_upcoming is null, say plainly "I couldn't confirm a specific upcoming Pokemon TCG expansion right now — check pokemon.com or PokéBeach for the latest announcements." Do NOT substitute a get_latest_sets row.
+* If confirmed_upcoming.source_url is present, cite it (e.g. "per pokemon.com" or the full URL). Never fabricate URLs.
+* SOURCE PRIORITY: when the tool's sources[] contains an OFFICIAL Pokemon domain (pokemon.com, tcg.pokemon.com, pokemon.co.jp, pokemoncenter.com), you MUST cite that in your answer. Specialist sources (PokéBeach, Bulbagarden, Serebii, CardPrice) are acceptable as the citation ONLY when no official source is present in sources[]. If both are present, cite the official one; specialist can be mentioned as a supporting corroborator but never as the sole citation.
+* Distinguish an EXPANSION (new numbered/named set of ~150+ cards) from a PRODUCT WAVE (new ETB/tin/booster wave of an existing set). When the user's wording is "next set" or "next expansion", answer the expansion. Mention product waves only as a side note when relevant.
 
 SET-SIZE SEMANTICS - the get_latest_sets result splits set size into THREE distinct fields. Never conflate them:
 
@@ -1732,6 +1763,169 @@ function computeRecommendationContext(
   return mergeRecommendationContext(prev, extracted);
 }
 
+// ────────────────────────────────────────────────────────────────
+// v168 (2026-09-24): live-freshness lookup for upcoming Pokemon TCG
+// releases. The main smart-endpoint Haiku model doesn't have
+// web_search access; this handler makes a bounded second call to
+// Sonnet 4.6 + Anthropic's server-side web_search_20250305 tool and
+// returns the structured findings back to Haiku.
+//
+// Real-user regression that motivated this (2026-09-24):
+//   User: "When is the next set coming out?"
+//   v167: "Chaos Rising is the next one out, releasing May 22, 2026.
+//          That's followed by Pitch Black on July 17, then 30th
+//          Celebration on September 16..."
+//   Ground truth (today 2026-09-24): those all released months ago.
+//   The next English expansion is Mega Evolution — Delta Reign,
+//   November 6, 2026.
+// The DB-backed get_latest_sets is a HISTORICAL catalogue and
+// cannot answer forward-looking questions. This new tool must.
+//
+// Contract:
+//   * The handler prompts Sonnet with today's date and a strict
+//     source-priority instruction: pokemon.com / pokemon.co.jp /
+//     tcg.pokemon.com first, PokéBeach second, specialist sources
+//     third.
+//   * Sonnet is asked to emit a JSON envelope so we can extract
+//     structured fields (confirmed_upcoming, sources, confidence).
+//   * All URLs returned come from web_search citations — never
+//     model-fabricated.
+//   * If no future release can be confirmed, confirmed_upcoming is
+//     null and the caller must say so plainly instead of falling
+//     back to an old DB row.
+const SONNET_FOR_SEARCH = "claude-sonnet-4-6";
+const SEARCH_MAX_USES   = 5;
+
+async function dbLookupCurrentTcgInfo(query: string): Promise<any> {
+  const q = String(query ?? "").trim();
+  if (!q) return { ok: false, error: "empty query", queried_at: new Date().toISOString().slice(0, 10) };
+
+  const today = new Date().toISOString().slice(0, 10);
+  const system =
+    `You are the PokePrices freshness lookup. You have web_search. Answer ONE Pokemon TCG freshness question.\n\n` +
+    `Today is ${today}. Use this as "now" when deciding whether a release is past or future.\n\n` +
+    `Source priority (search in this order, prefer higher-tier sources):\n` +
+    `  1. Official Pokemon: pokemon.com, tcg.pokemon.com, pokemon.co.jp, pokemoncenter.com\n` +
+    `  2. PokéBeach (pokebeach.com)\n` +
+    `  3. Specialist sources: bulbagarden.net, serebii.net, ptcgo.com\n\n` +
+    `Return ONLY a JSON object matching this schema in your final message (no prose, no markdown):\n` +
+    `{\n` +
+    `  "answer": "<one plain-English sentence summarising the finding>",\n` +
+    `  "confirmed_upcoming": {\n` +
+    `    "set_name": "<official set name>",\n` +
+    `    "release_date": "YYYY-MM-DD",\n` +
+    `    "release_type": "expansion" | "product_wave" | "reprint" | "promo",\n` +
+    `    "region": "en" | "jp" | "other",\n` +
+    `    "source_url": "<the primary citation URL from web_search>"\n` +
+    `  } | null,\n` +
+    `  "additional_upcoming": [ /* up to 3 additional confirmed future releases, same shape */ ],\n` +
+    `  "confidence": "high" | "medium" | "low",\n` +
+    `  "notes": "<any hedge / caveat about source freshness or ambiguity>"\n` +
+    `}\n\n` +
+    `RULES:\n` +
+    `* Never quote a release_date earlier than ${today} in the confirmed_upcoming field. If the only candidate release date is in the past, set confirmed_upcoming=null and explain.\n` +
+    `* Every URL you cite must come from a web_search result — do NOT fabricate URLs.\n` +
+    `* Distinguish "expansion" (new set) from "product_wave" (booster wave / ETB / tin refresh of an existing set) — if the user's question is about a "set" or "expansion", prioritise expansion.\n` +
+    `* If web_search returns no confirmed upcoming expansion, confirmed_upcoming=null and confidence="low".\n` +
+    `* Emit JSON only. No prose, no code fences.`;
+
+  const body = {
+    model: SONNET_FOR_SEARCH,
+    max_tokens: 2000,
+    system,
+    messages: [{ role: "user", content: q }],
+    tools: [
+      {
+        type: "web_search_20250305",
+        name: "web_search",
+        max_uses: SEARCH_MAX_USES,
+      },
+    ],
+  };
+
+  const t0 = Date.now();
+  let res: Response;
+  try {
+    res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": CLAUDE_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (e: any) {
+    return { ok: false, error: "network", detail: String(e), queried_at: today };
+  }
+  const latencyMs = Date.now() - t0;
+  const data = await res.json();
+  if (!res.ok) {
+    return { ok: false, error: "anthropic_error", status: res.status, detail: data, queried_at: today };
+  }
+
+  // Extract text + citations
+  const textBlocks = (data.content || []).filter((b: any) => b?.type === "text");
+  const text = textBlocks.map((b: any) => b.text || "").join("\n").trim();
+
+  // Try to parse JSON envelope. Accept it wrapped in fences too.
+  let parsed: any = null;
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
+  } catch { /* leave parsed null */ }
+
+  // Collect all web_search citations
+  const sources: any[] = [];
+  for (const block of data.content || []) {
+    if (block?.type === "web_search_tool_result" && Array.isArray(block.content)) {
+      for (const r of block.content) {
+        if (r?.type === "web_search_result" && typeof r.url === "string") {
+          sources.push({ url: r.url, title: r.title || null });
+        }
+      }
+    }
+  }
+
+  const searchesUsed = Number(data?.usage?.server_tool_use?.web_search_requests ?? 0);
+
+  // Defensive: strip any confirmed_upcoming whose release_date is
+  // in the past. The prompt already forbids this, but a second
+  // guard here means Haiku never sees a past-date row labelled as
+  // upcoming.
+  const nowIso = today;
+  const validFuture = (row: any): boolean => {
+    if (!row || typeof row !== "object") return false;
+    const d = String(row.release_date ?? "");
+    return /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= nowIso;
+  };
+  const cleanedUpcoming = parsed?.confirmed_upcoming && validFuture(parsed.confirmed_upcoming)
+    ? parsed.confirmed_upcoming : null;
+  const cleanedAdditional = Array.isArray(parsed?.additional_upcoming)
+    ? parsed.additional_upcoming.filter(validFuture)
+    : [];
+
+  return {
+    ok: true,
+    queried_at: today,
+    query: q,
+    answer:             parsed?.answer ?? text.slice(0, 500),
+    confirmed_upcoming: cleanedUpcoming,
+    additional_upcoming: cleanedAdditional,
+    sources,
+    confidence:         parsed?.confidence ?? "unknown",
+    notes:              parsed?.notes ?? null,
+    provenance: {
+      model:         SONNET_FOR_SEARCH,
+      searches_used: searchesUsed,
+      latency_ms:    latencyMs,
+    },
+    guidance: cleanedUpcoming
+      ? `Present confirmed_upcoming.set_name and release_date to the user. Cite confirmed_upcoming.source_url as the source. If additional_upcoming has entries, mention them briefly. Never quote a date before ${today} as "next" / "upcoming" / "coming soon".`
+      : `No future Pokemon TCG expansion could be confirmed via web_search. Say so plainly ("I couldn't confirm a specific upcoming expansion right now"), do NOT fall back to a get_latest_sets DB row as though it were upcoming. Suggest checking pokemon.com or PokéBeach directly for the latest announcements.`,
+  };
+}
+
 async function dbGetBudgetPsa10(budgetGbp: number): Promise<any> {
   const budgetUsdCents = Math.round((budgetGbp / GBP_RATE) * 100);
   const { data } = await supabase.from("card_trends")
@@ -1961,6 +2155,11 @@ async function executeTool(
       return {
         data: await dbGetPriceSummary(toolInput.card_slug, toolInput.period_days),
         queryType: "price_history_summary",
+      };
+    case "lookup_current_tcg_info":
+      return {
+        data: await dbLookupCurrentTcgInfo(toolInput.query),
+        queryType: "freshness_lookup",
       };
     case "find_graded_cards":
       return {
@@ -2940,6 +3139,12 @@ Deno.serve(async (req: Request) => {
     // than one). Exposed on the response so the eval can enforce
     // "PSA pop claim requires get_grading_pop this turn".
     const toolsUsedThisTurn: string[] = [];
+    // v168 (2026-09-24): when lookup_current_tcg_info was called
+    // this turn, surface the sources the web_search returned so the
+    // client / eval can verify the answer cites an official source
+    // when one is present. Never includes fabricated URLs — only
+    // what web_search returned via the tool result.
+    let freshnessProvenance: any = null;
     let queryType = "general";
     let cardDataFound = false;
     let inputTokens = 0;
@@ -3008,6 +3213,23 @@ Deno.serve(async (req: Request) => {
           toolUsed = tb.name;
           if (!toolsUsedThisTurn.includes(tb.name)) toolsUsedThisTurn.push(tb.name);
           if (qt) queryType = qt;
+          // v168: capture the freshness tool result so the client
+          // can inspect sources (never overwrites a prior capture).
+          if (tb.name === "lookup_current_tcg_info" && !freshnessProvenance && data && typeof data === "object") {
+            const officialRe = /\b(?:pokemon\.com|pokemoncenter\.com|pokemon\.co\.jp|tcg\.pokemon\.com)\b/i;
+            const srcs = Array.isArray(data.sources) ? data.sources : [];
+            const primaryUrl = data.confirmed_upcoming?.source_url ?? null;
+            const hasOfficialInSources = srcs.some((s: any) => typeof s?.url === "string" && officialRe.test(s.url));
+            const primaryIsOfficial    = typeof primaryUrl === "string" && officialRe.test(primaryUrl);
+            freshnessProvenance = {
+              sources: srcs.slice(0, 10),
+              primary_source_url: primaryUrl,
+              has_official_source: hasOfficialInSources || primaryIsOfficial,
+              primary_is_official: primaryIsOfficial,
+              confidence: data.confidence ?? "unknown",
+              queried_at: data.queried_at ?? null,
+            };
+          }
 
           const d = data;
           const found = d && (
@@ -3265,6 +3487,7 @@ Deno.serve(async (req: Request) => {
       // read tool_used; new eval assertions inspect this to enforce
       // "PSA pop claim requires get_grading_pop".
       tools_used: toolsUsedThisTurn,
+      freshness_provenance: freshnessProvenance,
       // v167: echo the merged recommendation context so the client
       // can send it back verbatim on the next turn. Never overwrite
       // the client's local copy silently — the client should replace
