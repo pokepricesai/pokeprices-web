@@ -24,6 +24,14 @@
     {
       "path": "/api/cron/seo-bing-daily",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/indexnow-worker",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/indexnow-harvest",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

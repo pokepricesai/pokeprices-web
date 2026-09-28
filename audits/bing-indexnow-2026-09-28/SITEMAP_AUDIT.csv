@@ -1,0 +1,13 @@
+sitemap,http_status,byte_size,loc_count,expected_row_range,notes
+sitemap.xml,200,1460,10 sub-sitemaps,-,Sitemap index; lastmod dynamic per request; hostname https://www.pokeprices.io
+sitemap-pages.xml,200,5422,29,-,25 hardcoded routes; /dealer priority 0.6; /studio priority 0.5
+sitemap-sets.xml,200,57072,288,-,All set_metadata rows (no filter); matches DB exactly
+sitemap-pokemon.xml,200,192470,1025,-,All species (filter total_cards>0 but all 1025 pass); paginates in 1000-row chunks
+sitemap-insights.xml,200,2867,12,-,status=published only; matches DB
+sitemap-card-shows.xml,200,6734,32,-,From @/data/cardShows; upcoming + non-cancelled only
+sitemap-cards-1.xml,200,2138289,9913,ids 0-10000,Cards with positive price in last 7d; card_url_slug and set_name not null
+sitemap-cards-2.xml,200,2148334,9947,ids 10000-20000,Same filter
+sitemap-cards-3.xml,200,2098184,9784,ids 20000-30000,Same filter
+sitemap-cards-4.xml,200,4287519,19459,ids 30000-50000,Larger shard; hard cap at row 50000 (see code comment)
+sitemap-cards-5.xml,200,3189246,14024,ids 50000-100000,Recent Japanese cohort (Block 5A-W-50D); covers 50k-100k range
+TOTAL,,15928197,64513,-,All URLs use https://www.pokeprices.io (with www); no query strings; no fragments; no duplicates observed

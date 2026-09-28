@@ -168,10 +168,54 @@ export function bingSchemaDdl(project: string, dataset: string): string[] {
 /** Execute the idempotent DDL. Returns per-statement pass/fail so the
  *  caller can surface partial-failure diagnostics without aborting the
  *  ingest. Since every DDL is IF NOT EXISTS, a second run should report
- *  every statement as ok with zero side-effects. */
+ *  every statement as ok with zero side-effects.
+ *
+ *  Stage 6A note: production ingest should NOT normally run DDL. The
+ *  dataset + tables are provisioned once by an operator with elevated
+ *  IAM (bigquery.admin on the pokeprices-seo project). Every subsequent
+ *  cron run just reads/writes existing tables under the far narrower
+ *  bigquery.dataEditor + bigquery.jobUser role.
+ *
+ *  Set `SEO_BQ_ALLOW_DDL=1` in the environment (or pass allowDdl=true
+ *  explicitly) if you're deliberately provisioning a fresh dataset. In
+ *  all other cases, we probe for a required table and either return "ok
+ *  — infra exists" or a single clear error telling the operator exactly
+ *  what to grant.
+ */
 export async function ensureBingSchema(
   ctx: BqContext,
-): Promise<{ statements: Array<{ label: string; ok: boolean; error?: string }> }> {
+  opts: { allowDdl?: boolean } = {},
+): Promise<{ statements: Array<{ label: string; ok: boolean; error?: string }>; mode: 'ddl' | 'probe' }> {
+  const envAllow = process.env.SEO_BQ_ALLOW_DDL === '1' || process.env.SEO_BQ_ALLOW_DDL === 'true'
+  const allow = opts.allowDdl === true || envAllow
+
+  if (!allow) {
+    // Probe path — check whether one of the tables already exists. If yes,
+    // we assume the whole schema exists (they are provisioned together).
+    // If no, return one clear failed statement so the caller downgrades
+    // status and the operator sees the exact permission action required.
+    const label = `probe: SELECT 1 FROM ${ctx.projectId}.${BING_BQ_DATASET}.${BING_TABLES.siteDaily} LIMIT 0`
+    try {
+      const [job] = await ctx.bq.createQueryJob({
+        query: `SELECT 1 FROM \`${ctx.projectId}.${BING_BQ_DATASET}.${BING_TABLES.siteDaily}\` LIMIT 0`,
+        location: ctx.location,
+        useLegacySql: false,
+      })
+      await job.getQueryResults()
+      return { statements: [{ label, ok: true }], mode: 'probe' }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'unknown probe error'
+      return {
+        statements: [{
+          label,
+          ok: false,
+          error: `Bing BigQuery infrastructure not present or inaccessible. Ask the operator to provision the dataset and tables once with elevated IAM (or set SEO_BQ_ALLOW_DDL=1 for this run). Underlying error: ${msg.slice(0, 240)}`,
+        }],
+        mode: 'probe',
+      }
+    }
+  }
+
   const ddls = bingSchemaDdl(ctx.projectId, BING_BQ_DATASET)
   const statements: Array<{ label: string; ok: boolean; error?: string }> = []
   for (const sql of ddls) {
@@ -189,5 +233,5 @@ export async function ensureBingSchema(
       statements.push({ label: firstLine, ok: false, error: msg.slice(0, 300) })
     }
   }
-  return { statements }
+  return { statements, mode: 'ddl' }
 }

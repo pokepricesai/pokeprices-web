@@ -24,6 +24,9 @@ const SUB_SITEMAPS = [
   'sitemap-insights.xml',
   // Block 5A-W-54B — per-event card-show URLs (upcoming + non-cancelled).
   'sitemap-card-shows.xml',
+  // Stage 6A — community directories (approved creators + active vendors)
+  // that were public but sitemap-invisible before the 2026-09-28 audit.
+  'sitemap-directories.xml',
 ]
 
 export async function GET() {

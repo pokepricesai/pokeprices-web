@@ -7,23 +7,40 @@
 // because a cache purge or a search-engine ping failed. Each failure
 // returns a `PostPublishWarning` the caller can attach to the
 // response.
+//
+// Stage 6A — IndexNow submission now goes through the persistent queue
+// (src/lib/indexnow/queue.ts) instead of firing a direct HTTP request.
+// This gives us retries, dedupe, audit history, and — crucially — makes
+// the publish action fast (a DB insert, not a network round-trip).
 
 import 'server-only'
 import { revalidatePath } from 'next/cache'
-import { CANONICAL_HOST, MAX_BATCH_SIZE, buildPayload, classifyStatus, safeLogBody } from '@/lib/indexnow/submitter.mjs'
-
-const INDEXNOW_KEY = process.env.INDEXNOW_KEY || 'a8f92c1d7e4b49d2b7c5e913f4aa8179'
-const KEY_LOCATION = `https://${CANONICAL_HOST}/${INDEXNOW_KEY}.txt`
+import { CANONICAL_HOST } from '@/lib/indexnow/submitter.mjs'
+import { enqueueUrl } from '@/lib/indexnow/queue'
+import { hashInsightSignature } from '@/lib/indexnow/hash'
 
 export type PostPublishWarning = { kind: 'revalidate' | 'indexnow'; detail: string }
 
 export type PostPublishOptions = {
-  slug:          string
-  wasFirstPublish: boolean
+  slug:              string
+  wasFirstPublish:   boolean
+  /** Optional fields that materially affect what search engines see —
+   *  used to compute a stable content hash so unchanged republishes do
+   *  not re-notify Bing. Callers pass whatever they have; missing
+   *  fields are hashed as empty strings, which is safe. */
+  hashInput?: {
+    headline?:         string | null
+    intro?:            string | null
+    meta_title?:       string | null
+    meta_description?: string | null
+    status?:           string | null
+    published_at?:     string | null
+    body_hash?:        string | null
+  }
 }
 
 /** Fire cache invalidation for the article + hub + sitemap, then
- *  submit the article URL to IndexNow. Never throws. */
+ *  enqueue the article URL for IndexNow submission. Never throws. */
 export async function runPostPublish(opts: PostPublishOptions): Promise<{ warnings: PostPublishWarning[] }> {
   const warnings: PostPublishWarning[] = []
   const articlePath = `/insights/${opts.slug}`
@@ -37,27 +54,37 @@ export async function runPostPublish(opts: PostPublishOptions): Promise<{ warnin
     catch (e) { warnings.push({ kind: 'revalidate', detail: `${p}: ${e instanceof Error ? e.message : 'unknown'}` }) }
   }
 
-  // 2. IndexNow — best-effort. First publications get notified;
-  //    updates can also submit, though the IndexNow protocol allows
-  //    but does not require it.
+  // 2. IndexNow — enqueue with priority 0 (new content). The scheduled
+  //    worker will drain the row on the next tick. If the DB is
+  //    momentarily unavailable, the warning surfaces and the operator
+  //    can requeue manually; publish still succeeds.
   try {
-    const payload = buildPayload([canonicalUrl], { key: INDEXNOW_KEY, keyLocation: KEY_LOCATION })
-    const res = await fetch('https://api.indexnow.org/indexnow', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
+    const contentHash = hashInsightSignature({
+      slug:             opts.slug,
+      headline:         opts.hashInput?.headline         ?? null,
+      intro:            opts.hashInput?.intro            ?? null,
+      meta_title:       opts.hashInput?.meta_title       ?? null,
+      meta_description: opts.hashInput?.meta_description ?? null,
+      status:           opts.hashInput?.status           ?? (opts.wasFirstPublish ? 'published' : 'published'),
+      published_at:     opts.hashInput?.published_at     ?? null,
+      body_hash:        opts.hashInput?.body_hash        ?? null,
     })
-    const cls = classifyStatus(res.status)
-    if (cls !== 'ok' && cls !== 'accepted') {
-      const text = await res.text().catch(() => '')
-      warnings.push({ kind: 'indexnow', detail: `${cls} (HTTP ${res.status}): ${safeLogBody(text, INDEXNOW_KEY)}` })
+    const enq = await enqueueUrl({
+      url:         canonicalUrl,
+      contentHash,
+      pageFamily:  'insight',
+      entityId:    opts.slug,
+      priority:    0,
+      reason:      opts.wasFirstPublish ? 'created' : 'updated',
+    })
+    if (enq.ok === false) {
+      const fail = enq as { ok: false; reason: string; detail?: string }
+      warnings.push({ kind: 'indexnow', detail: `enqueue: ${fail.reason}${fail.detail ? ` — ${fail.detail}` : ''}` })
     }
   } catch (e) {
     warnings.push({ kind: 'indexnow', detail: e instanceof Error ? e.message : 'unknown' })
   }
 
-  void opts.wasFirstPublish  // future: differentiate submission strategy
-  void MAX_BATCH_SIZE
   return { warnings }
 }
 
