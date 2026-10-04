@@ -27,7 +27,48 @@ import PokemonPriceSummary from '@/components/seo/PokemonPriceSummary'
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
-export const revalidate = 3600
+export const revalidate = 86400
+export const dynamicParams = true
+
+// Next.js 16 — on dynamic-segment routes, `revalidate` alone does not
+// enable Full Route Cache. Seed `generateStaticParams` with every
+// species that has at least one card so build-time prerender populates
+// the Vercel CDN. Species without cards (and brand-new slugs) fall
+// through to on-demand ISR via dynamicParams = true. Same source of
+// truth as sitemap-pokemon.xml.
+export async function generateStaticParams(): Promise<Array<{ slug: string }>> {
+  const url  = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!url || !anon) return []
+
+  const all: Array<{ name: string }> = []
+  let offset = 0
+  const PAGE_SIZE = 1000
+  while (true) {
+    const r = await fetch(
+      `${url}/rest/v1/pokemon_species?select=name&total_cards=gt.0&order=name.asc&offset=${offset}&limit=${PAGE_SIZE}`,
+      { headers: { apikey: anon, Authorization: `Bearer ${anon}` } },
+    )
+    if (!r.ok) break
+    const page = (await r.json()) as Array<{ name: string }>
+    if (!page.length) break
+    all.push(...page)
+    if (page.length < PAGE_SIZE) break
+    offset += PAGE_SIZE
+  }
+
+  // Mirror sitemap-pokemon.xml's pokeSlug exactly so prerendered paths
+  // match the URLs the sitemap advertises.
+  const pokeSlug = (name: string) => name
+    .toLowerCase()
+    .replace(/['.]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+  return all
+    .map(row => pokeSlug(row.name ?? ''))
+    .filter(slug => slug.length > 0)
+    .map(slug => ({ slug }))
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -108,25 +149,38 @@ interface SpeciesDetail {
 // The PokeAPI response now feeds the authoritative Pokémon display
 // name used in metadata and the visible H1.
 const fetchSpeciesDetail = cache(async (slug: string): Promise<SpeciesDetail | null> => {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_pokemon_species_detail`, {
-    method: 'POST',
-    headers: {
-      apikey: SUPABASE_ANON,
-      Authorization: `Bearer ${SUPABASE_ANON}`,
-      'Content-Type': 'application/json',
-      // Block 5A-W-53A.1 — bumping this on any RPC-shape change
-      // forces Vercel's data cache (which persists across
-      // deployments) to treat the request as a new cache key so
-      // the first render after deploy fetches the fresh RPC
-      // response instead of serving the pre-migration one.
-      'X-PokePrices-Cache-Version': 'rpc-2026-08-06-distinct-set-count',
-    },
-    body: JSON.stringify({ p_slug: slug }),
-    next: { revalidate: 3600 },
-  })
-  if (!r.ok) return null
-  const data = await r.json()
-  return data || null
+  // Wrapped in try/catch so a transient network error during build-time
+  // prerender (generateStaticParams fans out ~1k species in parallel)
+  // or a Supabase hiccup at runtime degrades to a null response rather
+  // than a 500. The page handler already treats null as empty-state.
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_pokemon_species_detail`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_ANON,
+        Authorization: `Bearer ${SUPABASE_ANON}`,
+        'Content-Type': 'application/json',
+        // Block 5A-W-53A.1 — bumping this on any RPC-shape change
+        // forces Vercel's data cache (which persists across
+        // deployments) to treat the request as a new cache key so
+        // the first render after deploy fetches the fresh RPC
+        // response instead of serving the pre-migration one.
+        'X-PokePrices-Cache-Version': 'rpc-2026-08-06-distinct-set-count',
+      },
+      body: JSON.stringify({ p_slug: slug }),
+      next: { revalidate: 86400 },
+    })
+    if (!r.ok) {
+      console.warn(`[pokemon/${slug}] fetchSpeciesDetail non-ok: ${r.status}`)
+      return null
+    }
+    const data = await r.json()
+    return data || null
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    console.warn(`[pokemon/${slug}] fetchSpeciesDetail threw: ${msg}`)
+    return null
+  }
 })
 
 const fetchPokeApi = cache(async (slug: string): Promise<{ pokemon: any; species: any } | null> => {
@@ -162,18 +216,27 @@ const fetchPokeApi = cache(async (slug: string): Promise<{ pokemon: any; species
 async function fetchNeighbours(id: number): Promise<{ prev: { id: number; name: string } | null; next: { id: number; name: string } | null }> {
   const ids = [id - 1, id + 1].filter(n => n >= 1)
   if (!ids.length) return { prev: null, next: null }
-  const r = await fetch(
-    `${SUPABASE_URL}/rest/v1/pokemon_species?id=in.(${ids.join(',')})&select=id,name`,
-    {
-      headers: { apikey: SUPABASE_ANON, Authorization: `Bearer ${SUPABASE_ANON}` },
-      next: { revalidate: 86400 },
-    },
-  )
-  if (!r.ok) return { prev: null, next: null }
-  const rows = (await r.json()) as { id: number; name: string }[]
-  return {
-    prev: rows.find(r => r.id === id - 1) ?? null,
-    next: rows.find(r => r.id === id + 1) ?? null,
+  try {
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/pokemon_species?id=in.(${ids.join(',')})&select=id,name`,
+      {
+        headers: { apikey: SUPABASE_ANON, Authorization: `Bearer ${SUPABASE_ANON}` },
+        next: { revalidate: 86400 },
+      },
+    )
+    if (!r.ok) {
+      console.warn(`[pokemon neighbours ${id}] non-ok: ${r.status}`)
+      return { prev: null, next: null }
+    }
+    const rows = (await r.json()) as { id: number; name: string }[]
+    return {
+      prev: rows.find(r => r.id === id - 1) ?? null,
+      next: rows.find(r => r.id === id + 1) ?? null,
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    console.warn(`[pokemon neighbours ${id}] threw: ${msg}`)
+    return { prev: null, next: null }
   }
 }
 

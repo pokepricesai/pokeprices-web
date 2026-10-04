@@ -33,6 +33,17 @@ import CardPriceQuickFacts from '@/components/seo/CardPriceQuickFacts'
 // ISR: regenerate every 24h. Prices refresh nightly, so this aligns with data cadence.
 // Dramatically reduces crawl-budget consumption across 40k+ card pages.
 export const revalidate = 86400
+export const dynamicParams = true
+
+// Next.js 16 — on dynamic-segment routes, `revalidate` alone no longer
+// opts into Full Route Cache. Returning an empty array from
+// generateStaticParams registers the route for ISR (so first requests
+// render on-demand and the result is cached for `revalidate` seconds)
+// without the build-time cost of prerendering ~29k card pages. New /
+// unknown slugs are generated on first request via dynamicParams.
+export async function generateStaticParams(): Promise<Array<{ slug: string; cardSlug: string }>> {
+  return []
+}
 
 const supabaseServer = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,

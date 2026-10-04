@@ -14,11 +14,28 @@ import { getSetSeo } from '@/lib/seo-helpers'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 export const revalidate = 86400
+export const dynamicParams = true
 
 const supabaseServer = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
+
+// Next.js 16 — on dynamic-segment routes, `revalidate` alone no longer
+// opts the route into the Full Route Cache. We must list the slugs we
+// want prerendered at build time; everything else falls through to
+// on-demand ISR via dynamicParams = true. See audit for context.
+export async function generateStaticParams() {
+  const { data, error } = await supabaseServer
+    .from('set_metadata')
+    .select('set_name')
+    .order('set_name')
+  if (error || !data) return []
+  return data
+    .map(row => row.set_name)
+    .filter((name): name is string => typeof name === 'string' && name.length > 0)
+    .map(slug => ({ slug }))
+}
 
 // Shared existence check. Two layers, both cheap:
 //   1. set_metadata row by exact set_name match (canonical source of
