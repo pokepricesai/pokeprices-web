@@ -377,13 +377,22 @@ export default function CardPageClient({
   const [loading,      setLoading]      = useState(!serverProvidedCard)
 
   useEffect(() => {
+    // Phase 1 — card extras cost fix.
+    //
+    // Previously the client issued five direct browser → Supabase
+    // calls on every page view (get_card_metrics,
+    // get_card_price_history, get_card_insight, card_volume,
+    // psa_population). None of them cached between the browser and
+    // Supabase, so each crawler re-render re-ran all five. We now
+    // call ONE same-origin endpoint instead; the Vercel edge caches
+    // its response per card for 24h when every chunk succeeded, and
+    // for a shorter 1h recovery window on any partial failure.
+    //
+    // Trend handoff is UNCHANGED. The server page passes
+    // initialTrendData which the client prefers; the browser only
+    // fires get_card_trends_detail when the server fetch failed.
+    const abort = new AbortController()
     async function loadCard() {
-      // W46D — if the server handed us a card row, skip the duplicate
-      // get_card_detail_by_url_slug RPC entirely. We still need the
-      // *supplementary* RPCs (metrics, price history, insight, volume,
-      // PSA population, and maybe trend) but the card-detail call is
-      // the biggest / most-cached one, and getting rid of it is the
-      // point of this block.
       let cardData: any = null
       if (serverProvidedCard) {
         cardData = initialCardData
@@ -397,60 +406,65 @@ export default function CardPageClient({
         setCard(cardData)
       }
 
-      const slug = cardData.card_slug
-
-      // W46C-FIX1 — skip get_card_trends_detail when the server page
-      // already handed us a trend row. This is the whole "one RPC call
-      // per page load" guarantee: with server-fetched card + trend,
-      // the client makes 4 parallel calls; without either, 5.
       const trendPromise = initialTrendData !== undefined
         ? Promise.resolve({ data: null })
-        : supabase.rpc('get_card_trends_detail', { slug })
+        : supabase.rpc('get_card_trends_detail', { slug: cardData.card_slug })
 
-      // Block 5A-W-55A — build the PSA population query up-front so we
-      // can fire it in parallel with the RPC/table batch below. It was
-      // previously chained AFTER `Promise.all` completed, costing one
-      // extra sequential round-trip for no reason.
-      const baseName    = cardData.card_name.split('[')[0].split('#')[0].trim()
-      const variant     = extractVariant(cardData.card_name)
-      const setNameClean = cardData.set_name.replace(/^Pokemon /, '')
+      // Canonical cache-key inputs. Matches the semantics the browser
+      // query previously computed: baseName strips "[variant]" and
+      // trailing "#NN"; the "Pokemon " set-name prefix is stripped
+      // inside the endpoint so the endpoint owns the normalisation.
+      const bareSlug = String(cardData.card_slug ?? '').replace(/^pc-/, '')
+      const baseName = String(cardData.card_name ?? '').split('[')[0].split('#')[0].trim()
+      const variant  = extractVariant(String(cardData.card_name ?? ''))
+      const qs = new URLSearchParams()
+      qs.set('setName', String(cardData.set_name ?? ''))
+      qs.set('cardName', baseName)
+      if (cardData.card_number) qs.set('cardNumber', String(cardData.card_number))
+      if (variant) qs.set('variant', variant)
+      const extrasUrl = `/api/card/${encodeURIComponent(bareSlug)}/extras?${qs.toString()}`
 
-      let popQuery = supabase
-        .from('psa_population')
-        .select('card_name, variant, set_name, card_number, psa_7, psa_8, psa_9, psa_10, total_graded, gem_rate')
-        .ilike('card_name', `%${baseName}%`)
-        .ilike('set_name', `%${setNameClean}%`)
-        .gt('total_graded', 0)
-
-      if (variant) {
-        popQuery = popQuery.ilike('variant', `%${variant}%`)
-      } else if (cardData.card_number) {
-        popQuery = popQuery.eq('card_number', String(cardData.card_number))
-      }
-      const popPromise = popQuery.order('total_graded', { ascending: false }).limit(1)
-
-      const [trendRes, metricsRes, histRes, insightRes, volRes, popRes] = await Promise.all([
+      const [trendRes, extrasRes] = await Promise.all([
         trendPromise,
-        supabase.rpc('get_card_metrics', { card_slug: cardData.card_slug }),
-        supabase.rpc('get_card_price_history', { slug }),
-        supabase.rpc('get_card_insight', { slug }),
-        supabase.from('card_volume').select('volume_label, sales_30d').eq('card_slug', slug).eq('grade', 'Ungraded').maybeSingle(),
-        popPromise,
+        fetch(extrasUrl, { signal: abort.signal, credentials: 'omit' })
+          // 500 responses still carry the discriminated chunks (every
+          // chunk marked error). Reading them is cheap and keeps the
+          // UI in sync; the Cache-Control: no-store header stops the
+          // CDN from pinning the failure.
+          .then((r) => (r.ok || r.status === 500) ? r.json().catch(() => null) : null)
+          .catch(() => null),
       ])
 
-      if (trendRes.data)   setTrend(trendRes.data)
-      if (metricsRes.data) {
-        const m = Array.isArray(metricsRes.data) ? metricsRes.data[0] : metricsRes.data
-        setMetrics(m)
+      if (trendRes?.data) setTrend(trendRes.data)
+
+      if (extrasRes) {
+        // Each chunk is a discriminated { status, data }. We treat
+        // 'error' identically to 'missing data' for UI purposes —
+        // the Collector Intel tiles already render gracefully with
+        // any single source absent — but we avoid pretending an
+        // errored chunk returned a factual empty result.
+        if (extrasRes.metrics?.status === 'ok' && extrasRes.metrics.data) {
+          const m = Array.isArray(extrasRes.metrics.data) ? extrasRes.metrics.data[0] : extrasRes.metrics.data
+          if (m) setMetrics(m)
+        }
+        if (extrasRes.priceHistory?.status === 'ok' && Array.isArray(extrasRes.priceHistory.data)) {
+          setPriceHistory(extrasRes.priceHistory.data)
+        }
+        if (extrasRes.insight?.status === 'ok' && extrasRes.insight.data) {
+          setInsight(extrasRes.insight.data)
+        }
+        if (extrasRes.volume?.status === 'ok' && extrasRes.volume.data?.volume_label) {
+          setVolumeLabel(extrasRes.volume.data.volume_label)
+        }
+        if (extrasRes.psaPop?.status === 'ok' && extrasRes.psaPop.data) {
+          setPsaPop(extrasRes.psaPop.data)
+        }
       }
-      if (histRes.data)    setPriceHistory(histRes.data)
-      if (insightRes.data) setInsight(insightRes.data)
-      if (volRes.data?.volume_label) setVolumeLabel(volRes.data.volume_label)
-      if (popRes.data && popRes.data.length > 0) setPsaPop(popRes.data[0])
 
       setLoading(false)
     }
     loadCard()
+    return () => abort.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setName, cardUrlSlug])
 
