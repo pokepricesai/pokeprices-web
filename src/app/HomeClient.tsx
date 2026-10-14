@@ -243,51 +243,60 @@ export default function HomeClient() {
   const [latestInsights, setLatestInsights] = useState<Insight[]>([])
   const [weeklyUpdated, setWeeklyUpdated] = useState<string | null>(null)
 
+  // Public homepage data goes through the cached /api/home/extras
+  // Route Handler. One same-origin fetch replaces the five direct
+  // browser → Supabase calls (market_index, get_hidden_gems,
+  // get_market_total, insights, get_weekly_market_report). The
+  // response is CDN-cached for 24h; a per-chunk discriminated
+  // {status, data} shape preserves the previous "render only on real
+  // data, degrade silently on error" behaviour.
   useEffect(() => {
-    async function loadAnalytics() {
-      const [indexRes, gemsRes, totalRes, insightsRes] = await Promise.all([
-        supabase.from('market_index')
-          .select('date, total_raw_usd, median_raw_usd, raw_pct_30d')
-          .order('date', { ascending: true })
-          .limit(80),
-        supabase.rpc('get_hidden_gems', { lim: 6 }),
-        supabase.rpc('get_market_total'),
-        supabase.from('insights')
-          .select('id, slug, headline, intro, theme_label, published_at, image_url, read_time_mins')
-          .eq('status', 'published')
-          .order('published_at', { ascending: false })
-          .limit(3),
-      ])
+    const controller = new AbortController()
+    async function loadExtras() {
+      try {
+        const res = await fetch('/api/home/extras', {
+          signal: controller.signal,
+          credentials: 'omit',
+        })
+        if (!res.ok) return
+        const payload = await res.json() as {
+          marketIndex?:  { status: 'ok' | 'error'; data: MarketIndexRow[] | null }
+          hiddenGems?:   { status: 'ok' | 'error'; data: HiddenGem[] | null }
+          marketTotal?:  { status: 'ok' | 'error'; data: MarketTotal | null }
+          insights?:     { status: 'ok' | 'error'; data: Insight[] | null }
+          weeklyReport?: { status: 'ok' | 'error'; data: WeeklyReportRow[] | null }
+        }
 
-      if (indexRes.data && indexRes.data.length > 0) {
-        setMarketIndex(indexRes.data)
-        const latest = indexRes.data[indexRes.data.length - 1]
-        const displayValue = (totalRes.data as MarketTotal)?.total_raw_usd ?? latest.total_raw_usd
-        const cardsTracked = (totalRes.data as MarketTotal)?.cards_tracked ?? 0
-        const pct30d = latest.raw_pct_30d != null ? Number(latest.raw_pct_30d) : null
-        setTotalMarket({ value: displayValue, pct30d, cardsTracked })
+        const indexRows = payload.marketIndex?.status === 'ok' ? payload.marketIndex.data ?? [] : []
+        if (indexRows.length > 0) {
+          setMarketIndex(indexRows)
+          const latest = indexRows[indexRows.length - 1]
+          const total = payload.marketTotal?.status === 'ok' ? payload.marketTotal.data : null
+          const displayValue = total?.total_raw_usd ?? latest.total_raw_usd
+          const cardsTracked = total?.cards_tracked ?? 0
+          const pct30d = latest.raw_pct_30d != null ? Number(latest.raw_pct_30d) : null
+          setTotalMarket({ value: displayValue, pct30d, cardsTracked })
+        }
+
+        const gems = payload.hiddenGems?.status === 'ok' ? payload.hiddenGems.data ?? [] : []
+        if (gems.length > 0) setHiddenGems(gems)
+
+        const latestGuides = payload.insights?.status === 'ok' ? payload.insights.data ?? [] : []
+        if (latestGuides.length > 0) setLatestInsights(latestGuides)
+
+        const weekly = payload.weeklyReport?.status === 'ok' ? payload.weeklyReport.data ?? [] : []
+        if (weekly.length > 0) {
+          setWeeklyReport(weekly)
+          setWeeklyUpdated(new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))
+        }
+      } catch (e) {
+        if ((e as Error).name === 'AbortError') return
+        // Match previous behaviour: silently degrade — the sections
+        // guarded by `.length > 0` simply do not render.
       }
-
-      if (gemsRes.data && gemsRes.data.length > 0) setHiddenGems(gemsRes.data)
-      if (insightsRes.data && insightsRes.data.length > 0) setLatestInsights(insightsRes.data)
     }
-    loadAnalytics()
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    async function load(attempt = 1) {
-      const { data } = await supabase.rpc('get_weekly_market_report')
-      if (cancelled) return
-      if (data && data.length > 0) {
-        setWeeklyReport(data)
-        setWeeklyUpdated(new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))
-      } else if (attempt < 3) {
-        setTimeout(() => load(attempt + 1), 1500 * attempt)
-      }
-    }
-    load()
-    return () => { cancelled = true }
+    loadExtras()
+    return () => controller.abort()
   }, [])
 
   // Block 5A-W-41A-RETRY — inline auth-aware CTA for the split-hero
