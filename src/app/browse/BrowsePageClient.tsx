@@ -299,20 +299,41 @@ export default function BrowsePageClient() {
   // completion_desc is legitimately requested).
   const [authResolved, setAuthResolved] = useState(false)
 
+  // Public browse data goes through the cached /api/browse/extras
+  // Route Handler. One same-origin fetch replaces the two direct
+  // browser → Supabase RPCs (get_set_list_v2, get_trending_sets).
+  // The per-user portfolio completion load below is UNCHANGED — it is
+  // user-specific and must not be CDN-cached.
   useEffect(() => {
+    const controller = new AbortController()
     async function loadSets() {
-      const [setsRes, trendRes] = await Promise.all([
-        supabase.rpc('get_set_list_v2'),
-        supabase.rpc('get_trending_sets', { lim: 8 }),
-      ])
-      if (setsRes.data && !setsRes.error) setSets(setsRes.data)
-      if (trendRes.data) {
-        const d = trendRes.data
-        setTrendingSets({ rising: d.rising ?? [], falling: d.falling ?? [] })
+      try {
+        const res = await fetch('/api/browse/extras', {
+          signal: controller.signal,
+          credentials: 'omit',
+        })
+        if (!res.ok) { setLoading(false); return }
+        const payload = await res.json() as {
+          sets?:     { status: 'ok' | 'error'; data: SetInfo[] | null }
+          trending?: { status: 'ok' | 'error'; data: { rising: TrendingSet[]; falling: TrendingSet[] } | null }
+        }
+        if (payload.sets?.status === 'ok' && Array.isArray(payload.sets.data)) {
+          setSets(payload.sets.data)
+        }
+        if (payload.trending?.status === 'ok' && payload.trending.data) {
+          const d = payload.trending.data
+          setTrendingSets({ rising: d.rising ?? [], falling: d.falling ?? [] })
+        }
+      } catch (e) {
+        if ((e as Error).name === 'AbortError') return
+        // Match previous behaviour: silently degrade; the skeleton
+        // disappears, no "set list" renders.
+      } finally {
+        setLoading(false)
       }
-      setLoading(false)
     }
     loadSets()
+    return () => controller.abort()
   }, [])
 
   useEffect(() => {

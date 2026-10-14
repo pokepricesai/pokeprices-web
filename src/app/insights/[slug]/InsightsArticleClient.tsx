@@ -1,7 +1,6 @@
 'use client'
 import React, { Fragment, useState, useEffect } from 'react'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
 import ArticleSchema from '@/components/ArticleSchema'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 // Block 5A-W-47A — read segment / image block model + safe URL guards.
@@ -67,16 +66,37 @@ function CardTile({ slug }: { slug: string }) {
   const [price, setPrice] = useState<number | null>(null)
 
   useEffect(() => {
+    const controller = new AbortController()
     async function load() {
-      const bareSlug = slug.replace('pc-', '')
-      const [{ data: cardData }, { data: priceData }] = await Promise.all([
-        supabase.from('cards').select('card_name, set_name, card_number, image_url, card_url_slug').eq('card_slug', bareSlug).single(),
-        supabase.from('daily_prices').select('raw_usd').eq('card_slug', slug).order('date', { ascending: false }).limit(1).single(),
-      ])
-      if (cardData) setCard(cardData)
-      if (priceData) setPrice(priceData.raw_usd)
+      try {
+        const res = await fetch(`/api/insights/card-ref/${encodeURIComponent(slug)}`, {
+          signal: controller.signal,
+          credentials: 'omit',
+        })
+        if (!res.ok) return
+        const payload = await res.json() as {
+          metadata?: { status: 'ok' | 'error'; data: {
+            card_name: string; set_name: string; card_number: string | null;
+            image_url: string | null; card_url_slug: string | null
+          } | null }
+          priceHistory?: { status: 'ok' | 'error'; data: Array<{ raw_usd: number }> | null }
+        }
+        if (payload.metadata?.status === 'ok' && payload.metadata.data) {
+          setCard(payload.metadata.data)
+        }
+        if (payload.priceHistory?.status === 'ok' && Array.isArray(payload.priceHistory.data) && payload.priceHistory.data.length > 0) {
+          // The server returns ascending-date rows filtered to raw_usd > 0.
+          // The former CardTile query asked for the single most recent
+          // non-zero row, so last-of-ascending is the equivalent read.
+          const latest = payload.priceHistory.data[payload.priceHistory.data.length - 1]
+          setPrice(latest.raw_usd)
+        }
+      } catch (e) {
+        if ((e as Error).name === 'AbortError') return
+      }
     }
     load()
+    return () => controller.abort()
   }, [slug])
 
   if (!card) return <div style={{ background: 'var(--bg-light)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px', fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>Loading…</div>
@@ -105,14 +125,31 @@ function ChartBlock({ block }: { block: any }) {
 
   useEffect(() => {
     if (!block.card_slug) return
-    const bareSlug = block.card_slug.replace('pc-', '')
-    Promise.all([
-      supabase.from('cards').select('card_name, set_name, card_url_slug').eq('card_slug', bareSlug).single(),
-      supabase.from('daily_prices').select('raw_usd').eq('card_slug', block.card_slug).gt('raw_usd', 0).order('date', { ascending: true }).limit(90),
-    ]).then(([{ data: c }, { data: h }]) => {
-      if (c) setCard(c)
-      if (h) setHistory(h.map((x: any) => x.raw_usd))
-    })
+    const controller = new AbortController()
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/insights/card-ref/${encodeURIComponent(block.card_slug)}`, {
+          signal: controller.signal,
+          credentials: 'omit',
+        })
+        if (!res.ok) return
+        const payload = await res.json() as {
+          metadata?: { status: 'ok' | 'error'; data: {
+            card_name: string; set_name: string; card_url_slug: string | null
+          } | null }
+          priceHistory?: { status: 'ok' | 'error'; data: Array<{ raw_usd: number }> | null }
+        }
+        if (payload.metadata?.status === 'ok' && payload.metadata.data) {
+          setCard(payload.metadata.data)
+        }
+        if (payload.priceHistory?.status === 'ok' && Array.isArray(payload.priceHistory.data)) {
+          setHistory(payload.priceHistory.data.map(x => x.raw_usd))
+        }
+      } catch (e) {
+        if ((e as Error).name === 'AbortError') return
+      }
+    })()
+    return () => controller.abort()
   }, [block.card_slug])
 
   const latest = history[history.length - 1], earliest = history[0]

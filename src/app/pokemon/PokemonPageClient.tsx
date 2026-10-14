@@ -1,7 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import FAQ from '@/components/FAQ'
 import { getPokemonHubFaqItems } from '@/lib/faqs'
@@ -32,53 +31,69 @@ export default function PokemonPageClient() {
     mostExpensive: PokemonEntry | null
   }>({ totalPokemon: 0, totalCards: 0, mostCards: null, mostExpensive: null })
 
+  // Public species list + total-cards count go through the cached
+  // /api/pokemon/extras Route Handler. One same-origin fetch replaces
+  // the up-to-four direct browser → Supabase calls that previously
+  // paginated get_pokemon_species_list on every visit.
   useEffect(() => {
+    const controller = new AbortController()
     async function load() {
-      // get_pokemon_species_list is paged at the RPC level — call it
-      // multiple times to get every species, regardless of the PostgREST
-      // 1,000-row cap.
-      let all: any[] = []
-      const PAGE = 500
-      let offset = 0
-      while (true) {
-        const { data, error } = await supabase.rpc('get_pokemon_species_list', {
-          p_lim: PAGE, p_offset: offset,
+      try {
+        const res = await fetch('/api/pokemon/extras', {
+          signal: controller.signal,
+          credentials: 'omit',
         })
-        if (error || !data || data.length === 0) break
-        all = all.concat(data)
-        if (data.length < PAGE) break
-        offset += PAGE
-        if (all.length >= 5000) break
+        if (!res.ok) { setLoading(false); return }
+        const payload = await res.json() as {
+          species?: {
+            status: 'ok' | 'error'
+            data: Array<{
+              id: number
+              name: string
+              total_cards: number | null
+              highest_card_price_cents: number | null
+              total_market_value_cents: number | string | null
+              type_primary: string | null
+              generation: number | null
+            }> | null
+          }
+          totalCards?: { status: 'ok' | 'error'; data: number | null }
+        }
+
+        const rows = payload.species?.status === 'ok' ? payload.species.data ?? [] : []
+        const entries: PokemonEntry[] = rows.map((r) => ({
+          id:           r.id,
+          name:         r.name,
+          cardCount:    r.total_cards ?? 0,
+          maxPrice:     r.highest_card_price_cents ?? null,
+          totalValue:   Number(r.total_market_value_cents ?? 0),
+          typePrimary:  r.type_primary ?? null,
+          generation:   r.generation ?? null,
+        }))
+
+        const mostCards     = [...entries].sort((a, b) => b.cardCount - a.cardCount)[0] ?? null
+        const mostExpensive = [...entries].sort((a, b) => (b.maxPrice ?? 0) - (a.maxPrice ?? 0))[0] ?? null
+
+        const totalCards =
+          payload.totalCards?.status === 'ok' ? payload.totalCards.data ?? 0 : 0
+
+        setPokemon(entries)
+        setFiltered(entries)
+        setStats({
+          totalPokemon: entries.length,
+          totalCards,
+          mostCards,
+          mostExpensive,
+        })
+      } catch (e) {
+        if ((e as Error).name === 'AbortError') return
+        // Match previous silent-degrade behaviour.
+      } finally {
+        setLoading(false)
       }
-
-      const [countRes] = await Promise.all([
-        supabase.from('cards').select('id', { count: 'exact', head: true }).eq('is_sealed', false),
-      ])
-
-      const entries: PokemonEntry[] = all.map((r: any) => ({
-        id:           r.id,
-        name:         r.name,
-        cardCount:    r.total_cards ?? 0,
-        maxPrice:     r.highest_card_price_cents ?? null,
-        totalValue:   Number(r.total_market_value_cents ?? 0),
-        typePrimary:  r.type_primary ?? null,
-        generation:   r.generation ?? null,
-      }))
-
-      const mostCards     = [...entries].sort((a, b) => b.cardCount - a.cardCount)[0] ?? null
-      const mostExpensive = [...entries].sort((a, b) => (b.maxPrice ?? 0) - (a.maxPrice ?? 0))[0] ?? null
-
-      setPokemon(entries)
-      setFiltered(entries)
-      setStats({
-        totalPokemon: entries.length,
-        totalCards:   countRes.count ?? 0,
-        mostCards,
-        mostExpensive,
-      })
-      setLoading(false)
     }
     load()
+    return () => controller.abort()
   }, [])
 
   useEffect(() => {
