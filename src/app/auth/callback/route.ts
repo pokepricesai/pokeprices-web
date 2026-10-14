@@ -57,6 +57,17 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(target)
     }
 
+    // CN-03: record cross-network Pokémon site membership so the
+    // Collector Network admin surface can see this user's PokePrices
+    // membership. The hub does NOT send any welcome / onboarding /
+    // weekly email for site_code='pokemon' — PokePrices runs its own
+    // stack (see tryEnrolOnboarding below). Failures are non-blocking.
+    try {
+      await supa.rpc('record_site_authentication', { p_site_code: 'pokemon' })
+    } catch {
+      // non-fatal; CN-A/B RPC may not exist on preview branches
+    }
+
     // Best-effort onboarding enrolment. NEVER blocks the redirect:
     //   * the helper short-circuits when EMAIL_ONBOARDING_ENABLED is unset
     //   * any DB or contact upsert failure is logged and swallowed
