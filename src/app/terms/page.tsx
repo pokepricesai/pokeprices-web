@@ -3,7 +3,7 @@ import Link from 'next/link'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 export const metadata = {
-  title: 'Terms of Service — PokePrices',
+  title: 'Terms of Service | PokePrices',
   description: 'Terms of Service for PokePrices.io',
   alternates: { canonical: 'https://www.pokeprices.io/terms' },
 }
@@ -84,7 +84,7 @@ export default function TermsPage() {
       </Section>
 
       <Section title="4. Affiliate Links">
-        <P>PokePrices may display links to third-party marketplaces including eBay. Some of these links are affiliate links — if you make a purchase through one of these links, we may receive a small commission at no additional cost to you.</P>
+        <P>PokePrices may display links to third-party marketplaces including eBay. Some of these links are affiliate links. If you make a purchase through one of these links, we may receive a small commission at no additional cost to you.</P>
         <P>Affiliate links are how we keep the platform free. We do not promote specific listings, sellers, or products in exchange for payment. Our data and editorial content are independent of any affiliate relationship.</P>
       </Section>
 
@@ -100,7 +100,7 @@ export default function TermsPage() {
       </Section>
 
       <Section title="7. AI-Powered Features">
-        <P>PokePrices includes an AI chat assistant powered by third-party AI services. The assistant is designed to help with Pokémon TCG research questions. It may occasionally produce inaccurate or incomplete responses — always verify important information independently.</P>
+        <P>PokePrices includes an AI chat assistant powered by third-party AI services. The assistant is designed to help with Pokémon TCG research questions. It may occasionally produce inaccurate or incomplete responses, so always verify important information independently.</P>
         <P>Do not submit sensitive personal information through the chat interface.</P>
       </Section>
 

@@ -230,7 +230,7 @@ const features = [
   { title: 'Real sold data',     desc: 'Price guide derived from recent sold-sales activity, not asking prices' },
   { title: 'Grading insights',   desc: 'Is it worth grading? See the PSA 10 premium and gem rate' },
   { title: 'Market trends',      desc: 'Price movements, drawdowns and momentum for every card' },
-  { title: 'No data collection', desc: 'No login, no tracking, no email capture — ever' },
+  { title: 'No data collection', desc: 'No login, no tracking, no email capture, ever' },
 ]
 
 // ── Main ──────────────────────────────────────────────────────────────────
@@ -395,7 +395,7 @@ export default function HomeClient() {
               color: 'rgba(255,255,255,0.6)', fontSize: 11, margin: '0 0 16px',
               fontFamily: "'Figtree', sans-serif",
             }}>
-              Price guide rebuilt nightly from recent sold-sales activity — no asking prices, no guesses
+              Price guide rebuilt nightly from recent sold-sales activity. No asking prices, no guesses.
             </p>
 
             {/* Browse links — quiet inline row so they don't compete
@@ -515,7 +515,7 @@ export default function HomeClient() {
                   a wider or narrower logo cannot warp. */}
               <img
                 src="/set-assets/logos/30th Celebration.webp"
-                alt="Pokémon 30th Celebration — set logo"
+                alt="Pokémon 30th Celebration set logo"
                 style={{
                   flexShrink: 0, height: 68, width: 'auto',
                   maxWidth: 200, objectFit: 'contain',
@@ -654,7 +654,7 @@ export default function HomeClient() {
             )}
           </div>
           <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '0 0 14px', fontFamily: "'Figtree', sans-serif" }}>
-            Volume-verified signals from the market — min 3 confirmed sales
+            Volume-verified signals from the market, with a minimum of 3 confirmed sales.
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
             {weeklyReport.map(row => {
@@ -712,7 +712,7 @@ export default function HomeClient() {
           {[
             { title: 'Browse Cards & Sets',   desc: '65,000+ Pokémon cards across 280+ sets. Live raw and PSA 10 prices, grading data, and set completion tools.', href: '/browse'         },
             { title: 'Browse Pokémon',        desc: "Every Pokémon species with all its cards, prices and grading history in one place.",                       href: '/pokemon'        },
-            { title: 'Follow Market Movers',  desc: 'This week’s top risers, fallers, most volatile and most-traded cards — volume-verified.',            href: '#market-movers'  },
+            { title: 'Follow Market Movers',  desc: 'This week’s top risers, fallers, most volatile and most-traded cards. Volume-verified.',          href: '#market-movers'  },
             { title: 'Read Market Insights',  desc: 'Grading guides, PSA 10 value gaps, chase-card analysis and market breakdowns.',                              href: '/insights'       },
           ].map(card => (
             <Link key={card.title} href={card.href} style={{
@@ -786,7 +786,7 @@ export default function HomeClient() {
           }}>
             <h2 style={{ fontSize: 20, margin: '0 0 4px', fontFamily: "'Outfit', sans-serif" }}>Hidden Gems</h2>
             <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '0 0 16px', fontFamily: "'Figtree', sans-serif" }}>
-              Rising price · low pop · under the radar — volume-verified cards worth a closer look
+              Rising price · low pop · under the radar. Volume-verified cards worth a closer look.
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
               {hiddenGems.map(gem => {
@@ -996,7 +996,7 @@ export default function HomeClient() {
             Monthly collector digest
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 20px', lineHeight: 1.6, fontFamily: "'Figtree', sans-serif", maxWidth: 420, marginLeft: 'auto', marginRight: 'auto' }}>
-            Market moves, biggest risers and fallers, grading tips, hidden gems and upcoming set previews — once a month, no spam, no paywall.
+            Market moves, biggest risers and fallers, grading tips, hidden gems and upcoming set previews. One newsletter a month, no spam, no paywall.
           </p>
           <NewsletterSignup source="homepage" />
           <p style={{ color: 'var(--text-muted)', fontSize: 11, margin: '12px 0 0', fontFamily: "'Figtree', sans-serif" }}>

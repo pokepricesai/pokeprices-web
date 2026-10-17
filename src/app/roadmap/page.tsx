@@ -5,11 +5,11 @@ import FAQ, { type FAQItem } from '@/components/FAQ'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 export const metadata: Metadata = {
-  title: 'Features & Roadmap — PokePrices',
-  description: 'A complete tour of what PokePrices.io does today — live Pokémon TCG card prices, PSA grading insights, portfolio tracking, the collector AI assistant — plus the roadmap of what is coming next. Free, no login, no data collection.',
+  title: 'Features & Roadmap | PokePrices',
+  description: 'A complete tour of what PokePrices.io does today, including live Pokémon TCG card prices, PSA grading insights, portfolio tracking and the collector AI assistant, plus the roadmap of what is coming next. Free, no login, no data collection.',
   alternates: { canonical: 'https://www.pokeprices.io/roadmap' },
   openGraph: {
-    title: 'PokePrices — Features & Roadmap',
+    title: 'PokePrices Features & Roadmap',
     description: 'Every feature on PokePrices today, plus the public roadmap of what is coming next for Pokémon TCG collectors.',
     url: 'https://www.pokeprices.io/roadmap',
     siteName: 'PokePrices',
@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'PokePrices — Features & Roadmap',
+    title: 'PokePrices Features & Roadmap',
     description: 'Every feature on PokePrices today, plus the public roadmap of what is coming next.',
   },
 }
@@ -33,7 +33,7 @@ type FeatureBlock = {
 const featureBlocks: FeatureBlock[] = [
   {
     title: 'Live Pokémon card prices and history',
-    blurb: 'Every card page shows the current raw (ungraded) value plus PSA 9 and PSA 10 prices, a 30 and 90 day trend, all-time high, drawdown from peak and a sparkline of recent activity. Prices are guide values derived from recent sold-sales activity across the major marketplaces, never asking prices — so what you see reflects what cards actually changed hands for.',
+    blurb: 'Every card page shows the current raw (ungraded) value plus PSA 9 and PSA 10 prices, a 30 and 90 day trend, all-time high, drawdown from peak and a sparkline of recent activity. Prices are guide values derived from recent sold-sales activity across the major marketplaces, never asking prices, so what you see reflects what cards actually changed hands for.',
     links: [
       { label: 'Browse all sets',           href: '/browse',          description: 'Every Pokémon TCG set we track, filterable by era.' },
       { label: 'Risers & fallers',          href: '/visualisations/risers-fallers', description: 'Biggest 30-day movers across the market.' },
@@ -42,7 +42,7 @@ const featureBlocks: FeatureBlock[] = [
   },
   {
     title: 'PSA, CGC and BGS grading insight',
-    blurb: 'Each card carries the PSA population (how many copies have been graded) and the gem rate (the percentage that came back as a PSA 10). Combine that with the raw-to-PSA-10 multiple and the Grading Calculator and you can answer the real question — is this card worth the £25, the wait and the risk?',
+    blurb: 'Each card carries the PSA population (how many copies have been graded) and the gem rate (the percentage that came back as a PSA 10). Combine that with the raw-to-PSA-10 multiple and the Grading Calculator and you can answer the real question: is this card worth the £25, the wait and the risk?',
     links: [
       { label: 'Grading Calculator',        href: '/dashboard/grading', description: 'Landed cost vs. graded uplift, break-even at a glance.' },
       { label: 'Tools hub',                 href: '/tools',             description: 'All open calculators and trackers.' },
@@ -50,7 +50,7 @@ const featureBlocks: FeatureBlock[] = [
   },
   {
     title: 'Set pages with the data you actually need',
-    blurb: 'Open any set and you get the printing total, release date, master-set value, biggest cards, biggest movers and a hidden-gems shortlist. Sets are tagged by era — Base, Gym, Neo, EX, Diamond & Pearl, Platinum, HGSS, Black & White, XY, Sun & Moon, Sword & Shield, Scarlet & Violet and the new Mega Evolution era — so the chronology is honest, not marketing-led.',
+    blurb: 'Open any set and you get the printing total, release date, master-set value, biggest cards, biggest movers and a hidden-gems shortlist. Sets are tagged by era (Base, Gym, Neo, EX, Diamond & Pearl, Platinum, HGSS, Black & White, XY, Sun & Moon, Sword & Shield, Scarlet & Violet and the new Mega Evolution era), so the chronology is honest, not marketing-led.',
     links: [
       { label: 'Browse sets by era',        href: '/browse',          description: 'Filter sets by era and sort by release, value or size.' },
       { label: 'Chaos Rising',              href: '/set/Chaos%20Rising', description: 'Latest released set, Mega Evolution era.' },
@@ -68,7 +68,7 @@ const featureBlocks: FeatureBlock[] = [
   },
   {
     title: 'Tools collectors actually use',
-    blurb: 'No-login calculators for the things you actually need answers to — what would it cost to grade this, is this trade fair, how is my collection moving. Every tool runs on the same sold-listing data the rest of the site shows.',
+    blurb: 'No-login calculators for the things you actually need answers to: what would it cost to grade this, is this trade fair, how is my collection moving. Every tool runs on the same sold-sales data the rest of the site shows.',
     links: [
       { label: 'Grading Calculator',        href: '/dashboard/grading', description: 'PSA, CGC and BGS landed cost vs. graded uplift.' },
       { label: 'Trade Evaluator',           href: '/dealer',            description: 'Compare two card stacks for a fair trade.' },
@@ -81,14 +81,14 @@ const featureBlocks: FeatureBlock[] = [
   },
   {
     title: 'The collector AI assistant',
-    blurb: 'A focused chat assistant tuned for Pokémon TCG questions — set context, grading trade-offs, what a card is currently worth, whether a printing is rare. It is grounded in our live database, not the model’s training data, so prices stay current. AI is a feature here, not the brand.',
+    blurb: 'A focused chat assistant tuned for Pokémon TCG questions: set context, grading trade-offs, what a card is currently worth, whether a printing is rare. It is grounded in our live database, not the model’s training data, so prices stay current. AI is a feature here, not the brand.',
     links: [
       { label: 'Open the AI assistant',     href: '/ai-assistant',     description: 'Ask anything about Pokémon TCG prices, sets, grading.' },
     ],
   },
   {
     title: 'Studio for content creators',
-    blurb: 'One-click branded graphics from any card, set or price snapshot — PNG exports sized for X, Instagram, YouTube thumbnails and Discord. Built so creators can share what they’re seeing without having to mock anything up themselves.',
+    blurb: 'One-click branded graphics from any card, set or price snapshot. PNG exports sized for X, Instagram, YouTube thumbnails and Discord. Built so creators can share what they’re seeing without having to mock anything up themselves.',
     links: [
       { label: 'Open Studio',               href: '/studio',           description: 'Generate share-ready PNGs from any card.' },
     ],
@@ -105,10 +105,10 @@ const featureBlocks: FeatureBlock[] = [
   },
   {
     title: 'Games for collectors',
-    blurb: 'Short daily games built around real card data — guess the price, higher-or-lower between two cards, and a daily-pick puzzle. They’re designed to teach you the market without you having to study it.',
+    blurb: 'Short daily games built around real card data: guess the price, higher-or-lower between two cards, and a daily-pick puzzle. They’re designed to teach you the market without you having to study it.',
     links: [
       { label: 'Games hub',                 href: '/games',               description: 'All daily games in one place.' },
-      { label: 'Daily Pick',                href: '/games/daily-pick',    description: 'One card a day — would you buy it now?' },
+      { label: 'Daily Pick',                href: '/games/daily-pick',    description: 'One card a day. Would you buy it now?' },
       { label: 'Guess the Price',           href: '/games/guess-price',   description: 'Estimate the sold price of a real card.' },
       { label: 'Higher or Lower',           href: '/games/higher-lower',  description: 'Which of these two is worth more right now?' },
     ],
@@ -139,14 +139,14 @@ type RoadmapItem = { title: string; blurb: string }
 
 const roadmapNow: RoadmapItem[] = [
   { title: 'IndexNow integration',          blurb: 'Notify Bing and other engines the second a card page, set page or insight is added or updated, so new content gets indexed in hours instead of weeks.' },
-  { title: 'Era filter on the sets page',   blurb: 'Shipped — /browse now has a chronological era filter that includes the new Mega Evolution era.' },
+  { title: 'Era filter on the sets page',   blurb: 'Shipped. /browse now has a chronological era filter that includes the new Mega Evolution era.' },
   { title: 'Mega Evolution era',            blurb: 'Phantasmal Flames, Perfect Order, Ascended Heroes and Chaos Rising are grouped under the new Mega Evolution era, with Pitch Black confirmed for Jul 17, 2026.' },
 ]
 
 const roadmapSoon: RoadmapItem[] = [
   { title: 'Set-level price index',                    blurb: 'A per-set trend line composed from the price-guide values of every card in the set, so you can see how an entire set is moving in one chart, not just card by card.' },
   { title: 'Release calendar table',                   blurb: 'A real table of upcoming Pokémon TCG sets with confirmed release dates, preorder links, UK and US retailer stock, and recommended retail prices.' },
-  { title: 'Pull rates',                               blurb: 'Public pull-rate data from confirmed openings — odds of hitting each rarity tier per set, with sample sizes and last-updated stamps.' },
+  { title: 'Pull rates',                               blurb: 'Public pull-rate data from confirmed openings. Odds of hitting each rarity tier per set, with sample sizes and last-updated stamps.' },
   { title: 'Rip or Keep',                              blurb: 'For sealed product, a quick calculator showing whether the expected pull value beats the current sealed price.' },
   { title: 'Curated investing knowledge',              blurb: 'A vetted knowledge document injected into the AI assistant so it can reason about long-term collecting strategy, not just current prices.' },
   { title: 'Faster image loading',                     blurb: 'Lazy-loaded card images, smaller bundles and tighter caching so the site feels instant on mobile.' },
@@ -154,10 +154,10 @@ const roadmapSoon: RoadmapItem[] = [
 
 const roadmapLater: RoadmapItem[] = [
   { title: 'Card shop directory',          blurb: 'A searchable directory of physical Pokémon TCG shops, filterable by country, city and stock type. Useful for collectors, useful for shops.' },
-  { title: 'Sealed product tracking',      blurb: 'Box, booster bundle, ETB and elite trainer box price tracking — same sold-listing methodology as singles.' },
+  { title: 'Sealed product tracking',      blurb: 'Box, booster bundle, ETB and elite trainer box price tracking, built on the same sold-sales methodology as singles.' },
   { title: 'Japanese set coverage',        blurb: 'Pricing for popular Japanese sets and Promo cards, with cross-references to their English counterparts.' },
-  { title: 'Public API for businesses',    blurb: 'A documented price API for vendors, card shops and tools. Free tier for hobbyists, paid tier for commercial use — this is how the project keeps the consumer side free.' },
-  { title: 'Native mobile app',            blurb: 'Only if the web version genuinely cannot do what collectors need on the move. The bar is high — most apps in this space are worse than a good mobile website.' },
+  { title: 'Public API for businesses',    blurb: 'A documented price API for vendors, card shops and tools. Free tier for hobbyists, paid tier for commercial use. That split is how the project keeps the consumer side free.' },
+  { title: 'Native mobile app',            blurb: 'Only if the web version genuinely cannot do what collectors need on the move. The bar is high; most apps in this space are worse than a good mobile website.' },
 ]
 
 // ── FAQ — long, SEO-targeted ─────────────────────────────────────────────────
@@ -165,7 +165,7 @@ const roadmapLater: RoadmapItem[] = [
 const faqItems: FAQItem[] = [
   {
     question: 'What is PokePrices?',
-    answer: 'PokePrices is a free Pokémon TCG price intelligence site. It shows live raw and PSA-graded card values, grading economics, set-level momentum and a small set of collector tools — all without a login, a paywall or any data collection. It is built and maintained by a single collector.',
+    answer: 'PokePrices is a free Pokémon TCG price intelligence site. It shows live raw and PSA-graded card values, grading economics, set-level momentum and a small set of collector tools, all without a login, a paywall or any data collection. It is built and maintained by a single collector.',
   },
   {
     question: 'Is PokePrices really free?',
@@ -173,11 +173,11 @@ const faqItems: FAQItem[] = [
   },
   {
     question: 'Do I need to sign up?',
-    answer: 'No. Everything on /browse, every card page, every set page, /insights, /visualisations, the AI assistant, the grading calculator, Studio and the games work without a login. You only need an account if you want PokePrices to remember things for you across devices — a portfolio, a watchlist or a set-completion checklist.',
+    answer: 'No. Everything on /browse, every card page, every set page, /insights, /visualisations, the AI assistant, the grading calculator, Studio and the games works without a login. You only need an account if you want PokePrices to remember things for you across devices, such as a portfolio, a watchlist or a set-completion checklist.',
   },
   {
     question: 'Where do the prices come from?',
-    answer: 'The displayed card figures are guide values derived from recent sold-sales activity on the major Pokémon TCG marketplaces (eBay, TCGplayer, Heritage, Goldin and others). We never use asking prices, which can run well above what cards actually transact for. The sold-sales approach is also why our figures sometimes look lower than less-strict price guides — they track what changed hands, not what sellers are hoping to get.',
+    answer: 'The displayed card figures are guide values derived from recent sold-sales activity on the major Pokémon TCG marketplaces (eBay, TCGplayer, Heritage, Goldin and others). We never use asking prices, which can run well above what cards actually transact for. The sold-sales approach is also why our figures sometimes look lower than less-strict price guides: they track what changed hands, not what sellers are hoping to get.',
   },
   {
     question: 'How often are prices updated?',
@@ -185,7 +185,7 @@ const faqItems: FAQItem[] = [
   },
   {
     question: 'How accurate are the prices?',
-    answer: 'For widely traded cards, the figures are very close to real-world transaction values — the same marketplace activity anyone could verify. For rarer cards with few recent sales, accuracy depends on sample size. Every card page is transparent about the data source and how recent the last sale was, so you can judge confidence yourself.',
+    answer: 'For widely traded cards, the figures are very close to real-world transaction values, drawn from the same marketplace activity anyone could verify. For rarer cards with few recent sales, accuracy depends on sample size. Every card page is transparent about the data source and how recent the last sale was, so you can judge confidence yourself.',
   },
   {
     question: 'Do you cover both raw cards and graded cards?',
@@ -201,11 +201,11 @@ const faqItems: FAQItem[] = [
   },
   {
     question: 'Why are some sets in the Mega Evolution era?',
-    answer: 'The new Mega Evolution era covers the Pokémon TCG re-brand starting around Phantasmal Flames. Phantasmal Flames, Perfect Order, Ascended Heroes and Chaos Rising sit in the Mega Evolution era, with Mega Evolution — Pitch Black confirmed as the next major release on July 17, 2026. Earlier Scarlet & Violet era sets like Journey Together and Destined Rivals stay under Scarlet & Violet.',
+    answer: 'The new Mega Evolution era covers the Pokémon TCG re-brand starting around Phantasmal Flames. Phantasmal Flames, Perfect Order, Ascended Heroes and Chaos Rising sit in the Mega Evolution era, with Mega Evolution: Pitch Black confirmed as the next major release on July 17, 2026. Earlier Scarlet & Violet era sets like Journey Together and Destined Rivals stay under Scarlet & Violet.',
   },
   {
     question: 'Do you support Magic: The Gathering?',
-    answer: 'A sister site, MagicPrices, runs on the same Supabase infrastructure with Scryfall data — 104,000+ English cards and 1,000+ sets. The two projects share data plumbing but each focuses on its own community.',
+    answer: 'A sister site, MagicPrices, runs on the same Supabase infrastructure with Scryfall data, covering 104,000+ English cards and 1,000+ sets. The two projects share data plumbing but each focuses on its own community.',
   },
   {
     question: 'Are prices shown in GBP or USD?',
@@ -217,11 +217,11 @@ const faqItems: FAQItem[] = [
   },
   {
     question: 'Is there a public API?',
-    answer: 'Not yet for consumers. A documented price API for vendors and card shops is on the roadmap and will be how the consumer site stays free — commercial users pay, hobbyists do not.',
+    answer: 'Not yet for consumers. A documented price API for vendors and card shops is on the roadmap, and that is how the consumer site stays free: commercial users pay, hobbyists do not.',
   },
   {
     question: 'How does the AI assistant work?',
-    answer: 'The assistant is a Claude-based chat tool tuned for Pokémon TCG questions. It is given live data from our database at request time — current prices, set info, PSA population — so its answers reflect the actual market today rather than the model’s training cutoff. AI is a feature here, not the marketing identity.',
+    answer: 'The assistant is a Claude-based chat tool tuned for Pokémon TCG questions. It is given live data from our database at request time (current prices, set info, PSA population), so its answers reflect the actual market today rather than the model’s training cutoff. AI is a feature here, not the marketing identity.',
   },
   {
     question: 'Can I submit a card show?',
@@ -237,11 +237,11 @@ const faqItems: FAQItem[] = [
   },
   {
     question: 'Do you track sealed product like booster boxes and ETBs?',
-    answer: 'Not yet. Sealed product tracking is on the longer-term roadmap. The methodology will mirror singles — guide values derived from recent sold-sales activity only, with the same transparency on data sources.',
+    answer: 'Not yet. Sealed product tracking is on the longer-term roadmap. The methodology will mirror singles: guide values derived from recent sold-sales activity only, with the same transparency on data sources.',
   },
   {
     question: 'What makes PokePrices different from other Pokémon price sites?',
-    answer: 'Three things — the data is derived from real sold-sales activity (not asking prices), the site has no login, paywall or data collection, and the tooling is built by a collector rather than by an investor-led startup. The product principles are public on this page, and you can hold us to them.',
+    answer: 'Three things. The data is derived from real sold-sales activity (not asking prices), the site has no login, paywall or data collection, and the tooling is built by a collector rather than by an investor-led startup. The product principles are public on this page, and you can hold us to them.',
   },
   {
     question: 'Who built PokePrices?',
@@ -249,11 +249,11 @@ const faqItems: FAQItem[] = [
   },
   {
     question: 'How can I support the project?',
-    answer: 'Use it, share it with collectors you know, and submit corrections when something looks off. The newsletter is the easiest way to follow updates — once a month, no spam, no paywall. Long-term, the public API for commercial users will be how the project funds itself.',
+    answer: 'Use it, share it with collectors you know, and submit corrections when something looks off. The newsletter is the easiest way to follow updates, once a month, with no spam and no paywall. Long-term, the public API for commercial users will be how the project funds itself.',
   },
   {
     question: 'When is the next major Pokémon TCG set?',
-    answer: 'Mega Evolution — Pitch Black, the first major set of the new Mega Evolution era, is scheduled for July 17, 2026. The most recent release was Chaos Rising on May 22, 2026.',
+    answer: 'Mega Evolution: Pitch Black, the first major set of the new Mega Evolution era, is scheduled for July 17, 2026. The most recent release was Chaos Rising on May 22, 2026.',
   },
   {
     question: 'Where can I get notified of new features?',
@@ -300,9 +300,9 @@ export default function RoadmapPage() {
           fontSize: 16, color: 'var(--text-muted)', lineHeight: 1.65,
           margin: 0, maxWidth: 720,
         }}>
-          A full tour of what PokePrices does today — live <Link href="/browse" style={{ color: 'var(--primary)' }}>Pokémon TCG card prices</Link>, PSA grading economics,
+          A full tour of what PokePrices does today, including live <Link href="/browse" style={{ color: 'var(--primary)' }}>Pokémon TCG card prices</Link>, PSA grading economics,
           a <Link href="/dashboard/portfolio" style={{ color: 'var(--primary)' }}>portfolio tracker</Link>, the <Link href="/ai-assistant" style={{ color: 'var(--primary)' }}>collector AI assistant</Link>,
-          <Link href="/studio" style={{ color: 'var(--primary)' }}> Studio for creators</Link> and a small set of <Link href="/tools" style={{ color: 'var(--primary)' }}>tools</Link> built by a single collector — plus the public
+          <Link href="/studio" style={{ color: 'var(--primary)' }}> Studio for creators</Link> and a small set of <Link href="/tools" style={{ color: 'var(--primary)' }}>tools</Link> built by a single collector, plus the public
           roadmap of what is coming next. The product principles are simple: no login for the data, no paywall, no email capture, no data collection. Ever.
         </p>
       </section>
@@ -331,8 +331,8 @@ export default function RoadmapPage() {
       {/* ── Features today ── */}
       <SectionHeading id="features">What PokePrices does today</SectionHeading>
       <Lead>
-        Every section below links to the actual feature. If something interests you, click straight through —
-        you do not need an account, an email or a credit card to use any of it.
+        Every section below links to the actual feature. If something interests you, click straight through.
+        You do not need an account, an email or a credit card to use any of it.
       </Lead>
 
       {featureBlocks.map(block => (
@@ -353,7 +353,7 @@ export default function RoadmapPage() {
                   {link.label} →
                 </Link>
                 {link.description && (
-                  <span style={{ color: 'var(--text-muted)' }}>{' — '}{link.description}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>{' · '}{link.description}</span>
                 )}
               </li>
             ))}
@@ -389,7 +389,7 @@ export default function RoadmapPage() {
           { title: 'No paywall',          body: 'The core site is free forever. Every price, every chart, every tool that does not require saved state is open.' },
           { title: 'No data collection',  body: 'No tracking pixels beyond standard analytics. No email harvesting. No login walls in front of data.' },
           { title: 'Sold-sales activity only', body: 'Prices reflect what changed hands, not what sellers are asking. This is sometimes the difference between buying smart and getting fleeced.' },
-          { title: 'Honest landed cost',  body: 'When a calculator says “you would profit X”, VAT, shipping, grading fees and platform cuts are already factored in — we protect collectors, not flippers.' },
+          { title: 'Honest landed cost',  body: 'When a calculator says “you would profit X”, VAT, shipping, grading fees and platform cuts are already factored in. We protect collectors, not flippers.' },
           { title: 'Collectors first',    body: 'Decisions are made for collectors, not investors. If a feature would help flipping at the expense of the community, it does not ship.' },
           { title: 'AI is a feature',     body: 'The collector AI assistant is one tool among many, not the brand. We will never lead with "AI" as marketing because it does not describe what we actually do.' },
         ].map(p => (
@@ -403,7 +403,7 @@ export default function RoadmapPage() {
       {/* ── Roadmap ── */}
       <SectionHeading id="roadmap">Roadmap</SectionHeading>
       <Lead>
-        Honest, in order of how close it is to shipping. Things move around — this is a one-person project — but
+        Honest, in order of how close it is to shipping. Things move around (this is a one-person project), but
         this is the priority stack as of today.
       </Lead>
 
@@ -416,7 +416,7 @@ export default function RoadmapPage() {
       <FAQ
         items={faqItems}
         title="Frequently asked questions"
-        intro="The questions collectors actually ask — about prices, data, grading, the roadmap and the principles. Each answer is also emitted as FAQPage structured data so search engines can pick it up directly."
+        intro="The questions collectors actually ask about prices, data, grading, the roadmap and the principles. Each answer is also emitted as FAQPage structured data so search engines can pick it up directly."
       />
 
       {/* ── Closing CTA ── */}

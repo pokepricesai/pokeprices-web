@@ -160,7 +160,7 @@ function PortfolioLoginInner() {
     })
     setLoading(false)
     if (error) { setError(error.message); return }
-    setInfo('Password reset link sent — check your inbox.')
+    setInfo('Password reset link sent. Check your inbox.')
   }
 
   // Reset transient state when switching mode
@@ -319,7 +319,7 @@ function PortfolioLoginInner() {
             {loading ? 'Sending…' : 'Send login link'}
           </button>
           <p style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textAlign: 'center', margin: '12px 0 0', lineHeight: 1.5 }}>
-            We&apos;ll email you a one-tap link — no password needed.
+            We&apos;ll email you a one-tap link. No password needed.
           </p>
         </>
       )}
@@ -341,7 +341,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             Track your collection
           </h1>
           <p style={{ fontSize: 14, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, lineHeight: 1.6 }}>
-            Free portfolio tracker — see what your cards are worth, track performance, get insights.
+            Free portfolio tracker. See what your cards are worth, track performance and get insights.
           </p>
         </div>
 

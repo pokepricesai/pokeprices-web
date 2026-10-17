@@ -28,7 +28,7 @@ export default function MarketingPreview(props: MarketingPreviewProps) {
       </Text>
       <Text>
         This is a preview of the kind of message we might send when
-        there is something genuinely worth opening — a new tool, a
+        there is something genuinely worth opening: a new tool, a
         useful data report, or a price intelligence story we think you
         will enjoy.
       </Text>
@@ -51,7 +51,7 @@ export function marketingPreviewPlainText(_props: MarketingPreviewProps): string
     'Hello collector,',
     '',
     'This is a preview of the kind of message we might send when there',
-    'is something genuinely worth opening — a new tool, a useful data',
+    'is something genuinely worth opening: a new tool, a useful data',
     'report, or a price intelligence story we think you will enjoy.',
     '',
     'We only send marketing messages to collectors who have opted in.',

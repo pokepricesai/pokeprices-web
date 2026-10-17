@@ -222,7 +222,7 @@ export function scoreFile(
   }
   if (f.asset_type === 'pack' || f.asset_type === 'card' || f.asset_type === 'banner') {
     score += BG_WEIGHTS.ASSET_TYPE_WRONG
-    warnings.push(`asset_type=${f.asset_type} — likely wrong asset for a set identity`)
+    warnings.push(`asset_type=${f.asset_type}; likely wrong asset for a set identity`)
   }
 
   // English-market rejection.
@@ -234,7 +234,7 @@ export function scoreFile(
   // Tiny dimension guard when asking for a logo.
   if (want === 'logo' && f.width != null && f.height != null && f.width < 80 && f.height < 80) {
     score += BG_WEIGHTS.DIMENSION_TINY
-    warnings.push(`tiny image (${f.width}×${f.height}) — likely a symbol misfiled as logo`)
+    warnings.push(`tiny image (${f.width}×${f.height}); likely a symbol misfiled as logo`)
   }
 
   return { file: f, score, reasons, warnings }

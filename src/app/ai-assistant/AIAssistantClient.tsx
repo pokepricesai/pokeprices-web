@@ -62,7 +62,7 @@ export default function AIAssistantClient() {
           Ask Me Anything
         </h1>
         <p style={{ fontSize: 15, color: 'var(--text-muted)', lineHeight: 1.6, maxWidth: 600, margin: '0 auto' }}>
-          PokePrices' AI assistant knows every card, set and sold price in our database. Ask about grading economics, set context, market moves, hidden gems — anything a real collector would ask another collector. It cites the cards it talks about so you can verify the numbers.
+          PokePrices' AI assistant knows every card, set and sold price in our database. Ask about grading economics, set context, market moves, hidden gems, or anything else a real collector would ask another collector. It cites the cards it talks about so you can verify the numbers.
         </p>
       </div>
 
@@ -109,7 +109,7 @@ export default function AIAssistantClient() {
               <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.2, padding: '2px 6px', borderRadius: 4, background: 'var(--accent)', color: '#1a3a6b' }}>BETA</span>
             </div>
             <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              Free accounts get 100 card scans per month. Sign up takes 30 seconds — no payment, no card details.
+              Free accounts get 100 card scans per month. Sign up takes 30 seconds, with no payment and no card details.
             </p>
           </div>
           <Link
@@ -190,11 +190,11 @@ export default function AIAssistantClient() {
           How this works (and what it is not)
         </h2>
         <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.7 }}>
-          <li>Powered by Claude Haiku with read-only access to the PokePrices database — 40,000+ cards, 156+ sets, nightly sold-listing updates.</li>
+          <li>Powered by Claude Haiku with read-only access to the PokePrices database: 40,000+ cards, 156+ sets, nightly sold-listing updates.</li>
           <li>Numbers it cites come straight from the same tables that power every other page on the site.</li>
           <li>It is not financial advice. The market moves; do your own work on big-ticket decisions.</li>
           <li>No conversation history is stored against your identity. Each session is anonymous.</li>
-          <li>Card scanning is in BETA — accuracy is good for modern cards, improving for vintage and promo. Free tier is 100 scans per month.</li>
+          <li>Card scanning is in BETA. Accuracy is good for modern cards, improving for vintage and promo. Free tier is 100 scans per month.</li>
         </ul>
       </div>
 

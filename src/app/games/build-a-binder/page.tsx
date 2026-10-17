@@ -3,12 +3,12 @@
 import BuildABinderClient from './BuildABinderClient'
 
 export const metadata = {
-  title: 'Build a Binder — Pokémon Card Game | PokePrices',
+  title: 'Build a Binder: Pokémon Card Game | PokePrices',
   description:
     'Pick 5 Pokémon cards without going over your budget. Real market prices. Free to play, no login.',
   alternates: { canonical: 'https://www.pokeprices.io/games/build-a-binder' },
   openGraph: {
-    title: 'Build a Binder — Pokémon Card Game',
+    title: 'Build a Binder: Pokémon Card Game',
     description:
       'Pick 5 Pokémon cards without going over your budget. Real market prices. Free to play, no login.',
     url: 'https://www.pokeprices.io/games/build-a-binder',

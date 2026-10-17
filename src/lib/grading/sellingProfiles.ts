@@ -106,7 +106,7 @@ export function resolveFixedSellingFee(rule: FixedSellingFeeRule, saleValueCents
  */
 export const UK_EBAY_PRIVATE: SellingProfile = {
   id: 'uk_ebay_private',
-  displayName: 'eBay UK — private seller',
+  displayName: 'eBay UK: private seller',
   marketplace: 'ebay_uk',
   sellerType: 'private',
   currency: 'GBP',
@@ -138,7 +138,7 @@ export const UK_EBAY_PRIVATE: SellingProfile = {
  */
 export const UK_EBAY_BUSINESS: SellingProfile = {
   id: 'uk_ebay_business',
-  displayName: 'eBay UK — business seller (Collectables)',
+  displayName: 'eBay UK: business seller (Collectables)',
   marketplace: 'ebay_uk',
   sellerType: 'business',
   currency: 'GBP',

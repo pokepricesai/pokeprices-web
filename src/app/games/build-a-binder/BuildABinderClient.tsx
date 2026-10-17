@@ -167,7 +167,7 @@ export default function BuildABinderClient() {
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, padding: 16, marginBottom: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
           <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>
-            Your binder — {picks.length}/{TARGET_CARD_COUNT}
+            Your binder: {picks.length}/{TARGET_CARD_COUNT}
           </div>
           <div style={{ display: 'flex', gap: 12, fontSize: 13, color: 'var(--text-muted)' }}>
             <span><strong style={{ color: 'var(--text)' }}>Spent</strong> {fmtUsd(stats.totalCents)}</span>

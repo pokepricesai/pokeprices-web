@@ -15,10 +15,10 @@ export const ONBOARDING_TEMPLATE_OPTIONS = [
 export type OnboardingTemplateKey = (typeof ONBOARDING_TEMPLATE_OPTIONS)[number]['key']
 
 export const ACTIVATION_BRANCH_OPTIONS = [
-  { branch: 'A' as const, label: 'A — No portfolio and no watchlist' },
-  { branch: 'B' as const, label: 'B — Watchlist exists, portfolio empty' },
-  { branch: 'C' as const, label: 'C — Portfolio exists, watchlist empty' },
-  { branch: 'D' as const, label: 'D — Portfolio and watchlist both exist' },
+  { branch: 'A' as const, label: 'A: No portfolio and no watchlist' },
+  { branch: 'B' as const, label: 'B: Watchlist exists, portfolio empty' },
+  { branch: 'C' as const, label: 'C: Portfolio exists, watchlist empty' },
+  { branch: 'D' as const, label: 'D: Portfolio and watchlist both exist' },
 ] as const
 
 export type ActivationBranch = (typeof ACTIVATION_BRANCH_OPTIONS)[number]['branch']

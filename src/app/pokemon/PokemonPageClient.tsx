@@ -7,12 +7,6 @@ import { getPokemonHubFaqItems } from '@/lib/faqs'
 
 const PAGE_SIZE = 100
 
-// Known total number of Pokémon species in the National Pokédex at the
-// time of writing. Used as a safe display fallback during the brief
-// window where server-passed data is missing (e.g. edge/SSR failure)
-// so we never render the misleading "All 0 species" string.
-const KNOWN_SPECIES_COUNT = 1025
-
 export interface PokemonEntry {
   id: number
   name: string
@@ -157,8 +151,10 @@ export default function PokemonPageClient({
         '@context': 'https://schema.org',
         '@type': 'Dataset',
         '@id': 'https://www.pokeprices.io/pokemon#dataset',
-        name: 'Pokémon Card Prices by Species — Master Dataset',
-        description: `All ${pokemon.length || '1,025'} Pokémon species cross-referenced against every Pokémon TCG card they appear on, with raw and PSA 10 prices, PSA population data, and Pokédex info.`,
+        name: 'Pokémon Card Prices by Species: Master Dataset',
+        description: pokemon.length > 0
+          ? `All ${pokemon.length} Pokémon species cross-referenced against every Pokémon TCG card they appear on, with raw and PSA 10 prices, PSA population data, and Pokédex info.`
+          : 'Every tracked Pokémon species cross-referenced against every Pokémon TCG card they appear on, with raw and PSA 10 prices, PSA population data, and Pokédex info.',
         url: 'https://www.pokeprices.io/pokemon',
         license: 'https://www.pokeprices.io/terms',
         creator: { '@id': 'https://www.pokeprices.io/#org' },
@@ -174,12 +170,20 @@ export default function PokemonPageClient({
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: 14, fontFamily: "'Figtree', sans-serif", margin: 0 }}>
           {/*
-            Display count rule — never render "0 species" during a
-            loading window. If we have a real server-provided count
-            we use it; otherwise fall back to the known Pokédex total.
-            A separate loading flag below drives the grid skeleton.
+            Display rule: never render a hardcoded number. If the
+            server-provided count is available we show it; otherwise
+            we show a loading placeholder and wait for authoritative
+            data to arrive. Previously fell back to a hardcoded 1,025,
+            which could display stale/misleading totals indefinitely
+            if the data layer ever regressed (PP-URGENT-02 Job 3).
           */}
-          All {stats.totalPokemon > 0 ? stats.totalPokemon : KNOWN_SPECIES_COUNT} species — click any Pokémon to see every card it appears on with current price-guide values.
+          {stats.totalPokemon > 0 ? (
+            <>Browse every one of {stats.totalPokemon} species and see every card they appear on, with current price-guide values.</>
+          ) : loading ? (
+            <>Loading the full species list, one moment.</>
+          ) : (
+            <>Browse every tracked Pokémon species and see every card they appear on, with current price-guide values.</>
+          )}
         </p>
       </div>
 
@@ -190,7 +194,7 @@ export default function PokemonPageClient({
             { label: 'Total Species', value: stats.totalPokemon.toLocaleString() },
             { label: 'Cards in Database', value: stats.totalCards.toLocaleString() },
             { label: 'Most Cards', value: stats.mostCards ? `${capitalize(stats.mostCards.name)} (${stats.mostCards.cardCount})` : '—' },
-            { label: 'Highest Card Value', value: stats.mostExpensive?.maxPrice ? `$${(stats.mostExpensive.maxPrice / 100).toFixed(0)} — ${capitalize(stats.mostExpensive.name)}` : '—' },
+            { label: 'Highest Card Value', value: stats.mostExpensive?.maxPrice ? `$${(stats.mostExpensive.maxPrice / 100).toFixed(0)} · ${capitalize(stats.mostExpensive.name)}` : '—' },
           ].map((s, i) => (
             <div key={i} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
               <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1, marginBottom: 5 }}>{s.value}</div>

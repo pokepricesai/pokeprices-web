@@ -174,7 +174,7 @@ export default function DashboardOnboardingChecklist({ userId }: Props) {
             <Link
               href={item.href}
               style={ctaStyle(item.complete)}
-              aria-label={item.complete ? `${item.label} — review` : `${item.label} — open`}
+              aria-label={item.complete ? `${item.label}: review` : `${item.label}: open`}
             >
               {item.complete ? 'Review' : 'Open'}
             </Link>

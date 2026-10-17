@@ -302,7 +302,7 @@ function buildPreviewText(data: WeeklyDigestData, sample: boolean): string {
     const n = data.alertSummary.totalEvents
     pieces.push(`${n} ${pluralize(n, 'alert', 'alerts')}`)
   }
-  if (pieces.length === 0) return 'A quiet week — no major moves to report.'
+  if (pieces.length === 0) return 'A quiet week. No major moves to report.'
   return `This week: ${pieces.join(' · ')}.`
 }
 
@@ -372,7 +372,7 @@ function renderPortfolioSectionHtml(data: WeeklyDigestData): string {
     return `${heading}
       <p style="font-family:'Figtree',sans-serif;font-size:13px;color:${BRAND.muted};margin:0 0 10px;line-height:1.5;">
         We're tracking ${p.itemCount} ${pluralize(p.itemCount, 'item', 'items')} in your portfolio, but we couldn't calculate a weekly value this time.
-        Check back next week — or open <a href="${PORTFOLIO_URL}" style="color:${BRAND.primary};font-weight:700;text-decoration:none;">your portfolio</a> for live values.
+        Check back next week, or open <a href="${PORTFOLIO_URL}" style="color:${BRAND.primary};font-weight:700;text-decoration:none;">your portfolio</a> for live values.
       </p>`
   }
 
@@ -414,7 +414,7 @@ function renderPortfolioSectionHtml(data: WeeklyDigestData): string {
          <span style="color:${changeColour(p.sinceLastDigest.absChangeCents)};font-weight:700;">${esc(fmtCents(p.sinceLastDigest.absChangeCents, currency))}</span>
          ${p.sinceLastDigest.pctChange != null ? `· <span style="color:${changeColour(p.sinceLastDigest.pctChange)};font-weight:700;">${esc(fmtPct(p.sinceLastDigest.pctChange))}</span>` : ''}
        </div>`
-    : `<div style="font-family:'Figtree',sans-serif;font-size:11px;margin-top:4px;color:${BRAND.mutedSoft};font-style:italic;">First weekly update — we'll show change-since-last-week from the next one.</div>`
+    : `<div style="font-family:'Figtree',sans-serif;font-size:11px;margin-top:4px;color:${BRAND.mutedSoft};font-style:italic;">First weekly update. We'll show change-since-last-week from the next one.</div>`
 
   // Block 5A-W-16H — 30-day movement summary, rendered between the
   // headline value and the top-items list. Shows even when the
@@ -544,7 +544,7 @@ function renderHtml(data: WeeklyDigestData, sample: boolean): string {
 
   const sampleBanner = sample ? `
     <div style="background:#fff7e0;border:1px solid #f3d36b;color:#704a00;padding:10px 12px;border-radius:8px;margin:0 0 20px;font-size:13px;font-family:'Figtree',sans-serif;">
-      <strong>Sample data</strong> — this email was generated from hand-crafted values for design review. It would NOT be sent to a recipient.
+      <strong>Sample data</strong>: this email was generated from hand-crafted values for design review. It would NOT be sent to a recipient.
     </div>` : ''
 
   let body: string
@@ -558,7 +558,7 @@ function renderHtml(data: WeeklyDigestData, sample: boolean): string {
     ].filter(Boolean)
     body = sections.length > 0
       ? sections.join('')
-      : `<p style="font-family:'Figtree',sans-serif;font-size:13px;color:${BRAND.muted};margin:0;line-height:1.5;">A quiet week — nothing meaningful to report across your portfolio, watchlist or alerts.</p>`
+      : `<p style="font-family:'Figtree',sans-serif;font-size:13px;color:${BRAND.muted};margin:0;line-height:1.5;">A quiet week. Nothing meaningful to report across your portfolio, watchlist or alerts.</p>`
   }
 
   const footer = `
@@ -601,7 +601,7 @@ function renderText(data: WeeklyDigestData, sample: boolean): string {
   lines.push(BRAND_TAGLINE)
   lines.push('='.repeat(Math.max(BRAND_TAGLINE.length, 'PokePrices'.length)))
   lines.push('')
-  if (sample) { lines.push('[SAMPLE DATA — preview only; would NOT be sent.]'); lines.push('') }
+  if (sample) { lines.push('[SAMPLE DATA: preview only; would NOT be sent.]'); lines.push('') }
 
   if (data.status === 'disabled_master') {
     lines.push('Smart alerts are turned off.')
@@ -631,7 +631,7 @@ function renderText(data: WeeklyDigestData, sample: boolean): string {
         if (data.portfolio.sinceLastDigest) {
           lines.push(`Since last weekly: ${fmtCents(data.portfolio.sinceLastDigest.absChangeCents, data.currency)}  (${fmtPct(data.portfolio.sinceLastDigest.pctChange)})`)
         } else {
-          lines.push(`First weekly update — change-since-last-week will appear from the next one.`)
+          lines.push(`First weekly update. Change-since-last-week will appear from the next one.`)
         }
         // Block 5A-W-16H — 30-day movement block in the text body.
         if (data.portfolio.movement30d) {
@@ -693,7 +693,7 @@ function renderText(data: WeeklyDigestData, sample: boolean): string {
                     || (data.watchlist && data.watchlist.itemCount > 0)
                     || data.alertSummary.cardBlocks.length > 0
     if (!anyContent) {
-      lines.push('A quiet week — nothing meaningful to report across your portfolio, watchlist or alerts.')
+      lines.push('A quiet week. Nothing meaningful to report across your portfolio, watchlist or alerts.')
       lines.push('')
     }
   }

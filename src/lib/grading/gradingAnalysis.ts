@@ -472,7 +472,7 @@ export function buildGradingPromptBlock(result: GradingAnalysisResult): string {
   const fmt = (cents: number) => `${cur}${(cents / 100).toFixed(2)}`
   const lines: string[] = []
   lines.push(
-    `GRADING ANALYSIS (deterministic — you MUST NOT recalculate, invent fees, or contradict these numbers).`,
+    `GRADING ANALYSIS (deterministic; you MUST NOT recalculate, invent fees, or contradict these numbers).`,
     `recommendation_code=${result.recommendationCode}`,
     `intended_use=${result.intendedUse}`,
     `comparison_basis=${result.comparisonBasis}`,
@@ -497,34 +497,34 @@ export function buildGradingPromptBlock(result: GradingAnalysisResult): string {
     )
   }
   if (!result.service.available) {
-    lines.push(`WARNING: the grading service (${result.service.serviceName}) is not currently accepting new submissions — do NOT recommend booking it.`)
+    lines.push(`WARNING: the grading service (${result.service.serviceName}) is not currently accepting new submissions; do NOT recommend booking it.`)
   }
   if (result.dataQuality.gradesExceedServiceCap.length > 0) {
-    lines.push(`WARNING: PSA ${result.dataQuality.gradesExceedServiceCap.join(', PSA ')} value(s) exceed the ${result.service.serviceName} declared-value cap — a higher tier is required for those grades.`)
+    lines.push(`WARNING: PSA ${result.dataQuality.gradesExceedServiceCap.join(', PSA ')} value(s) exceed the ${result.service.serviceName} declared-value cap; a higher tier is required for those grades.`)
   }
   if (result.dataQuality.missingRawValue) {
-    lines.push('WARNING: raw sale value is missing — do NOT quote an incremental-profit figure.')
+    lines.push('WARNING: raw sale value is missing; do NOT quote an incremental-profit figure.')
   }
   if (result.dataQuality.missingGradeValues.length > 0) {
-    lines.push(`WARNING: no confirmed sale data for PSA ${result.dataQuality.missingGradeValues.join(', PSA ')} — do NOT interpolate.`)
+    lines.push(`WARNING: no confirmed sale data for PSA ${result.dataQuality.missingGradeValues.join(', PSA ')}; do NOT interpolate.`)
   }
   if (result.dataQuality.lowVolumeGrades.length > 0) {
-    lines.push(`WARNING: thin sales volume on PSA ${result.dataQuality.lowVolumeGrades.join(', PSA ')} — label those figures as unreliable.`)
+    lines.push(`WARNING: thin sales volume on PSA ${result.dataQuality.lowVolumeGrades.join(', PSA ')}; label those figures as unreliable.`)
   }
   if (result.dataQuality.estimatedPricesUsed) {
     lines.push('WARNING: at least one graded value is estimated, not a confirmed sold market.')
   }
   if (result.dataQuality.extremeGradeMultiplierPresent) {
-    lines.push('WARNING: an extreme graded-to-raw multiplier (>=10x) was detected — add a caution about survivorship / one-sale outliers.')
+    lines.push('WARNING: an extreme graded-to-raw multiplier (>=10x) was detected; add a caution about survivorship / one-sale outliers.')
   }
   lines.push(result.assumptionsSummary)
   lines.push(
     `Response format (compact):`,
-    `  1. Verdict — one plain sentence matching recommendation_code. When comparison_basis=sell_raw, phrase it "Compared with selling the card raw today, ...".`,
-    `  2. Grade scenarios — per-grade one-liner using the numbers above.`,
-    `  3. Break-even point — cite the break_even_grade.`,
-    `  4. Assumptions — one line, verbatim from Assumptions above.`,
-    `  5. Data warning — only if a WARNING appears above.`,
+    `  1. Verdict: one plain sentence matching recommendation_code. When comparison_basis=sell_raw, phrase it "Compared with selling the card raw today, ...".`,
+    `  2. Grade scenarios: per-grade one-liner using the numbers above.`,
+    `  3. Break-even point: cite the break_even_grade.`,
+    `  4. Assumptions: one line, verbatim from Assumptions above.`,
+    `  5. Data warning: only if a WARNING appears above.`,
     `Do NOT use the phrases "sweet spot", "grading floor", "nearly doubles", or any percentage not present above.`,
   )
   if (result.intendedUse === 'collection') {

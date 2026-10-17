@@ -52,7 +52,7 @@ export function getCardFaqItems({
     if (card.psa10_usd) parts.push(`PSA 10: ${fmtUsd(card.psa10_usd)}`)
     items.push({
       question: `How much is ${fullName} from ${setName} worth?`,
-      answer: `${fullName} from ${setName} currently reads ${parts.join(', ')} in our aggregated recent-sales price guide. The guide is rebuilt nightly from sold-sales data across the major Pokémon TCG marketplaces — not asking prices.`,
+      answer: `${fullName} from ${setName} currently reads ${parts.join(', ')} in our aggregated recent-sales price guide. The guide is rebuilt nightly from sold-sales data across the major Pokémon TCG marketplaces, never asking prices.`,
     })
   }
 
@@ -62,7 +62,7 @@ export function getCardFaqItems({
     if (worthIt) {
       items.push({
         question: `Is ${fullName} worth grading?`,
-        answer: `The PSA 10 price of ${fmtUsd(card.psa10_usd)} is ${psa10Multiple.toFixed(1)}× the raw price of ${fmtUsd(card.raw_usd)}. After a ~$25 grading fee, a PSA 10 result would net approximately ${fmtUsd((gradingProfitCents ?? 0) + 2500)} — assuming the card grades a 10.${gemRate != null ? ` Only ${gemRate.toFixed(1)}% of submitted copies receive PSA 10, so factor that probability into the decision.` : ''}`,
+        answer: `The PSA 10 price of ${fmtUsd(card.psa10_usd)} is ${psa10Multiple.toFixed(1)}× the raw price of ${fmtUsd(card.raw_usd)}. After a $25 grading fee, a PSA 10 result would net approximately ${fmtUsd((gradingProfitCents ?? 0) + 2500)}, assuming the card actually grades a 10.${gemRate != null ? ` Only ${gemRate.toFixed(1)}% of submitted copies receive PSA 10, so factor that probability into the decision.` : ''}`,
       })
     } else {
       items.push({
@@ -75,7 +75,7 @@ export function getCardFaqItems({
   // Q3: Gem rate
   if (gemRate != null && card.psa10_usd) {
     let gemAnalysis = 'This is an average gem rate for Pokémon cards.'
-    if (gemRate < 10)      gemAnalysis = 'This is a difficult card to gem — that low rate is part of why PSA 10 copies command a premium.'
+    if (gemRate < 10)      gemAnalysis = 'This is a difficult card to gem, which is part of why PSA 10 copies command a premium.'
     else if (gemRate > 40) gemAnalysis = 'PSA 10 copies are relatively common for this card, which limits scarcity-driven price upside.'
     items.push({
       question: `What is the PSA 10 gem rate for ${fullName}?`,
@@ -86,7 +86,7 @@ export function getCardFaqItems({
   // Q4: Where do prices come from?
   items.push({
     question: `Where do PokePrices ${fullName} prices come from?`,
-    answer: `Raw, PSA 9 and PSA 10 figures come from our aggregated recent-sales price guide, rebuilt nightly from sold-sales data across the major Pokémon TCG marketplaces. The displayed values are guide numbers, not individual listings. PSA population data is sourced directly from PSA's public population reports. We never use asking prices — only confirmed sales activity feeds the guide.`,
+    answer: `Raw, PSA 9 and PSA 10 figures come from our aggregated recent-sales price guide, rebuilt nightly from sold-sales data across the major Pokémon TCG marketplaces. The displayed values are guide numbers, not individual listings. PSA population data is sourced directly from PSA's public population reports. Asking prices are never used; only confirmed sales activity feeds the guide.`,
   })
 
   return items
@@ -232,7 +232,7 @@ export function getPokemonFaqItems({
       : ''
     items.push({
       question: `Are ${name} cards a good investment?`,
-      answer: `That depends on the specific card, its condition and the price you pay. Card values can and do fall as well as rise.${riserBit} Always cross-check live eBay sold listings before buying with an investment thesis in mind — and this isn't financial advice.`,
+      answer: `That depends on the specific card, its condition and the price you pay. Card values can and do fall as well as rise.${riserBit} Always cross-check live eBay sold listings before buying with an investment thesis in mind, and this isn't financial advice.`,
     })
   }
 
@@ -254,7 +254,7 @@ export function getHomeFaqItems(): FAQItem[] {
   return [
     {
       question: 'How do I check what a Pokémon card is worth?',
-      answer: 'Search the card by name on PokePrices, or browse by set. Each card page shows the current raw price-guide value, PSA 9 and PSA 10 figures, the 30-day trend and PSA population — all derived from aggregated recent sold-sales data, never from asking prices. Free, no login.',
+      answer: 'Search the card by name on PokePrices, or browse by set. Each card page shows the current raw price-guide value, PSA 9 and PSA 10 figures, the 30-day trend and PSA population. Every figure is derived from aggregated recent sold-sales data, never from asking prices. Free, no login.',
     },
     {
       question: 'How do I know if my Pokémon card is valuable?',
@@ -274,11 +274,11 @@ export function getHomeFaqItems(): FAQItem[] {
     },
     {
       question: 'How often are Pokémon card prices updated?',
-      answer: 'Raw, PSA 9 and PSA 10 price-guide values for every tracked card refresh nightly from the latest sold-sales data — the refresh runs around 08:00 UTC daily. The 7-day, 30-day and 90-day percent moves are recomputed at the same time. PSA population numbers are updated biweekly from PSA.com. Prices are nightly, not real-time.',
+      answer: 'Raw, PSA 9 and PSA 10 price-guide values for every tracked card refresh nightly from the latest sold-sales data. The refresh runs around 08:00 UTC daily, and the 7-day, 30-day and 90-day percent moves are recomputed at the same time. PSA population numbers are updated biweekly from PSA.com. Prices are nightly, not real-time.',
     },
     {
       question: 'How quickly are new Pokémon sets added to PokePrices?',
-      answer: 'New English sets are typically added within a day or two of release — the 30th Celebration set (16 September 2026) went live the same day, joining a catalogue of 65,000+ cards across 280+ sets. Once a new set is catalogued, it flows into the same nightly price-guide refresh as every other set, so raw and graded figures appear from the next scheduled run onward.',
+      answer: 'New English sets are typically added within a day or two of release. The 30th Celebration set (16 September 2026) went live the same day, joining a catalogue of 65,000+ cards across 280+ sets. Once a new set is catalogued, it flows into the same nightly price-guide refresh as every other set, so raw and graded figures appear from the next scheduled run onward.',
     },
     {
       question: 'How do I know the PSA population data is accurate?',
@@ -290,7 +290,7 @@ export function getHomeFaqItems(): FAQItem[] {
     },
     {
       question: 'How is the grading calculator different from other tools?',
-      answer: 'PokePrices factors in the real PSA 10 gem rate for each card, a $25 grading fee, and the current raw and PSA 10 prices to estimate probability-weighted profit. Other tools assume every card grades a 10 — most do not.',
+      answer: 'PokePrices factors in the real PSA 10 gem rate for each card, a $25 grading fee, and the current raw and PSA 10 prices to estimate probability-weighted profit. Other tools assume every card grades a 10, which most will not.',
     },
   ]
 }
@@ -306,7 +306,7 @@ export function getBrowseFaqItems(setCount?: number | null): FAQItem[] {
     },
     {
       question: 'What does a "card list" page show me?',
-      answer: 'Each set page is a complete card list — every card from that set with its number, image, raw price, PSA 9 and PSA 10 prices, 30-day price change, and a link to the individual card page with the full grading and trend breakdown.',
+      answer: 'Each set page is a complete card list, with every card from that set shown with its number, image, raw price, PSA 9 and PSA 10 prices, 30-day price change, and a link to the individual card page for the full grading and trend breakdown.',
     },
     {
       question: 'How do I find the most valuable cards in a set?',
@@ -314,7 +314,7 @@ export function getBrowseFaqItems(setCount?: number | null): FAQItem[] {
     },
     {
       question: 'Are sealed product prices tracked too?',
-      answer: 'Yes — booster boxes, ETBs, premium collections and other sealed products are tracked on the relevant set pages where data is available. Sealed listings appear in a separate "Sealed Product" section on each set page.',
+      answer: 'Yes. Booster boxes, ETBs, premium collections and other sealed products are tracked on the relevant set pages where data is available. Sealed listings appear in a separate "Sealed Product" section on each set page.',
     },
     {
       question: 'How often do set prices update?',
@@ -338,7 +338,7 @@ export function getPokemonHubFaqItems(speciesCount?: number | null): FAQItem[] {
     },
     {
       question: 'Why are some species more valuable than others?',
-      answer: 'Card value depends on rarity, condition, age and demand — not just the species. Vintage holos, full arts and special illustrations command the highest prices. Species pages on PokePrices show both the most valuable card and the average raw price.',
+      answer: 'Card value depends on rarity, condition, age and demand, not just the species itself. Vintage holos, full arts and special illustrations tend to lead the top end. Species pages on PokePrices show both the most valuable card and the average raw price.',
     },
     {
       question: 'Do species pages include Pokédex info or just card prices?',
@@ -384,7 +384,7 @@ export function getCreatorsHubFaqItems(): FAQItem[] {
     },
     {
       question: 'How do I add my Pokémon TCG channel to the directory?',
-      answer: 'Use the "Submit your channel" link on the creators page. Submissions are reviewed manually — we look for genuine, ongoing Pokémon TCG content. There is no fee.',
+      answer: 'Use the "Submit your channel" link on the creators page. Submissions are reviewed manually, and we look for genuine, ongoing Pokémon TCG content. There is no fee.',
     },
     {
       question: 'How are creators ranked or featured?',
@@ -392,7 +392,7 @@ export function getCreatorsHubFaqItems(): FAQItem[] {
     },
     {
       question: 'Does PokePrices have an affiliate or sponsorship deal with these creators?',
-      answer: 'No. The directory is editorial — listings are not sponsored. We may link to creator content from articles or feature collaborations separately, but inclusion in the directory is not paid placement.',
+      answer: 'No. The directory is editorial, and listings are never sponsored. We may link to creator content from articles or feature collaborations separately, but inclusion in the directory is not paid placement.',
     },
   ]
 }
@@ -407,11 +407,11 @@ export function getVendorsHubFaqItems(): FAQItem[] {
     },
     {
       question: 'How do I add my Pokémon card shop?',
-      answer: 'Use the "Submit a vendor" link on the vendors page. We review submissions for legitimacy — physical shops need a real address; online sellers need a public storefront. Listings are free.',
+      answer: 'Use the "Submit a vendor" link on the vendors page. We review submissions for legitimacy: physical shops need a real address, and online sellers need a public storefront. Listings are free.',
     },
     {
       question: 'Are these vendors verified by PokePrices?',
-      answer: 'Vendors marked "Verified" have been manually checked — we have confirmed the address, looked at customer feedback, and checked the storefront is live. Unverified listings are user submissions awaiting review.',
+      answer: 'Vendors marked "Verified" have been manually checked. We have confirmed the address, looked at customer feedback, and checked that the storefront is live. Unverified listings are user submissions awaiting review.',
     },
     {
       question: 'Does PokePrices take a cut from purchases?',
@@ -426,11 +426,11 @@ export function getStudioFaqItems(): FAQItem[] {
   return [
     {
       question: 'What is PokePrices Studio?',
-      answer: 'A free tool that turns Pokémon TCG market data into shareable visuals — PSA gauges, market temperature charts, peak-distance graphics and more. Designed for posting to Twitter, Reddit, Discord or YouTube.',
+      answer: 'A free tool that turns Pokémon TCG market data into shareable visuals: PSA gauges, market temperature charts, peak-distance graphics and more. Designed for posting to Twitter, Reddit, Discord or YouTube.',
     },
     {
       question: 'Do I need an account to use Studio?',
-      answer: 'No. Studio is free and public — pick a card, choose a visual, export as PNG. No login, no watermark, no paywall.',
+      answer: 'No. Studio is free and public. Pick a card, choose a visual, export as PNG. No login, no watermark, no paywall.',
     },
     {
       question: 'Can I use the visuals commercially?',
@@ -438,7 +438,7 @@ export function getStudioFaqItems(): FAQItem[] {
     },
     {
       question: 'What card and set data is available in Studio?',
-      answer: 'Every card and set tracked on PokePrices is available — that is 40,000+ cards across 156+ sets. Visuals refresh against the latest nightly price update.',
+      answer: 'Every card and set tracked on PokePrices is available, which is 40,000+ cards across 156+ sets. Visuals refresh against the latest nightly price update.',
     },
   ]
 }

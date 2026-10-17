@@ -553,7 +553,7 @@ function IdlePanel({
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, lineHeight: 1.55 }}>
-          One card, a whole stack with the camera, or photos you took earlier — all work.
+          One card, a whole stack with the camera, or photos you took earlier: all work.
         </p>
         <button onClick={onCameraSingle} style={primaryButtonStyle}>
           Take a photo
@@ -562,10 +562,10 @@ function IdlePanel({
           Take many photos in a row
         </button>
         <button onClick={onGallery} style={secondaryButtonStyle}>
-          Choose from gallery — bulk OK
+          Choose from gallery (bulk OK)
         </button>
         <button onClick={onManualSearch} style={secondaryButtonStyle}>
-          Search by name — no photo
+          Search by name (no photo)
         </button>
         <p style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '4px 0 0', lineHeight: 1.5 }}>
           Bulk modes step through your photos one by one, confirm each match before moving on. Avoid glare, fill the frame, good lighting helps.
@@ -576,13 +576,13 @@ function IdlePanel({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, lineHeight: 1.55 }}>
-        On desktop there is no camera scan — tap below to upload one or more card photos from your computer. They are processed one by one and you confirm each match as it appears.
+        On desktop there is no camera scan. Tap below to upload one or more card photos from your computer. They are processed one by one and you confirm each match as it appears.
       </p>
       <button onClick={onGallery} style={primaryButtonStyle}>
         Upload card image(s)
       </button>
       <button onClick={onManualSearch} style={secondaryButtonStyle}>
-        Search by name — no photo
+        Search by name (no photo)
       </button>
       <p style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '4px 0 0', lineHeight: 1.5 }}>
         Avoid glare, fill the frame, good lighting helps. If the read looks wrong on the result screen, the &quot;Try AI mode&quot; button reruns the same image through Claude vision.
@@ -629,7 +629,7 @@ function CollectingPanel({
         Process {pending.length} {pending.length === 1 ? 'photo' : 'photos'}
       </button>
       <button onClick={onCancel} style={linkButtonStyle}>
-        Cancel — discard photos
+        Cancel (discard photos)
       </button>
     </div>
   )
@@ -659,7 +659,7 @@ function ManualSearchPanel({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {queueLabel && (
         <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase' }}>
-          {queueLabel} — manual fallback
+          {queueLabel}: manual fallback
         </span>
       )}
       <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, lineHeight: 1.55 }}>
@@ -762,7 +762,7 @@ function GradeQtyPicker({
             <optgroup key={company} label={company}>
               {HOLDING_TYPES.filter(t => t.company === company).map(t => (
                 <option key={t.value} value={t.value}>
-                  {t.label}{t.manual ? ' — manual value' : ''}
+                  {t.label}{t.manual ? ' (manual value)' : ''}
                 </option>
               ))}
             </optgroup>
@@ -891,7 +891,7 @@ function ResultsPanel({
           <button onClick={onManualSearch} style={linkButtonStyle}>Search by name</button>
         )}
         {queueRemaining > 0 && (
-          <button onClick={onSkip} style={linkButtonStyle}>Skip — next ({queueRemaining})</button>
+          <button onClick={onSkip} style={linkButtonStyle}>Skip to next ({queueRemaining})</button>
         )}
         <button onClick={onCancel} style={linkButtonStyle}>Cancel</button>
       </div>

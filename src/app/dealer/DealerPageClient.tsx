@@ -442,7 +442,7 @@ function DealerCardRow({ card, region, onRemove, onPriceChange, onGradeChange }:
             onReset={() => onPriceChange(null)}
           />
           <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 3 }}>
-            {isOverridden ? 'Using your price — click to change, or reset to market' : 'Defaults to market — click to set your store price'}
+            {isOverridden ? 'Using your price. Click to change, or reset to market' : 'Defaults to market. Click to set your store price'}
           </div>
         </div>
 
@@ -522,7 +522,7 @@ function CustomerCardRow({ card, mode, cashPct, tradePct, region, onRemove, onPc
             onReset={() => onMarketOverride(null)}
           />
           <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: 3 }}>
-            {isMarketOverride ? 'Using your value — click to change, or reset to data' : 'From our data — click to set your own (e.g. eBay last sold)'}
+            {isMarketOverride ? 'Using your value. Click to change, or reset to data' : 'From our data. Click to set your own (e.g. eBay last sold)'}
           </div>
         </div>
 
@@ -717,7 +717,7 @@ function DealVerdict({ dealerCards, customerCards, mode, cashPct, tradePct, regi
       <div style={{ textAlign: 'center' as const, padding: '8px 0' }}>
         <div style={{ fontSize: 26, fontWeight: 900, color: '#16a34a', fontFamily: "'Figtree', sans-serif", marginBottom: 6 }}>✓ Even deal</div>
         <div style={{ fontSize: 14, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-          Both sides are within {fmt(0.50, region)} — no cash needed.
+          Both sides are within {fmt(0.50, region)}, so no cash is needed.
         </div>
       </div>
     )
@@ -1267,20 +1267,20 @@ export default function DealerPageClient() {
             {
               num: '1',
               color: '#1d4ed8',
-              title: 'Dealer side — cards going out',
-              body: "Search for each card you're giving the customer. The price defaults to the last sold market value — click it to enter your actual store price instead.",
+              title: 'Dealer side: cards going out',
+              body: "Search for each card you're giving the customer. The price defaults to the last sold market value. Click it to enter your actual store price instead.",
               tip: 'If a card is priced at £45 in your display case, type £45. That\'s what goes into the deal.',
               bullets: undefined,
             },
             {
               num: '2',
               color: '#b45309',
-              title: 'Customer side — cards coming in',
+              title: 'Customer side: cards coming in',
               body: "Add the cards the customer is bringing. Each one pulls a market value from our data, and the offer is calculated as market value × your rate automatically.",
               tip: undefined,
               bullets: [
-                'Click the market value to override it — e.g. if eBay last sold shows £150 but our data says £175, set it to £150. The cash or trade offer recalculates from that.',
-                'Click the % badge to adjust the rate for that card only — e.g. lower it for a damaged card.',
+                'Click the market value to override it. For example, if eBay last sold shows £150 but our data says £175, set it to £150. The cash or trade offer recalculates from that.',
+                'Click the % badge to adjust the rate for that card only, for example to lower it for a damaged card.',
               ],
             },
             {
@@ -1290,16 +1290,16 @@ export default function DealerPageClient() {
               body: 'Choose Cash, Trade Credit, or Blended in the verdict panel:',
               tip: undefined,
               bullets: [
-                'Cash — dealer pays money. Verdict shows who adds cash and how much.',
-                'Trade Credit — dealer gives store credit. Customer either has credit to spend or tops up with cash.',
-                'Blended — part cash, part store credit, split proportionally across your two rates.',
+                'Cash: dealer pays money. Verdict shows who adds cash and how much.',
+                'Trade Credit: dealer gives store credit. Customer either has credit to spend or tops up with cash.',
+                'Blended: part cash, part store credit, split proportionally across your two rates.',
               ],
             },
             {
               num: '4',
               color: '#16a34a',
               title: 'Set your default rates',
-              body: 'Use the sliders at the top to set your standard cash offer % and trade credit % — these apply to all customer cards unless individually overridden. Most shops run 40–60% cash and 60–80% trade credit.',
+              body: 'Use the sliders at the top to set your standard cash offer % and trade credit %. These apply to all customer cards unless individually overridden. Most shops run 40–60% cash and 60–80% trade credit.',
               tip: 'You can type directly into the % field or drag the slider.',
               bullets: undefined,
             },
@@ -1349,7 +1349,7 @@ export default function DealerPageClient() {
           borderLeft: '3px solid var(--primary)',
         }}>
           <div style={{ fontSize: 13, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.6 }}>
-            <strong>Remember:</strong> Guide prices are derived from recent sold-sales data and historical trends — a solid baseline, but always cross-check live eBay sold listings on each card before locking in a deal.
+            <strong>Remember:</strong> Guide prices are derived from recent sold-sales data and historical trends. They're a solid baseline, but always cross-check live eBay sold listings on each card before locking in a deal.
           </div>
         </div>
       </div>

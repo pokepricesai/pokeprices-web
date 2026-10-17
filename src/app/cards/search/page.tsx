@@ -11,11 +11,11 @@ import DeepCardSearchClient from './DeepCardSearchClient'
 const SITE = 'https://www.pokeprices.io'
 
 export const metadata: Metadata = {
-  title:       'Pokémon Card Search — Filter by Price, PSA Grade & Set | PokePrices',
+  title:       'Pokémon Card Search: Filter by Price, PSA Grade & Set | PokePrices',
   description: 'Search all English and Japanese Pokémon cards by price, PSA grade, Pokémon, set, release date and price movement. Find cards that match your budget and collection goals.',
   alternates:  { canonical: `${SITE}/cards/search` },
   openGraph: {
-    title:       'Pokémon Card Search — Filter by Price, PSA Grade & Set | PokePrices',
+    title:       'Pokémon Card Search: Filter by Price, PSA Grade & Set | PokePrices',
     description: 'Search all English and Japanese Pokémon cards by price, PSA grade, Pokémon, set, release date and price movement.',
     url:         `${SITE}/cards/search`,
     siteName:    'PokePrices',

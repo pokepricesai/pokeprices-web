@@ -64,7 +64,7 @@ export default function EbayCardPrimaryAction(props: EbayCardPrimaryActionProps)
         sourceComponent="card_primary_action"
         label={label}
         icon="🛒"
-        ariaLabel={`${label} — opens current listings in a new tab`}
+        ariaLabel={`${label}, opens current listings in a new tab`}
         style={{
           display:        'inline-flex',
           alignItems:     'center',

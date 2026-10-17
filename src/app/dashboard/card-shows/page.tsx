@@ -6,7 +6,7 @@ import { requireAuthUser } from '@/lib/auth-server'
 import CardShowsPlannerClient from './CardShowsPlannerClient'
 
 export const metadata: Metadata = {
-  title: 'Card Show Planner — PokePrices Dashboard',
+  title: 'Card Show Planner | PokePrices Dashboard',
   robots: { index: false, follow: false },
 }
 

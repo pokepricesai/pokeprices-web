@@ -102,4 +102,4 @@ export const HOLDING_TYPE_TO_PRICE_COLUMN: Record<string, string> = {
 
 export const NO_MARKET_DATA_NOTE =
   'PokePrices does not yet pull live market data for this specific grade. ' +
-  'Please enter the current value manually below — you can update it from the Edit screen any time.'
+  'Please enter the current value manually below. You can update it from the Edit screen any time.'

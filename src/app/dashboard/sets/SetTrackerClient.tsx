@@ -328,7 +328,7 @@ function SetCard({ set, currency, onAdd }: {
       {set.owned.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.2, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 8 }}>
-            Owned in {set.set_name} — {set.owned.length} card{set.owned.length === 1 ? '' : 's'}
+            Owned in {set.set_name}: {set.owned.length} card{set.owned.length === 1 ? '' : 's'}
           </div>
           <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
             {set.owned.map(c => (
@@ -431,7 +431,7 @@ function SetCard({ set, currency, onAdd }: {
       {set.cheapest_missing.length > 0 && (
         <>
           <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.2, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 8 }}>
-            Cheapest missing — {fmt(remainingCost, currency)} for the next {set.cheapest_missing.length}
+            Cheapest missing: {fmt(remainingCost, currency)} for the next {set.cheapest_missing.length}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 10 }}>
             {set.cheapest_missing.map(c => (

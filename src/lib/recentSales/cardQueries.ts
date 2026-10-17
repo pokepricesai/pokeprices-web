@@ -1,6 +1,10 @@
 // src/lib/recentSales/cardQueries.ts
-// Server-only read query that backs the "Recent verified sales"
-// section on individual card pages.
+// Server-only read query that backs the "Recent tracked sales"
+// section on individual card pages. Rows surface only when
+// parse_status='ok' AND review_status='active' — the label was
+// changed from "verified" to "tracked" in PP-URGENT-02 because
+// row acceptance reflects our quality pipeline, not an
+// independent transaction confirmation.
 //
 // Returns operator-safe marketplace facts only — no PII anywhere.
 // Filters to parse_status='ok' AND review_status='active', mirroring

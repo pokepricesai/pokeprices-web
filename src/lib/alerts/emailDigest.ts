@@ -128,7 +128,7 @@ function thresholdSuffix(payload: Record<string, unknown>): string {
   // "above your 20% alert threshold" works for either direction —
   // |pct| has already passed the gate, and we don't bother labelling
   // rise vs drop here because the price line already shows the sign.
-  return ` — above your ${thr}% alert threshold`
+  return `, above your ${thr}% alert threshold`
 }
 
 function reasonText(ev: DigestEvent): string {
@@ -408,7 +408,7 @@ export function buildSampleEvents(): DigestEvent[] {
       payload:  { recent_active_count: 4, window_days: 7, source: 'watchlist' },
     },
     {
-      cardName: 'Raikou — Phantasmal Flames — Mega Evolutions Blister', setName: 'Promo',
+      cardName: 'Raikou: Phantasmal Flames: Mega Evolutions Blister', setName: 'Promo',
       cardUrl:  'https://www.pokeprices.io/set/Promo/card/raikou---phantasmal-flames---mega-evolutions-blister',
       rule:     'spread_change', severity: 'normal',
       payload:  { old_spread: 5.2, new_spread: 7.8, pct: 50.0, raw: 1500, psa10: 11700, source: 'watchlist' },
@@ -437,15 +437,15 @@ function buildSubject(events: DigestEvent[], sample: boolean, test: boolean): st
   const prefix = tags.length > 0 ? tags.join(' ') + ' ' : ''
   if (events.length === 0) return `${prefix}Your PokePrices alert digest`
   const distinctCards = new Set(events.map(e => `${e.cardName}|${e.setName}`)).size
-  return `${prefix}Your PokePrices alert digest — ${distinctCards} ${pluralize(distinctCards, 'card moved', 'cards moved')}`
+  return `${prefix}Your PokePrices alert digest: ${distinctCards} ${pluralize(distinctCards, 'card moved', 'cards moved')}`
 }
 
 function buildPreviewText(events: DigestEvent[], sample: boolean): string {
-  if (events.length === 0) return sample ? 'Sample preview — no real events.' : 'No new alerts since your last digest.'
+  if (events.length === 0) return sample ? 'Sample preview, no real events.' : 'No new alerts since your last digest.'
   // First high-severity, else first event.
   const head = events.find(e => e.severity === 'high') ?? events[0]
   const tail = events.length > 1 ? ` and ${events.length - 1} more` : ''
-  return `${head.cardName} — ${reasonText(head)}${tail}.`
+  return `${head.cardName}: ${reasonText(head)}${tail}.`
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -497,7 +497,7 @@ function renderHtml(events: DigestEvent[], sample: boolean): string {
 
   const sampleBanner = sample ? `
     <div style="background:#fff7e0;border:1px solid #f3d36b;color:#704a00;padding:10px 12px;border-radius:8px;margin:0 0 20px;font-size:13px;font-family:'Figtree',sans-serif;">
-      <strong>Sample data</strong> — this email was generated from hand-crafted events for design review. It would NOT be sent to a recipient.
+      <strong>Sample data</strong>: this email was generated from hand-crafted events for design review. It would NOT be sent to a recipient.
     </div>` : ''
 
   const renderReason = (ev: DigestEvent): string => `
@@ -578,7 +578,7 @@ function renderText(events: DigestEvent[], sample: boolean): string {
   lines.push('A short summary of meaningful changes on cards you watch.')
   lines.push('')
   if (sample) {
-    lines.push('[SAMPLE DATA — preview only; would NOT be sent.]')
+    lines.push('[SAMPLE DATA: preview only; would NOT be sent.]')
     lines.push('')
   }
   if (events.length === 0) {

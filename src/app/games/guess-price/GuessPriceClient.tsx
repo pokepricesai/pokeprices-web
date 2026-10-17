@@ -179,7 +179,7 @@ function Result({ card, result, shareText, onPlayAgain }: { card: DailyCard; res
   const bandLabel =
     result.accuracy >= 90 ? 'Dead on.' :
     result.accuracy >= 70 ? 'Pretty close.' :
-    result.accuracy >= 40 ? 'Way off — happens.' :
+    result.accuracy >= 40 ? 'Way off. It happens.' :
     'Tough one.'
 
   return (

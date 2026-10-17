@@ -76,7 +76,7 @@ export default function Footer() {
             <p style={{
               color: 'rgba(255,255,255,0.55)', fontSize: 12, margin: '0 0 10px', lineHeight: 1.5,
             }}>
-              Monthly collector digest — market moves, grading tips and set previews.
+              Monthly collector digest. Market moves, grading tips and set previews.
             </p>
             <NewsletterSignup source="footer" dark />
             <a

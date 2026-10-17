@@ -283,7 +283,7 @@ export default function WatchlistClient({ embedded = false }: { embedded?: boole
             {embedded ? 'Your watchlist' : 'Watchlist'}
           </h1>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0 }}>
-            Cards you are watching — current value, 7d / 30d change, PSA premium.
+            Cards you are watching, with current value, 7d / 30d change and the PSA premium.
           </p>
         </div>
         <button onClick={() => setShowAdd(true)} style={{

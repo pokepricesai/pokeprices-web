@@ -4,7 +4,7 @@ import ComingSoonBadge from '@/components/ComingSoonBadge'
 
 export const metadata: Metadata = {
   title: 'Pokémon TCG market visualisations | PokePrices',
-  description: 'Visual views of the Pokémon TCG market — heatmaps, risers, fallers, set indexes, grade premium curves and price distributions. Built from real sold-listing data.',
+  description: 'Visual views of the Pokémon TCG market: heatmaps, risers, fallers, set indexes, grade premium curves and price distributions. Built from real sold-listing data.',
   alternates: { canonical: 'https://www.pokeprices.io/visualisations' },
 }
 
@@ -28,7 +28,7 @@ const VISUALISATIONS: Viz[] = [
   },
   {
     title: 'Risers & Fallers',
-    blurb: 'Leaderboards of the biggest movers — 30d, 90d, 365d. Card images, prices and confirmed-volume tags per row.',
+    blurb: 'Leaderboards of the biggest movers across 30d, 90d and 365d. Card images, prices and confirmed-volume tags per row.',
     status: 'live',
     href: '/visualisations/risers-fallers',
     accent: 'linear-gradient(135deg, #22c55e 0%, #ef4444 100%)',
@@ -44,7 +44,7 @@ const VISUALISATIONS: Viz[] = [
   },
   {
     title: 'Grade Premium Curve',
-    blurb: 'For any card: the raw price, then PSA 6, 7, 8, 9, 10 — plotted against grading cost so the break-even line is obvious.',
+    blurb: 'For any card: the raw price, then PSA 6, 7, 8, 9, 10, plotted against grading cost so the break-even line is obvious.',
     status: 'soon',
     accent: 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)',
     emoji: '📐',
@@ -116,7 +116,7 @@ export default function VisualisationsHubPage() {
         </p>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, margin: 0 }}>
           The order this list ships in depends on what collectors actually want. Got a chart in mind we have not listed?{' '}
-          <Link href="/contact" style={{ color: 'var(--primary)', fontWeight: 700, textDecoration: 'none' }}>Tell me</Link> — small site, real human reads every message.
+          <Link href="/contact" style={{ color: 'var(--primary)', fontWeight: 700, textDecoration: 'none' }}>Tell me</Link>. Small site, real human reads every message.
         </p>
       </div>
 

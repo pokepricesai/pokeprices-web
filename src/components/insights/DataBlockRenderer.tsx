@@ -188,7 +188,7 @@ function CardBlockView({ payload }: { payload: CardBlockPayload }) {
             {show.psa10 && <PriceCell label="PSA 10" cents={source?.psa10 ?? null} />}
           </div>
           <div style={S.sourceLine}>
-            {mode === 'snapshot' ? `Snapshot as of ${asOfLabel}` : `Live prices${asOfLabel ? ` — last observed ${asOfLabel}` : ''}`}
+            {mode === 'snapshot' ? `Snapshot as of ${asOfLabel}` : `Live prices${asOfLabel ? `, last observed ${asOfLabel}` : ''}`}
           </div>
         </div>
       </div>
@@ -371,12 +371,12 @@ function PriceChartBlock({ payload }: { payload: PriceChartPayload }) {
       ) : (
         <div style={S.chartFallback}>
           {payload.mode === 'live'
-            ? 'Live chart unavailable — no daily prices for this card in the selected window.'
-            : 'Chart unavailable — no snapshot points provided.'}
+            ? 'Live chart unavailable: no daily prices for this card in the selected window.'
+            : 'Chart unavailable: no snapshot points provided.'}
         </div>
       )}
       <div style={S.sourceLine}>
-        {payload.card.cardName}{payload.card.setName ? ` (${payload.card.setName})` : ''} — {payload.mode === 'snapshot' ? `snapshot as of ${payload.asOf ?? '(unspecified)'}` : `live (${payload.days ?? 180}-day window)`}
+        {payload.card.cardName}{payload.card.setName ? ` (${payload.card.setName})` : ''} · {payload.mode === 'snapshot' ? `snapshot as of ${payload.asOf ?? '(unspecified)'}` : `live (${payload.days ?? 180}-day window)`}
       </div>
     </div>
   )

@@ -175,7 +175,7 @@ export default function GuessTheCardClient() {
   // Neutral alt text before reveal; real card name after reveal.
   const imgAlt = phase === 'guessing'
     ? 'Obscured Pokémon card'
-    : `${cardDisplayName || 'Pokémon card'} — ${card?.set_name || ''}`.trim()
+    : `${cardDisplayName || 'Pokémon card'} · ${card?.set_name || ''}`.trim()
 
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '28px 16px 60px', fontFamily: "'Figtree', sans-serif" }}>
@@ -196,7 +196,7 @@ export default function GuessTheCardClient() {
           Guess the Card
         </h1>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
-          Identify the card from the obscured artwork. Pick from three options —
+          Identify the card from the obscured artwork. Pick from three options;
           each miss makes the picture clearer and unlocks another clue.
         </p>
       </div>

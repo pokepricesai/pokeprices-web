@@ -185,7 +185,7 @@ export default function DeepCardSearchClient({ catalogueCount }: { catalogueCoun
           fontFamily: "'Figtree', sans-serif",
           margin: 0, lineHeight: 1.55, maxWidth: 780,
         }}>
-          Search every English and Japanese Pokémon card by price, PSA grade, Pokémon, set, age and price movement — or simply describe what you&apos;re looking for.
+          Search every English and Japanese Pokémon card by price, PSA grade, Pokémon, set, age and price movement, or simply describe what you&apos;re looking for.
           {catalogueCount ? ` Search across ${catalogueCount.toLocaleString()} English and Japanese Pokémon cards.` : ''}
         </p>
       </header>

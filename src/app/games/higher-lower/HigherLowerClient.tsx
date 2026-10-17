@@ -178,7 +178,7 @@ export default function HigherLowerClient() {
             </Link>
           </div>
           <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 24 }}>
-            Fresh shuffle every game — play as often as you like.
+            Fresh shuffle every game. Play as often as you like.
           </p>
         </div>
       </div>
@@ -234,7 +234,7 @@ export default function HigherLowerClient() {
 
       {phase === 'reveal' && (
         <div style={{ textAlign: 'center', marginTop: 14, fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>
-          {next.current_raw > current.current_raw ? '▲ Higher' : '▼ Lower'} — {fmtUsd(next.current_raw)}
+          {next.current_raw > current.current_raw ? '▲ Higher' : '▼ Lower'}: {fmtUsd(next.current_raw)}
         </div>
       )}
 

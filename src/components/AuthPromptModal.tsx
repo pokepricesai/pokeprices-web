@@ -144,7 +144,7 @@ export default function AuthPromptModal({
           </button>
         </div>
         <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '14px 0 0', textAlign: 'center', opacity: 0.75 }}>
-          Free — no card required. Free plan supports watchlist &amp; portfolio.
+          Free. No card required. Free plan supports watchlist &amp; portfolio.
         </p>
       </div>
     </div>

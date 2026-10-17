@@ -206,7 +206,7 @@ export function scoreCandidate(pp: PokePricesSet, cand: TcgDexSet): ScoredCandid
     else if (delta <= 5)   { score += WEIGHTS.COUNT_WITHIN_5; reasons.push(`card count Δ=${delta}`) }
     else if (delta > pp.card_count * 0.5) {
       score += WEIGHTS.COUNT_MAJOR_MISMATCH
-      warnings.push(`card count Δ=${delta} (pp=${pp.card_count}, tcgdex=${candCount}) — likely different product`)
+      warnings.push(`card count Δ=${delta} (pp=${pp.card_count}, tcgdex=${candCount}); likely different product`)
     } else {
       warnings.push(`card count Δ=${delta} (pp=${pp.card_count}, tcgdex=${candCount})`)
     }
@@ -220,7 +220,7 @@ export function scoreCandidate(pp: PokePricesSet, cand: TcgDexSet): ScoredCandid
   // suggests English mainline (e.g. "Sword & Shield") but the set
   // has no explicit JP marker AND no JP-only card count evidence.
   if (cand.serie && /(^|\s)(en|english|international)\b/i.test(cand.serie)) {
-    warnings.push(`TCGdex serie "${cand.serie}" looks English-market — verify this is genuinely the Japanese product`)
+    warnings.push(`TCGdex serie "${cand.serie}" looks English-market; verify this is genuinely the Japanese product`)
   }
 
   return { candidate: cand, score, reasons, warnings }
@@ -263,7 +263,7 @@ export function classifyMatch(
       best,
       alternates: bestAlternates,
       warnings: [
-        `top two candidates within ${AMBIGUITY_MARGIN} pts (${best.score} vs ${second.score}) — pick manually`,
+        `top two candidates within ${AMBIGUITY_MARGIN} pts (${best.score} vs ${second.score}); pick manually`,
         ...best.warnings,
       ],
     }

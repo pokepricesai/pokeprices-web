@@ -387,7 +387,7 @@ export async function POST(req: NextRequest) {
       const maxMultiple = 20
       const fillPct = multiple ? Math.min(100, (multiple / maxMultiple) * 100) : 0
       const gaugeCol = !multiple ? mu : multiple < 3 ? '#22c55e' : multiple < 8 ? '#f59e0b' : '#ef4444'
-      const gaugeLabel = !multiple ? 'No data' : multiple < 3 ? 'Low premium — consider grading' : multiple < 8 ? 'Meaningful premium' : 'Very high premium — high risk'
+      const gaugeLabel = !multiple ? 'No data' : multiple < 3 ? 'Low premium; consider grading' : multiple < 8 ? 'Meaningful premium' : 'Very high premium; high risk'
 
       // SVG semicircle arc
       // Coordinate system: cx=150, cy=130, r=90

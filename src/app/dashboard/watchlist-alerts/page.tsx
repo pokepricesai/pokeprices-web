@@ -7,7 +7,7 @@ import { requireAuthUser } from '@/lib/auth-server'
 import WatchlistAlertsClient from './WatchlistAlertsClient'
 
 export const metadata: Metadata = {
-  title: 'Watchlist & Alerts — PokePrices Dashboard',
+  title: 'Watchlist & Alerts | PokePrices Dashboard',
   robots: { index: false, follow: false },
 }
 

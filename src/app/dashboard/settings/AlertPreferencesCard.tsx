@@ -47,9 +47,9 @@ const DOW_LABELS: Array<{ value: number; label: string }> = [
 ]
 
 const SENSITIVITY_HINTS: Record<SensitivityPreset, string> = {
-  conservative: 'Fewer emails — only the biggest moves come through.',
+  conservative: 'Fewer emails. Only the biggest moves come through.',
   balanced:     'Balanced is recommended for most collectors.',
-  active:       'More alerts — catch smaller moves and lower sales counts.',
+  active:       'More alerts. Catch smaller moves and lower sales counts.',
 }
 
 export default function AlertPreferencesCard({ userId }: { userId: string }) {
@@ -115,7 +115,7 @@ export default function AlertPreferencesCard({ userId }: { userId: string }) {
 
       <Toggle
         label="Smart alerts"
-        sub="Master switch. When off, no weekly digest and no instant alerts — regardless of what you set below."
+        sub="Master switch. When off, no weekly digest and no instant alerts, regardless of what you set below."
         value={prefs.enabled}
         onChange={v => update({ enabled: v })}
       />
@@ -126,7 +126,7 @@ export default function AlertPreferencesCard({ userId }: { userId: string }) {
         <SectionLabel>Weekly overview</SectionLabel>
         <Toggle
           label="Weekly overview email"
-          sub="A short summary every week — biggest movers across your cards and portfolio total change."
+          sub="A short summary every week: biggest movers across your cards and portfolio total change."
           value={prefs.weeklyDigestEnabled}
           onChange={v => update({ weeklyDigestEnabled: v })}
         />
@@ -191,7 +191,7 @@ export default function AlertPreferencesCard({ userId }: { userId: string }) {
             <div style={labelStyle}>How sensitive should alerts be?</div>
             <div style={subTextStyle}>
               {currentPreset === 'custom'
-                ? 'Custom thresholds — adjust each one in Advanced settings below.'
+                ? 'Custom thresholds. Adjust each one in Advanced settings below.'
                 : SENSITIVITY_HINTS[currentPreset]}
             </div>
           </div>
@@ -230,7 +230,7 @@ export default function AlertPreferencesCard({ userId }: { userId: string }) {
           }}>
             Advanced settings
             <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'none', letterSpacing: 0 }}>
-              — per-rule thresholds, scopes, cooldowns
+              · per-rule thresholds, scopes, cooldowns
             </span>
           </summary>
 

@@ -117,7 +117,7 @@ export const PSA_SUPER_EXPRESS_DIRECT: GradingServiceProfile = {
 export const PSA_VALUE_DIRECT_PAUSED: GradingServiceProfile = {
   id: 'psa_value_direct_paused',
   company: 'PSA',
-  serviceName: 'PSA Value (Direct) — paused',
+  serviceName: 'PSA Value (Direct): paused',
   submissionMethod: 'direct',
   gradingFee: 2500,          // Historical $25.00 USD
   feeCurrency: 'USD',

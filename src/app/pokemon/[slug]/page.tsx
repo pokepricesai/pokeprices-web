@@ -459,7 +459,7 @@ export default async function PokemonSpeciesPage({
   // the price-guide qualifier. When Japanese cards exist we name
   // both markets; otherwise we drop cleanly to "& Prices".
   const h1 = hasJapaneseCards
-    ? `All ${displayName} Cards — English & Japanese Prices`
+    ? `All ${displayName} Cards | English & Japanese Prices`
     : `All ${displayName} Cards & Prices`
   // Block 5A-W-53A.1 — the RPC's cards_by_set is capped at 12 for
   // the tile layout, so bySet.length under-reports for Pokémon
@@ -480,7 +480,7 @@ export default async function PokemonSpeciesPage({
     : ''
   const subtitle = sp && sp.total_cards > 0
     ? `All ${sp.total_cards} ${displayName} Pokémon cards across ${distinctSetCount || sp.total_cards} sets,${jpClause} with raw and PSA 10 price-guide values plus rarity data. Guide values are refreshed nightly from recent sold-sales activity.`
-    : `${displayName} doesn't appear on any Pokémon TCG cards in our database yet — we'll add them as soon as new sets land.`
+    : `${displayName} doesn't appear on any Pokémon TCG cards in our database yet. We'll add them as soon as new sets land.`
 
   // Block 5A-W-53B.1 — per-language derivations used by the two
   // server-rendered indexable sections (English + Japanese Card
@@ -510,21 +510,35 @@ export default async function PokemonSpeciesPage({
   const showEnglishSection  = hasJapaneseCards && englishCards.length > 0
   const showJapaneseSection = hasJapaneseCards && japaneseCards.length > 0
 
-  // Programmatic prose — fact-dense, deterministic, varied per species.
+  // Programmatic prose: fact-dense, deterministic, varied per species.
   // Every sentence is conditional on data actually being available. No
-  // canned colour commentary ("vintage holos tend to lead the top end",
-  // "modern reprints sit near bulk") — those read as AI filler at scale.
+  // canned colour commentary (e.g. "vintage holos tend to lead the top
+  // end", "modern reprints sit near bulk") because those read as AI
+  // filler at scale. Also strips the duplicate year when the first set
+  // name already contains it (e.g. "Japanese 1996 Carddass in 1996").
   const proseParts: string[] = []
   if (sp && sp.total_cards > 0) {
     const parts: string[] = []
-    // Opener — deterministic variety keyed on slug so pages don't all
+    // Opener: deterministic variety keyed on slug so pages don't all
     // read the same but a given page stays identical across refreshes.
     if (sp.first_appeared_set && sp.first_appeared_year) {
+      // If the set name already contains the year, don't repeat it.
+      // Example: set="Japanese 1996 Carddass" + year=1996 should
+      // render as "Japanese 1996 Carddass" alone, never
+      // "Japanese 1996 Carddass in 1996".
+      const yearStr = String(sp.first_appeared_year)
+      const setContainsYear = sp.first_appeared_set.includes(yearStr)
+      const setWithYear = setContainsYear
+        ? sp.first_appeared_set
+        : `${sp.first_appeared_set} (${sp.first_appeared_year})`
+      const setInYear = setContainsYear
+        ? sp.first_appeared_set
+        : `${sp.first_appeared_set} in ${sp.first_appeared_year}`
       const openerVariants = [
-        `${displayName} first appeared in ${sp.first_appeared_set} (${sp.first_appeared_year}) and has been printed on ${sp.total_cards} Pokémon TCG cards across ${distinctSetCount || 'multiple'} sets since.`,
-        `Since debuting in ${sp.first_appeared_set} in ${sp.first_appeared_year}, ${displayName} has made ${sp.total_cards} card appearances across ${distinctSetCount || 'multiple'} sets.`,
-        `${sp.total_cards} ${displayName} cards are catalogued here, spanning ${distinctSetCount || 'multiple'} sets dating back to ${sp.first_appeared_set} in ${sp.first_appeared_year}.`,
-        `${displayName}'s TCG history runs from ${sp.first_appeared_set} (${sp.first_appeared_year}) to today — ${sp.total_cards} cards in total across ${distinctSetCount || 'multiple'} sets.`,
+        `${displayName} first appeared in ${setWithYear} and has been printed on ${sp.total_cards} Pokémon TCG cards across ${distinctSetCount || 'multiple'} sets since.`,
+        `Since debuting in ${setInYear}, ${displayName} has made ${sp.total_cards} card appearances across ${distinctSetCount || 'multiple'} sets.`,
+        `${sp.total_cards} ${displayName} cards are catalogued here, spanning ${distinctSetCount || 'multiple'} sets dating back to ${setInYear}.`,
+        `${displayName}'s TCG history runs from ${setWithYear} to today, with ${sp.total_cards} cards in total across ${distinctSetCount || 'multiple'} sets.`,
       ]
       parts.push(pickVariant(slug, openerVariants))
     } else {
@@ -553,10 +567,10 @@ export default async function PokemonSpeciesPage({
     const valueParts: string[] = []
     if (raw)   valueParts.push(`${fmtUsd(raw)} raw`)
     if (psa10) valueParts.push(`${fmtUsd(psa10)} in PSA 10`)
-    const valueStr = valueParts.length ? ` — ${valueParts.join(' / ')}` : ''
+    const valueStr = valueParts.length ? ` at ${valueParts.join(' / ')}` : ''
     // Fact-only sentence. The canned "vintage holos lead, modern
-    // reprints bulk" closer was removed — it added no information and
-    // read as AI filler at scale.
+    // reprints bulk" closer was removed because it added no information
+    // and read as AI filler at scale.
     const sentenceVariants = [
       `The top-value ${displayName} card right now is ${top.card_name} from ${top.set_name}${valueStr}.`,
       `${top.card_name} (${top.set_name}) is the most valuable ${displayName} card tracked here${valueStr}.`,
@@ -955,7 +969,7 @@ export default async function PokemonSpeciesPage({
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, padding: '40px 24px', textAlign: 'center', marginBottom: 24 }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>🃏</div>
           <p style={{ color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, lineHeight: 1.6 }}>
-            {displayName} hasn't appeared on any Pokémon TCG cards in our database yet. We'll add them as soon as new sets land — check back later.
+            {displayName} hasn't appeared on any Pokémon TCG cards in our database yet. We'll add them as soon as new sets land. Check back later.
           </p>
         </div>
       )}

@@ -178,7 +178,7 @@ export default function QuickPriceClient() {
             <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.2, padding: '2px 6px', borderRadius: 4, background: 'var(--accent)', color: '#1a3a6b' }}>BETA</span>
           </div>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '4px 0 0' }}>
-            Scan or search to build a list. Set a grade and quantity per card, then apply a percentage to the total. Nothing is saved — close the tab and the list goes with it.
+            Scan or search to build a list. Set a grade and quantity per card, then apply a percentage to the total. Nothing is saved. Close the tab and the list goes with it.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -459,7 +459,7 @@ function RowCard({
         </div>
         {isMan && row.manualCents == null && (
           <div style={{ fontSize: 10, color: '#b8741f', fontFamily: "'Figtree', sans-serif", marginTop: 4 }}>
-            ⚠ No live market data for this grade — enter a manual value.
+            ⚠ No live market data for this grade. Enter a manual value.
           </div>
         )}
       </div>

@@ -266,7 +266,7 @@ export default async function CardShowDetailPage(
           fontFamily: "'Figtree', sans-serif",
           margin: '0 0 14px', lineHeight: 1.6,
         }}>
-          Get sharper before you walk in — know what cards are worth, which sets are running hot, and what to look for at the tables.
+          Get sharper before you walk in. Know what cards are worth, which sets are running hot, and what to look for at the tables.
         </p>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <Link href="/browse"   style={pillLinkStyle}>Search Pokémon card prices</Link>

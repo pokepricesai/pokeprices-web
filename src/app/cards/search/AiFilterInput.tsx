@@ -106,7 +106,7 @@ export default function AiFilterInput({ onParsed }: Props) {
           <input
             id="deep-search-ai"
             type="text"
-            placeholder="Describe what you're looking for — e.g. 'PSA 9 Pikachu under £70'"
+            placeholder="Describe what you're looking for, e.g. 'PSA 9 Pikachu under £70'"
             value={text}
             onChange={e => setText(e.target.value)}
             disabled={busy}

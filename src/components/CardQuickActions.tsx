@@ -395,7 +395,7 @@ export default function CardQuickActions({ card }: { card: Card }) {
             <span>📊</span> Add to portfolio
           </Link>
           <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", alignSelf: 'center' }}>
-            Free — no card required to register.
+            Free. No card required to register.
           </span>
         </div>
         {ebayBox}
@@ -514,7 +514,7 @@ export function CardPortfolioAddModal({
     setError('')
     try {
       if (manual && !manualValue) {
-        throw new Error('Please enter a current value — we don\'t have live market data for this grade.')
+        throw new Error('Please enter a current value. We don\'t have live market data for this grade.')
       }
       // Block 5A-W-24 — defence in depth. The card-page button
       // already gates BEFORE opening this modal, but other call

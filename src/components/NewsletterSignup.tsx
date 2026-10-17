@@ -38,7 +38,7 @@ export default function NewsletterSignup({ source = 'website', dark = false }: {
         color: dark ? 'rgba(255,255,255,0.8)' : 'var(--green)',
         fontFamily: "'Figtree', sans-serif", fontSize: 14, fontWeight: 600,
       }}>
-        <span style={{ fontSize: 16 }}>✓</span> You're in — first issue coming soon.
+        <span style={{ fontSize: 16 }}>✓</span> You're in. First issue coming soon.
       </div>
     )
   }
@@ -112,7 +112,7 @@ export default function NewsletterSignup({ source = 'website', dark = false }: {
       </div>
       {state === 'error' && (
         <p style={{ color: '#ef4444', fontSize: 12, margin: 0, fontFamily: "'Figtree', sans-serif" }}>
-          Something went wrong — try again in a moment.
+          Something went wrong. Try again in a moment.
         </p>
       )}
     </div>

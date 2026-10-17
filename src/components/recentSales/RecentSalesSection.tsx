@@ -1,5 +1,5 @@
 // src/components/recentSales/RecentSalesSection.tsx
-// Server component that renders the "Recent verified sales" panel
+// Server component that renders the "Recent tracked sales" panel
 // below the card-page data. Receives pre-fetched, pre-grouped data
 // from the card-page server component. The interactive grade-tab
 // switch (and the grade-aware affiliate link) live in a child client
@@ -8,7 +8,7 @@
 import type { CardPageRecentSalesData } from '@/lib/recentSales/cardQueries'
 import RecentSalesGradeTabs, { type RecentSalesCardContext } from './RecentSalesGradeTabs'
 
-const TITLE = 'Recent verified sales'
+const TITLE = 'Recent tracked sales'
 
 export default function RecentSalesSection({
   data,
@@ -21,7 +21,7 @@ export default function RecentSalesSection({
 
   return (
     <section
-      aria-label="Recent verified sales"
+      aria-label="Recent tracked sales"
       style={{
         maxWidth:    960,
         margin:     '0 auto 40px',

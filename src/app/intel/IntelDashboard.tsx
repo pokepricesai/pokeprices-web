@@ -195,9 +195,9 @@ function AddPageModal({ retailers, products, onAdd, onClose }: any) {
           <div>
             <label style={{ ...s, fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 5 }}>Scrape Frequency</label>
             <select value={frequency} onChange={e => setFrequency(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
-              <option value="high">High — every 5-10 min (hot items)</option>
-              <option value="medium">Medium — every 30-60 min (default)</option>
-              <option value="low">Low — every 6-24 hr (archive)</option>
+              <option value="high">High (every 5-10 min, hot items)</option>
+              <option value="medium">Medium (every 30-60 min, default)</option>
+              <option value="low">Low (every 6-24 hr, archive)</option>
             </select>
           </div>
           <button onClick={handleSave} disabled={!url || !retailerId || saving}

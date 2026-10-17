@@ -52,7 +52,7 @@ export default function OnboardingDiscovery({ replyTo }: OnboardingDiscoveryProp
       <FeatureCard
         glyph="🔍"
         title="Grading comparison"
-        body="Raw vs PSA premium per card — useful when deciding whether grading is worth it."
+        body="Raw vs PSA premium per card; useful when deciding whether grading is worth it."
         href={emailLink('browse')}
         cta="Compare grades"
       />
@@ -86,7 +86,7 @@ export default function OnboardingDiscovery({ replyTo }: OnboardingDiscoveryProp
         <strong style={{ color: COLORS.text }}>Tell us what would help.</strong>
         {' '}
         PokePrices is being built for collectors. If something is missing or
-        unclear, reply to this email — you can reach the team at{' '}
+        unclear, reply to this email. You can reach the team at{' '}
         <TextLink href={`mailto:${reply}`}>{reply}</TextLink>.
         Public roadmap: <TextLink href={emailLink('roadmap')}>www.pokeprices.io/roadmap</TextLink>.
       </InfoBox>

@@ -4,7 +4,7 @@ import { requireAuthUser } from '@/lib/auth-server'
 import SetTrackerClient from './SetTrackerClient'
 
 export const metadata: Metadata = {
-  title: 'Set Completion — PokePrices Dashboard',
+  title: 'Set Completion | PokePrices Dashboard',
   robots: { index: false, follow: false },
 }
 

@@ -40,8 +40,8 @@ export default function CardStructuredData({ card }: { card: any }) {
       {
         '@type': 'Dataset',
         '@id': `${pageUrl}#dataset`,
-        name: `${card.card_name} (${card.set_name}) — Price Data`,
-        description: `Historical and current market prices for ${card.card_name} from ${card.set_name}. Covers raw, PSA 9 and PSA 10 grades with PSA population data. Updated daily from real sold listings.`,
+        name: `${card.card_name} (${card.set_name}) Price Data`,
+        description: `Historical and current market prices for ${card.card_name} from ${card.set_name}. Covers raw, PSA 9 and PSA 10 grades with PSA population data. Updated daily from recent sold-sales activity.`,
         url: pageUrl,
         license: 'https://www.pokeprices.io/terms',
         creator: { '@id': 'https://www.pokeprices.io/#org' },

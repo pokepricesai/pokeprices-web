@@ -102,8 +102,17 @@ describe('getSetSeo', () => {
     const seo = getSetSeo('Chaos Rising')
     expect(seo.description).toContain('Chaos Rising')
     expect(seo.description.toLowerCase()).toContain('psa 10')
-    expect(seo.description.toLowerCase()).toContain('most valuable')
-    expect(seo.description.toLowerCase()).toContain('chase cards')
+    // PP-URGENT-02: getSetSeo now returns one of four deterministic
+    // variants. "most valuable" wording was dropped; the honest copy
+    // instead references one of chase cards / biggest cards / card
+    // list / card by card. Assert at least one of those is present.
+    const lower = seo.description.toLowerCase()
+    const hasIntentToken =
+      lower.includes('chase cards') ||
+      lower.includes('biggest cards') ||
+      lower.includes('card list') ||
+      lower.includes('card by card')
+    expect(hasIntentToken).toBe(true)
   })
   it('canonical uses the passed slug when provided', () => {
     const seo = getSetSeo('Chaos Rising', 'Chaos%20Rising')
@@ -141,7 +150,7 @@ describe('getPokemonSeo (Block 5A-W-53B.1 rewrite — title + description)', () 
       year: 2026,
     })
     expect(seo.title).toBe(
-      'Pikachu Card Prices — All English & Japanese Cards (2026) | PokePrices',
+      'Pikachu Card Prices: All English & Japanese Cards (2026) | PokePrices',
     )
   })
 
@@ -152,7 +161,7 @@ describe('getPokemonSeo (Block 5A-W-53B.1 rewrite — title + description)', () 
       year: 2026,
     })
     expect(seo.title).toBe(
-      'Zubat Card Prices — All Cards & Values (2026) | PokePrices',
+      'Zubat Card Prices: All Cards & Values (2026) | PokePrices',
     )
   })
 
@@ -166,7 +175,7 @@ describe('getPokemonSeo (Block 5A-W-53B.1 rewrite — title + description)', () 
       hasJapaneseCards: true, year: 2026,
     })
     expect(seo.title).toContain(name)
-    expect(seo.title).toContain('Card Prices — All English & Japanese Cards')
+    expect(seo.title).toContain('Card Prices: All English & Japanese Cards')
     expect(seo.title.endsWith('| PokePrices')).toBe(false)
     expect(seo.title).not.toContain('…')
   })
@@ -177,7 +186,7 @@ describe('getPokemonSeo (Block 5A-W-53B.1 rewrite — title + description)', () 
       hasJapaneseCards: true,
     })
     expect(seo.title).toBe(
-      'Pikachu Card Prices — All English & Japanese Cards | PokePrices',
+      'Pikachu Card Prices: All English & Japanese Cards | PokePrices',
     )
     expect(seo.title).not.toMatch(/\(\)/)
   })
@@ -377,22 +386,23 @@ describe('Special-name preservation flows through the 53B.1 template', () => {
       hasPsa10Data: true, hasJapaneseCards: true, year: 2026,
     })
     expect(seo.title).toBe(
-      'Mr. Mime Card Prices — All English & Japanese Cards (2026) | PokePrices',
+      'Mr. Mime Card Prices: All English & Japanese Cards (2026) | PokePrices',
     )
     expect(seo.description).toContain('Mr. Mime cards')
     expect(seo.canonical).toBe('https://www.pokeprices.io/pokemon/mr-mime')
   })
 
-  it('produces the correct Farfetch’d title (curly apostrophe preserved; brand tail drops per length ladder)', () => {
-    // "Farfetch’d …" with the brand tail is 73 chars — one over the
-    // 72-char SERP budget — so t2 (brand-tail dropped) wins. Curly
-    // apostrophe and — em-dash both preserved intact.
+  it('produces the correct Farfetch’d title (curly apostrophe preserved; brand tail retained at exactly SERP max)', () => {
+    // PP-URGENT-02: separator changed from em-dash to colon ":", which
+    // is one byte shorter. The full "Farfetch’d …" title now lands at
+    // exactly 72 chars — the SERP budget — so t1 wins and the brand
+    // tail is retained. Curly apostrophe preserved intact.
     const seo = getPokemonSeo({
       name: 'Farfetch’d', slug: 'farfetchd', totalCards: 45,
       hasPsa10Data: true, hasJapaneseCards: true, year: 2026,
     })
     expect(seo.title).toBe(
-      'Farfetch’d Card Prices — All English & Japanese Cards (2026)',
+      'Farfetch’d Card Prices: All English & Japanese Cards (2026) | PokePrices',
     )
     expect(seo.title).toContain('Farfetch’d')
     expect(seo.title.length).toBeLessThanOrEqual(72)
@@ -405,7 +415,7 @@ describe('Special-name preservation flows through the 53B.1 template', () => {
       hasPsa10Data: true, hasJapaneseCards: true, year: 2026,
     })
     expect(seo.title).toBe(
-      'Ho-Oh Card Prices — All English & Japanese Cards (2026) | PokePrices',
+      'Ho-Oh Card Prices: All English & Japanese Cards (2026) | PokePrices',
     )
     expect(seo.canonical).toBe('https://www.pokeprices.io/pokemon/ho-oh')
   })
@@ -416,7 +426,7 @@ describe('Special-name preservation flows through the 53B.1 template', () => {
       hasPsa10Data: true, hasJapaneseCards: true, year: 2026,
     })
     expect(seo.title).toBe(
-      'Nidoran♀ Card Prices — All English & Japanese Cards (2026) | PokePrices',
+      'Nidoran♀ Card Prices: All English & Japanese Cards (2026) | PokePrices',
     )
     expect(seo.canonical).toBe('https://www.pokeprices.io/pokemon/nidoran-f')
   })

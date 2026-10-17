@@ -88,7 +88,7 @@ export default function GamesLanding() {
           Play anytime
         </h2>
         <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-          These two reset every game — play as many rounds as you like, no waiting for tomorrow.
+          These two reset every game. Play as many rounds as you like, no waiting for tomorrow.
         </p>
       </div>
 
@@ -130,7 +130,7 @@ export default function GamesLanding() {
 
       <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', marginTop: 36, lineHeight: 1.6 }}>
         Today's Pick refreshes once a day, voted on by the whole community.<br />
-        Built on real sold-listing data — no asking prices, no guesses.
+        Built on real sold-listing data: no asking prices, no guesses.
       </p>
     </div>
   )

@@ -59,7 +59,7 @@ export default function AvatarPicker({ open, currentPokemonId, onClose, onSaved 
     })
     setSaving(false)
     if (err) {
-      setError(err.message || 'Could not save avatar — try again.')
+      setError(err.message || 'Could not save avatar. Try again.')
       return
     }
     onSaved(newId)

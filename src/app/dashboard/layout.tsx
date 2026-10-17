@@ -14,7 +14,7 @@ import type { Metadata } from 'next'
 import DashboardShell from './DashboardShell'
 
 export const metadata: Metadata = {
-  title: 'Dashboard — PokePrices',
+  title: 'Dashboard | PokePrices',
   robots: { index: false, follow: false },
 }
 

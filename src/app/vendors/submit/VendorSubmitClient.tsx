@@ -556,7 +556,7 @@ export default function VendorSubmitClient() {
                   fontFamily: "'Figtree', sans-serif",
                   margin: '8px 0 0', lineHeight: 1.5,
                 }}>
-                  PNG, JPG or WEBP · max 2 MB. Square images look best — they'll display next to your name in the directory and on your detail page.
+                  PNG, JPG or WEBP · max 2 MB. Square images look best; they'll display next to your name in the directory and on your detail page.
                 </p>
                 {logoFile && (
                   <p style={{

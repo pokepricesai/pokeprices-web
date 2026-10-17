@@ -4,7 +4,7 @@ import { requireAuthUser } from '@/lib/auth-server'
 import GradingCalculatorClient from './GradingCalculatorClient'
 
 export const metadata: Metadata = {
-  title: 'Grading Calculator — PokePrices Dashboard',
+  title: 'Grading Calculator | PokePrices Dashboard',
   robots: { index: false, follow: false },
 }
 

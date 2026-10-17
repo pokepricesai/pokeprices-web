@@ -33,7 +33,7 @@ describe('SetCompletionProgress — contract', () => {
   })
 
   it('builds a descriptive accessible label including the set name', () => {
-    expect(SRC).toContain('${setName} — ${percentage}% complete')
+    expect(SRC).toContain('${setName}: ${percentage}% complete')
     expect(SRC).toContain('${ownedDistinct} of ${totalEligible} cards')
   })
 

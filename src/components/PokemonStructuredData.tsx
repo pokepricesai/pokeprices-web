@@ -27,7 +27,7 @@ export default function PokemonStructuredData({
       {
         '@type': 'Dataset',
         '@id': `${url}#dataset`,
-        name: `${name} — Card Price Dataset`,
+        name: `${name}: Card Price Dataset`,
         description: `Daily price observations for every ${name} Pokémon card across all sets. Covers raw, PSA 9 and PSA 10 grades plus PSA population data.`,
         url,
         license: 'https://www.pokeprices.io/terms',
@@ -65,7 +65,7 @@ export default function PokemonStructuredData({
       itemListElement: topCards.map((c, i) => ({
         '@type': 'ListItem',
         position: i + 1,
-        name: `${c.card_name} — ${c.set_name}`,
+        name: `${c.card_name} (${c.set_name})`,
         url: c.card_url_slug
           ? `https://www.pokeprices.io/set/${encodeURIComponent(c.set_name)}/card/${c.card_url_slug}`
           : url,

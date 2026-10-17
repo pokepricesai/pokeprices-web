@@ -318,7 +318,7 @@ export default function CreatorsClient({ creators }: { creators: Creator[] }) {
           textShadow: '0 2px 10px rgba(0,0,0,0.15)',
         }}>Creator Directory</h1>
         <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 15, margin: '0 0 24px', fontFamily: "'Figtree', sans-serif" }}>
-          Pokémon TCG content creators worth following — YouTube, TikTok, X and more
+          Pokémon TCG content creators worth following across YouTube, TikTok, X and more
         </p>
         <div style={{ maxWidth: 480, margin: '0 auto 16px' }}>
           <input
@@ -443,7 +443,7 @@ export default function CreatorsClient({ creators }: { creators: Creator[] }) {
                 color: 'var(--text-muted)', fontSize: 13,
                 fontFamily: "'Figtree', sans-serif",
               }}>
-                No other creators match your filters — featured creators always show above.{' '}
+                No other creators match your filters. Featured creators always show above.{' '}
                 <button
                   onClick={() => { setSearch(''); setActivePlatform(null); setActiveSpecialism(null) }}
                   style={{

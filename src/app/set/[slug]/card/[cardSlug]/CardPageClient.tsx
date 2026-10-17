@@ -137,7 +137,7 @@ function generateFallbackInsight(card: any, trend: any, metrics: any, psaPop: an
   if (rawUsd) {
     if (psa10Usd) {
       const multiple = (card.psa10_usd / card.raw_usd).toFixed(1)
-      parts.push(`${card.card_name} from ${card.set_name} currently trades at $${rawUsd} raw, with PSA 10 copies reaching $${psa10Usd} — a ${multiple}x grade premium.`)
+      parts.push(`${card.card_name} from ${card.set_name} currently trades at $${rawUsd} raw, with PSA 10 copies reaching $${psa10Usd}: a ${multiple}x grade premium.`)
     } else {
       parts.push(`${card.card_name} from ${card.set_name} currently trades at $${rawUsd} raw.`)
     }
@@ -154,7 +154,7 @@ function generateFallbackInsight(card: any, trend: any, metrics: any, psaPop: an
     if (Math.sign(pct30d) === Math.sign(pct90d)) {
       parts.push(`The card has moved ${dir30} ${Math.abs(pct30d).toFixed(1)}% over the past 30 days and ${dir90} ${Math.abs(pct90d).toFixed(1)}% over 90 days, suggesting ${pct30d > 0 ? 'sustained buying interest' : 'continued softness'}.`)
     } else {
-      parts.push(`Price is ${dir30} ${Math.abs(pct30d).toFixed(1)}% in the last 30 days, though the 90-day trend tells a different story at ${pct90d > 0 ? '+' : ''}${pct90d.toFixed(1)}% — worth watching for a clearer direction.`)
+      parts.push(`Price is ${dir30} ${Math.abs(pct30d).toFixed(1)}% in the last 30 days, though the 90-day trend tells a different story at ${pct90d > 0 ? '+' : ''}${pct90d.toFixed(1)}%. Worth watching for a clearer direction.`)
     }
   } else if (pct30d != null && q30 === 'clean') {
     const dir = pct30d > 0 ? 'gained' : 'lost'
@@ -167,7 +167,7 @@ function generateFallbackInsight(card: any, trend: any, metrics: any, psaPop: an
     if (gemRate < 5) {
       parts.push(`Only ${gemRate.toFixed(1)}% of ${total} graded copies have achieved PSA 10, making gem-quality examples genuinely scarce.`)
     } else if (gemRate > 40) {
-      parts.push(`With ${gemRate.toFixed(1)}% of ${total} graded copies receiving PSA 10, gem examples are relatively plentiful — which moderates the grade premium.`)
+      parts.push(`With ${gemRate.toFixed(1)}% of ${total} graded copies receiving PSA 10, gem examples are relatively plentiful, which moderates the grade premium.`)
     } else if (card.psa10_usd && card.raw_usd) {
       parts.push(`PSA population stands at ${total} graded with a ${gemRate.toFixed(1)}% gem rate.`)
     }
@@ -175,7 +175,7 @@ function generateFallbackInsight(card: any, trend: any, metrics: any, psaPop: an
 
   const drawdown = raw.drawdown_pct != null ? parseFloat(raw.drawdown_pct) : null
   if (drawdown != null && drawdown < -30 && parts.length < 3) {
-    parts.push(`At ${drawdown.toFixed(0)}% below its all-time high, the card sits at a notable discount to peak — a potential entry point for patient collectors.`)
+    parts.push(`At ${drawdown.toFixed(0)}% below its all-time high, the card sits at a notable discount to peak: a potential entry point for patient collectors.`)
   } else if (drawdown != null && drawdown > -5 && parts.length < 3) {
     parts.push(`The card is trading near its all-time high.`)
   }
@@ -198,7 +198,7 @@ function TrendCell({ val, label }: { val: number | null; label: string }) {
   }
   if (quality === 'warn') {
     return (
-      <div title="Unusually large move — may reflect a stale price anchor. Check the Recent verified sales panel below.">
+      <div title="Unusually large move. May reflect a stale price anchor. Check the Recent tracked sales panel below.">
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, fontFamily: "'Figtree', sans-serif" }}>{label}</div>
         <div style={{ fontSize: 15, fontWeight: 700, color: '#e07b39', fontFamily: "'Figtree', sans-serif" }}>
           ⚠ {val > 0 ? '+' : ''}{val.toFixed(1)}%
@@ -231,7 +231,7 @@ function HeroBanner({ trend, hasInsight }: { trend: any; hasInsight: boolean }) 
   if (quality === 'warn') {
     return (
       <div style={{ background: 'rgba(224,123,57,0.08)', border: '1px solid rgba(224,123,57,0.25)', borderLeft: '3px solid #e07b39', borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: 13, lineHeight: 1.6, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>
-        ⚠️ <strong>{isUp ? 'Up' : 'Down'} {absPct.toFixed(0)}% in {main.label}</strong> — unusually large move. This may reflect a stale price anchor rather than real market activity. Check the Recent verified sales panel below before drawing conclusions.
+        ⚠️ <strong>{isUp ? 'Up' : 'Down'} {absPct.toFixed(0)}% in {main.label}</strong>, an unusually large move. This may reflect a stale price anchor rather than real market activity. Check the Recent tracked sales panel below before drawing conclusions.
       </div>
     )
   }
@@ -553,14 +553,14 @@ export default function CardPageClient({
 
   const salesMonthly  = raw.sales_30d ?? raw.volume_30d ?? null
   const liquidityLabel = volumeLabel
-    ? volumeLabel.includes('per day') ? 'High — very active market'
-    : volumeLabel.includes('per week') ? 'High — sells regularly'
-    : volumeLabel.includes('per month') ? 'Moderate — steady market'
-    : 'Low — patient seller needed'
+    ? volumeLabel.includes('per day') ? 'High: very active market'
+    : volumeLabel.includes('per week') ? 'High: sells regularly'
+    : volumeLabel.includes('per month') ? 'Moderate: steady market'
+    : 'Low: patient seller needed'
     : salesMonthly == null ? null
-    : salesMonthly >= 8  ? 'High — sells regularly'
-    : salesMonthly >= 3  ? 'Moderate — steady market'
-    : 'Low — patient seller needed'
+    : salesMonthly >= 8  ? 'High: sells regularly'
+    : salesMonthly >= 3  ? 'Moderate: steady market'
+    : 'Low: patient seller needed'
 
   const gemRate = psaPop?.gem_rate ? parseFloat(psaPop.gem_rate) : null
 
@@ -610,7 +610,7 @@ export default function CardPageClient({
   })
   if (gemRate != null) tiles.push({
     label: 'Gem Rate (PSA 10)', value: `${gemRate.toFixed(1)}%`,
-    sub: gemRate < 5 ? 'Hard to gem — scarce' : gemRate > 40 ? 'Common gem — high supply' : 'Average difficulty',
+    sub: gemRate < 5 ? 'Hard to gem: scarce' : gemRate > 40 ? 'Common gem: high supply' : 'Average difficulty',
     highlight: gemRate < 5,
   })
   if (psaPop?.total_graded) tiles.push({
@@ -818,12 +818,12 @@ export default function CardPageClient({
               </div>
               {trendPeriods.some(t => pctQuality(t.val, t.label) === 'suppress') && (
                 <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '10px 0 0', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
-                  — Some periods are hidden because the price movement was too large to be reliable. Check the Recent verified sales panel below for the real picture.
+                  Some periods are hidden because the price movement was too large to be reliable. Check the Recent tracked sales panel below for the real picture.
                 </p>
               )}
               {trendPeriods.some(t => pctQuality(t.val, t.label) === 'warn') && !trendPeriods.some(t => pctQuality(t.val, t.label) === 'suppress') && (
                 <p style={{ fontSize: 11, color: '#e07b39', margin: '10px 0 0', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
-                  ⚠ Large moves shown in amber — verify against the Recent verified sales panel below before drawing conclusions.
+                  ⚠ Large moves shown in amber. Verify against the Recent tracked sales panel below before drawing conclusions.
                 </p>
               )}
             </div>
@@ -854,7 +854,7 @@ export default function CardPageClient({
             series={CARD_CHART_SERIES}
             height={280}
             ranges
-            note="New graded tiers (BGS, CGC, SGC, ACE, TAG) just started tracking — limited history will fill in over the coming weeks."
+            note="New graded tiers (BGS, CGC, SGC, ACE, TAG) just started tracking. Limited history will fill in over the coming weeks."
           />
         </Panel>
       )}
@@ -883,7 +883,7 @@ export default function CardPageClient({
         <Panel>
           <SectionLabel>Grading Calculator</SectionLabel>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 16px', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
-            Based on PSA Standard tier (~$25 USD). Assumes a perfect PSA 10 result — actual outcome depends on card condition.
+            Based on PSA Standard tier (~$25 USD). Assumes a perfect PSA 10 result; actual outcome depends on card condition.
           </p>
 
           {isLotteryCard && (
@@ -923,8 +923,8 @@ export default function CardPageClient({
 
           {gemRate != null && totalGraded != null && (
             <div style={{ marginTop: 16, padding: '12px 14px', background: gemRate < 10 ? 'rgba(39,174,96,0.06)' : 'var(--bg-light)', border: `1px solid ${gemRate < 10 ? 'rgba(39,174,96,0.2)' : 'var(--border)'}`, borderRadius: 10, fontSize: 13, fontFamily: "'Figtree', sans-serif", color: 'var(--text)', lineHeight: 1.6 }}>
-              <strong>{gemRate.toFixed(1)}% gem rate</strong> — {psa10Count?.toLocaleString()} PSA 10s out of {totalGraded?.toLocaleString()} graded.
-              {' '}{gemRate < 10 ? 'Hard card to grade — scarcity keeps the PSA 10 premium justified.' : gemRate > 40 ? 'PSA 10s are relatively common — strong supply.' : 'Average difficulty to gem.'}
+              <strong>{gemRate.toFixed(1)}% gem rate</strong>: {psa10Count?.toLocaleString()} PSA 10s out of {totalGraded?.toLocaleString()} graded.
+              {' '}{gemRate < 10 ? 'Hard card to grade; scarcity keeps the PSA 10 premium justified.' : gemRate > 40 ? 'PSA 10s are relatively common; strong supply.' : 'Average difficulty to gem.'}
             </div>
           )}
         </Panel>
@@ -933,7 +933,7 @@ export default function CardPageClient({
       {/* PSA Population */}
       {psaPop && (
         <Panel>
-          <SectionLabel>PSA Population{psaPop.variant && psaPop.variant !== 'Standard' ? ` — ${psaPop.variant}` : ''}</SectionLabel>
+          <SectionLabel>PSA Population{psaPop.variant && psaPop.variant !== 'Standard' ? `: ${psaPop.variant}` : ''}</SectionLabel>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 16 }}>
             {[
               { label: 'PSA 7',  value: psaPop.psa_7         },

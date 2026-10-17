@@ -16,7 +16,7 @@ describe('getCountrySeo — 54B template', () => {
   it('emits the pinned UK title / H1 / meta with real count and year', () => {
     const seo = getCountrySeo('uk', 2026, 24)
     expect(seo.title).toBe(
-      'Pokémon Card Shows UK — All Upcoming Shows & Events (2026) | PokePrices',
+      'Pokémon Card Shows UK: All Upcoming Shows & Events (2026) | PokePrices',
     )
     expect(seo.h1).toBe('All Upcoming Pokémon Card Shows in the UK')
     expect(seo.description).toBe(
@@ -29,7 +29,7 @@ describe('getCountrySeo — 54B template', () => {
   it('USA title uses "USA" not "US"', () => {
     const seo = getCountrySeo('us', 2026, 26)
     expect(seo.title).toBe(
-      'Pokémon Card Shows USA — All Upcoming Shows & Events (2026) | PokePrices',
+      'Pokémon Card Shows USA: All Upcoming Shows & Events (2026) | PokePrices',
     )
     expect(seo.h1).toBe('All Upcoming Pokémon Card Shows in the USA')
     expect(seo.backLinkText).toBe('All USA Pokémon Card Shows')
@@ -47,10 +47,10 @@ describe('getCountrySeo — 54B template', () => {
     const auSeo = getCountrySeo('au', 2026, 6)
     const nzSeo = getCountrySeo('nz', 2026, 2)
     expect(auSeo.title).toBe(
-      'Pokémon Card Shows Australia — All Upcoming Shows & Events (2026) | PokePrices',
+      'Pokémon Card Shows Australia: All Upcoming Shows & Events (2026) | PokePrices',
     )
     expect(nzSeo.title).toBe(
-      'Pokémon Card Shows New Zealand — All Upcoming Shows & Events (2026) | PokePrices',
+      'Pokémon Card Shows New Zealand: All Upcoming Shows & Events (2026) | PokePrices',
     )
     expect(nzSeo.h1).toBe('All Upcoming Pokémon Card Shows in New Zealand')
     expect(nzSeo.backLinkText).toBe('All New Zealand Pokémon Card Shows')
@@ -97,7 +97,7 @@ describe('getHubSeo — 54B template', () => {
   it('title enumerates five countries in the required order', () => {
     const seo = getHubSeo(2026)
     expect(seo.title).toBe(
-      'Pokémon Card Shows Near Me — UK, USA, Canada, Australia & NZ | PokePrices',
+      'Pokémon Card Shows Near Me: UK, USA, Canada, Australia & NZ | PokePrices',
     )
   })
   it('h1 targets the "card shows near me" intent', () => {
@@ -173,14 +173,14 @@ describe('getEventSeo — 54B template', () => {
   it('title uses "Pokémon Card Show" for a card-show event', () => {
     const seo = getEventSeo(londonCardShow)
     expect(seo.title).toBe(
-      'London Card Show — Esher Pokémon Card Show (August 2026) | PokePrices',
+      'London Card Show: Esher Pokémon Card Show (August 2026) | PokePrices',
     )
   })
 
   it('title uses "Trading Card Show" for a broad mixed event', () => {
     const seo = getEventSeo(collectorsShowcase)
     expect(seo.title).toBe(
-      'Collectors Showcase — Olympia — London Trading Card Show (November 2026) | PokePrices',
+      'Collectors Showcase — Olympia: London Trading Card Show (November 2026) | PokePrices',
     )
   })
 
@@ -199,7 +199,7 @@ describe('getEventSeo — 54B template', () => {
     expect(seo.description).toContain('takes place on 4 October 2026')
     expect(seo.description).toContain('in England')
     // Title falls back to country label when the city is TBA.
-    expect(seo.title).toContain('Tap and Play Card Show — UK Pokémon Card Show (October 2026)')
+    expect(seo.title).toContain('Tap and Play Card Show: UK Pokémon Card Show (October 2026)')
   })
 
   it('canonical URL is /card-shows/{country}/{slug}', () => {

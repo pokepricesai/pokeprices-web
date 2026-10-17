@@ -144,7 +144,7 @@ async function applyUnsubscribe(token: string): Promise<void> {
 }
 
 function html(message: string): string {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Unsubscribed — PokePrices</title>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Unsubscribed · PokePrices</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
 <style>

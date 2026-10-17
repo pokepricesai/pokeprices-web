@@ -216,7 +216,7 @@ export default function SetPriceIndexClient() {
           Set Price Index
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0, lineHeight: 1.6 }}>
-          Pick up to {MAX_SELECTED} sets to compare. The chart shows the total tracked value of each set over its full history — useful for spotting which sets are running, which are cooling, and how new releases land against the old guard.
+          Pick up to {MAX_SELECTED} sets to compare. The chart shows the total tracked value of each set over its full history, useful for spotting which sets are running, which are cooling, and how new releases land against the old guard.
         </p>
       </div>
 
@@ -314,7 +314,7 @@ export default function SetPriceIndexClient() {
                         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
                           {sum.pct != null
                             ? `since ${fmtCents(sum.first)}`
-                            : 'Just one datapoint so far — % change will appear once we have more.'}
+                            : 'Just one datapoint so far. % change will appear once we have more.'}
                         </div>
                       </>
                     ) : (

@@ -180,7 +180,7 @@ export default function SettingsClient() {
     if (!confirm('Really delete? This wipes everything.')) return
     // Cascade rules in the DB will remove watchlist, alerts, prefs, portfolio_items etc.
     // We can't delete auth.users from the client; sign the user out and email luke for manual deletion if needed.
-    alert('Sign-out only — to fully delete your account, please email contact@pokeprices.io and we will remove all your data within 7 days (UK GDPR).')
+    alert('Sign-out only. To fully delete your account, please email contact@pokeprices.io and we will remove all your data within 7 days (UK GDPR).')
     await supabase.auth.signOut()
     router.push('/')
   }
@@ -218,7 +218,7 @@ export default function SettingsClient() {
               />
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 8 }}>
-                  {avatarPokemonId ? 'You have an avatar set. Pick a different one any time.' : 'No avatar yet — pick a Gen 1 Pokémon.'}
+                  {avatarPokemonId ? 'You have an avatar set. Pick a different one any time.' : 'No avatar yet. Pick a Gen 1 Pokémon.'}
                 </div>
                 <button onClick={() => setPickerOpen(true)}
                   style={{
@@ -295,7 +295,7 @@ export default function SettingsClient() {
                         })}
                         {savedIsLegacy && savedRaw && (
                           <option value={savedRaw} disabled>
-                            {savedRaw} (legacy — not currently available)
+                            {savedRaw} (legacy, not currently available)
                           </option>
                         )}
                       </select>
@@ -381,7 +381,7 @@ export default function SettingsClient() {
 
             <Toggle
               label="Weekly digest"
-              sub="Your watchlist this week — biggest movers and any cards near a target."
+              sub="Your watchlist this week: biggest movers and any cards near a target."
               value={prefs.weekly_digest_enabled}
               onChange={v => update('weekly_digest_enabled', v)}
             />

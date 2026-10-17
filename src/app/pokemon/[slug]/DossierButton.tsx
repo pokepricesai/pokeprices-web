@@ -56,7 +56,7 @@ export default function DossierButton({
         fileName: `pokeprices-${slug}-dossier.png`,
         pixelRatio: 2,
         shareTitle: 'PokePrices',
-        shareText: `${displayName} — collector's dossier from PokePrices`,
+        shareText: `${displayName}: collector's dossier from PokePrices`,
       })
     } catch (e: any) {
       console.error('Insight export failed:', e)

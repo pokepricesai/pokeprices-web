@@ -347,7 +347,7 @@ export default function DashboardHubClient() {
     {
       id: 'portfolio',
       title: 'Portfolio',
-      desc: 'Track what you own — collection value, P&L, grading insights.',
+      desc: 'Track what you own: collection value, P&L, grading insights.',
       href: '/dashboard/portfolio',
       count: portfolioSnap?.itemCount ?? null,
       countLabel: 'cards',
@@ -356,7 +356,7 @@ export default function DashboardHubClient() {
     {
       id: 'watchlist',
       title: 'Watchlist & Alerts',
-      desc: 'Cards you are watching, the alerts that fire on them, and your alert settings — all in one place.',
+      desc: 'Cards you are watching, the alerts that fire on them, and your alert settings, all in one place.',
       href: '/dashboard/watchlist-alerts',
       count: watchSnap?.count ?? null,
       countLabel: 'watching',

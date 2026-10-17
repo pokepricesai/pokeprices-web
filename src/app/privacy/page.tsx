@@ -3,8 +3,8 @@ import Link from 'next/link'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 
 export const metadata = {
-  title: 'Privacy Policy — PokePrices',
-  description: 'How PokePrices handles your data — short version: we collect very little, never sell it, and let you delete anything you create.',
+  title: 'Privacy Policy | PokePrices',
+  description: 'How PokePrices handles your data. Short version: we collect very little, never sell it, and let you delete anything you create.',
   alternates: { canonical: 'https://www.pokeprices.io/privacy' },
 }
 
@@ -76,7 +76,7 @@ export default function PrivacyPage() {
       </Section>
 
       <Section title="2. What we collect when you just visit">
-        <P>Browsing PokePrices anonymously — looking at card pages, sets, insights, the AI assistant — does not require an account and does not require you to give us any personal information.</P>
+        <P>Browsing PokePrices anonymously (looking at card pages, sets, insights, the AI assistant) does not require an account and does not require you to give us any personal information.</P>
         <P>We use Google Analytics to count visits and understand which pages people use. This drops standard analytics cookies and records your approximate location (country level), device type, browser and the pages you view. We do not use the analytics data to identify you personally. You can opt out at the browser level using any standard ad/analytics blocker.</P>
         <P>Our hosting providers (Vercel for the website, Supabase for the database) keep short-lived request logs that include IP addresses for security and abuse prevention. These logs roll over automatically and are not used for marketing.</P>
       </Section>
@@ -86,13 +86,13 @@ export default function PrivacyPage() {
       </Section>
 
       <Section title="4. Creating an account (for the trackers)">
-        <P>Trackers — Portfolio, Watchlist, Set Completion, Smart Alerts, Card Show Planner — require an account so we can save your work to you and not someone else. Authentication is handled by Supabase Auth. We use it because it is reputable and we did not want to roll our own.</P>
+        <P>Trackers (Portfolio, Watchlist, Set Completion, Smart Alerts, Card Show Planner) require an account so we can save your work to you and not someone else. Authentication is handled by Supabase Auth. We use it because it is reputable and we did not want to roll our own.</P>
         <P>When you create an account we store:</P>
         <UL>
           <li>Your email address (or a Google-issued identifier if you sign in with Google).</li>
           <li>A user ID (random, opaque) we use internally to link your portfolio, watchlist and alerts to you.</li>
           <li>An optional display name and chosen Pokémon avatar (kept in user metadata).</li>
-          <li>Whatever you put into the trackers — cards you own, watched cards, set progress, alert thresholds.</li>
+          <li>Whatever you put into the trackers: cards you own, watched cards, set progress, alert thresholds.</li>
           <li>Your email preferences (digest on/off, alert delivery cadence).</li>
         </UL>
         <P>We do not collect, ask for, or store any payment information. We never request your real name, address, date of birth or phone number.</P>
@@ -102,45 +102,45 @@ export default function PrivacyPage() {
       <Section title="5. Cookies">
         <P>We use a small number of cookies, all of which fall into the "strictly necessary" or "analytics" categories under UK / EU rules:</P>
         <UL>
-          <li><strong style={{ color: 'var(--text)' }}>Authentication cookies</strong> — only set if you sign in. These keep you logged in. Provided by Supabase.</li>
-          <li><strong style={{ color: 'var(--text)' }}>Analytics cookies</strong> — Google Analytics first-party cookies that count visits.</li>
-          <li><strong style={{ color: 'var(--text)' }}>Affiliate attribution</strong> — when you click an eBay listing link, eBay drops their own cookie so they can attribute the sale to us. We never see who clicked or what you bought; we only see aggregate commission totals.</li>
+          <li><strong style={{ color: 'var(--text)' }}>Authentication cookies</strong>: only set if you sign in. These keep you logged in. Provided by Supabase.</li>
+          <li><strong style={{ color: 'var(--text)' }}>Analytics cookies</strong>: Google Analytics first-party cookies that count visits.</li>
+          <li><strong style={{ color: 'var(--text)' }}>Affiliate attribution</strong>: when you click an eBay listing link, eBay drops their own cookie so they can attribute the sale to us. We never see who clicked or what you bought; we only see aggregate commission totals.</li>
         </UL>
         <P>We do not use behavioural advertising cookies, retargeting pixels, or cross-site tracking.</P>
       </Section>
 
       <Section title="6. AI assistant">
         <P>The "Ask Me Anything" chat is anonymous. Each chat session gets a random session ID generated in your browser. We do not link conversations to your account or your email. Your messages are sent to our AI provider (Anthropic) so it can generate a response; we do not use the conversations to train any model.</P>
-        <P>Please do not put personal information into the chat — it is not the right tool for that.</P>
+        <P>Please do not put personal information into the chat. It is not the right tool for that.</P>
       </Section>
 
       <Section title="7. Third parties we share data with">
         <P>We do not sell or rent data. Some services are essential to running the site:</P>
         <UL>
-          <li><strong style={{ color: 'var(--text)' }}>Vercel</strong> — web hosting. Sees standard request logs.</li>
-          <li><strong style={{ color: 'var(--text)' }}>Supabase</strong> — database and authentication. Stores your account, tracker data and email preferences.</li>
-          <li><strong style={{ color: 'var(--text)' }}>Google Analytics</strong> — anonymous traffic measurement.</li>
-          <li><strong style={{ color: 'var(--text)' }}>Anthropic</strong> — powers the AI assistant. Receives the chat messages you send so it can respond.</li>
-          <li><strong style={{ color: 'var(--text)' }}>Google Sign-In</strong> — optional, only if you choose to sign in with Google. Google receives the standard data needed to authenticate you.</li>
-          <li><strong style={{ color: 'var(--text)' }}>eBay Partner Network</strong> — affiliate links to eBay listings. Sets a cookie when you click through.</li>
+          <li><strong style={{ color: 'var(--text)' }}>Vercel</strong>: web hosting. Sees standard request logs.</li>
+          <li><strong style={{ color: 'var(--text)' }}>Supabase</strong>: database and authentication. Stores your account, tracker data and email preferences.</li>
+          <li><strong style={{ color: 'var(--text)' }}>Google Analytics</strong>: anonymous traffic measurement.</li>
+          <li><strong style={{ color: 'var(--text)' }}>Anthropic</strong>: powers the AI assistant. Receives the chat messages you send so it can respond.</li>
+          <li><strong style={{ color: 'var(--text)' }}>Google Sign-In</strong>: optional, only if you choose to sign in with Google. Google receives the standard data needed to authenticate you.</li>
+          <li><strong style={{ color: 'var(--text)' }}>eBay Partner Network</strong>: affiliate links to eBay listings. Sets a cookie when you click through.</li>
         </UL>
       </Section>
 
       <Section title="8. How long we keep your data">
-        <P>Newsletter email addresses — until you unsubscribe.</P>
-        <P>Account data — until you delete your account (see below). Portfolio / watchlist / alert data lives alongside your account and goes with it.</P>
-        <P>Analytics data — retained per Google Analytics' default (currently 14 months).</P>
-        <P>AI chat sessions — not stored against your identity. Anthropic retains the raw API calls per their data policy.</P>
+        <P>Newsletter email addresses: until you unsubscribe.</P>
+        <P>Account data: until you delete your account (see below). Portfolio / watchlist / alert data lives alongside your account and goes with it.</P>
+        <P>Analytics data: retained per Google Analytics' default (currently 14 months).</P>
+        <P>AI chat sessions: not stored against your identity. Anthropic retains the raw API calls per their data policy.</P>
       </Section>
 
       <Section title="9. Your rights">
         <P>You have rights under UK GDPR (and equivalent rights under EU GDPR and most other regimes):</P>
         <UL>
-          <li><strong style={{ color: 'var(--text)' }}>Access</strong> — ask what we hold about you.</li>
-          <li><strong style={{ color: 'var(--text)' }}>Correction</strong> — fix anything that is wrong.</li>
-          <li><strong style={{ color: 'var(--text)' }}>Deletion</strong> — have your account and all associated tracker data removed.</li>
-          <li><strong style={{ color: 'var(--text)' }}>Portability</strong> — get a copy of your tracker data in a portable format.</li>
-          <li><strong style={{ color: 'var(--text)' }}>Withdraw consent</strong> — unsubscribe from email, opt out of analytics, delete your account.</li>
+          <li><strong style={{ color: 'var(--text)' }}>Access</strong>: ask what we hold about you.</li>
+          <li><strong style={{ color: 'var(--text)' }}>Correction</strong>: fix anything that is wrong.</li>
+          <li><strong style={{ color: 'var(--text)' }}>Deletion</strong>: have your account and all associated tracker data removed.</li>
+          <li><strong style={{ color: 'var(--text)' }}>Portability</strong>: get a copy of your tracker data in a portable format.</li>
+          <li><strong style={{ color: 'var(--text)' }}>Withdraw consent</strong>: unsubscribe from email, opt out of analytics, delete your account.</li>
         </UL>
         <P>Email <a href="mailto:contact@pokeprices.io" style={{ color: 'var(--primary)' }}>contact@pokeprices.io</a> and we will action requests within 7 days. You can also delete your own account directly from <Link href="/dashboard/settings" style={{ color: 'var(--primary)' }}>Settings</Link>.</P>
         <P>If you are unhappy with how we have handled your data, you have the right to complain to the UK Information Commissioner's Office at <a href="https://ico.org.uk" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)' }}>ico.org.uk</a>.</P>

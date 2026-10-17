@@ -155,7 +155,7 @@ export default function OnboardingAutomationStatus({ getAccessToken }: Props) {
 
           {snap.lastSummary && (
             <p style={summaryStyle}>
-              Last summary —{' '}
+              Last summary ·{' '}
               processed: {snap.lastSummary.processed} ·{' '}
               sent: {snap.lastSummary.sent} ·{' '}
               skipped: {snap.lastSummary.skipped} ·{' '}

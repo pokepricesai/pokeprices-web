@@ -119,11 +119,11 @@ export function getCountrySeo(
     : `Pokémon card shows`
   const showsWord = upcomingCount === 1 ? 'show' : 'shows'
 
-  const title = `Pokémon Card Shows ${label} — All Upcoming Shows & Events (${yearStr}) | PokePrices`
+  const title = `Pokémon Card Shows ${label}: All Upcoming Shows & Events (${yearStr}) | PokePrices`
   const h1    = `All Upcoming Pokémon Card Shows in ${locative}`
   const intro = upcomingCount > 0
     ? `Looking for a Pokémon card show in ${locative}? PokePrices tracks upcoming Pokémon, TCG and trading card events across the country, with dates, venues and official ticket links. There are currently ${upcomingCount} upcoming ${showsWord} in our calendar.`
-    : `PokePrices tracks upcoming Pokémon, TCG and trading card events across ${locative}. No shows are currently listed — check back as organisers publish ${yearStr} dates.`
+    : `PokePrices tracks upcoming Pokémon, TCG and trading card events across ${locative}. No shows are currently listed; check back as organisers publish ${yearStr} dates.`
   const description = upcomingCount > 0
     ? `Find ${countStr} across ${locative} in ${yearStr}. Browse dates, cities, venues and ticket links for Pokémon, TCG and trading card events.`
     : `Browse upcoming Pokémon card shows across ${locative} in ${yearStr}. Dates, cities, venues and ticket links for Pokémon, TCG and trading card events.`
@@ -145,7 +145,7 @@ export function getCountrySeo(
  *  supported market. */
 export function getHubSeo(_year: number): HubSeo {
   const title =
-    'Pokémon Card Shows Near Me — UK, USA, Canada, Australia & NZ | PokePrices'
+    'Pokémon Card Shows Near Me: UK, USA, Canada, Australia & NZ | PokePrices'
   const description =
     'Find upcoming Pokémon card shows, TCG conventions and trading card events across the UK, USA, Canada, Australia and New Zealand. Dates, venues and official ticket links.'
   return {
@@ -192,7 +192,7 @@ export function getEventSeo(show: CardShow): EventSeo {
     ? show.city!
     : COUNTRY_TITLE_LABEL[show.country]
 
-  const title = `${show.name} — ${cityForTitle} ${noun} (${month} ${year}) | PokePrices`
+  const title = `${show.name}: ${cityForTitle} ${noun} (${month} ${year}) | PokePrices`
 
   // Meta — describe without inventing venue where TBA. All venue /
   // city references gated through isVenuePlaceholder so a

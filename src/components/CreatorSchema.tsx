@@ -24,7 +24,7 @@ export default function CreatorSchema({ creator }: { creator: Creator }) {
         '@type': 'ProfilePage',
         '@id': `${url}#profile`,
         url,
-        name: `${creator.name} — Pokémon TCG creator`,
+        name: `${creator.name}: Pokémon TCG creator`,
         description: creator.description || `Pokémon TCG creator ${creator.name} listed in the PokePrices community directory.`,
         mainEntity: { '@id': `${url}#person` },
         isPartOf: { '@id': 'https://www.pokeprices.io/#website' },

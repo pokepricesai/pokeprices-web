@@ -38,7 +38,7 @@ const COPY: Record<ActivationBranch, Copy> = {
     badge:     'Start your collection',
     headline:  'Start with one card',
     body: [
-      'You signed up a couple of days ago — welcome back. The fastest way to make PokePrices feel useful is to add a single card. Either drop a card you own into your portfolio, or watchlist a card you are weighing up.',
+      'You signed up a couple of days ago, so welcome back. The fastest way to make PokePrices feel useful is to add a single card. Either drop a card you own into your portfolio, or watchlist a card you are weighing up.',
       'You will start seeing weekly price moves, grading premium, and (if it is a chase card) where it sits against your target.',
     ],
     ctaLabel: 'Find a card',
@@ -46,7 +46,7 @@ const COPY: Record<ActivationBranch, Copy> = {
   },
   B: {
     subject:   'Turn your watchlist into a portfolio',
-    preheader: 'Your watchlist is a great signal — add the cards you actually own.',
+    preheader: 'Your watchlist is a great signal. Add the cards you actually own.',
     badge:     'Build your portfolio',
     headline:  'Add the cards you own',
     body: [
@@ -62,14 +62,14 @@ const COPY: Record<ActivationBranch, Copy> = {
     badge:     'Track your next purchase',
     headline:  'Watchlist what you are weighing up',
     body: [
-      'Your portfolio is set up — nice work. A watchlist is the other half of the picture. Drop in the cards you are considering and PokePrices tracks the move so you can time the buy.',
+      'Your portfolio is set up. Nice work. A watchlist is the other half of the picture. Drop in the cards you are considering and PokePrices tracks the move so you can time the buy.',
       'Watchlist cards do not affect your portfolio totals; they just keep you on top of prices you care about.',
     ],
     ctaLabel: 'Build your watchlist',
     ctaUrl:   emailLink('watchlist'),
   },
   D: {
-    subject:   'You are set up — try the deeper tools',
+    subject:   'You are set up. Try the deeper tools',
     preheader: "You're set up. Time to try the deeper tools.",
     badge:     'Explore more tools',
     headline:  'You are set up. Try the next layer.',

@@ -244,7 +244,7 @@ function SealedSection({
         <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
       </div>
       <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 14, lineHeight: 1.6, background: 'var(--bg-light)', borderRadius: 8, padding: '10px 14px' }}>
-        Sealed product prices track market value of unopened product — not individual cards.
+        Sealed product prices track market value of unopened product, not individual cards.
       </p>
       <CardGrid cards={sealedCards} setName={setName} buildTileActionProps={buildTileActionProps} onTileClick={onTileClick} />
     </div>
@@ -794,7 +794,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12, marginBottom: 14 }}>
           {topMovers.length > 0 && (
             <Panel>
-              <SectionLabel>📈 Top Risers — Cards (30d)</SectionLabel>
+              <SectionLabel>📈 Top Risers: Cards (30d)</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {topMovers.map((card, i) => <MoverRow key={i} card={card} setName={setName} positive />)}
               </div>
@@ -802,7 +802,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
           )}
           {topFallers.length > 0 && (
             <Panel>
-              <SectionLabel>📉 Top Fallers — Cards (30d)</SectionLabel>
+              <SectionLabel>📉 Top Fallers: Cards (30d)</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {topFallers.map((card, i) => <MoverRow key={i} card={card} setName={setName} positive={false} />)}
               </div>
@@ -810,7 +810,7 @@ export default function SetPageClient({ slug }: { slug: string }) {
           )}
           {topSealedMovers.length > 0 && (
             <Panel>
-              <SectionLabel>📦 Top Risers — Sealed (30d)</SectionLabel>
+              <SectionLabel>📦 Top Risers: Sealed (30d)</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {topSealedMovers.map((card, i) => <MoverRow key={i} card={card} setName={setName} positive />)}
               </div>

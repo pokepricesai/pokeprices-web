@@ -106,7 +106,7 @@ export async function POST(req: Request) {
       // Treat the not-yet-applied migration as a 503 rather than a 500
       // so the admin panel can render the "not yet enabled" copy.
       if (error.code === 'PGRST205' || /Could not find the table/i.test(error.message)) {
-        return NextResponse.json({ error: 'affiliate_events table missing — apply migration' }, { status: 503 })
+        return NextResponse.json({ error: 'affiliate_events table missing; apply migration' }, { status: 503 })
       }
       // eslint-disable-next-line no-console
       console.warn('[affiliate-event] insert failed:', error.message)

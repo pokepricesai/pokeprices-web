@@ -38,11 +38,14 @@ describe('additional Japanese static pilots', () => {
     expect(existsSync(join(process.cwd(), 'public', 'set-assets', 'symbols', 'Japanese Abyss Eye.png'))).toBe(true)
   })
 
-  it('Japanese Ruler of the Black Flame resolves to logo PNG (no symbol supplied yet)', () => {
+  it('Japanese Ruler of the Black Flame resolves to logo + symbol PNGs', () => {
+    // The symbol asset has since been supplied; mapping is now populated
+    // in SYMBOL_MAP and the file exists under public/set-assets/symbols/.
     const a = getSetAssets('Japanese Ruler of the Black Flame')
     expect(a.logoUrl).toBe('/set-assets/logos/Japanese Ruler of the Black Flame.png')
-    expect(a.symbolUrl).toBeNull()
+    expect(a.symbolUrl).toBe('/set-assets/symbols/Japanese Ruler of the Black Flame.png')
     expect(existsSync(join(process.cwd(), 'public', 'set-assets', 'logos', 'Japanese Ruler of the Black Flame.png'))).toBe(true)
+    expect(existsSync(join(process.cwd(), 'public', 'set-assets', 'symbols', 'Japanese Ruler of the Black Flame.png'))).toBe(true)
   })
 })
 

@@ -79,7 +79,7 @@ export function buildDashboardChecklist(
     {
       id:          'portfolio',
       label:       'Add your first portfolio card',
-      description: 'Start by tracking a few cards you own — collection value, P&L and grading insights light up once cards are in.',
+      description: 'Start by tracking a few cards you own. Collection value, P&L and grading insights light up once cards are in.',
       href:        '/dashboard/portfolio',
       complete:    isPositive(inputs.portfolioCount),
     },

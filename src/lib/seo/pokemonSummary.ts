@@ -236,20 +236,20 @@ export function buildPokemonSummary(input: PokemonSummaryInput): PokemonSummaryO
     facts.push({
       key:      'top_valuable',
       label:    'Most valuable card',
-      value:    `${topRaw.card_name} — ${topRaw.set_name} · ${rawPrice} raw / ${psa10Price} PSA 10`,
+      value:    `${topRaw.card_name}, ${topRaw.set_name} · ${rawPrice} raw / ${psa10Price} PSA 10`,
       linkHref: cardHref(topRaw.card_name, topRaw.set_name, topRaw.card_url_slug ?? null),
     })
   } else {
     if (topRaw && rawPrice) facts.push({
       key:      'top_raw',
       label:    'Most valuable (raw)',
-      value:    `${topRaw.card_name} — ${topRaw.set_name} · ${rawPrice}`,
+      value:    `${topRaw.card_name}, ${topRaw.set_name} · ${rawPrice}`,
       linkHref: cardHref(topRaw.card_name, topRaw.set_name, topRaw.card_url_slug ?? null),
     })
     if (topPsa10 && psa10Price) facts.push({
       key:      'top_psa10',
       label:    'Most valuable (PSA 10)',
-      value:    `${topPsa10.card_name} — ${topPsa10.set_name} · ${psa10Price}`,
+      value:    `${topPsa10.card_name}, ${topPsa10.set_name} · ${psa10Price}`,
       linkHref: cardHref(topPsa10.card_name, topPsa10.set_name, topPsa10.card_url_slug ?? null),
     })
   }
@@ -269,7 +269,7 @@ export function buildPokemonSummary(input: PokemonSummaryInput): PokemonSummaryO
     if (pctLabel) facts.push({
       key:      'top_mover_30d',
       label:    'Biggest 30-day move',
-      value:    `${mover.card_name} — ${mover.set_name} · ${pctLabel}`,
+      value:    `${mover.card_name}, ${mover.set_name} · ${pctLabel}`,
       linkHref: cardHref(mover.card_name, mover.set_name, mover.card_url_slug ?? null),
       variant:  mover.raw_pct_30d > 0 ? 'up' : mover.raw_pct_30d < 0 ? 'down' : 'default',
     })

@@ -4,7 +4,7 @@ import { requireAuthUser } from '@/lib/auth-server'
 import SettingsClient from './SettingsClient'
 
 export const metadata: Metadata = {
-  title: 'Settings — PokePrices Dashboard',
+  title: 'Settings | PokePrices Dashboard',
   robots: { index: false, follow: false },
 }
 

@@ -409,7 +409,7 @@ export default function VendorsPageClient() {
           padding: '8px 18px', borderRadius: 10, textDecoration: 'none',
           fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif",
         }}>
-          + List Your Store — It&apos;s Free
+          + List Your Store (It&apos;s Free)
         </Link>
       </div>
 
@@ -547,7 +547,7 @@ export default function VendorsPageClient() {
           borderRadius: 14, padding: '48px 24px', textAlign: 'center',
         }}>
           <p style={{ color: 'var(--text-muted)', fontSize: 14, fontFamily: "'Figtree', sans-serif", marginBottom: 16 }}>
-            No vendors listed yet — be the first!
+            No vendors listed yet. Be the first!
           </p>
           <Link href="/vendors/submit" style={{
             background: 'var(--primary)', color: '#fff',

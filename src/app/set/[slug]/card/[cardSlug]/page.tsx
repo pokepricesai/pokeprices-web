@@ -165,7 +165,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   if (result.status === 'error') {
     const canonical = `https://www.pokeprices.io/set/${slug}/card/${cardSlug}`
     return {
-      title:       'Pokémon Card Price Guide — PokePrices',
+      title:       'Pokémon Card Price Guide | PokePrices',
       description: 'Track raw, PSA 9 and PSA 10 Pokémon card prices, grading data and recent sales.',
       alternates:  { canonical },
       robots:      { index: false, follow: true },
@@ -214,19 +214,19 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   let description: string
 
   if (useGradingVariant && rawUsd && psa10Usd) {
-    title = `${name}${num}${jpMarker} Price: ${fmt(card.psa10_usd!)} PSA 10 vs ${fmt(card.raw_usd!)} Raw — Worth Grading? (${year})`
-    description = `Is ${name}${num} worth grading? PSA 10 ${fmt(card.psa10_usd!)} is ${multiple!.toFixed(1)}× the raw price of ${fmt(card.raw_usd!)}. ${descSetPhrase} price guide — gem rate, grading spread, PSA population and verified recent sales.`
+    title = `${name}${num}${jpMarker} Price: ${fmt(card.psa10_usd!)} PSA 10 vs ${fmt(card.raw_usd!)} Raw. Worth Grading? (${year})`
+    description = `Is ${name}${num} worth grading? PSA 10 ${fmt(card.psa10_usd!)} is ${multiple!.toFixed(1)}× the raw price of ${fmt(card.raw_usd!)}. ${descSetPhrase} price guide: gem rate, grading spread, PSA population and verified recent sales.`
   } else if (rawUsd && psa10Usd) {
-    title = `${name}${num}${jpMarker} Price & Value: ${fmt(card.raw_usd!)} Raw, ${fmt(card.psa10_usd!)} PSA 10 (${year}) — ${setLabel}`
-    description = `How much is ${name}${num} worth? ${descSetPhrase} price guide — ${fmt(card.raw_usd!)} raw${psa9Usd ? `, ${fmt(card.psa9_usd!)} PSA 9` : ''}, ${fmt(card.psa10_usd!)} PSA 10. Price trend, grading spread, PSA population and verified recent sales.`
+    title = `${name}${num}${jpMarker} Price & Value: ${fmt(card.raw_usd!)} Raw, ${fmt(card.psa10_usd!)} PSA 10 (${year}) | ${setLabel}`
+    description = `How much is ${name}${num} worth? ${descSetPhrase} price guide: ${fmt(card.raw_usd!)} raw${psa9Usd ? `, ${fmt(card.psa9_usd!)} PSA 9` : ''}, ${fmt(card.psa10_usd!)} PSA 10. Price trend, grading spread, PSA population and verified recent sales.`
   } else if (psa10Usd) {
-    title = `${name}${num}${jpMarker} PSA 10 Price & Value: ${fmt(card.psa10_usd!)} (${year}) — ${setLabel}`
-    description = `${name}${num} PSA 10 value: ${fmt(card.psa10_usd!)}. ${descSetPhrase} price guide — price trend, PSA population, gem rate and verified recent sales. Updated nightly.`
+    title = `${name}${num}${jpMarker} PSA 10 Price & Value: ${fmt(card.psa10_usd!)} (${year}) | ${setLabel}`
+    description = `${name}${num} PSA 10 value: ${fmt(card.psa10_usd!)}. ${descSetPhrase} price guide: price trend, PSA population, gem rate and verified recent sales. Updated nightly.`
   } else if (rawUsd) {
-    title = `${name}${num}${jpMarker} Price: ${fmt(card.raw_usd!)} Raw (${year}) — ${setLabel}`
-    description = `How much is ${name}${num} worth? ${descSetPhrase} price guide — currently ${fmt(card.raw_usd!)} raw. Price trend, grading data, PSA population and verified recent sales. Updated nightly.`
+    title = `${name}${num}${jpMarker} Price: ${fmt(card.raw_usd!)} Raw (${year}) | ${setLabel}`
+    description = `How much is ${name}${num} worth? ${descSetPhrase} price guide: currently ${fmt(card.raw_usd!)} raw. Price trend, grading data, PSA population and verified recent sales. Updated nightly.`
   } else {
-    title = `${name}${num}${jpMarker} Pokémon Card Price Guide (${year}) — ${setLabel}`
+    title = `${name}${num}${jpMarker} Pokémon Card Price Guide (${year}) | ${setLabel}`
     description = `Track ${name}${num} from ${descSetPhrase}: raw, PSA 9 and PSA 10 prices, grading spreads, PSA population and verified recent sales. Price guide updated nightly.`
   }
 
@@ -324,7 +324,7 @@ export default async function CardPage({ params }: { params: Promise<{ slug: str
   const trendForPanel: TrendRow | null = trendResult.ok ? trendResult.data : null
   const setHref = card ? `/set/${encodeURIComponent(String(card.set_name ?? ''))}` : null
 
-  // Recent verified sales — grouped by grade. Fail-closed: the loader
+  // Recent tracked sales (grouped by grade). Fail-closed: the loader
   // returns an empty group set when RECENT_SALES_FREE_PREVIEW_ENABLED
   // is not the literal "true", so the DB is not consulted while the
   // flag is off. The section renders nothing when total is zero.

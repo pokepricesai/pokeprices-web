@@ -23,7 +23,7 @@ export default function SetStructuredData({
         '@type': 'CollectionPage',
         '@id': `${url}#collection`,
         name: `${setName} Card List`,
-        description: `Pokémon card prices for ${setName} — raw, PSA 9 and PSA 10 values, grading data and market trends.`,
+        description: `Pokémon card prices for ${setName}: raw, PSA 9 and PSA 10 values, grading data and market trends.`,
         url,
         isPartOf: { '@id': 'https://www.pokeprices.io/#website' },
         dateModified: now,
@@ -31,7 +31,7 @@ export default function SetStructuredData({
       {
         '@type': 'Dataset',
         '@id': `${url}#dataset`,
-        name: `${setName} — Pokémon Card Price Dataset`,
+        name: `${setName}: Pokémon Card Price Dataset`,
         description: `Daily price observations for every card in ${setName}. ${cards.length} cards tracked${cardsWithPrice ? `, ${cardsWithPrice} with active price data` : ''}. Covers raw, PSA 9 and PSA 10 grades plus PSA population data.`,
         url,
         license: 'https://www.pokeprices.io/terms',

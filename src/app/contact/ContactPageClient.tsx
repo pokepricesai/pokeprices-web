@@ -136,7 +136,7 @@ export default function ContactPageClient() {
                 📬 Sign me up for the monthly digest
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-                Market moves, hidden gems, grading tips — once a month, no spam
+                Market moves, hidden gems, grading tips. Once a month, no spam.
               </div>
             </div>
           </div>

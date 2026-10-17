@@ -150,7 +150,7 @@ function TrendingSetsPanel({ data }: { data: { rising: TrendingSet[]; falling: T
       <div style={{ marginBottom: 16 }}>
         <h2 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 4px', fontFamily: "'Outfit', sans-serif", color: 'var(--text)' }}>Set Momentum</h2>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0, fontFamily: "'Figtree', sans-serif" }}>
-          Which sets are gaining or losing value — averaged across all cards in the set
+          Which sets are gaining or losing value, averaged across all cards in the set
         </p>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
@@ -576,7 +576,7 @@ export default function BrowsePageClient() {
         '@context': 'https://schema.org',
         '@type': 'Dataset',
         '@id': 'https://www.pokeprices.io/browse#dataset',
-        name: 'Pokémon TCG — All Sets Card Price Dataset',
+        name: 'Pokémon TCG: All Sets Card Price Dataset',
         description: `Master catalog of every Pokémon TCG set with active price tracking on PokePrices${sets.length ? `, currently ${sets.length} sets` : ''}. Each set has full card-level raw, PSA 9 and PSA 10 prices plus PSA population data.`,
         url: 'https://www.pokeprices.io/browse',
         license: 'https://www.pokeprices.io/terms',

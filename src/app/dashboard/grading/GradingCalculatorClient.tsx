@@ -414,7 +414,7 @@ export default function GradingCalculatorClient() {
                     const disabled = price == null
                     return (
                       <option key={t.value} value={t.value} disabled={disabled}>
-                        {t.label}{disabled ? ' (no price data)' : ` — ${fmt(price, currency)}`}
+                        {t.label}{disabled ? ' (no price data)' : `: ${fmt(price, currency)}`}
                       </option>
                     )
                   })}
@@ -446,10 +446,10 @@ export default function GradingCalculatorClient() {
               <Field label="≤ 7 %"><input  type="number" value={pctSub} onChange={e => setPctSub(parseFloat(e.target.value) || 0)} style={inputStyle} /></Field>
             </div>
             <p style={{ fontSize: 11, color: oddsSum === 100 ? 'var(--text-muted)' : '#ef4444', fontFamily: "'Figtree', sans-serif", margin: '6px 0 0' }}>
-              {oddsSum === 100 ? 'Sum: 100%' : `Sum: ${oddsSum}% — adjust so it totals 100%.`}
+              {oddsSum === 100 ? 'Sum: 100%' : `Sum: ${oddsSum}%. Adjust so it totals 100%.`}
             </p>
             <p style={{ fontSize: 10.5, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '8px 0 0', lineHeight: 1.5 }}>
-              The "hit" is the price for your chosen target grade. Lower outcomes (PSA 9 / 8 / sub) use PSA-equivalent prices as proxies — most cards that miss the chase target end up at a similar PSA grade regardless of grader.
+              The "hit" is the price for your chosen target grade. Lower outcomes (PSA 9 / 8 / sub) use PSA-equivalent prices as proxies, since most cards that miss the chase target end up at a similar PSA grade regardless of grader.
             </p>
           </Section>
         )}
@@ -474,9 +474,9 @@ export default function GradingCalculatorClient() {
             </div>
             <div style={{ background: result.roiPct >= 30 ? 'rgba(34,197,94,0.08)' : result.roiPct >= 0 ? 'rgba(245,158,11,0.08)' : 'rgba(239,68,68,0.08)', border: `1px solid ${result.roiPct >= 30 ? 'rgba(34,197,94,0.25)' : result.roiPct >= 0 ? 'rgba(245,158,11,0.25)' : 'rgba(239,68,68,0.25)'}`, borderRadius: 10, padding: '10px 14px', fontSize: 12.5, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.55 }}>
               {result.roiPct >= 30
-                ? <>Looks worth grading. Expected ROI is healthy after fees. Watch out for sub-grade outcomes — re-run with lower 10% odds if you have any doubt.</>
+                ? <>Looks worth grading. Expected ROI is healthy after fees. Watch out for sub-grade outcomes: re-run with lower 10% odds if you have any doubt.</>
                 : result.roiPct >= 0
-                  ? <>Marginal — would clear costs but not by much. Worth it only if you are confident in a 9 or better.</>
+                  ? <>Marginal. Would clear costs but not by much. Worth it only if you are confident in a 9 or better.</>
                   : <>Don&apos;t grade. At these odds, you would lose money on average. Either sell it raw or tighten your odds before sending in.</>}
             </div>
             <p style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '12px 0 0', lineHeight: 1.5 }}>
@@ -489,7 +489,7 @@ export default function GradingCalculatorClient() {
         <Section title="Best candidates from your raw cards">
           {!user ? (
             <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0, lineHeight: 1.6 }}>
-              <Link href="/dashboard/login" style={{ color: 'var(--primary)', fontWeight: 700, textDecoration: 'none' }}>Sign in</Link> to surface your raw cards here, ranked by expected grading ROI at your current odds. The calculator itself works without an account — pick any card via the search above.
+              <Link href="/dashboard/login" style={{ color: 'var(--primary)', fontWeight: 700, textDecoration: 'none' }}>Sign in</Link> to surface your raw cards here, ranked by expected grading ROI at your current odds. The calculator itself works without an account; pick any card via the search above.
             </p>
           ) : loadingCandidates ? (
             <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0 }}>Loading…</p>
@@ -523,7 +523,7 @@ export default function GradingCalculatorClient() {
         </Section>
 
         <p style={{ fontSize: 10.5, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", textAlign: 'center', margin: '4px 0 0', lineHeight: 1.6 }}>
-          Service fees and turnaround are public-list snapshots — confirm with the grading company before submitting. Not financial advice.
+          Service fees and turnaround are public-list snapshots. Confirm with the grading company before submitting. Not financial advice.
         </p>
       </div>
     </div>

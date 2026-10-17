@@ -15,7 +15,7 @@ import { emailLink, unsubscribePreferencesLink } from '@/lib/email/onboardingLin
 export const ONBOARDING_WELCOME_KEY       = 'onboarding_welcome'
 export const ONBOARDING_WELCOME_SUBJECT   = 'Welcome to PokePrices'
 export const ONBOARDING_WELCOME_PREHEADER =
-  'Your dashboard is ready — track prices, build a portfolio, ask the AI.'
+  'Your dashboard is ready: track prices, build a portfolio, ask the AI.'
 
 export type OnboardingWelcomeProps = {
   replyTo?: string | null
@@ -40,7 +40,7 @@ export default function OnboardingWelcome(props: OnboardingWelcomeProps) {
     >
       <Text style={lead}>
         Thanks for signing up. PokePrices is a free price-intelligence
-        tool for Pokémon TCG collectors — no paid plans, no email-capture
+        tool for Pokémon TCG collectors, with no paid plans, no email-capture
         wall, just data and tools you can use straight away.
       </Text>
 

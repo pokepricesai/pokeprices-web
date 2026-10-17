@@ -7,17 +7,12 @@
 // retains client-side interactivity (search, sort, pagination) but
 // no longer blocks the fold on a browser round trip.
 
+import type { Metadata } from 'next'
 import PokemonPageClient, { type PokemonEntry } from './PokemonPageClient'
 import { headers } from 'next/headers'
 
-export const metadata = {
-  title: 'All Pokémon Cards by Species (2026) — 1,025 Pokémon, Live Prices',
-  description: 'Browse all 1,025 Pokémon species and find every card they appear on. Raw prices, PSA 10 values, full checklists and grading data across every Pokémon TCG set. Free, no login.',
-  alternates: { canonical: 'https://www.pokeprices.io/pokemon' },
-}
-
 // 24h ISR mirrors the extras endpoint's s-maxage. If the catalogue
-// changes mid-day, the next scheduled rebuild picks it up — same
+// changes mid-day, the next scheduled rebuild picks it up on the same
 // cadence as the price-guide refresh.
 export const revalidate = 86400
 
@@ -67,8 +62,30 @@ async function fetchInitialExtras(): Promise<{
       payload.totalCards?.status === 'ok' ? payload.totalCards.data ?? 0 : 0
     return { initialSpecies, initialTotalCards, usedFallback: false }
   } catch {
-    // Degrade silently — the client component can still refetch on mount.
+    // Degrade silently; the client component refetches on mount.
     return { initialSpecies: [], initialTotalCards: 0, usedFallback: true }
+  }
+}
+
+// Dynamic metadata: use the authoritative species count where it's
+// available on the request, otherwise fall back to copy that doesn't
+// quote a number. This replaces the previous hardcoded "1,025 Pokémon"
+// headline so the SEO description cannot silently rot if the catalogue
+// changes.
+export async function generateMetadata(): Promise<Metadata> {
+  const { initialSpecies } = await fetchInitialExtras()
+  const n = initialSpecies.length
+  const year = new Date().getFullYear()
+  const title = n > 0
+    ? `All Pokémon Cards by Species (${year}): ${n} Species, Live Prices | PokePrices`
+    : `All Pokémon Cards by Species (${year}): Live Prices | PokePrices`
+  const description = n > 0
+    ? `Browse all ${n} Pokémon species and find every card they appear on. Raw prices, PSA 10 values, full checklists and grading data across every Pokémon TCG set. Free, no login.`
+    : 'Browse every Pokémon species and find every card they appear on. Raw prices, PSA 10 values, full checklists and grading data across every Pokémon TCG set. Free, no login.'
+  return {
+    title,
+    description,
+    alternates: { canonical: 'https://www.pokeprices.io/pokemon' },
   }
 }
 
@@ -78,8 +95,8 @@ export default async function PokemonPage() {
     <PokemonPageClient
       initialSpecies={initialSpecies}
       initialTotalCards={initialTotalCards}
-      // When SSR fetch failed we flag that so the client runs its
-      // own fetch on mount instead of trusting the empty seed.
+      // When SSR fetch failed we flag that so the client runs its own
+      // fetch on mount instead of trusting the empty seed.
       initialFallback={usedFallback}
     />
   )

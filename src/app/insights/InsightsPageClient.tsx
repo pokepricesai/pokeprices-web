@@ -95,7 +95,7 @@ export default function InsightsPageClient() {
             {
               '@type': 'ItemList',
               '@id': 'https://www.pokeprices.io/insights#articles',
-              name: 'PokePrices Insights — Articles',
+              name: 'PokePrices Insights: Articles',
               numberOfItems: insights.length,
               itemListElement: insights.slice(0, 20).map((a, i) => ({
                 '@type': 'ListItem',
@@ -114,7 +114,7 @@ export default function InsightsPageClient() {
           Pokémon Card Insights
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: 0, fontFamily: "'Figtree', sans-serif", lineHeight: 1.6 }}>
-          Pokémon card market reports, price trends and grading analysis — built from real PSA 10 sales, raw-vs-graded spreads and set-level movement.
+          Pokémon card market reports, price trends and grading analysis, built from real PSA 10 sales, raw-vs-graded spreads and set-level movement.
         </p>
       </div>
 
@@ -145,7 +145,7 @@ export default function InsightsPageClient() {
             {activeTheme === 'all' ? 'Articles coming soon' : `No ${THEME_LABELS[activeTheme]} articles yet`}
           </h3>
           <p style={{ color: 'var(--text-muted)', fontSize: 14, maxWidth: 400, margin: '0 auto', fontFamily: "'Figtree', sans-serif", lineHeight: 1.6 }}>
-            Check back soon — new articles published weekly.
+            Check back soon. New articles published weekly.
           </p>
         </div>
       ) : (

@@ -431,7 +431,7 @@ export default function ScanTestClient() {
 
   async function confirmTopCandidate(candidate: Candidate) {
     if (!result?.scan_log_id) {
-      setConfirmError('No scan_log_id from server — confirm not available')
+      setConfirmError('No scan_log_id from server. Confirm not available.')
       return
     }
     setConfirmError(null)
@@ -591,12 +591,12 @@ function StartPanel({ onStart }: { onStart: () => void }) {
         Fill the frame with the card, avoid glare, good lighting helps.
       </p>
       <p style={{ fontFamily: "'Figtree', sans-serif", fontSize: 13, lineHeight: 1.5, margin: '0 0 16px', color: 'var(--text-muted)' }}>
-        When you tap capture, <strong style={{ color: 'var(--text)' }}>tilt the card slightly</strong> over the next second
-        — that motion is how we tell holos and reverse holos apart (foil shifts; paper does not).
+        When you tap capture, <strong style={{ color: 'var(--text)' }}>tilt the card slightly</strong> over the next second.
+        That motion is how we tell holos and reverse holos apart (foil shifts; paper does not).
       </p>
       <button onClick={onStart} style={primaryButtonStyle}>Start camera</button>
       <p style={{ fontFamily: "'Figtree', sans-serif", fontSize: 11, color: 'var(--text-muted)', margin: '12px 0 0' }}>
-        Mobile web camera APIs need HTTPS — works on the Vercel deploy but not on localhost.
+        Mobile web camera APIs need HTTPS. Works on the Vercel deploy but not on localhost.
       </p>
     </div>
   )
@@ -685,7 +685,7 @@ function CapturedPanel({
           style={selectStyle}
         >
           <option value="vision_ocr">Vision OCR (3 calls, ~$0.0045/scan, deterministic)</option>
-          <option value="ai_vision">AI Vision — Haiku 4.5 (1 call, ~$0.0025/scan, sees holo visually)</option>
+          <option value="ai_vision">AI Vision: Haiku 4.5 (1 call, ~$0.0025/scan, sees holo visually)</option>
         </select>
       </div>
 
@@ -697,7 +697,7 @@ function CapturedPanel({
             onChange={e => onFeatureChange(e.target.value as Feature)}
             style={selectStyle}
           >
-            <option value="DOCUMENT_TEXT_DETECTION">DOCUMENT_TEXT_DETECTION (default — preserves layout)</option>
+            <option value="DOCUMENT_TEXT_DETECTION">DOCUMENT_TEXT_DETECTION (default, preserves layout)</option>
             <option value="TEXT_DETECTION">TEXT_DETECTION (looser, sometimes catches stylised text)</option>
           </select>
         </div>
@@ -751,21 +751,21 @@ function ResultPanel({
   const variantNote = (() => {
     if (!top) {
       if (p.collector_number && scannedDenom) {
-        return `Scanned ${p.collector_number} cleanly but no card with set total ${scannedDenom} exists in our DB. The set may not be loaded yet — cross-set numerator-only "matches" are suppressed because they would be wrong.`
+        return `Scanned ${p.collector_number} cleanly but no card with set total ${scannedDenom} exists in our DB. The set may not be loaded yet. Cross-set numerator-only "matches" are suppressed because they would be wrong.`
       }
       return null
     }
     if (top.match_quality === 'full' || top.match_quality === 'with_denom') {
       if ((top.pool_size ?? 1) > 1) {
-        return `${top.pool_size} variants of this exact card (regular / reverse holo / etc) — confirm below.`
+        return `${top.pool_size} variants of this exact card (regular / reverse holo / etc). Confirm below.`
       }
       return null
     }
     if (top.match_quality === 'unknown_denom') {
-      return `Numerator matches but our DB has no set total for ${top.set_name} — verify this is the right set before confirming.`
+      return `Numerator matches but our DB has no set total for ${top.set_name}. Verify this is the right set before confirming.`
     }
     if (top.match_quality === 'numerator') {
-      return `Scan did not produce a clear denominator. Showing numerator-only matches across sets — pick the right one or rescan.`
+      return `Scan did not produce a clear denominator. Showing numerator-only matches across sets. Pick the right one or rescan.`
     }
     return null
   })()
@@ -803,7 +803,7 @@ function ResultPanel({
         <SignalRow label="Set abbreviation" value={p.set_abbreviation} />
         <SignalRow label="Set hint" value={p.set_hint} />
         <SignalRow label="Copyright year" value={p.copyright_year != null ? String(p.copyright_year) : null} />
-        <SignalRow label="Promo card" value={p.is_promo ? 'yes — filtering to promo sets' : null} />
+        <SignalRow label="Promo card" value={p.is_promo ? 'yes, filtering to promo sets' : null} />
       </div>
 
       {result.engine === 'ai_vision' && result.ai_variant
@@ -843,7 +843,7 @@ function ResultPanel({
           <p style={mutedNoteStyle}>
             {p.collector_number || p.name
               ? 'No matches found for these signals.'
-              : 'No signals extracted — nothing to match against.'}
+              : 'No signals extracted. Nothing to match against.'}
           </p>
         )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
@@ -860,7 +860,7 @@ function ResultPanel({
         </div>
         {confirmed && (
           <p style={{ ...mutedNoteStyle, color: 'var(--green)' }}>
-            Logged — thanks. This scan is now a training-data row for tuning.
+            Logged. Thanks. This scan is now a training-data row for tuning.
           </p>
         )}
         {confirmError && (
@@ -974,14 +974,14 @@ function holoReorderDiagnosis(
   const confPct = Math.round(holo.confidence * 100)
 
   if (holo.confidence < HOLO_MIN_CONFIDENCE) {
-    return { reordered: false, reason: `Tilt verdict was ${verdictLabel} but only ${confPct}% confident — not strong enough to reorder.` }
+    return { reordered: false, reason: `Tilt verdict was ${verdictLabel} but only ${confPct}% confident, not strong enough to reorder.` }
   }
   if (candidates.length < 2) return { reordered: false, reason: null }
 
   const topConf = candidates[0].confidence
   const tied = candidates.filter(c => topConf - c.confidence <= HOLO_TIE_WINDOW)
   if (tied.length < 2) {
-    return { reordered: false, reason: `Top match is alone at ${Math.round(topConf * 100)}% — holo verdict is not used as a tiebreaker when there is nothing to tiebreak.` }
+    return { reordered: false, reason: `Top match is alone at ${Math.round(topConf * 100)}%. Holo verdict is not used as a tiebreaker when there is nothing to tiebreak.` }
   }
 
   const matchesVariant = (c: Candidate) =>
@@ -990,7 +990,7 @@ function holoReorderDiagnosis(
                                       isFullArtVariant(c)
   const matchedInTied = tied.filter(matchesVariant)
   if (matchedInTied.length === 0) {
-    return { reordered: false, reason: `Tilt verdict was ${verdictLabel} (${confPct}% confident) but none of the top ${tied.length} tied candidates are the ${verdictLabel} variant — leaving DB ordering alone.` }
+    return { reordered: false, reason: `Tilt verdict was ${verdictLabel} (${confPct}% confident) but none of the top ${tied.length} tied candidates are the ${verdictLabel} variant, so leaving DB ordering alone.` }
   }
 
   // Did we actually move anything? (Only if the first tied candidate did not already match.)
@@ -1179,13 +1179,13 @@ function HoloPanel({ holo }: { holo: HoloAnalysis }) {
       </div>
       <div style={{ marginTop: 10, fontFamily: "'Figtree', sans-serif", fontSize: 11, color: 'var(--text-muted)' }}>
         <strong style={{ color: 'var(--text)' }}>Artwork region</strong>
-        {' — '}{holo.artwork.shimmer_count} shimmering sample points,
+        {': '}{holo.artwork.shimmer_count} shimmering sample points,
         {' '}mean L stdev {holo.artwork.mean_l_stdev.toFixed(3)},
         {' '}max L stdev {holo.artwork.max_l_stdev.toFixed(3)}
       </div>
       <div style={{ marginTop: 4, fontFamily: "'Figtree', sans-serif", fontSize: 11, color: 'var(--text-muted)' }}>
         <strong style={{ color: 'var(--text)' }}>Frame region</strong>
-        {' — '}{holo.frame.shimmer_count} shimmering sample points,
+        {': '}{holo.frame.shimmer_count} shimmering sample points,
         {' '}mean L stdev {holo.frame.mean_l_stdev.toFixed(3)},
         {' '}max L stdev {holo.frame.max_l_stdev.toFixed(3)}
       </div>

@@ -56,7 +56,7 @@ export default function SetCompletionProgress({
   const marginTop   = isFull ? 8 : 6
 
   const label = setName
-    ? `${setName} — ${percentage}% complete, ${ownedDistinct} of ${totalEligible} cards`
+    ? `${setName}: ${percentage}% complete, ${ownedDistinct} of ${totalEligible} cards`
     : `${percentage}% complete, ${ownedDistinct} of ${totalEligible} cards`
 
   return (

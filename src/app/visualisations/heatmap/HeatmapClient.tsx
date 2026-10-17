@@ -60,7 +60,7 @@ export default function HeatmapClient() {
             Market heatmap
           </h1>
           <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0 }}>
-            High-value, actively-traded cards — colour shows 30-day price movement · min 3 confirmed sales
+            High-value, actively-traded cards. Colour shows 30-day price movement · min 3 confirmed sales
           </p>
         </div>
         {updated && (
@@ -153,7 +153,7 @@ export default function HeatmapClient() {
       )}
 
       <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', marginTop: 30, lineHeight: 1.6 }}>
-        Built on real sold-listing data — no asking prices, no guesses.
+        Built on real sold-listing data. No asking prices, no guesses.
       </p>
     </div>
   )

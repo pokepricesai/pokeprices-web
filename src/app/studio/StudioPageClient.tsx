@@ -1870,7 +1870,7 @@ export default function StudioPageClient(_props: StudioPageClientProps = {}) {
         '@type': 'SoftwareApplication',
         '@id': 'https://www.pokeprices.io/studio#app',
         name: 'PokePrices Studio',
-        description: 'Free web tool that turns Pokémon TCG market data into shareable PNG visuals — PSA gauges, market temperature, peak distance and chase-card graphics for any of 40,000+ tracked cards.',
+        description: 'Free web tool that turns Pokémon TCG market data into shareable PNG visuals: PSA gauges, market temperature, peak distance and chase-card graphics for any of 40,000+ tracked cards.',
         url: 'https://www.pokeprices.io/studio',
         applicationCategory: 'DesignApplication',
         operatingSystem: 'Web',
@@ -1891,7 +1891,7 @@ export default function StudioPageClient(_props: StudioPageClientProps = {}) {
           PokePrices Studio
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: 0, fontFamily: "'Figtree',sans-serif", lineHeight: 1.6, maxWidth: 680 }}>
-          Turn live PokePrices data into share-ready graphics. Pick a visual style, drop in a card or set, tweak the look — export a clean PNG for X, Reddit, Discord or your set-page banner. Built on the same sold-listing data the rest of the site runs on, so the numbers on the image are the numbers you can verify everywhere else.
+          Turn live PokePrices data into share-ready graphics. Pick a visual style, drop in a card or set, tweak the look, then export a clean PNG for X, Reddit, Discord or your set-page banner. Built on the same sold-listing data the rest of the site runs on, so the numbers on the image are the numbers you can verify everywhere else.
         </p>
 
         {/* Workflow hint strip — three quick pills explaining the flow */}

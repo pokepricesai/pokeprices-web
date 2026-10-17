@@ -191,10 +191,10 @@ describe('buildEventSchema — PostalAddress placeholder filtering', () => {
 // ── Tap and Play metadata does not contain placeholders
 
 describe('Tap and Play metadata (title + description) never leaks "Venue TBA"', () => {
-  it('title falls back to country label — "Tap and Play Card Show — UK Pokémon Card Show (October 2026) | PokePrices"', () => {
+  it('title falls back to country label — "Tap and Play Card Show: UK Pokémon Card Show (October 2026) | PokePrices"', () => {
     const seo = getEventSeo(tapAndPlay)
     expect(seo.title).toBe(
-      'Tap and Play Card Show — UK Pokémon Card Show (October 2026) | PokePrices',
+      'Tap and Play Card Show: UK Pokémon Card Show (October 2026) | PokePrices',
     )
     expect(seo.title).not.toContain('Venue TBA')
     expect(seo.title).not.toContain('TBA')

@@ -242,7 +242,7 @@ export default function RisersFallersClient() {
       }}>
         <span style={{ fontSize: 16 }}>✓</span>
         <p style={{ fontSize: 12.5, color: 'var(--text)', margin: 0, lineHeight: 1.55, flex: 1, minWidth: 200 }}>
-          <strong>Filtered for high sales quality.</strong> We only include cards with confirmed multi-sale volume in the period. Low-traffic listings and asking-price noise are excluded — every move you see is backed by repeated real-world sales activity.
+          <strong>Filtered for high sales quality.</strong> We only include cards with confirmed multi-sale volume in the period. Low-traffic listings and asking-price noise are excluded, so every move you see is backed by repeated real-world sales activity.
         </p>
       </div>
 
@@ -268,7 +268,7 @@ export default function RisersFallersClient() {
       </div>
 
       <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', marginTop: 36, lineHeight: 1.6 }}>
-        Built on real sold-listing data — no asking prices, no guesses.
+        Built on real sold-listing data. No asking prices, no guesses.
       </p>
     </div>
   )

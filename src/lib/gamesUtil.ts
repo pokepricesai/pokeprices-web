@@ -122,7 +122,7 @@ export interface DailyMatchup {
 }
 
 export const DAILY_MATCHUPS: DailyMatchup[] = [
-  { id: 1,  question: 'Crown jewel of vintage — which one?',
+  { id: 1,  question: 'Crown jewel of vintage: which one?',
     a: { card_url_slug: 'charizard-4',  label: 'Charizard Base Set' },
     b: { card_url_slug: 'blastoise-2',  label: 'Blastoise Base Set' } },
   { id: 2,  question: 'Modern chase or vintage holo?',

@@ -445,7 +445,7 @@ function AddCardModal({
       const priceCents  = purchasePrice ? Math.round(parseFloat(purchasePrice) * cps) : null
       const manualCents = isManual && manualValue ? Math.round(parseFloat(manualValue) * cps) : null
       if (isManual && !manualCents) {
-        throw new Error('Please enter a current value — we don\'t have live market data for this grade.')
+        throw new Error('Please enter a current value. We don\'t have live market data for this grade.')
       }
       // Only include manual-value columns when set — keeps the write working
       // even if the 2026-04-30 portfolio-improvements migration hasn't run.
@@ -668,7 +668,7 @@ function PortfolioDNA({ items, totalValue }: { items: PortfolioItem[]; totalValu
       {concentration > 40 && (
         <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: 10, padding: '10px 12px' }}>
           <div style={{ fontSize: 12, color: '#f59e0b', fontFamily: "'Figtree', sans-serif", fontWeight: 600 }}>
-            ⚠ {topCard?.card_name} makes up {concentration}% of your portfolio — consider diversifying
+            ⚠ {topCard?.card_name} makes up {concentration}% of your portfolio. Consider diversifying
           </div>
         </div>
       )}
@@ -878,7 +878,7 @@ function AIInsightPanel({ items, totalValue, currency }: { items: PortfolioItem[
     // API key client-side. The chat endpoint already wraps Claude Haiku
     // server-side and returns { answer }.
     const message = `[Portfolio analysis]
-Give me a 2-3 sentence summary of how this Pokémon TCG portfolio is performing and what to watch. Plain prose only — no bullets, no bold, no headers. Sound like a knowledgeable collector friend, not a financial advisor. Use real card names. End with "Not financial advice."
+Give me a 2-3 sentence summary of how this Pokémon TCG portfolio is performing and what to watch. Plain prose only: no bullets, no bold, no headers. Sound like a knowledgeable collector friend, not a financial advisor. Use real card names. End with "Not financial advice."
 
 Portfolio:
 ${JSON.stringify(portfolioSummary, null, 2)}`
@@ -1558,12 +1558,12 @@ export default function PortfolioDashboard() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 style={{ fontFamily: "'Outfit', sans-serif", fontSize: 26, margin: '0 0 2px', color: 'var(--text)' }}>My Collection</h1>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0 }}>Track what you own — value, P&amp;L, grading insights.</p>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: 0 }}>Track what you own: value, P&amp;L, grading insights.</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={() => setShowScanner(true)}
             style={{ padding: '9px 16px', borderRadius: 10, border: '1px solid var(--primary)', background: 'transparent', color: 'var(--primary)', fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif", cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8 }}
-            title="On mobile, opens your camera. On desktop, opens the file picker — upload one or many card photos at once.">
+            title="On mobile, opens your camera. On desktop, opens the file picker. Upload one or many card photos at once.">
             Scan / upload
             <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.2, padding: '2px 6px', borderRadius: 4, background: 'var(--accent)', color: '#1a3a6b' }}>BETA</span>
           </button>
@@ -1783,7 +1783,7 @@ export default function PortfolioDashboard() {
                               }}
                               title="We do not have a recent sale at this grade for this card. Open Edit to set a manual value."
                             >
-                              no market data — set manual
+                              no market data. Set manual
                             </span>
                           )}
                           {stale && (
@@ -1793,7 +1793,7 @@ export default function PortfolioDashboard() {
                                 background: 'rgba(255,165,0,0.18)',
                                 padding: '1px 7px', borderRadius: 6,
                               }}
-                              title="Manual value is over 60 days old — open Edit to refresh"
+                              title="Manual value is over 60 days old. Open Edit to refresh"
                             >
                               ↻ refresh
                             </span>
@@ -1816,7 +1816,7 @@ export default function PortfolioDashboard() {
                               {fmt(posVal, currency)}
                               {lowVolume && (
                                 <span
-                                  title={`Low recent sales (${sales30d} in 30d) — market price may be unreliable. Tap Edit to enter your own value.`}
+                                  title={`Low recent sales (${sales30d} in 30d). Market price may be unreliable. Tap Edit to enter your own value.`}
                                   style={{ color: '#b8741f', marginLeft: 3, cursor: 'help' }}
                                 >*</span>
                               )}
@@ -1903,7 +1903,7 @@ export default function PortfolioDashboard() {
               }}>
                 <strong style={{ color: '#b8741f' }}>Heads up:</strong>{' '}
                 live market data for BGS, CGC, SGC, ACE and TAG is coming soon. For
-                now, those grades require a manual value — you can update yours
+                now, those grades require a manual value. You can update yours
                 from the Edit screen any time.
               </div>
 
@@ -1952,7 +1952,7 @@ export default function PortfolioDashboard() {
                     })}
                   </div>
                   <p style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", margin: '12px 0 0', lineHeight: 1.5 }}>
-                    Suggestions only — based on price momentum (30d ≥ 20% or 90d ≥ 30%). Not financial advice.
+                    Suggestions only, based on price momentum (30d ≥ 20% or 90d ≥ 30%). Not financial advice.
                   </p>
                 </div>
               )}
@@ -2024,7 +2024,7 @@ export default function PortfolioDashboard() {
                 <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 18px' }}>
                   <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 8 }}>💤 No Price Data</div>
                   <div style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginBottom: 8 }}>
-                    {deadWeight.length} card{deadWeight.length !== 1 ? 's' : ''} in your portfolio {deadWeight.length !== 1 ? 'have' : 'has'} no current market data — these may be rare, very new, or thinly traded.
+                    {deadWeight.length} card{deadWeight.length !== 1 ? 's' : ''} in your portfolio {deadWeight.length !== 1 ? 'have' : 'has'} no current market data. These may be rare, very new, or thinly traded.
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {deadWeight.slice(0, 3).map(item => (

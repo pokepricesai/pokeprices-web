@@ -25,25 +25,25 @@ const SECTION = readFileSync(join(process.cwd(), 'src', 'app', 'pokemon', '[slug
 
 // ── getPokemonSeo — 53B.1 title / description ─────────
 
-describe('53B.1 — getPokemonSeo template (title + description)', () => {
-  it('title exact match: "{Name} Card Prices — All English & Japanese Cards ({year}) | PokePrices"', () => {
+describe('53B.1 — getPokemonSeo template (title + description) [PP-URGENT-02 em-dash update]', () => {
+  it('title exact match: "{Name} Card Prices: All English & Japanese Cards ({year}) | PokePrices"', () => {
     const seo = getPokemonSeo({
       name: 'Pikachu', slug: 'pikachu', totalCards: 547,
       englishCards: 369, japaneseCards: 178, distinctSetCount: 134,
       hasPsa10Data: true, hasJapaneseCards: true, year: 2026,
     })
     expect(seo.title).toBe(
-      'Pikachu Card Prices — All English & Japanese Cards (2026) | PokePrices',
+      'Pikachu Card Prices: All English & Japanese Cards (2026) | PokePrices',
     )
   })
 
-  it('title fallback (no JP): "{Name} Card Prices — All Cards & Values ({year}) | PokePrices"', () => {
+  it('title fallback (no JP): "{Name} Card Prices: All Cards & Values ({year}) | PokePrices"', () => {
     const seo = getPokemonSeo({
       name: 'Zubat', slug: 'zubat', totalCards: 3, distinctSetCount: 2,
       hasPsa10Data: false, hasJapaneseCards: false, year: 2026,
     })
     expect(seo.title).toBe(
-      'Zubat Card Prices — All Cards & Values (2026) | PokePrices',
+      'Zubat Card Prices: All Cards & Values (2026) | PokePrices',
     )
   })
 
@@ -106,15 +106,19 @@ describe('53B.1 — page.tsx derives + forwards the 53B.1 inputs into getPokemon
 
 // ── H1 — new copy ────────────────────────────────────
 
-describe('53B.1 — H1 is the human-readable "All {Name} Cards — English & Japanese Prices"', () => {
+describe('53B.1 — H1 is the human-readable "All {Name} Cards | English & Japanese Prices" (PP-URGENT-02 em-dash removal)', () => {
   it('H1 template is conditional on hasJapaneseCards', () => {
     expect(PAGE).toMatch(
-      /const h1 = hasJapaneseCards\s*\n\s*\?\s*`All \$\{displayName\} Cards — English & Japanese Prices`\s*\n\s*:\s*`All \$\{displayName\} Cards & Prices`/,
+      /const h1 = hasJapaneseCards\s*\n\s*\?\s*`All \$\{displayName\} Cards \| English & Japanese Prices`\s*\n\s*:\s*`All \$\{displayName\} Cards & Prices`/,
     )
   })
 
   it('the old 53B "Card Prices & All {Name} Pokémon Cards" H1 template is gone', () => {
     expect(PAGE).not.toContain('Card Prices & All ${displayName} Pokémon Cards')
+  })
+
+  it('the H1 never contains an em dash', () => {
+    expect(PAGE).not.toMatch(/All \$\{displayName\} Cards —/)
   })
 })
 

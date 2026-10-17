@@ -40,7 +40,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
   if (!vendor) {
     return {
-      title:       'Vendor not found — PokePrices',
+      title:       'Vendor not found | PokePrices',
       description: 'This vendor profile is no longer available.',
       robots:      { index: false, follow: false },
       alternates:  { canonical },
@@ -50,13 +50,13 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const name        = vendor.name?.trim() || 'Pokémon card vendor'
   const location    = [vendor.city, vendor.country].filter(Boolean).join(', ')
   const fallbackDesc = location
-    ? `${name} — Pokémon card shop based in ${location}. Listed in the PokePrices vendor directory.`
-    : `${name} — listed in the PokePrices vendor directory of Pokémon card shops.`
+    ? `${name}: Pokémon card shop based in ${location}. Listed in the PokePrices vendor directory.`
+    : `${name} is listed in the PokePrices vendor directory of Pokémon card shops.`
   const description = vendor.description?.trim() || fallbackDesc
 
   const title = location
-    ? `${name} — Pokémon Card Shop in ${location} | PokePrices`
-    : `${name} — Pokémon Card Shop | PokePrices`
+    ? `${name}: Pokémon Card Shop in ${location} | PokePrices`
+    : `${name}: Pokémon Card Shop | PokePrices`
 
   const ogImage = vendor.image_url || `${SITE_URL}/og-image.png`
 

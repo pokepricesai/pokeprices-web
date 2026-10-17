@@ -51,12 +51,12 @@ export function getCardSeo(card: {
   if (useGradingVariant) {
     title       = `${cleanName}${numSuffix}: Is It Worth Grading? Raw vs PSA 10`
     description = psa10Usd && rawUsd
-      ? `${cleanName}${numSuffix} — Raw ${fmt(rawUsd)}, PSA 10 ${fmt(psa10Usd)} (${multiple.toFixed(1)}x). See the grading gap, recent trend, PSA population data and whether the upside is worth the risk.`
+      ? `${cleanName}${numSuffix}: Raw ${fmt(rawUsd)}, PSA 10 ${fmt(psa10Usd)} (${multiple.toFixed(1)}x). See the grading gap, recent trend, PSA population data and whether the upside is worth the risk.`
       : `See raw, PSA 9 and PSA 10 prices for ${cleanName}${numSuffix}. Compare the grading gap, recent trend and whether the upside looks worth the risk.`
   } else {
     title       = `${cleanName}${numSuffix} Price: Raw, PSA 9, PSA 10`
     description = rawUsd
-      ? `${cleanName}${numSuffix} from ${card.set_name} — Raw ${fmt(rawUsd)}${psa9Usd ? `, PSA 9 ${fmt(psa9Usd)}` : ''}${psa10Usd ? `, PSA 10 ${fmt(psa10Usd)}` : ''}. Price trend, grading spread, PSA population data and live eBay listings.`
+      ? `${cleanName}${numSuffix} from ${card.set_name}. Raw ${fmt(rawUsd)}${psa9Usd ? `, PSA 9 ${fmt(psa9Usd)}` : ''}${psa10Usd ? `, PSA 10 ${fmt(psa10Usd)}` : ''}. Price trend, grading spread, PSA population data and live eBay listings.`
       : `Track ${cleanName}${numSuffix} prices across raw, PSA 9 and PSA 10. See current value, grading spread, recent trend and population-backed context.`
   }
 
@@ -95,7 +95,7 @@ export const INSIGHTS_HUB_OG_DESCRIPTION = 'Pokémon card market trends, price m
  */
 export function getInsightsArticleFallbackDescription(headline: string): string {
   const safe = headline?.trim() || 'Pokémon card insight'
-  return `${safe} — Pokémon card market trends, price analysis and grading insights from PokePrices.`
+  return `${safe}. Pokémon card market trends, price analysis and grading insights from PokePrices.`
 }
 
 // ── Set page ───────────────────────────────────────────────────────
@@ -135,6 +135,32 @@ const SERP_TITLE_MAX = 72
  *   * canonical URL still uses the internal Japanese-prefixed slug —
  *     the URL identity is not rewritten.
  */
+// Pre-defined description openers for set pages. Chosen deterministically
+// per slug so each set reads slightly differently without the templates
+// drifting over time. Previously every set page served the same single
+// description, which read as formulaic across thousands of pages
+// (PP-URGENT-02 Job 2). The four variants are all factually equivalent
+// and each tops out below Google's typical ~155-char SERP cutoff.
+const SET_DESCRIPTION_VARIANTS = [
+  (name: string) => `Every ${name} Pokémon card tracked in one list, with raw, PSA 9 and PSA 10 values, the chase cards, grading opportunities and current set-wide price trends.`,
+  (name: string) => `Full ${name} card checklist with up-to-date raw and PSA 10 price-guide values, the biggest cards by market value, grading spreads and 30-day set trends.`,
+  (name: string) => `See the full ${name} card list, PSA 10 values, chase cards and grading opportunities. Price-guide values refresh nightly from recent sold-sales activity.`,
+  (name: string) => `Browse ${name} card by card: raw and PSA 10 price-guide values, the chase cards worth hunting, grading economics and the set's current direction.`,
+] as const
+
+/**
+ * Deterministic FNV-1a 32-bit hash. Pure. Used to pick a stable
+ * description variant per set so repeat visits always see the same copy.
+ */
+function fnvHash32(input: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i)
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0
+  }
+  return h >>> 0
+}
+
 export function getSetSeo(setName: string, slug?: string): SetSeo {
   const safeName = setName?.trim() || 'Pokémon'
   const isJp = safeName.startsWith('Japanese ')
@@ -143,8 +169,11 @@ export function getSetSeo(setName: string, slug?: string): SetSeo {
   const long     = longSetTitle(visible, jpMarker)
   const title    = long.length <= SERP_TITLE_MAX ? long : shortSetTitle(visible, jpMarker)
   const descName = isJp ? `${visible} Japanese` : visible
-  const description = `Browse ${descName} Pokémon cards with raw and PSA 10 prices. See the most valuable cards, chase cards, grading opportunities and current set price trends.`
-  // Canonical retains the internal Japanese-prefixed identity — URL
+  // Pick a deterministic description variant per set so the thousands of
+  // set pages do not all share one sentence.
+  const variant = SET_DESCRIPTION_VARIANTS[fnvHash32(safeName) % SET_DESCRIPTION_VARIANTS.length]
+  const description = variant(descName)
+  // Canonical retains the internal Japanese-prefixed identity. URL
   // routing must not depend on the visible display name.
   const canonical = `${SITE}/set/${slug ?? encodeURIComponent(safeName)}`
   return { title, description, canonical }
@@ -284,8 +313,8 @@ export function getPokemonSeo(input: PokemonSeoInput): PokemonSeo {
   // any Japanese cards exist. Brand tail + year drop before the body
   // is touched; the species name is preserved intact throughout.
   const body = input.hasJapaneseCards
-    ? `${safeName} Card Prices — All English & Japanese Cards`
-    : `${safeName} Card Prices — All Cards & Values`
+    ? `${safeName} Card Prices: All English & Japanese Cards`
+    : `${safeName} Card Prices: All Cards & Values`
   const yearTail = yearNum != null ? ` (${yearNum})` : ''
   const t1 = `${body}${yearTail} | PokePrices`
   const t2 = `${body}${yearTail}`

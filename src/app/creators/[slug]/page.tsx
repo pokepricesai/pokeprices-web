@@ -30,10 +30,10 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const { slug } = await params
   const creator = await getCreator(slug)
   if (!creator) notFound()
-  const title       = `${creator.name} — Pokémon TCG creator profile | PokePrices`
+  const title       = `${creator.name}: Pokémon TCG creator profile | PokePrices`
   const description = creator.description
     ? `${creator.name}: ${creator.description.slice(0, 150)}`
-    : `${creator.name} — Pokémon TCG creator profile on PokePrices. Find their YouTube, X, Instagram and more.`
+    : `${creator.name}: Pokémon TCG creator profile on PokePrices. Find their YouTube, X, Instagram and more.`
   const canonical = `https://www.pokeprices.io/creators/${slug}`
   return {
     title,
