@@ -185,15 +185,30 @@ describe('53B.1 — catalogue H2 gains "& Prices" suffix', () => {
   })
 })
 
-// ── Recent-sold wording correction (from 53B, still holds) ─
+// ── Market-data wording — PP-URGENT-01 Job 1 ──
+//
+// The old 53B/53B.1 tests asserted the page named PriceCharting as the
+// data source. PP-URGENT-01 removed public mentions of the third-party
+// provider and reworded the market-data claims to be accurate without
+// overstating ("real eBay sold listings"). The replacement tests
+// enforce the new, honest wording and the anti-regression that we do
+// NOT accidentally reintroduce PriceCharting into public page prose.
 
-describe('53B / 53B.1 — species prose + FAQ do not claim "recent sold listings"', () => {
-  it('page.tsx prose no longer says "by current sold-listing prices"', () => {
+describe('PP-URGENT-01 — species prose + FAQ describe market data accurately', () => {
+  it('page.tsx prose uses "price-guide value" wording, not "sold-listing prices"', () => {
     expect(PAGE).not.toMatch(/by current sold-listing prices/)
-    expect(PAGE).toMatch(/current PriceCharting price guide value/)
+    expect(PAGE).toMatch(/price-guide value/)
   })
 
-  it('getPokemonFaqItems catalogue answer names PriceCharting instead of "recent sold listings"', () => {
+  it('page.tsx no longer names PriceCharting publicly', () => {
+    // Comments and internal types still reference the provider for
+    // technical provenance; the user-visible prose must not.
+    const visibleBlock = PAGE.replace(/\/\/[^\n]*/g, '')  // strip line comments
+                            .replace(/\/\*[\s\S]*?\*\//g, '') // strip block comments
+    expect(visibleBlock).not.toMatch(/PriceCharting/)
+  })
+
+  it('getPokemonFaqItems catalogue answer describes aggregated recent-sales data', () => {
     const items = getPokemonFaqItems({
       name: 'Pikachu',
       cards: [
@@ -202,8 +217,8 @@ describe('53B / 53B.1 — species prose + FAQ do not claim "recent sold listings
       uniqueSets: 132,
     })
     const catalogue = items.find(i => i.question.startsWith('How many'))!
-    expect(catalogue.answer).not.toContain('recent sold listings')
-    expect(catalogue.answer).toContain('PriceCharting')
+    expect(catalogue.answer).not.toContain('PriceCharting')
+    expect(catalogue.answer).toContain('aggregated recent-sales price-guide value')
   })
 })
 

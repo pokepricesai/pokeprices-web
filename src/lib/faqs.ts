@@ -210,7 +210,7 @@ export function getPokemonFaqItems({
     const cheap = [...withPrice].sort((a, b) => (a.raw_usd ?? Infinity) - (b.raw_usd ?? Infinity))[0]
     items.push({
       question: `What is the cheapest ${name} card?`,
-      answer: `The cheapest ${name} card with current price data is ${cheap.card_name} from ${cheap.set_name} at ${fmtUsd(cheap.raw_usd)}. Modern bulk and reverse-holo printings are usually the most affordable way to add a ${name} to a collection.`,
+      answer: `The cheapest ${name} card with a current guide value is ${cheap.card_name} from ${cheap.set_name} at ${fmtUsd(cheap.raw_usd)}.`,
     })
   }
 
@@ -218,19 +218,21 @@ export function getPokemonFaqItems({
   if (firstAppearedSet && firstAppearedYear) {
     items.push({
       question: `When was the first ${name} Pokémon card released?`,
-      answer: `The first ${name} card appeared in ${firstAppearedSet} in ${firstAppearedYear}. Since then, ${name} has been printed across ${uniqueSets} ${uniqueSets === 1 ? 'set' : 'different sets'} with a wide range of artwork, rarity tiers and special editions.`,
+      answer: `The first ${name} card appeared in ${firstAppearedSet} in ${firstAppearedYear}, with ${uniqueSets} ${uniqueSets === 1 ? 'set' : 'different sets'} featuring the Pokémon since.`,
     })
   }
 
   // 5. Are these cards a good investment? (NB: careful framing)
+  //   Written as a direct, honest answer — no stock "vintage up / modern
+  //   bulk" filler, no implied endorsement. Keeps the real top-mover
+  //   datapoint when we have one.
   if (withPrice.length > 0) {
-    const top = [...withPrice].sort((a, b) => (b.raw_usd ?? 0) - (a.raw_usd ?? 0))[0]
     const riserBit = topRiser && topRiser.raw_pct_30d != null && topRiser.raw_pct_30d > 0
-      ? ` Over the last 30 days, ${topRiser.card_name} (${topRiser.set_name}) has moved ${topRiser.raw_pct_30d > 0 ? '+' : ''}${topRiser.raw_pct_30d.toFixed(1)}%.`
+      ? ` For context on recent activity: ${topRiser.card_name} (${topRiser.set_name}) is up ${topRiser.raw_pct_30d.toFixed(1)}% over 30 days.`
       : ''
     items.push({
       question: `Are ${name} cards a good investment?`,
-      answer: `It depends entirely on the specific card. Vintage holos and graded copies of cards like ${top.card_name} have appreciated significantly, while modern reprints typically sit near bulk. Card values can fall as well as rise.${riserBit} Always cross-check current eBay sold listings before deciding, and this is not financial advice.`,
+      answer: `That depends on the specific card, its condition and the price you pay. Card values can and do fall as well as rise.${riserBit} Always cross-check live eBay sold listings before buying with an investment thesis in mind — and this isn't financial advice.`,
     })
   }
 

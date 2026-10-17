@@ -19,6 +19,7 @@ import EbayLiveListings, { EbayInlineLink } from '@/components/EbayLiveListings'
 import { buildCardEbayQuery } from '@/lib/ebayAffiliate'
 import { getPokemonFaqItems } from '@/lib/faqs'
 import { getPokemonSeo, pokeApiEnglishDisplayName } from '@/lib/seo-helpers'
+import { pickVariant } from '@/lib/prose/variety'
 import SpeciesInteractiveSection from './SpeciesInteractiveSection'
 import DossierButton from './DossierButton'
 // Block 5A-W-46C — server-rendered "card prices at a glance" summary.
@@ -509,20 +510,39 @@ export default async function PokemonSpeciesPage({
   const showEnglishSection  = hasJapaneseCards && englishCards.length > 0
   const showJapaneseSection = hasJapaneseCards && japaneseCards.length > 0
 
-  // Programmatic prose — every sentence is conditional on real data presence.
+  // Programmatic prose — fact-dense, deterministic, varied per species.
+  // Every sentence is conditional on data actually being available. No
+  // canned colour commentary ("vintage holos tend to lead the top end",
+  // "modern reprints sit near bulk") — those read as AI filler at scale.
   const proseParts: string[] = []
   if (sp && sp.total_cards > 0) {
     const parts: string[] = []
+    // Opener — deterministic variety keyed on slug so pages don't all
+    // read the same but a given page stays identical across refreshes.
     if (sp.first_appeared_set && sp.first_appeared_year) {
-      parts.push(`${displayName} has appeared on ${sp.total_cards} different Pokémon TCG cards across ${distinctSetCount || 'multiple'} sets since first being printed in ${sp.first_appeared_set} in ${sp.first_appeared_year}.`)
+      const openerVariants = [
+        `${displayName} first appeared in ${sp.first_appeared_set} (${sp.first_appeared_year}) and has been printed on ${sp.total_cards} Pokémon TCG cards across ${distinctSetCount || 'multiple'} sets since.`,
+        `Since debuting in ${sp.first_appeared_set} in ${sp.first_appeared_year}, ${displayName} has made ${sp.total_cards} card appearances across ${distinctSetCount || 'multiple'} sets.`,
+        `${sp.total_cards} ${displayName} cards are catalogued here, spanning ${distinctSetCount || 'multiple'} sets dating back to ${sp.first_appeared_set} in ${sp.first_appeared_year}.`,
+        `${displayName}'s TCG history runs from ${sp.first_appeared_set} (${sp.first_appeared_year}) to today — ${sp.total_cards} cards in total across ${distinctSetCount || 'multiple'} sets.`,
+      ]
+      parts.push(pickVariant(slug, openerVariants))
     } else {
-      parts.push(`${displayName} has appeared on ${sp.total_cards} Pokémon TCG cards.`)
+      const openerVariants = [
+        `${displayName} appears on ${sp.total_cards} Pokémon TCG cards tracked here.`,
+        `${sp.total_cards} ${displayName} cards are catalogued in the Pokémon TCG so far.`,
+        `There are ${sp.total_cards} ${displayName} cards in our catalogue.`,
+      ]
+      parts.push(pickVariant(slug, openerVariants))
     }
     if (primaryType) {
-      const typeStr = sp.type_secondary ? `${primaryType.charAt(0).toUpperCase() + primaryType.slice(1)} / ${sp.type_secondary.charAt(0).toUpperCase() + sp.type_secondary.slice(1)}` : `${primaryType.charAt(0).toUpperCase() + primaryType.slice(1)}`
+      const typeCap = primaryType.charAt(0).toUpperCase() + primaryType.slice(1)
+      const typeStr = sp.type_secondary
+        ? `${typeCap} / ${sp.type_secondary.charAt(0).toUpperCase() + sp.type_secondary.slice(1)}`
+        : typeCap
       const lineage = isLegendary ? ' Legendary' : isMythical ? ' Mythical' : ''
-      const genStr = sp.generation ? ` from generation ${sp.generation}` : ''
-      parts.push(`It is a${lineage} ${typeStr}-type Pokémon${genStr}.`)
+      const genStr = sp.generation ? ` introduced in generation ${sp.generation}` : ''
+      parts.push(`In the games, it's a${lineage} ${typeStr}-type${genStr}.`)
     }
     proseParts.push(parts.join(' '))
   }
@@ -533,19 +553,26 @@ export default async function PokemonSpeciesPage({
     const valueParts: string[] = []
     if (raw)   valueParts.push(`${fmtUsd(raw)} raw`)
     if (psa10) valueParts.push(`${fmtUsd(psa10)} in PSA 10`)
-    const valueStr = valueParts.length ? ` — currently ${valueParts.join(' and ')}` : ''
-    // Price-guide values are aggregated recent-sales figures, not literal single listings.
-    proseParts.push(`By current price-guide value, the most valuable ${displayName} card is the ${top.card_name} from ${top.set_name}${valueStr}. Vintage holos, full arts and special illustrations tend to lead the top end, while modern reprints sit closer to bulk.`)
+    const valueStr = valueParts.length ? ` — ${valueParts.join(' / ')}` : ''
+    // Fact-only sentence. The canned "vintage holos lead, modern
+    // reprints bulk" closer was removed — it added no information and
+    // read as AI filler at scale.
+    const sentenceVariants = [
+      `The top-value ${displayName} card right now is ${top.card_name} from ${top.set_name}${valueStr}.`,
+      `${top.card_name} (${top.set_name}) is the most valuable ${displayName} card tracked here${valueStr}.`,
+      `By current guide value, ${displayName}'s chase card is ${top.card_name} out of ${top.set_name}${valueStr}.`,
+    ]
+    proseParts.push(pickVariant(`${slug}:top`, sentenceVariants))
   }
   if (sp?.most_recent_set && risers.length > 0) {
     const r = risers[0]
     if (r.raw_pct_30d != null && r.raw_pct_30d > 0) {
-      proseParts.push(`The most recent ${displayName} cards are from ${sp.most_recent_set}. Over the last 30 days, the biggest mover for ${displayName} is ${r.card_name} (${r.set_name}), up ${r.raw_pct_30d.toFixed(1)}%.`)
+      proseParts.push(`The newest printings sit in ${sp.most_recent_set}. The strongest 30-day mover is ${r.card_name} (${r.set_name}), up ${r.raw_pct_30d.toFixed(1)}%.`)
     } else {
-      proseParts.push(`The most recent ${displayName} cards are from ${sp.most_recent_set}.`)
+      proseParts.push(`The newest printings sit in ${sp.most_recent_set}.`)
     }
   } else if (sp?.most_recent_set) {
-    proseParts.push(`The most recent ${displayName} cards are from ${sp.most_recent_set}.`)
+    proseParts.push(`The newest printings sit in ${sp.most_recent_set}.`)
   }
 
   // FAQ
