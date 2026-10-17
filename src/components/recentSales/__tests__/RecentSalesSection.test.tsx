@@ -85,7 +85,7 @@ describe('RecentSalesSection — empty / null', () => {
 describe('RecentSalesSection — title and copy', () => {
   it('renders the section title when rows exist', () => {
     const html = render(data())
-    expect(html).toContain('Recent verified sales')
+    expect(html).toContain('Recent tracked sales')
   })
 
   it('does NOT render PriceCharting / source copy', () => {

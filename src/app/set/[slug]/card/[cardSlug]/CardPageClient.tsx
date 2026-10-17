@@ -540,9 +540,15 @@ export default function CardPageClient({
   const psa10Multiple = card.psa10_usd && card.raw_usd ? card.psa10_usd / card.raw_usd : null
   const psa9Multiple  = card.psa9_usd  && card.raw_usd ? card.psa9_usd  / card.raw_usd : null
 
-  const gradingCostCents  = 2500
-  const gradingProfitCents = card.raw_usd && card.psa10_usd
-    ? card.psa10_usd - card.raw_usd - gradingCostCents
+  // PP-GOOGLE-02: dropped the hardcoded $25 fee that was applied to
+  // every card regardless of value. PSA's fee tiers scale from $25
+  // (Economy, cards under ~$499) to Walk-Through for cards >$10k. A
+  // single flat number was misleading on high-value pages (a $12k
+  // Charizard was advertised as "net ~$12k after $25 fee"). We now
+  // show the gross raw→PSA10 spread only; the fee itself is deferred
+  // to PSA's own current pricing page.
+  const gradingGrossSpreadCents = card.raw_usd && card.psa10_usd
+    ? card.psa10_usd - card.raw_usd
     : null
 
   const hasLongTermData = trend && (trend.raw_365d_ago != null || trend.raw_pct_365d != null)
@@ -564,13 +570,19 @@ export default function CardPageClient({
 
   const gemRate = psaPop?.gem_rate ? parseFloat(psaPop.gem_rate) : null
 
+  // PP-GOOGLE-02: `expectedValueCents` previously used the hardcoded
+  // $25 grading-cost assumption to compute a probability-weighted net.
+  // Reworked to compute the probability-weighted GROSS return only.
+  // The fee tier for a given card value is deferred to PSA's own
+  // pricing page; no hardcoded fee enters the math.
   const expectedValueCents: number | null = card.raw_usd && card.psa10_usd && gemRate != null
     ? (() => {
         const p10  = gemRate / 100
         const p9   = (1 - p10) * 0.6
         const p9val = card.psa9_usd ?? Math.round(card.psa10_usd * 0.25)
         const expectedReturn = (p10 * card.psa10_usd) + (p9 * p9val) + ((1 - p10 - p9) * card.raw_usd * 0.8)
-        return Math.round(expectedReturn - card.raw_usd - gradingCostCents)
+        // Return GROSS expected delta (no hardcoded grading fee).
+        return Math.round(expectedReturn - card.raw_usd)
       })()
     : null
 
@@ -650,9 +662,9 @@ export default function CardPageClient({
     })
   }
   if (expectedValueCents != null) tiles.push({
-    label: 'Expected Grade Value',
+    label: 'Expected Gross Return',
     value: `${expectedValueCents > 0 ? '+' : ''}$${(expectedValueCents / 100).toFixed(0)}`,
-    sub: gemRate != null ? `at ${gemRate.toFixed(1)}% gem rate` : 'probability-weighted',
+    sub: gemRate != null ? `probability-weighted · at ${gemRate.toFixed(1)}% gem` : 'probability-weighted',
     highlight: expectedValueCents > 0,
   })
 
@@ -883,7 +895,9 @@ export default function CardPageClient({
         <Panel>
           <SectionLabel>Grading Calculator</SectionLabel>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 16px', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
-            Based on PSA Standard tier (~$25 USD). Assumes a perfect PSA 10 result; actual outcome depends on card condition.
+            Figures below are the gross raw-to-PSA-10 spread. PSA grading fees vary by card value and service tier — check{' '}
+            <a href="https://www.psacard.com/services" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)' }}>psacard.com/services</a>{' '}
+            for the fee applicable to this card. Assumes a perfect PSA 10; actual outcome depends on card condition.
           </p>
 
           {isLotteryCard && (
@@ -893,12 +907,20 @@ export default function CardPageClient({
           )}
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10, marginBottom: 18 }}>
-            <StatTile label="Buy Raw"             value={`$${(card.raw_usd / 100).toFixed(0)}`} />
-            <StatTile label="Grading Fee"          value="~$25" sub="PSA Standard" />
-            <StatTile label="PSA 10 Value"         value={`$${(card.psa10_usd / 100).toFixed(0)}`} />
-            <StatTile label="Best Case (PSA 10)"   value={gradingProfitCents != null ? `${gradingProfitCents > 0 ? '+' : ''}$${(gradingProfitCents / 100).toFixed(0)}` : '—'} sub="if you pull a 10" />
+            <StatTile label="Raw Price"           value={`$${(card.raw_usd / 100).toFixed(0)}`} />
+            <StatTile label="PSA 10 Value"        value={`$${(card.psa10_usd / 100).toFixed(0)}`} />
+            <StatTile
+              label="Gross Premium (PSA 10)"
+              value={gradingGrossSpreadCents != null ? `${gradingGrossSpreadCents > 0 ? '+' : ''}$${(gradingGrossSpreadCents / 100).toFixed(0)}` : '—'}
+              sub="before PSA fees"
+            />
             {expectedValueCents != null && (
-              <StatTile label="Expected Value" value={`${expectedValueCents > 0 ? '+' : ''}$${(expectedValueCents / 100).toFixed(0)}`} sub={gemRate != null ? `at ${gemRate.toFixed(1)}% gem rate` : 'probability-weighted'} highlight={expectedValueCents > 0} />
+              <StatTile
+                label="Expected Gross Return"
+                value={`${expectedValueCents > 0 ? '+' : ''}$${(expectedValueCents / 100).toFixed(0)}`}
+                sub={gemRate != null ? `probability-weighted · at ${gemRate.toFixed(1)}% gem` : 'probability-weighted'}
+                highlight={expectedValueCents > 0}
+              />
             )}
           </div>
 
@@ -1000,11 +1022,16 @@ export default function CardPageClient({
       <ExploreMoreSet setName={card.set_name} currentUrlSlug={cardUrlSlug} />
 
       {/* FAQ — visible content + FAQPage schema */}
+      {/*
+        PP-GOOGLE-02: gradingProfitCents removed. The FAQ no longer
+        quotes a dollar net-profit figure. It now describes the
+        gross raw→PSA10 spread and defers fee details to PSA's
+        current pricing page.
+      */}
       <FAQ items={getCardFaqItems({
         card,
         gemRate,
         psa10Multiple: psa10Multiple ?? undefined,
-        gradingProfitCents: gradingProfitCents ?? undefined,
       })} />
     </div>
   )

@@ -1,6 +1,17 @@
-// CardStructuredData — @graph of WebPage + Dataset
-// Dataset type is accurate for price data and can unlock Google's Dataset label
-// Deliberately avoids Product/Offer/InStock which caused false "In Stock" search snippets
+// CardStructuredData — WebPage markup for an individual card page.
+//
+// PP-GOOGLE-02: dropped the per-card Dataset @graph entry that this
+// component used to emit on all ~44,000 card URLs. Google's Dataset
+// schema is intended for "structured collections of data about a
+// specific topic" (government, scientific, OpenAIRE-style records with
+// a DOI or similar persistent identifier). A single trading-card
+// price snapshot does not meet that intent, and emitting Dataset at
+// catalogue scale was a plausible contributor to the Oct 2026 quality
+// re-weighting. The WebPage entry below is standard, correct, and
+// kept intact. BreadcrumbList is emitted separately from the server
+// layer; FAQPage is emitted via <FAQ>. Deliberately still avoids
+// Product/Offer/InStock, which caused false "In Stock" search snippets
+// before.
 export default function CardStructuredData({ card }: { card: any }) {
   if (!card) return null
 
@@ -19,53 +30,23 @@ export default function CardStructuredData({ card }: { card: any }) {
 
   const graph = {
     '@context': 'https://schema.org',
-    '@graph': [
-      {
-        '@type': 'WebPage',
-        '@id': `${pageUrl}#webpage`,
-        name: `${card.card_name} Price Guide`,
-        description: `${card.card_name} from ${card.set_name}. Current market prices: ${priceStr}. Includes PSA population data, price trend and grading analysis.`,
-        url: pageUrl,
-        image: card.image_url || undefined,
-        isPartOf: { '@id': 'https://www.pokeprices.io/#website' },
-        about: {
-          '@type': 'Thing',
-          name: card.card_name,
-          description: `${card.card_name} Pokémon trading card from ${card.set_name}`,
-          image: card.image_url || undefined,
-        },
-        primaryImageOfPage: card.image_url ? { '@type': 'ImageObject', url: card.image_url } : undefined,
-        dateModified: now,
-      },
-      {
-        '@type': 'Dataset',
-        '@id': `${pageUrl}#dataset`,
-        name: `${card.card_name} (${card.set_name}) Price Data`,
-        description: `Historical and current market prices for ${card.card_name} from ${card.set_name}. Covers raw, PSA 9 and PSA 10 grades with PSA population data. Updated daily from recent sold-sales activity.`,
-        url: pageUrl,
-        license: 'https://www.pokeprices.io/terms',
-        creator: { '@id': 'https://www.pokeprices.io/#org' },
-        publisher: { '@id': 'https://www.pokeprices.io/#org' },
-        isAccessibleForFree: true,
-        keywords: [
-          card.card_name,
-          card.set_name,
-          'Pokémon card prices',
-          'PSA 10 value',
-          'PSA population',
-          'trading card price history',
-        ],
-        variableMeasured: [
-          'Raw card price (USD)',
-          'PSA 9 price (USD)',
-          'PSA 10 price (USD)',
-          'PSA 10 population',
-          '30-day price change',
-        ],
-        temporalCoverage: '2020/..',
-        dateModified: now,
-      },
-    ],
+    '@type': 'WebPage',
+    '@id': `${pageUrl}#webpage`,
+    name: `${card.card_name} Price Guide`,
+    description: priceStr
+      ? `${card.card_name} from ${card.set_name}. Current price-guide values: ${priceStr}. Includes PSA population data, price trend and grading analysis.`
+      : `${card.card_name} from ${card.set_name}. PSA population data, price trend and grading analysis.`,
+    url: pageUrl,
+    image: card.image_url || undefined,
+    isPartOf: { '@id': 'https://www.pokeprices.io/#website' },
+    about: {
+      '@type': 'Thing',
+      name: card.card_name,
+      description: `${card.card_name} Pokémon trading card from ${card.set_name}`,
+      image: card.image_url || undefined,
+    },
+    primaryImageOfPage: card.image_url ? { '@type': 'ImageObject', url: card.image_url } : undefined,
+    dateModified: now,
   }
 
   return (

@@ -42,12 +42,12 @@ describe('buildEmailDigest — subject', () => {
       ev({ cardName: 'A', setName: 'Base', rule: 'psa10_change' }),
       ev({ cardName: 'B', setName: 'Base' }),
     ])
-    expect(d.subject).toBe('Your PokePrices alert digest — 2 cards moved')
+    expect(d.subject).toBe('Your PokePrices alert digest: 2 cards moved')
   })
 
   it('uses singular when exactly one distinct card moved', () => {
     const d = buildEmailDigest([ev({ cardName: 'A', setName: 'Base' })])
-    expect(d.subject).toBe('Your PokePrices alert digest — 1 card moved')
+    expect(d.subject).toBe('Your PokePrices alert digest: 1 card moved')
   })
 
   it('prefixes [SAMPLE] when sample=true', () => {

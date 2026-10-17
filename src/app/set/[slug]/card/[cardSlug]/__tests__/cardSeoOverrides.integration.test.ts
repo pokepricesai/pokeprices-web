@@ -223,7 +223,7 @@ describe('generateMetadata — override does NOT apply on the error branch', () 
   it('RPC error keeps the SAFE FALLBACK title, ignoring the override map', async () => {
     setRpc(() => ({ data: null, error: { message: 'boom' } }))
     const meta = await generateMetadata(params('Evolving Skies', 'umbreon-vmax-215')) as Meta
-    expect(meta.title).toBe('Pokémon Card Price Guide — PokePrices')
+    expect(meta.title).toBe('Pokémon Card Price Guide | PokePrices')
     expect(meta.description).toBe('Track raw, PSA 9 and PSA 10 Pokémon card prices, grading data and recent sales.')
     expect(meta.robots).toEqual({ index: false, follow: true })
   })

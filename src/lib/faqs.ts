@@ -25,7 +25,6 @@ export function getCardFaqItems({
   card,
   gemRate,
   psa10Multiple,
-  gradingProfitCents,
 }: {
   card: {
     card_name: string
@@ -37,6 +36,12 @@ export function getCardFaqItems({
   }
   gemRate?: number | null
   psa10Multiple?: number | null
+  /**
+   * @deprecated PP-GOOGLE-02 removed the hardcoded $25 grading-fee
+   * assumption; the "Is it worth grading?" FAQ no longer quotes a
+   * net dollar figure, so callers no longer need to compute or pass
+   * this value.
+   */
   gradingProfitCents?: number | null
 }): FAQItem[] {
   const items: FAQItem[] = []
@@ -57,19 +62,22 @@ export function getCardFaqItems({
   }
 
   // Q2: Worth grading?
+  //
+  // PP-GOOGLE-02: removed the "net approximately $X after a $25 grading
+  // fee" claim. PSA's fees vary by card value and service tier (Economy
+  // through Walk-Through), and the previous answer applied a single
+  // hardcoded $25 fee to all cards including those worth tens of
+  // thousands of dollars. The replacement describes the gross premium
+  // only, mentions that fees vary, and defers to PSA's own fee page.
   if (card.raw_usd && card.psa10_usd && psa10Multiple != null) {
-    const worthIt = gradingProfitCents != null && gradingProfitCents > 0
-    if (worthIt) {
-      items.push({
-        question: `Is ${fullName} worth grading?`,
-        answer: `The PSA 10 price of ${fmtUsd(card.psa10_usd)} is ${psa10Multiple.toFixed(1)}× the raw price of ${fmtUsd(card.raw_usd)}. After a $25 grading fee, a PSA 10 result would net approximately ${fmtUsd((gradingProfitCents ?? 0) + 2500)}, assuming the card actually grades a 10.${gemRate != null ? ` Only ${gemRate.toFixed(1)}% of submitted copies receive PSA 10, so factor that probability into the decision.` : ''}`,
-      })
-    } else {
-      items.push({
-        question: `Is ${fullName} worth grading?`,
-        answer: `The PSA 10 price of ${fmtUsd(card.psa10_usd)} is ${psa10Multiple.toFixed(1)}× the raw price of ${fmtUsd(card.raw_usd)}. After grading fees the upside looks limited. Wait for the raw price to drop, or grade only if you have a near-mint copy you are confident about.`,
-      })
-    }
+    const feeNote = `Grading fees vary by card value and PSA service tier — see PSA's current fee page before submitting`
+    const gemBit = gemRate != null
+      ? ` Only ${gemRate.toFixed(1)}% of submitted copies receive PSA 10, so factor that probability into the decision.`
+      : ''
+    items.push({
+      question: `Is ${fullName} worth grading?`,
+      answer: `The PSA 10 price of ${fmtUsd(card.psa10_usd)} is ${psa10Multiple.toFixed(1)}× the raw price of ${fmtUsd(card.raw_usd)}. ${feeNote}.${gemBit}`,
+    })
   }
 
   // Q3: Gem rate
