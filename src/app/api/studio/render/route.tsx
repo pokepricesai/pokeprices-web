@@ -208,7 +208,7 @@ function renderMovers(movers: any[], period: string, direction: string, v: Retur
       ))}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 20px', borderTop: `1px solid ${v.br}`, marginTop: 'auto' }}>
-        <span style={{ fontSize: 9, color: v.mu }}>Data: PriceCharting</span>
+        <span style={{ fontSize: 9, color: v.mu }}>pokeprices.io</span>
         <span style={{ fontSize: 9, color: v.mu }}>Not financial advice</span>
       </div>
     </div>
@@ -256,7 +256,7 @@ function renderSetReport(cards: any[], setName: string, v: ReturnType<typeof get
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 20px', borderTop: `1px solid ${v.br}`, marginTop: 'auto' }}>
-        <span style={{ fontSize: 9, color: v.mu }}>Data: PriceCharting · pokeprices.io</span>
+        <span style={{ fontSize: 9, color: v.mu }}>pokeprices.io · nightly price guide</span>
         <span style={{ fontSize: 9, color: v.mu }}>Not financial advice</span>
       </div>
     </div>

@@ -163,7 +163,7 @@ export default function GuessPriceClient() {
       </div>
 
       <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', marginTop: 18, lineHeight: 1.6 }}>
-        Price = current raw market value from confirmed sold listings. Play as many rounds as you like.
+        Price = current raw price-guide value, derived from confirmed sold-sales data. Play as many rounds as you like.
       </p>
     </div>
   )

@@ -52,7 +52,7 @@ export function getCardFaqItems({
     if (card.psa10_usd) parts.push(`PSA 10: ${fmtUsd(card.psa10_usd)}`)
     items.push({
       question: `How much is ${fullName} from ${setName} worth?`,
-      answer: `${fullName} from ${setName} is currently worth ${parts.join(', ')} based on recent sold listings. Prices update daily from real eBay sales.`,
+      answer: `${fullName} from ${setName} currently reads ${parts.join(', ')} in our aggregated recent-sales price guide. The guide is rebuilt nightly from sold-sales data across the major Pokémon TCG marketplaces — not asking prices.`,
     })
   }
 
@@ -86,7 +86,7 @@ export function getCardFaqItems({
   // Q4: Where do prices come from?
   items.push({
     question: `Where do PokePrices ${fullName} prices come from?`,
-    answer: `Prices are tracked nightly from real sold listings on PriceCharting (raw, PSA 9 and PSA 10). PSA population data is sourced from PSA's public reports. We do not use asking prices — only confirmed sales.`,
+    answer: `Raw, PSA 9 and PSA 10 figures come from our aggregated recent-sales price guide, rebuilt nightly from sold-sales data across the major Pokémon TCG marketplaces. The displayed values are guide numbers, not individual listings. PSA population data is sourced directly from PSA's public population reports. We never use asking prices — only confirmed sales activity feeds the guide.`,
   })
 
   return items
@@ -115,7 +115,7 @@ export function getSetFaqItems({
   // Q1: How many cards
   items.push({
     question: `How many cards are in ${setName}?`,
-    answer: `${setName} has ${total} cards tracked on PokePrices.${withPrice.length > 0 ? ` ${withPrice.length} of those have current price data from recent sold listings.` : ''}`,
+    answer: `${setName} has ${total} cards tracked on PokePrices.${withPrice.length > 0 ? ` ${withPrice.length} of those currently carry price-guide values from recent sold-sales data.` : ''}`,
   })
 
   // Q2: When released
@@ -136,7 +136,7 @@ export function getSetFaqItems({
         : ''
       items.push({
         question: `What is the most valuable card in ${setName}?`,
-        answer: `The most valuable raw card in ${setName} is ${mostValRaw.card_name} at ${fmtUsd(mostValRaw.raw_usd)} based on recent sold listings.${psa10Bit}`,
+        answer: `By raw price-guide value, the most valuable card in ${setName} is ${mostValRaw.card_name} at ${fmtUsd(mostValRaw.raw_usd)}.${psa10Bit}`,
       })
     }
   }
@@ -145,14 +145,14 @@ export function getSetFaqItems({
   if (totalSetValueCents && totalSetValueCents > 0 && withPrice.length > 5) {
     items.push({
       question: `How much does it cost to complete ${setName} in raw condition?`,
-      answer: `Buying every card in ${setName} at current raw prices would cost approximately ${fmtUsd(totalSetValueCents)}, calculated by summing the current sold-listing price of each tracked card. Singles can almost always be bought below sealed/booster rates.`,
+      answer: `Buying every card in ${setName} at the current guide prices would cost approximately ${fmtUsd(totalSetValueCents)}, calculated by summing each card's raw price-guide value. Individual singles can usually be bought below that total if you shop patiently.`,
     })
   }
 
   // Q5: Where prices come from
   items.push({
     question: `How are ${setName} prices calculated on PokePrices?`,
-    answer: `Every ${setName} card price comes from real sold listings tracked nightly via PriceCharting. We never use asking prices. PSA 9 and PSA 10 prices reflect graded sales of the same card. PSA population numbers come from PSA's public reports.`,
+    answer: `Each ${setName} price is a guide value derived from recent sold-sales data on the major Pokémon TCG marketplaces, refreshed nightly. We don't use asking prices. PSA 9 and PSA 10 figures are guide values for graded copies of the same card. PSA population numbers come from PSA's public reports.`,
   })
 
   return items
@@ -185,12 +185,11 @@ export function getPokemonFaqItems({
   const withPrice = cards.filter(c => c.raw_usd && c.raw_usd > 0)
 
   // 1. How many cards exist?
-  // Block 5A-W-53B — replaces "recent sold listings" wording
-  // where the underlying value is a PriceCharting price-guide
-  // number, not a literal sold listing.
+  // The underlying values are aggregated price-guide numbers, not
+  // literal sold listings — kept the wording honest in Job PP-URGENT-01.
   items.push({
     question: `How many ${name} Pokémon cards are there?`,
-    answer: `PokePrices tracks ${cards.length} ${name} cards across ${uniqueSets} ${uniqueSets === 1 ? 'set' : 'different sets'} of the Pokémon TCG. ${withPrice.length} have current price guide data via PriceCharting.`,
+    answer: `PokePrices tracks ${cards.length} ${name} cards across ${uniqueSets} ${uniqueSets === 1 ? 'set' : 'different sets'} of the Pokémon TCG. ${withPrice.length} currently carry an aggregated recent-sales price-guide value.`,
   })
 
   // 2. What is the most valuable card?
@@ -202,7 +201,7 @@ export function getPokemonFaqItems({
       : ''
     items.push({
       question: `What is the most valuable ${name} card?`,
-      answer: `The most valuable ${name} card by current raw price is ${top.card_name} from ${top.set_name} at ${fmtUsd(top.raw_usd)} in the PriceCharting price guide.${psa10Bit}`,
+      answer: `By raw price-guide value, the most valuable ${name} card is ${top.card_name} from ${top.set_name} at ${fmtUsd(top.raw_usd)}.${psa10Bit}`,
     })
   }
 
@@ -253,7 +252,7 @@ export function getHomeFaqItems(): FAQItem[] {
   return [
     {
       question: 'How do I check what a Pokémon card is worth?',
-      answer: 'Search the card by name on PokePrices, or browse by set. Each card page shows the current raw value, PSA 9 and PSA 10 prices, the 30-day trend and PSA population — all sourced from real sold listings, not asking prices. Free, no login.',
+      answer: 'Search the card by name on PokePrices, or browse by set. Each card page shows the current raw price-guide value, PSA 9 and PSA 10 figures, the 30-day trend and PSA population — all derived from aggregated recent sold-sales data, never from asking prices. Free, no login.',
     },
     {
       question: 'How do I know if my Pokémon card is valuable?',
@@ -261,7 +260,7 @@ export function getHomeFaqItems(): FAQItem[] {
     },
     {
       question: 'Where does the Pokémon card price data come from?',
-      answer: 'PokePrices tracks sold listings from PriceCharting, updated nightly. Every price you see reflects what cards have actually sold for, not asking prices. PSA population data is scraped directly from PSA\'s public population reports and refreshed biweekly.',
+      answer: 'PokePrices runs an aggregated recent-sales price guide, rebuilt nightly from sold-sales data across the major Pokémon TCG marketplaces (eBay, TCGplayer, Heritage, Goldin and others). Every figure you see reflects confirmed sales activity, not asking prices. PSA population numbers come straight from PSA\'s own public population reports, refreshed biweekly.',
     },
     {
       question: 'Is PokePrices really free to use?',
@@ -273,11 +272,11 @@ export function getHomeFaqItems(): FAQItem[] {
     },
     {
       question: 'How often are Pokémon card prices updated?',
-      answer: 'Raw, PSA 9 and PSA 10 prices for every tracked card refresh nightly from PriceCharting sold-listing data — the scraper runs at 08:00 UTC every day. The 7-day, 30-day and 90-day percentage moves are recomputed at the same time. PSA population numbers are updated biweekly from PSA.com. Prices are nightly, not real-time.',
+      answer: 'Raw, PSA 9 and PSA 10 price-guide values for every tracked card refresh nightly from the latest sold-sales data — the refresh runs around 08:00 UTC daily. The 7-day, 30-day and 90-day percent moves are recomputed at the same time. PSA population numbers are updated biweekly from PSA.com. Prices are nightly, not real-time.',
     },
     {
       question: 'How quickly are new Pokémon sets added to PokePrices?',
-      answer: 'New English sets are typically added within a day or two of release — the 30th Celebration set (16 September 2026) went live the same day, joining a catalogue of 65,000+ cards across 280+ sets. Once a new set is catalogued, it flows into the same nightly PriceCharting scrape as every other set, so raw and graded prices appear from the next scheduled run onward.',
+      answer: 'New English sets are typically added within a day or two of release — the 30th Celebration set (16 September 2026) went live the same day, joining a catalogue of 65,000+ cards across 280+ sets. Once a new set is catalogued, it flows into the same nightly price-guide refresh as every other set, so raw and graded figures appear from the next scheduled run onward.',
     },
     {
       question: 'How do I know the PSA population data is accurate?',

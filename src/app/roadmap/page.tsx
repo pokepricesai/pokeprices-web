@@ -33,7 +33,7 @@ type FeatureBlock = {
 const featureBlocks: FeatureBlock[] = [
   {
     title: 'Live Pokémon card prices and history',
-    blurb: 'Every card page shows the current raw (ungraded) value plus PSA 9 and PSA 10 prices, a 30 and 90 day trend, all-time high, drawdown from peak and a sparkline of recent activity. Prices are sourced from real sold listings, never asking prices — so what you see is what cards actually changed hands for.',
+    blurb: 'Every card page shows the current raw (ungraded) value plus PSA 9 and PSA 10 prices, a 30 and 90 day trend, all-time high, drawdown from peak and a sparkline of recent activity. Prices are guide values derived from recent sold-sales activity across the major marketplaces, never asking prices — so what you see reflects what cards actually changed hands for.',
     links: [
       { label: 'Browse all sets',           href: '/browse',          description: 'Every Pokémon TCG set we track, filterable by era.' },
       { label: 'Risers & fallers',          href: '/visualisations/risers-fallers', description: 'Biggest 30-day movers across the market.' },
@@ -144,7 +144,7 @@ const roadmapNow: RoadmapItem[] = [
 ]
 
 const roadmapSoon: RoadmapItem[] = [
-  { title: 'Set-level price index from PriceCharting', blurb: 'Pull the set-level trend lines that PriceCharting calculates so you can see how an entire set is moving in one chart, not just card by card.' },
+  { title: 'Set-level price index',                    blurb: 'A per-set trend line composed from the price-guide values of every card in the set, so you can see how an entire set is moving in one chart, not just card by card.' },
   { title: 'Release calendar table',                   blurb: 'A real table of upcoming Pokémon TCG sets with confirmed release dates, preorder links, UK and US retailer stock, and recommended retail prices.' },
   { title: 'Pull rates',                               blurb: 'Public pull-rate data from confirmed openings — odds of hitting each rarity tier per set, with sample sizes and last-updated stamps.' },
   { title: 'Rip or Keep',                              blurb: 'For sealed product, a quick calculator showing whether the expected pull value beats the current sealed price.' },
@@ -177,15 +177,15 @@ const faqItems: FAQItem[] = [
   },
   {
     question: 'Where do the prices come from?',
-    answer: 'Card prices are sourced from real sold listings on major marketplaces. We do not use asking prices, which can be wildly above what cards actually transact for. The sold-listing approach is why our prices sometimes look lower than other price guides — they reflect what changed hands, not what people are hoping to get.',
+    answer: 'The displayed card figures are guide values derived from recent sold-sales activity on the major Pokémon TCG marketplaces (eBay, TCGplayer, Heritage, Goldin and others). We never use asking prices, which can run well above what cards actually transact for. The sold-sales approach is also why our figures sometimes look lower than less-strict price guides — they track what changed hands, not what sellers are hoping to get.',
   },
   {
     question: 'How often are prices updated?',
-    answer: 'Card prices are recalculated nightly from the most recent sold-listing data. PSA population numbers are refreshed roughly every two weeks. Set-level aggregates and momentum charts rebuild from the underlying card prices on the same nightly cycle.',
+    answer: 'Guide values are recalculated nightly from the most recent sold-sales activity. PSA population numbers are refreshed roughly every two weeks. Set-level aggregates and momentum charts rebuild from the underlying card prices on the same nightly cycle.',
   },
   {
     question: 'How accurate are the prices?',
-    answer: 'For widely traded cards, the prices are very close to reality — they are computed from the same public marketplace data anyone could verify. For rarer cards with few recent sales, accuracy depends on sample size. Every card page is transparent about the data source and how recent the last sale was, so you can judge the confidence yourself.',
+    answer: 'For widely traded cards, the figures are very close to real-world transaction values — the same marketplace activity anyone could verify. For rarer cards with few recent sales, accuracy depends on sample size. Every card page is transparent about the data source and how recent the last sale was, so you can judge confidence yourself.',
   },
   {
     question: 'Do you cover both raw cards and graded cards?',
@@ -237,11 +237,11 @@ const faqItems: FAQItem[] = [
   },
   {
     question: 'Do you track sealed product like booster boxes and ETBs?',
-    answer: 'Not yet. Sealed product tracking is on the longer-term roadmap. The methodology will mirror singles — sold listings only, with the same transparency on data sources.',
+    answer: 'Not yet. Sealed product tracking is on the longer-term roadmap. The methodology will mirror singles — guide values derived from recent sold-sales activity only, with the same transparency on data sources.',
   },
   {
     question: 'What makes PokePrices different from other Pokémon price sites?',
-    answer: 'Three things — the data is sold-listing only (not asking prices), the site has no login, paywall or data collection, and the tooling is built by a collector rather than by an investor-led startup. The product principles are public on this page, and you can hold us to them.',
+    answer: 'Three things — the data is derived from real sold-sales activity (not asking prices), the site has no login, paywall or data collection, and the tooling is built by a collector rather than by an investor-led startup. The product principles are public on this page, and you can hold us to them.',
   },
   {
     question: 'Who built PokePrices?',
@@ -369,8 +369,8 @@ export default function RoadmapPage() {
 
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, padding: '18px 22px', marginBottom: 28 }}>
         <ul style={{ paddingLeft: 18, margin: 0, fontSize: 14, color: 'var(--text)', lineHeight: 1.8 }}>
-          <li><strong>Raw card prices</strong> are computed from real sold listings on major Pokémon TCG marketplaces. Asking prices are never used.</li>
-          <li><strong>Graded card prices</strong> (PSA 9, PSA 10, CGC, BGS where available) come from the same sold-listing methodology, filtered by grading service and grade.</li>
+          <li><strong>Raw card prices</strong> are guide values derived from recent sold-sales activity across the major Pokémon TCG marketplaces. Asking prices are never used.</li>
+          <li><strong>Graded card prices</strong> (PSA 9, PSA 10, CGC, BGS where available) are built the same way, filtered by grading service and grade.</li>
           <li><strong>PSA population data</strong> is sourced directly from PSA and refreshed roughly every two weeks via a manual save-and-parse workflow.</li>
           <li><strong>Set metadata</strong> (release date, printing total, era) is curated against multiple primary sources and cross-checked against Pokémon TCG release calendars.</li>
           <li><strong>Update cadence</strong> for card prices is nightly. Every card page tells you when the data was last refreshed.</li>
@@ -388,7 +388,7 @@ export default function RoadmapPage() {
         {[
           { title: 'No paywall',          body: 'The core site is free forever. Every price, every chart, every tool that does not require saved state is open.' },
           { title: 'No data collection',  body: 'No tracking pixels beyond standard analytics. No email harvesting. No login walls in front of data.' },
-          { title: 'Sold listings only',  body: 'Prices reflect what changed hands, not what sellers are asking. This is sometimes the difference between buying smart and getting fleeced.' },
+          { title: 'Sold-sales activity only', body: 'Prices reflect what changed hands, not what sellers are asking. This is sometimes the difference between buying smart and getting fleeced.' },
           { title: 'Honest landed cost',  body: 'When a calculator says “you would profit X”, VAT, shipping, grading fees and platform cuts are already factored in — we protect collectors, not flippers.' },
           { title: 'Collectors first',    body: 'Decisions are made for collectors, not investors. If a feature would help flipping at the expense of the community, it does not ship.' },
           { title: 'AI is a feature',     body: 'The collector AI assistant is one tool among many, not the brand. We will never lead with "AI" as marketing because it does not describe what we actually do.' },

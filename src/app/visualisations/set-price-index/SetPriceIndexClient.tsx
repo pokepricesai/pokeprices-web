@@ -269,7 +269,7 @@ export default function SetPriceIndexClient() {
                 valueFormatter={valueFormatter}
                 note={chartMode === 'indexed'
                   ? 'Each set is normalised so its first datapoint equals 100. Lines above 100 are up since launch; below 100 are down. Lets you compare a $5M vintage set against a $200k modern set on the same chart.'
-                  : 'Total tracked value across all cards in each set, in USD. Sourced from sold listings, updated nightly.'}
+                  : 'Total tracked value across all cards in each set, in USD. Derived from recent sold-sales data, updated nightly.'}
               />
             )}
           </div>

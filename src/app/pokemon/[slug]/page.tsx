@@ -467,13 +467,10 @@ export default async function PokemonSpeciesPage({
   // distinct_set_count field; fall back to bySet.length only when
   // the RPC hasn't been redeployed with the 53A.1 change yet.
   const distinctSetCount = sp?.distinct_set_count ?? bySet.length
-  // Block 5A-W-53B — subtitle names the total, distinct set count,
-  // and (when present) the Japanese subset so "Japanese {Name}
-  // cards" and "all {Name} cards" search intents both land on real
-  // on-page copy. Replaces the older "live prices" claim (values
-  // come from PriceCharting nightly, they are guide values not
-  // literal live listings) with the accurate "PriceCharting price
-  // guide" attribution.
+  // Subtitle names the total, distinct set count, and (when present)
+  // the Japanese subset so "Japanese {Name} cards" and "all {Name}
+  // cards" search intents land on real on-page copy. Values are
+  // aggregated price-guide numbers, not literal live listings.
   const jpCount = (typeof sp?.jp_total_cards === 'number' && sp.jp_total_cards > 0)
     ? sp.jp_total_cards
     : null
@@ -481,7 +478,7 @@ export default async function PokemonSpeciesPage({
     ? ` including ${jpCount} Japanese-language ${jpCount === 1 ? 'card' : 'cards'},`
     : ''
   const subtitle = sp && sp.total_cards > 0
-    ? `All ${sp.total_cards} ${displayName} Pokémon cards across ${distinctSetCount || sp.total_cards} sets,${jpClause} with raw prices, PSA 10 values and rarity data from the PriceCharting price guide. Updated nightly.`
+    ? `All ${sp.total_cards} ${displayName} Pokémon cards across ${distinctSetCount || sp.total_cards} sets,${jpClause} with raw and PSA 10 price-guide values plus rarity data. Guide values are refreshed nightly from recent sold-sales activity.`
     : `${displayName} doesn't appear on any Pokémon TCG cards in our database yet — we'll add them as soon as new sets land.`
 
   // Block 5A-W-53B.1 — per-language derivations used by the two
@@ -537,11 +534,8 @@ export default async function PokemonSpeciesPage({
     if (raw)   valueParts.push(`${fmtUsd(raw)} raw`)
     if (psa10) valueParts.push(`${fmtUsd(psa10)} in PSA 10`)
     const valueStr = valueParts.length ? ` — currently ${valueParts.join(' and ')}` : ''
-    // Block 5A-W-53B — the "current sold-listing prices" wording
-    // over-claimed: the underlying value is a PriceCharting guide
-    // price (aggregated / smoothed), not a literal recent sold
-    // listing. Corrected to reflect the true data source.
-    proseParts.push(`The most valuable ${displayName} card by current PriceCharting price guide value is the ${top.card_name} from ${top.set_name}${valueStr}. Vintage holos, full arts and special illustrations command the highest prices, while modern reprints sit closer to bulk.`)
+    // Price-guide values are aggregated recent-sales figures, not literal single listings.
+    proseParts.push(`By current price-guide value, the most valuable ${displayName} card is the ${top.card_name} from ${top.set_name}${valueStr}. Vintage holos, full arts and special illustrations tend to lead the top end, while modern reprints sit closer to bulk.`)
   }
   if (sp?.most_recent_set && risers.length > 0) {
     const r = risers[0]

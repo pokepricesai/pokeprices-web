@@ -198,7 +198,7 @@ function TrendCell({ val, label }: { val: number | null; label: string }) {
   }
   if (quality === 'warn') {
     return (
-      <div title="Unusually large move — may reflect stale price anchor. Check sold listings.">
+      <div title="Unusually large move — may reflect a stale price anchor. Check the Recent verified sales panel below.">
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, fontFamily: "'Figtree', sans-serif" }}>{label}</div>
         <div style={{ fontSize: 15, fontWeight: 700, color: '#e07b39', fontFamily: "'Figtree', sans-serif" }}>
           ⚠ {val > 0 ? '+' : ''}{val.toFixed(1)}%
@@ -231,7 +231,7 @@ function HeroBanner({ trend, hasInsight }: { trend: any; hasInsight: boolean }) 
   if (quality === 'warn') {
     return (
       <div style={{ background: 'rgba(224,123,57,0.08)', border: '1px solid rgba(224,123,57,0.25)', borderLeft: '3px solid #e07b39', borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: 13, lineHeight: 1.6, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>
-        ⚠️ <strong>{isUp ? 'Up' : 'Down'} {absPct.toFixed(0)}% in {main.label}</strong> — unusually large move. This may reflect a stale price anchor rather than real market activity. Check recent sold listings before drawing conclusions.
+        ⚠️ <strong>{isUp ? 'Up' : 'Down'} {absPct.toFixed(0)}% in {main.label}</strong> — unusually large move. This may reflect a stale price anchor rather than real market activity. Check the Recent verified sales panel below before drawing conclusions.
       </div>
     )
   }
@@ -818,12 +818,12 @@ export default function CardPageClient({
               </div>
               {trendPeriods.some(t => pctQuality(t.val, t.label) === 'suppress') && (
                 <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '10px 0 0', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
-                  — Some periods are hidden because the price movement was too large to be reliable. Check recent eBay sold listings for the real picture.
+                  — Some periods are hidden because the price movement was too large to be reliable. Check the Recent verified sales panel below for the real picture.
                 </p>
               )}
               {trendPeriods.some(t => pctQuality(t.val, t.label) === 'warn') && !trendPeriods.some(t => pctQuality(t.val, t.label) === 'suppress') && (
                 <p style={{ fontSize: 11, color: '#e07b39', margin: '10px 0 0', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
-                  ⚠ Large moves shown in amber — verify against recent sold listings before drawing conclusions.
+                  ⚠ Large moves shown in amber — verify against the Recent verified sales panel below before drawing conclusions.
                 </p>
               )}
             </div>

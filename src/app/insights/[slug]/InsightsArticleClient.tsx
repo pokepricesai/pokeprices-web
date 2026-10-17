@@ -439,7 +439,7 @@ export default function InsightsArticleClient({ article }: { article: any }) {
       {/* Footer */}
       <div style={{ marginTop: 40, paddingTop: 24, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
         <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
-          Prices from real sold listings via PriceCharting. Updated daily.
+          Price-guide values derived from recent sold-sales data across the major Pokémon TCG marketplaces. Updated nightly.
         </span>
         <Link href="/insights" style={{ fontSize: 13, fontWeight: 700, color: 'var(--primary)', fontFamily: "'Figtree', sans-serif", textDecoration: 'none' }}>
           More articles →

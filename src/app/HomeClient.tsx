@@ -227,7 +227,7 @@ const recentEnglishSets: RecentSet[] = [
 // Block 5A-W-40B — dropped the leading emoji glyphs. Feature-tile
 // headline + one-line description read as clean copy blocks now.
 const features = [
-  { title: 'Real sold data',     desc: 'Prices from actual sold listings, not asking prices' },
+  { title: 'Real sold data',     desc: 'Price guide derived from recent sold-sales activity, not asking prices' },
   { title: 'Grading insights',   desc: 'Is it worth grading? See the PSA 10 premium and gem rate' },
   { title: 'Market trends',      desc: 'Price movements, drawdowns and momentum for every card' },
   { title: 'No data collection', desc: 'No login, no tracking, no email capture — ever' },
@@ -395,7 +395,7 @@ export default function HomeClient() {
               color: 'rgba(255,255,255,0.6)', fontSize: 11, margin: '0 0 16px',
               fontFamily: "'Figtree', sans-serif",
             }}>
-              Updated nightly from real sold listings — no asking prices, no guesses
+              Price guide rebuilt nightly from recent sold-sales activity — no asking prices, no guesses
             </p>
 
             {/* Browse links — quiet inline row so they don't compete

@@ -1349,7 +1349,7 @@ export default function DealerPageClient() {
           borderLeft: '3px solid var(--primary)',
         }}>
           <div style={{ fontSize: 13, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.6 }}>
-            <strong>Remember:</strong> Market prices are based on recent sold listings and historical data — a solid baseline, but always check the eBay last sold link on each card before locking in a deal.
+            <strong>Remember:</strong> Guide prices are derived from recent sold-sales data and historical trends — a solid baseline, but always cross-check live eBay sold listings on each card before locking in a deal.
           </div>
         </div>
       </div>
