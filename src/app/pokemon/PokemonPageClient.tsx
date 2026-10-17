@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import BreadcrumbSchema from '@/components/BreadcrumbSchema'
 import FAQ from '@/components/FAQ'
@@ -7,7 +7,13 @@ import { getPokemonHubFaqItems } from '@/lib/faqs'
 
 const PAGE_SIZE = 100
 
-interface PokemonEntry {
+// Known total number of Pokémon species in the National Pokédex at the
+// time of writing. Used as a safe display fallback during the brief
+// window where server-passed data is missing (e.g. edge/SSR failure)
+// so we never render the misleading "All 0 species" string.
+const KNOWN_SPECIES_COUNT = 1025
+
+export interface PokemonEntry {
   id: number
   name: string
   cardCount: number
@@ -17,25 +23,51 @@ interface PokemonEntry {
   generation: number | null
 }
 
-export default function PokemonPageClient() {
-  const [pokemon, setPokemon] = useState<PokemonEntry[]>([])
-  const [filtered, setFiltered] = useState<PokemonEntry[]>([])
+interface Props {
+  initialSpecies?: PokemonEntry[]
+  initialTotalCards?: number
+  /** True when SSR fetch failed and the client should refetch. */
+  initialFallback?: boolean
+}
+
+export default function PokemonPageClient({
+  initialSpecies = [],
+  initialTotalCards = 0,
+  initialFallback = false,
+}: Props) {
+  const hasInitial = initialSpecies.length > 0 && !initialFallback
+  const initialStats = useMemo(() => {
+    const mostCards     = [...initialSpecies].sort((a, b) => b.cardCount - a.cardCount)[0] ?? null
+    const mostExpensive = [...initialSpecies].sort((a, b) => (b.maxPrice ?? 0) - (a.maxPrice ?? 0))[0] ?? null
+    return {
+      totalPokemon:   initialSpecies.length,
+      totalCards:     initialTotalCards,
+      mostCards,
+      mostExpensive,
+    }
+  }, [initialSpecies, initialTotalCards])
+
+  const [pokemon, setPokemon] = useState<PokemonEntry[]>(initialSpecies)
+  const [filtered, setFiltered] = useState<PokemonEntry[]>(initialSpecies)
   const [visible, setVisible] = useState(PAGE_SIZE)
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<'id' | 'cards' | 'price' | 'value' | 'name'>('id')
-  const [loading, setLoading] = useState(true)
+  // Loading state: true only when we do NOT have initial data. If
+  // SSR succeeded we skip the client fetch entirely and render the
+  // real list immediately — zero waterfall, zero zero-count flash.
+  const [loading, setLoading] = useState(!hasInitial)
   const [stats, setStats] = useState<{
     totalPokemon: number
     totalCards: number
     mostCards: PokemonEntry | null
     mostExpensive: PokemonEntry | null
-  }>({ totalPokemon: 0, totalCards: 0, mostCards: null, mostExpensive: null })
+  }>(initialStats)
 
-  // Public species list + total-cards count go through the cached
-  // /api/pokemon/extras Route Handler. One same-origin fetch replaces
-  // the up-to-four direct browser → Supabase calls that previously
-  // paginated get_pokemon_species_list on every visit.
+  // Only run the client fetch when SSR did NOT provide data (edge
+  // failure path). The cached /api/pokemon/extras is still hit, so
+  // behaviour is the same as before for that degenerate case.
   useEffect(() => {
+    if (hasInitial) return
     const controller = new AbortController()
     async function load() {
       try {
@@ -94,7 +126,7 @@ export default function PokemonPageClient() {
     }
     load()
     return () => controller.abort()
-  }, [])
+  }, [hasInitial])
 
   useEffect(() => {
     let result = [...pokemon]
@@ -141,7 +173,13 @@ export default function PokemonPageClient() {
           Pokémon
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: 14, fontFamily: "'Figtree', sans-serif", margin: 0 }}>
-          All {stats.totalPokemon} species — click any Pokémon to see every card it appears on with live prices.
+          {/*
+            Display count rule — never render "0 species" during a
+            loading window. If we have a real server-provided count
+            we use it; otherwise fall back to the known Pokédex total.
+            A separate loading flag below drives the grid skeleton.
+          */}
+          All {stats.totalPokemon > 0 ? stats.totalPokemon : KNOWN_SPECIES_COUNT} species — click any Pokémon to see every card it appears on with current price-guide values.
         </p>
       </div>
 

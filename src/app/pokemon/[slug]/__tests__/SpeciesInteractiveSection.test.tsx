@@ -210,8 +210,13 @@ describe('53A.1 — distinct_set_count returned by RPC + consumed by page', () =
 
   it('page.tsx prose, FAQ, dossier and stats tile all consume the un-capped count', () => {
     // These four call-sites previously used bySet.length and would
-    // similarly under-report for wide-set Pokémon.
-    expect(PAGE).toMatch(/across \$\{distinctSetCount \|\| 'multiple'\} sets since first being printed/)
+    // similarly under-report for wide-set Pokémon. PP-URGENT-01
+    // Job 2 varied the prose wording across several deterministic
+    // openers, so the test is loosened to the real anti-regression:
+    // the opener prose must still reference `distinctSetCount`, not
+    // bySet.length — exact phrasing is deliberately not pinned.
+    expect(PAGE).toMatch(/across \$\{distinctSetCount \|\| 'multiple'\} sets/)
+    expect(PAGE).not.toMatch(/across \$\{bySet\.length \|\|/)
     expect(PAGE).toMatch(/uniqueSets:\s*distinctSetCount/)
     expect(PAGE).toMatch(/uniqueSetCount=\{distinctSetCount\}/)
     expect(PAGE).toMatch(/<StatTile label="Sets featured in" value=\{\(distinctSetCount \|\| 0\)\.toString\(\)\} \/>/)
