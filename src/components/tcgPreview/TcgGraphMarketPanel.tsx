@@ -16,6 +16,8 @@
 //     symbol — no silent EUR→USD conversion.
 
 import type { ProviderSnapshot, ProviderMarketPrice, ProviderGradedPrice } from '@/lib/providerData/snapshot'
+import type { FxTable, DisplayCurrency } from '@/lib/providerData/currency'
+import { convertForDisplay, formatPrice } from '@/lib/providerData/currency'
 
 function fmt(value: number | null | undefined, currency: string): string {
   if (value == null) return '—'
@@ -23,6 +25,27 @@ function fmt(value: number | null | undefined, currency: string): string {
   const v = Number(value)
   if (v >= 1000) return `${sym}${Math.round(v).toLocaleString('en-US')}`
   return `${sym}${v.toFixed(2)}`
+}
+
+/** Side-by-side native + converted display. Native price is always
+ *  present. Converted appears only when the display currency differs
+ *  AND an FX rate exists. The methodology note is a concise inline
+ *  marker (not a tooltip — print it so it survives screenshots). */
+function fmtWithConversion(
+  value: number | null | undefined,
+  sourceCcy: 'USD' | 'EUR' | string,
+  displayCcy: DisplayCurrency,
+  fx: FxTable | null,
+): { native: string; converted: string | null; note: string | null } {
+  const nativeStr = fmt(value, sourceCcy)
+  if (sourceCcy !== 'USD' && sourceCcy !== 'EUR') return { native: nativeStr, converted: null, note: null }
+  const r = convertForDisplay(value, sourceCcy as DisplayCurrency, displayCcy, fx)
+  if (!r.isConverted) return { native: nativeStr, converted: null, note: null }
+  return {
+    native: nativeStr,
+    converted: formatPrice(r.converted, displayCcy),
+    note: r.note,
+  }
 }
 
 function groupBy<T, K extends string>(rows: T[], keyFn: (r: T) => K): Record<K, T[]> {
@@ -36,9 +59,14 @@ function groupBy<T, K extends string>(rows: T[], keyFn: (r: T) => K): Record<K, 
 
 interface Props {
   snapshot: ProviderSnapshot
+  /** Optional. When present, non-matching source currencies are also
+   *  shown converted into displayCurrency with an explicit methodology
+   *  note. The native price is ALWAYS still displayed first. */
+  displayCurrency?: DisplayCurrency
+  fx?: FxTable | null
 }
 
-export default function TcgGraphMarketPanel({ snapshot }: Props) {
+export default function TcgGraphMarketPanel({ snapshot, displayCurrency, fx }: Props) {
   const bySource = groupBy(snapshot.market_prices, (r: ProviderMarketPrice) => r.source)
   const pooled = snapshot.graded_prices.filter((g: ProviderGradedPrice) => g.grader === 'any')
   const perGrader = snapshot.graded_prices.filter((g: ProviderGradedPrice) => g.grade === '10' && g.grader !== 'any' && g.grader !== 'raw')
@@ -86,13 +114,31 @@ export default function TcgGraphMarketPanel({ snapshot }: Props) {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((r: ProviderMarketPrice, i: number) => (
-                      <tr key={i} style={styles.tr}>
-                        <td style={styles.td}><code>{r.finish ?? '—'}</code></td>
-                        <td style={styles.tdNum}>{fmt(r.market, r.currency)}</td>
-                        <td style={styles.tdNum}>{fmt(r.low, r.currency)}</td>
-                      </tr>
-                    ))}
+                    {rows.map((r: ProviderMarketPrice, i: number) => {
+                      const marketCell = displayCurrency
+                        ? fmtWithConversion(r.market, r.currency, displayCurrency, fx ?? null)
+                        : { native: fmt(r.market, r.currency), converted: null as string | null, note: null as string | null }
+                      const lowCell = displayCurrency
+                        ? fmtWithConversion(r.low, r.currency, displayCurrency, fx ?? null)
+                        : { native: fmt(r.low, r.currency), converted: null as string | null, note: null as string | null }
+                      return (
+                        <tr key={i} style={styles.tr}>
+                          <td style={styles.td}><code>{r.finish ?? '—'}</code></td>
+                          <td style={styles.tdNum}>
+                            {marketCell.native}
+                            {marketCell.converted && (
+                              <span style={{ display: 'block', fontSize: 10, color: '#666' }}>≈ {marketCell.converted}</span>
+                            )}
+                          </td>
+                          <td style={styles.tdNum}>
+                            {lowCell.native}
+                            {lowCell.converted && (
+                              <span style={{ display: 'block', fontSize: 10, color: '#666' }}>≈ {lowCell.converted}</span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -137,6 +183,11 @@ export default function TcgGraphMarketPanel({ snapshot }: Props) {
 
       <div style={styles.attribution}>
         TCG id <code>{snapshot.tcg_card_id}</code> · printing <code>{snapshot.tcg_printing_key}</code> · lang <code>{snapshot.tcg_language}</code>
+        {displayCurrency && fx && (
+          <div style={{ marginTop: 4, fontSize: 10 }}>
+            Converted amounts use <code>{displayCurrency}</code> rates as of <code>{fx.as_of}</code>. Native marketplace currency is shown first; the converted amount is an estimate, not an actual trading quote.
+          </div>
+        )}
       </div>
     </aside>
   )

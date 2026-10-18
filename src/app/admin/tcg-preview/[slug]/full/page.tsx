@@ -14,11 +14,14 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { requireAdminPage } from '@/lib/adminAuth'
 import { getSupabaseServiceClient } from '@/lib/supabaseService'
+import { cookies } from 'next/headers'
 import { getProviderSnapshot } from '@/lib/providerData/snapshot'
 import { getProviderHistorySeries } from '@/lib/providerData/history'
 import { adaptSnapshotToLegacyCardRow, adaptProviderHistoryForChart } from '@/lib/providerData/toCardRow'
+import { loadLatestFxTable, parseDisplayCcy, DISPLAY_CCY_COOKIE } from '@/lib/providerData/currency'
 import CardPageClient from '@/app/set/[slug]/card/[cardSlug]/CardPageClient'
 import TcgGraphMarketPanel from '@/components/tcgPreview/TcgGraphMarketPanel'
+import CurrencySelector from '@/components/currency/CurrencySelector'
 
 export const metadata: Metadata = {
   title: 'TCGGraph full-template preview · PokePrices admin',
@@ -35,6 +38,11 @@ export default async function TcgPreviewFull({ params }: PageProps) {
   const decoded = decodeURIComponent(slug)
 
   const sb = getSupabaseServiceClient()
+  // Display currency: cookie-driven; USD default. FX table pulled
+  // from the pokemon_tcg_fx_rates snapshot.
+  const cookieStore = await cookies()
+  const displayCcy = parseDisplayCcy(cookieStore.get(DISPLAY_CCY_COOKIE)?.value)
+  const fx = await loadLatestFxTable(sb)
 
   // Fetch everything in parallel.
   const [ppRes, snapshot] = await Promise.all([
@@ -83,7 +91,7 @@ export default async function TcgPreviewFull({ params }: PageProps) {
   const chartData = adaptProviderHistoryForChart(historySeries)
 
   const quickFactsSlot = snapshot
-    ? <TcgGraphMarketPanel snapshot={snapshot} />
+    ? <TcgGraphMarketPanel snapshot={snapshot} displayCurrency={displayCcy} fx={fx} />
     : null
 
   // Public URL for comparison
@@ -114,7 +122,8 @@ export default async function TcgPreviewFull({ params }: PageProps) {
           {' · '}
           <span>printing: <code>{snapshot?.tcg_printing_key ?? '—'}</code></span>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <CurrencySelector previewOnly />
           <Link href={`/admin/tcg-preview/${encodeURIComponent(decoded)}`} style={{ color: '#ffd34f' }}>Diagnostic view</Link>
           {publicUrl && (
             <a href={publicUrl} target="_blank" rel="noreferrer" style={{ color: '#ffd34f' }}>Current public page ↗</a>
