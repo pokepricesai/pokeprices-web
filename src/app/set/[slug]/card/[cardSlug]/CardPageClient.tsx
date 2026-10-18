@@ -338,10 +338,27 @@ export type CardPageClientProps = {
   initialTrendData?: unknown
   quickFactsSlot?:   React.ReactNode
   seoIntroSlot?:     React.ReactNode
+  /** PP-TCG-MIGRATE-03 — when provided, the client-side extras fetch
+   *  is skipped and these points feed PriceChart directly. Used by
+   *  the authenticated /admin/tcg-preview/[slug]/full route so the
+   *  real template renders TCGGraph history without duplicating any
+   *  presentation logic. Public pages leave this undefined and the
+   *  normal `/api/card/.../extras` fetch runs as before. */
+  initialPriceHistory?: Array<Record<string, unknown>>
+  /** PP-TCG-MIGRATE-03 — mirrors above for the pre-rendered PSA
+   *  population + volume + insight data. Not used today; reserved
+   *  for a future provider that publishes these. */
+  initialProviderExtras?: {
+    metrics?: unknown
+    insight?: string | null
+    volumeLabel?: string | null
+    psaPop?: unknown
+  }
 }
 
 export default function CardPageClient({
   setName, cardUrlSlug, initialCardData, initialTrendData, quickFactsSlot, seoIntroSlot,
+  initialPriceHistory, initialProviderExtras,
 }: CardPageClientProps) {
   // W46D — treat any value !== undefined as "server supplied data".
   // A legitimate null from the server means "no card row exists" but
@@ -361,13 +378,14 @@ export default function CardPageClient({
   }, [pathname])
 
   const serverProvidedCard = initialCardData !== undefined && initialCardData !== null
+  const providerSuppliedExtras = initialPriceHistory !== undefined || initialProviderExtras !== undefined
   const [card,         setCard]         = useState<any>(serverProvidedCard ? initialCardData : null)
   const [trend,        setTrend]        = useState<any>(initialTrendData ?? null)
-  const [metrics,      setMetrics]      = useState<any>(null)
-  const [priceHistory, setPriceHistory] = useState<any[]>([])
-  const [insight,      setInsight]      = useState<string | null>(null)
-  const [psaPop,       setPsaPop]       = useState<any | null>(null)
-  const [volumeLabel,  setVolumeLabel]  = useState<string | null>(null)
+  const [metrics,      setMetrics]      = useState<any>(initialProviderExtras?.metrics ?? null)
+  const [priceHistory, setPriceHistory] = useState<any[]>(Array.isArray(initialPriceHistory) ? initialPriceHistory : [])
+  const [insight,      setInsight]      = useState<string | null>(initialProviderExtras?.insight ?? null)
+  const [psaPop,       setPsaPop]       = useState<any | null>(initialProviderExtras?.psaPop ?? null)
+  const [volumeLabel,  setVolumeLabel]  = useState<string | null>(initialProviderExtras?.volumeLabel ?? null)
   // W46D — skip the loading skeleton when the server supplied the card.
   // The visible hero (image + H1 + set name + hero banner + prices +
   // trend chips) is present in the initial HTML. Metrics / price
@@ -391,6 +409,16 @@ export default function CardPageClient({
     // Trend handoff is UNCHANGED. The server page passes
     // initialTrendData which the client prefers; the browser only
     // fires get_card_trends_detail when the server fetch failed.
+    // PP-TCG-MIGRATE-03 — authenticated preview path hands us data
+    // via initialPriceHistory + initialProviderExtras. In that case
+    // we skip the client-side extras fetch entirely so the preview
+    // never leaks a background Supabase call for pages that aren't
+    // publicly readable yet.
+    if (providerSuppliedExtras && serverProvidedCard) {
+      setLoading(false)
+      return
+    }
+
     const abort = new AbortController()
     async function loadCard() {
       let cardData: any = null

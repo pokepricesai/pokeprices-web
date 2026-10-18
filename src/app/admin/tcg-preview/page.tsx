@@ -99,12 +99,21 @@ export default async function TcgPreviewIndex() {
         {samples.map(s => (
           <div key={s.slug} style={{ padding: 12, border: '1px solid #e0e0e0', borderRadius: 4, background: '#fafafa' }}>
             <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>{s.cohort} · pricing_eligibility=<code>{s.pricing_eligibility ?? '—'}</code></div>
-            <Link
-              href={`/admin/tcg-preview/${encodeURIComponent(s.slug)}`}
-              style={{ fontSize: 14, fontWeight: 600, color: '#2a56c8', textDecoration: 'none' }}
-            >
-              {s.label}
-            </Link>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{s.label}</div>
+            <div style={{ display: 'flex', gap: 12, fontSize: 13 }}>
+              <Link
+                href={`/admin/tcg-preview/${encodeURIComponent(s.slug)}/full`}
+                style={{ color: '#2a56c8', textDecoration: 'none', fontWeight: 600 }}
+              >
+                Full-template preview →
+              </Link>
+              <Link
+                href={`/admin/tcg-preview/${encodeURIComponent(s.slug)}`}
+                style={{ color: '#666', textDecoration: 'none' }}
+              >
+                Diagnostic view
+              </Link>
+            </div>
           </div>
         ))}
       </div>
