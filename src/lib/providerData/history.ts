@@ -38,8 +38,9 @@ export async function getProviderHistorySeries(
   sb: SupabaseClient,
   tcg_card_id: string,
   tcg_printing_key: string,
+  opts: { ignoreFlag?: boolean } = {},
 ): Promise<ProviderHistorySeries[]> {
-  if (!isProviderFlagEnabled('tcggraph_history')) return [];
+  if (!opts.ignoreFlag && !isProviderFlagEnabled('tcggraph_history')) return [];
   const { data, error } = await sb
     .from('pokemon_tcg_prices_history')
     .select('series_kind, source, finish, grader, grade, currency, day, market, low')

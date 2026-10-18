@@ -24,6 +24,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // Shim server-only under Node vitest. Real module throws on client.
+      'server-only': path.resolve(__dirname, './src/__mocks__/server-only.ts'),
     },
   },
 })

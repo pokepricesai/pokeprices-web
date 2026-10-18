@@ -61,11 +61,26 @@ export interface ProviderSnapshot {
   graded_prices: ProviderGradedPrice[];
 }
 
+export interface GetSnapshotOptions {
+  /** Admin preview mode: skip the "mapping must be approved" gate so
+   *  the operator can see what each card would look like after
+   *  approval + flag flip. The pricing_eligibility gate still applies
+   *  — variants still never leak aggregate graded. Defaults to false. */
+  previewMode?: boolean;
+  /** In preview mode, ignore the global feature flags (the operator
+   *  is explicitly looking at this). Defaults to true when previewMode
+   *  is true, false otherwise. */
+  ignoreFlags?: boolean;
+}
+
 export async function getProviderSnapshot(
   sb: SupabaseClient,
   pp_card_slug: string,
+  opts: GetSnapshotOptions = {},
 ): Promise<ProviderSnapshot | null> {
-  // Mapping first — if the operator hasn't approved it, no snapshot.
+  const previewMode = !!opts.previewMode;
+  const ignoreFlags = opts.ignoreFlags ?? previewMode;
+
   const { data: mapping, error: mErr } = await sb
     .from('pokemon_tcg_mappings')
     .select('tcg_card_id, tcg_printing_key, tcg_set_code, tcg_language, tcg_name, review_status, pricing_eligibility')
@@ -73,7 +88,9 @@ export async function getProviderSnapshot(
     .eq('pp_card_slug', pp_card_slug)
     .maybeSingle();
   if (mErr || !mapping) return null;
-  if (mapping.review_status !== 'approved') return null;
+  // In public mode, the mapping MUST be approved. Preview mode skips
+  // the approval gate but every other invariant is unchanged.
+  if (!previewMode && mapping.review_status !== 'approved') return null;
   if (!mapping.tcg_card_id || !mapping.tcg_printing_key) return null;
 
   const [cardRes, marketRes, gradedRes] = await Promise.all([
@@ -98,12 +115,15 @@ export async function getProviderSnapshot(
 
   // Price-eligibility gate — never leak aggregate graded onto a
   // variant printing, never leak anything from identity_only /
-  // not_eligible / uncertain rows via this resolver.
-  const canReturnMarket = isProviderFlagEnabled('tcggraph_prices') &&
+  // not_eligible / uncertain rows. Applies in BOTH preview and
+  // public modes; only the mapping-approved gate differs.
+  const priceFlagOn = ignoreFlags ? true : isProviderFlagEnabled('tcggraph_prices');
+  const imageFlagOn = ignoreFlags ? true : isProviderFlagEnabled('tcggraph_images');
+  const canReturnMarket = priceFlagOn &&
     (eligibility === 'bulk_safe' || eligibility === 'market_only');
-  const canReturnGraded = isProviderFlagEnabled('tcggraph_prices') &&
+  const canReturnGraded = priceFlagOn &&
     eligibility === 'bulk_safe';
-  const canReturnImages = isProviderFlagEnabled('tcggraph_images') &&
+  const canReturnImages = imageFlagOn &&
     (eligibility === 'bulk_safe' || eligibility === 'market_only' || eligibility === 'identity_only');
 
   return {
