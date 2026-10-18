@@ -354,11 +354,24 @@ export type CardPageClientProps = {
     volumeLabel?: string | null
     psaPop?: unknown
   }
+  /** PP-TCG-MIGRATE-03A — strict empty-field suppression. When true:
+   *   • The entire Current Prices box is hidden when NO graded price
+   *     is populated (prevents the all-'—' column look that
+   *     TCGGraph-only variant / Japanese cards currently produce).
+   *   • Trend chips with null percentages are hidden individually.
+   *   • The Price History panel renders a compact "History not
+   *     available for this printing yet" note instead of nothing.
+   *   • Grading-value-based insights that depend on raw_usd AND
+   *     psa10_usd stay gated (they already check both; this flag
+   *     doesn't change that).
+   *  Public pages leave this undefined so there is zero behaviour
+   *  change on the live site. */
+  providerMode?: boolean
 }
 
 export default function CardPageClient({
   setName, cardUrlSlug, initialCardData, initialTrendData, quickFactsSlot, seoIntroSlot,
-  initialPriceHistory, initialProviderExtras,
+  initialPriceHistory, initialProviderExtras, providerMode,
 }: CardPageClientProps) {
   // W46D — treat any value !== undefined as "server supplied data".
   // A legitimate null from the server means "no card row exists" but
@@ -554,6 +567,28 @@ export default function CardPageClient({
     trend.raw_pct_7d !== null || trend.raw_pct_30d !== null ||
     trend.raw_pct_90d !== null || trend.raw_pct_180d !== null || trend.raw_pct_365d !== null
   )
+
+  // PP-TCG-MIGRATE-03A — strict empty-field suppression for provider
+  // mode. The GradeLadder renders '—' columns for every null value;
+  // that is the correct public UX today, but on a TCGGraph-only
+  // variant / Japanese card every graded field is deliberately null
+  // (per the price-eligibility invariants). Showing a row of '—'
+  // just looks broken. In provider mode we hide the entire price
+  // box in that case. The rest of the page (identity, image,
+  // breadcrumb, FAQ, Explore More, quickFactsSlot) stays.
+  const allGradedPricesNull = (
+    gradeLadderPrices.raw_usd == null &&
+    gradeLadderPrices.psa10_usd == null &&
+    gradeLadderPrices.psa9_usd == null &&
+    gradeLadderPrices.psa8_usd == null &&
+    gradeLadderPrices.psa7_usd == null &&
+    gradeLadderPrices.bgs10_usd == null &&
+    gradeLadderPrices.cgc10_usd == null &&
+    gradeLadderPrices.sgc10_usd == null &&
+    gradeLadderPrices.ace10_usd == null &&
+    gradeLadderPrices.tag10_usd == null
+  )
+  const showPriceBox = !providerMode || !allGradedPricesNull
 
   const trendPeriods = hasAnyTrend ? [
     { label: '7d',   val: trend.raw_pct_7d   },
@@ -822,6 +857,17 @@ export default function CardPageClient({
             </div>
           )}
 
+          {!showPriceBox ? (
+            /* PP-TCG-MIGRATE-03A — provider mode + nothing graded is
+             *  available for this printing. Hide the price box entirely
+             *  rather than render a ladder of '—' columns. The TCG
+             *  marketplace panel (quickFactsSlot) still shows per-finish
+             *  TCGplayer / Cardmarket market data where available. */
+            <div style={{ background: 'var(--card)', borderRadius: 12, border: '1px dashed var(--border)', padding: '14px 16px', marginBottom: 14, fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+              No graded or raw valuations are published for this specific printing. Any marketplace quotes shown
+              below come from the per-finish TCGplayer / Cardmarket listings.
+            </div>
+          ) : (
           <div style={{ background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)', padding: '14px 16px', marginBottom: 14 }}>
             <SectionLabel>Current Prices (USD)</SectionLabel>
             <GradeLadder prices={gradeLadderPrices} mode={card.is_sealed ? 'sealed' : 'card'} />
@@ -849,6 +895,7 @@ export default function CardPageClient({
               psa10PriceCents={card.psa10_usd ?? null}
             />
           </div>
+          )}
 
           {trendPeriods.length > 0 && (
             <div style={{ background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)', padding: '14px 16px' }}>
@@ -896,6 +943,17 @@ export default function CardPageClient({
             ranges
             note="New graded tiers (BGS, CGC, SGC, ACE, TAG) just started tracking. Limited history will fill in over the coming weeks."
           />
+        </Panel>
+      )}
+      {providerMode && priceHistory.length <= 1 && (
+        /* PP-TCG-MIGRATE-03A — honest absent-history state. Preserves
+         *  the Price History anchor on the page so layout doesn't
+         *  shift, without rendering a broken empty chart. */
+        <Panel style={{ paddingBottom: 24 }}>
+          <SectionLabel>Price History</SectionLabel>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", padding: '10px 0', lineHeight: 1.5 }}>
+            Historical pricing has not been ingested for this printing yet. When available, the chart will show per-source and per-grader series separately — never mixing methodologies on a single line.
+          </div>
         </Panel>
       )}
 

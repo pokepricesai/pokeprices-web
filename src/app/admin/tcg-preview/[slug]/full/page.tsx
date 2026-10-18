@@ -144,6 +144,7 @@ export default async function TcgPreviewFull({ params }: PageProps) {
         initialTrendData={null}
         initialPriceHistory={chartData as unknown as Array<Record<string, unknown>>}
         quickFactsSlot={quickFactsSlot}
+        providerMode
       />
     </>
   )
