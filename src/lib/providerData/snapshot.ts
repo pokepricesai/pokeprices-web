@@ -88,10 +88,19 @@ export async function getProviderSnapshot(
     .eq('pp_card_slug', pp_card_slug)
     .maybeSingle();
   if (mErr || !mapping) return null;
-  // In public mode, the mapping MUST be approved. Preview mode skips
-  // the approval gate but every other invariant is unchanged.
   if (!previewMode && mapping.review_status !== 'approved') return null;
   if (!mapping.tcg_card_id || !mapping.tcg_printing_key) return null;
+
+  // PP-TCG-MATCH §6 — read eligibility from the effective view so a
+  // stale bulk_safe assignment on pokemon_tcg_mappings cannot bypass
+  // a QA-recommended restriction (e.g. multi-printing graded unsafe).
+  const { data: effective } = await sb
+    .from('v_pokemon_tcg_effective_eligibility')
+    .select('effective_eligibility')
+    .eq('pp_card_slug', pp_card_slug)
+    .eq('provider', 'tcggraph')
+    .maybeSingle();
+  const effectiveEligibility = (effective?.effective_eligibility ?? mapping.pricing_eligibility) as ProviderPricingEligibility;
 
   const [cardRes, marketRes, gradedRes] = await Promise.all([
     sb.from('pokemon_tcg_provider_cards')
@@ -111,7 +120,7 @@ export async function getProviderSnapshot(
       .eq('tcg_card_id', mapping.tcg_card_id),
   ]);
 
-  const eligibility = mapping.pricing_eligibility as ProviderPricingEligibility;
+  const eligibility = effectiveEligibility;
 
   // Price-eligibility gate — never leak aggregate graded onto a
   // variant printing, never leak anything from identity_only /
