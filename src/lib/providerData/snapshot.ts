@@ -91,16 +91,25 @@ export async function getProviderSnapshot(
   if (!previewMode && mapping.review_status !== 'approved') return null;
   if (!mapping.tcg_card_id || !mapping.tcg_printing_key) return null;
 
-  // PP-TCG-MATCH §6 — read eligibility from the effective view so a
-  // stale bulk_safe assignment on pokemon_tcg_mappings cannot bypass
-  // a QA-recommended restriction (e.g. multi-printing graded unsafe).
-  const { data: effective } = await sb
+  // PP-TCG-QA-FINAL §3 — FAIL CLOSED on missing QA.
+  //
+  // Read eligibility from the effective view, which returns the MORE
+  // RESTRICTIVE of (mapping.pricing_eligibility, qa.recommended). If
+  // the view errors, returns no row, or returns null — the mapping is
+  // treated as not_eligible for public display. We NEVER fall back to
+  // the raw bulk_safe label on the mapping, because that would silently
+  // activate pricing/images for a card whose QA has not been run or
+  // has recommended a stricter eligibility that failed to apply.
+  const { data: effective, error: effErr } = await sb
     .from('v_pokemon_tcg_effective_eligibility')
     .select('effective_eligibility')
     .eq('pp_card_slug', pp_card_slug)
     .eq('provider', 'tcggraph')
     .maybeSingle();
-  const effectiveEligibility = (effective?.effective_eligibility ?? mapping.pricing_eligibility) as ProviderPricingEligibility;
+  if (effErr) return null;             // DB error → fail closed
+  if (!effective) return null;         // no QA row at all → fail closed
+  if (!effective.effective_eligibility) return null;  // null effective → fail closed
+  const effectiveEligibility = effective.effective_eligibility as ProviderPricingEligibility;
 
   const [cardRes, marketRes, gradedRes] = await Promise.all([
     sb.from('pokemon_tcg_provider_cards')

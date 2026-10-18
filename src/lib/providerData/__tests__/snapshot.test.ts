@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { getProviderSnapshot } from '../snapshot';
 
 // Regression tests for the admin-preview snapshot gate.
@@ -6,21 +6,14 @@ import { getProviderSnapshot } from '../snapshot';
 // invariants (variant printings never see aggregate graded,
 // identity_only never sees prices).
 
-type StubbedQuery = {
-  select: (...a: unknown[]) => StubbedQuery;
-  eq: (...a: unknown[]) => StubbedQuery;
-  maybeSingle?: () => Promise<{ data: unknown; error: null }>;
-};
-type QueryResolver = (table: string) => StubbedQuery | Promise<{ data: unknown[]; error: null }>;
-
-function makeStub(answers: Record<string, { data: unknown; error: null }>) {
+function makeStub(answers: Record<string, { data: unknown; error: unknown }>) {
   const stub: any = {
     from(table: string) {
       const q: any = {
         select() { return q; },
         eq() { return q; },
         maybeSingle() { return Promise.resolve(answers[`${table}:single`] ?? { data: null, error: null }); },
-        then(resolve: (r: { data: unknown; error: null }) => void) {
+        then(resolve: (r: { data: unknown; error: unknown }) => void) {
           resolve(answers[`${table}:list`] ?? { data: [], error: null });
         },
       };
@@ -28,6 +21,27 @@ function makeStub(answers: Record<string, { data: unknown; error: null }>) {
     },
   };
   return stub;
+}
+
+/**
+ * Build the full stub answer set INCLUDING the effective-eligibility view
+ * stub, which defaults to echoing the mapping's own pricing_eligibility.
+ * Tests only need to override `v_pokemon_tcg_effective_eligibility:single`
+ * when exercising the fail-closed paths.
+ */
+function makeStubWithEffectiveView(
+  mapping: { pricing_eligibility: string; [k: string]: unknown },
+  rest: Record<string, { data: unknown; error: unknown }> = {},
+  effectiveOverride?: { data: unknown; error: unknown },
+) {
+  return makeStub({
+    'pokemon_tcg_mappings:single': { data: mapping, error: null },
+    'v_pokemon_tcg_effective_eligibility:single': effectiveOverride ?? {
+      data: { effective_eligibility: mapping.pricing_eligibility },
+      error: null,
+    },
+    ...rest,
+  });
 }
 
 const APPROVED_BULK_SAFE_MAPPING = {
@@ -72,8 +86,7 @@ describe('getProviderSnapshot — public mode (previewMode=false)', () => {
   });
 
   it('returns null when all flags off even for approved rows', async () => {
-    const sb = makeStub({
-      'pokemon_tcg_mappings:single': { data: APPROVED_BULK_SAFE_MAPPING, error: null },
+    const sb = makeStubWithEffectiveView(APPROVED_BULK_SAFE_MAPPING, {
       'pokemon_tcg_provider_cards:single': { data: { image_normal: 'x.jpg', image_source: 'card' }, error: null },
       'pokemon_tcg_prices_market:list': { data: [{ source: 'tcgplayer', finish: 'normal' }], error: null },
       'pokemon_tcg_prices_graded:list': { data: [{ grader: 'psa', grade: '10', price: 100 }], error: null },
@@ -88,8 +101,7 @@ describe('getProviderSnapshot — public mode (previewMode=false)', () => {
   it('returns prices when flags enabled + bulk_safe + approved', async () => {
     process.env.PP_USE_TCGGRAPH_PRICES = '1';
     process.env.PP_USE_TCGGRAPH_IMAGES = '1';
-    const sb = makeStub({
-      'pokemon_tcg_mappings:single': { data: APPROVED_BULK_SAFE_MAPPING, error: null },
+    const sb = makeStubWithEffectiveView(APPROVED_BULK_SAFE_MAPPING, {
       'pokemon_tcg_provider_cards:single': { data: { image_normal: 'x.jpg', image_source: 'card' }, error: null },
       'pokemon_tcg_prices_market:list': { data: [{ source: 'tcgplayer', finish: 'normal', currency: 'USD', market: 10 }], error: null },
       'pokemon_tcg_prices_graded:list': { data: [{ grader: 'psa', grade: '10', currency: 'USD', price: 100 }], error: null },
@@ -108,8 +120,7 @@ describe('getProviderSnapshot — admin preview mode', () => {
   });
 
   it('returns prices even without flags set (ignoreFlags defaults true)', async () => {
-    const sb = makeStub({
-      'pokemon_tcg_mappings:single': { data: APPROVED_BULK_SAFE_MAPPING, error: null },
+    const sb = makeStubWithEffectiveView(APPROVED_BULK_SAFE_MAPPING, {
       'pokemon_tcg_provider_cards:single': { data: { image_normal: 'x.jpg' }, error: null },
       'pokemon_tcg_prices_market:list': { data: [{ source: 'tcgplayer' }], error: null },
       'pokemon_tcg_prices_graded:list': { data: [{ grader: 'psa', grade: '10' }], error: null },
@@ -121,8 +132,7 @@ describe('getProviderSnapshot — admin preview mode', () => {
   });
 
   it('returns snapshot for a pending (not-yet-approved) mapping', async () => {
-    const sb = makeStub({
-      'pokemon_tcg_mappings:single': { data: PENDING_MARKET_ONLY_MAPPING, error: null },
+    const sb = makeStubWithEffectiveView(PENDING_MARKET_ONLY_MAPPING, {
       'pokemon_tcg_provider_cards:single': { data: { image_normal: 'x.jpg' }, error: null },
       'pokemon_tcg_prices_market:list': { data: [{ source: 'tcgplayer' }], error: null },
       'pokemon_tcg_prices_graded:list': { data: [{ grader: 'psa', grade: '10' }], error: null },
@@ -133,8 +143,7 @@ describe('getProviderSnapshot — admin preview mode', () => {
   });
 
   it('market_only suppresses graded (variant printing invariant)', async () => {
-    const sb = makeStub({
-      'pokemon_tcg_mappings:single': { data: PENDING_MARKET_ONLY_MAPPING, error: null },
+    const sb = makeStubWithEffectiveView(PENDING_MARKET_ONLY_MAPPING, {
       'pokemon_tcg_provider_cards:single': { data: { image_normal: 'x.jpg' }, error: null },
       'pokemon_tcg_prices_market:list': { data: [{ source: 'tcgplayer' }], error: null },
       'pokemon_tcg_prices_graded:list': { data: [{ grader: 'psa', grade: '10', price: 999 }], error: null },
@@ -146,8 +155,7 @@ describe('getProviderSnapshot — admin preview mode', () => {
   });
 
   it('identity_only suppresses both market and graded', async () => {
-    const sb = makeStub({
-      'pokemon_tcg_mappings:single': { data: PENDING_IDENTITY_ONLY_MAPPING, error: null },
+    const sb = makeStubWithEffectiveView(PENDING_IDENTITY_ONLY_MAPPING, {
       'pokemon_tcg_provider_cards:single': { data: { image_normal: 'x.jpg' }, error: null },
       'pokemon_tcg_prices_market:list': { data: [{ source: 'tcgplayer' }], error: null },
       'pokemon_tcg_prices_graded:list': { data: [{ grader: 'psa', grade: '10' }], error: null },
@@ -159,8 +167,7 @@ describe('getProviderSnapshot — admin preview mode', () => {
   });
 
   it('uncertain still returns no prices / no graded', async () => {
-    const sb = makeStub({
-      'pokemon_tcg_mappings:single': { data: PENDING_UNCERTAIN_MAPPING, error: null },
+    const sb = makeStubWithEffectiveView(PENDING_UNCERTAIN_MAPPING, {
       'pokemon_tcg_provider_cards:single': { data: { image_normal: 'x.jpg' }, error: null },
       'pokemon_tcg_prices_market:list': { data: [{ source: 'tcgplayer' }], error: null },
       'pokemon_tcg_prices_graded:list': { data: [{ grader: 'psa', grade: '10' }], error: null },
@@ -176,5 +183,112 @@ describe('getProviderSnapshot — admin preview mode', () => {
     });
     const r = await getProviderSnapshot(sb, 'test-slug', { previewMode: true });
     expect(r).toBeNull();
+  });
+});
+
+// PP-TCG-QA-FINAL §3 — fail-closed invariants
+describe('getProviderSnapshot — fail-closed on missing QA / view errors', () => {
+  beforeEach(() => {
+    delete process.env.PP_USE_TCGGRAPH_PRICES;
+    delete process.env.PP_USE_TCGGRAPH_IMAGES;
+  });
+
+  it('returns null when the effective view errors (even if mapping says bulk_safe)', async () => {
+    // Simulate v_pokemon_tcg_effective_eligibility errored — fail closed.
+    const sb = makeStubWithEffectiveView(
+      APPROVED_BULK_SAFE_MAPPING,
+      {
+        'pokemon_tcg_provider_cards:single': { data: { image_normal: 'x.jpg' }, error: null },
+        'pokemon_tcg_prices_market:list': { data: [{ source: 'tcgplayer' }], error: null },
+        'pokemon_tcg_prices_graded:list': { data: [{ grader: 'psa', grade: '10' }], error: null },
+      },
+      { data: null, error: { message: 'db error' } },
+    );
+    const r = await getProviderSnapshot(sb, 'test-slug', { previewMode: true });
+    expect(r).toBeNull();
+  });
+
+  it('returns null when the effective view returns no row (no QA ever ran)', async () => {
+    const sb = makeStubWithEffectiveView(
+      APPROVED_BULK_SAFE_MAPPING,
+      {
+        'pokemon_tcg_provider_cards:single': { data: { image_normal: 'x.jpg' }, error: null },
+        'pokemon_tcg_prices_market:list': { data: [{ source: 'tcgplayer' }], error: null },
+        'pokemon_tcg_prices_graded:list': { data: [{ grader: 'psa', grade: '10' }], error: null },
+      },
+      { data: null, error: null },
+    );
+    const r = await getProviderSnapshot(sb, 'test-slug', { previewMode: true });
+    expect(r).toBeNull();
+  });
+
+  it('returns null when effective_eligibility is literally null', async () => {
+    const sb = makeStubWithEffectiveView(
+      APPROVED_BULK_SAFE_MAPPING,
+      {
+        'pokemon_tcg_provider_cards:single': { data: { image_normal: 'x.jpg' }, error: null },
+        'pokemon_tcg_prices_market:list': { data: [{ source: 'tcgplayer' }], error: null },
+        'pokemon_tcg_prices_graded:list': { data: [{ grader: 'psa', grade: '10' }], error: null },
+      },
+      { data: { effective_eligibility: null }, error: null },
+    );
+    const r = await getProviderSnapshot(sb, 'test-slug', { previewMode: true });
+    expect(r).toBeNull();
+  });
+
+  it('effective view downgrade overrides stale bulk_safe label (ambiguous_variant case)', async () => {
+    // The mapping still carries pricing_eligibility='bulk_safe' because the
+    // correction hasn't been applied yet. The QA has recommended 'not_eligible'
+    // because the mapping is ambiguous_variant. The effective view returns the
+    // more restrictive: not_eligible → snapshot must gate everything off.
+    const sb = makeStubWithEffectiveView(
+      APPROVED_BULK_SAFE_MAPPING,
+      {
+        'pokemon_tcg_provider_cards:single': { data: { image_normal: 'x.jpg' }, error: null },
+        'pokemon_tcg_prices_market:list': { data: [{ source: 'tcgplayer', market: 10 }], error: null },
+        'pokemon_tcg_prices_graded:list': { data: [{ grader: 'psa', grade: '10', price: 100 }], error: null },
+      },
+      { data: { effective_eligibility: 'not_eligible' }, error: null },
+    );
+    const r = await getProviderSnapshot(sb, 'test-slug', { previewMode: true });
+    expect(r?.pricing_eligibility).toBe('not_eligible');
+    expect(r?.market_prices).toEqual([]);
+    expect(r?.graded_prices).toEqual([]);
+    expect(r?.image_normal).toBeNull();
+  });
+
+  it('effective view downgrade overrides stale bulk_safe → market_only (pricing_restriction case)', async () => {
+    const sb = makeStubWithEffectiveView(
+      APPROVED_BULK_SAFE_MAPPING,
+      {
+        'pokemon_tcg_provider_cards:single': { data: { image_normal: 'x.jpg' }, error: null },
+        'pokemon_tcg_prices_market:list': { data: [{ source: 'tcgplayer', market: 10 }], error: null },
+        'pokemon_tcg_prices_graded:list': { data: [{ grader: 'psa', grade: '10', price: 100 }], error: null },
+      },
+      { data: { effective_eligibility: 'market_only' }, error: null },
+    );
+    process.env.PP_USE_TCGGRAPH_PRICES = '1';
+    process.env.PP_USE_TCGGRAPH_IMAGES = '1';
+    const r = await getProviderSnapshot(sb, 'test-slug');
+    expect(r?.pricing_eligibility).toBe('market_only');
+    expect(r?.market_prices).toHaveLength(1);   // market still shown
+    expect(r?.graded_prices).toEqual([]);        // graded suppressed by downgrade
+  });
+
+  it('effective view returning "uncertain" blocks everything (conflicting_identity case)', async () => {
+    const sb = makeStubWithEffectiveView(
+      APPROVED_BULK_SAFE_MAPPING,
+      {
+        'pokemon_tcg_provider_cards:single': { data: { image_normal: 'x.jpg' }, error: null },
+        'pokemon_tcg_prices_market:list': { data: [{ source: 'tcgplayer' }], error: null },
+        'pokemon_tcg_prices_graded:list': { data: [{ grader: 'psa', grade: '10' }], error: null },
+      },
+      { data: { effective_eligibility: 'uncertain' }, error: null },
+    );
+    const r = await getProviderSnapshot(sb, 'test-slug', { previewMode: true });
+    expect(r?.pricing_eligibility).toBe('uncertain');
+    expect(r?.market_prices).toEqual([]);
+    expect(r?.graded_prices).toEqual([]);
+    expect(r?.image_normal).toBeNull();
   });
 });
