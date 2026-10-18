@@ -367,11 +367,23 @@ export type CardPageClientProps = {
    *  Public pages leave this undefined so there is zero behaviour
    *  change on the live site. */
   providerMode?: boolean
+  /** PP-TCG-MIGRATE-06 §4 — display-currency support. When
+   *  provided (admin preview only), prices rendered in cents are
+   *  converted into displayCcy using the given fx table. Public
+   *  pages leave this undefined and continue to render USD exactly
+   *  as before. The conversion only touches hero + grading-
+   *  calculator USD-denominated values; percentages, multipliers,
+   *  and population counts are unaffected. */
+  displayCcy?: 'USD' | 'EUR'
+  fx?: {
+    as_of: string
+    rates: Partial<Record<`${'USD' | 'EUR'}_${'USD' | 'EUR'}`, number>>
+  } | null
 }
 
 export default function CardPageClient({
   setName, cardUrlSlug, initialCardData, initialTrendData, quickFactsSlot, seoIntroSlot,
-  initialPriceHistory, initialProviderExtras, providerMode,
+  initialPriceHistory, initialProviderExtras, providerMode, displayCcy, fx,
 }: CardPageClientProps) {
   // W46D — treat any value !== undefined as "server supplied data".
   // A legitimate null from the server means "no card row exists" but
@@ -589,6 +601,33 @@ export default function CardPageClient({
     gradeLadderPrices.tag10_usd == null
   )
   const showPriceBox = !providerMode || !allGradedPricesNull
+
+  // PP-TCG-MIGRATE-06 §4 — display-currency helper. In public mode
+  // (displayCcy=undefined) returns the original '$X' render exactly
+  // as before. In admin preview with EUR + FX, converts and swaps
+  // the symbol. Null-safe at every step; if FX is unavailable the
+  // helper falls back to the native USD rendering with a trailing
+  // '*' marker visible on hover.
+  const fmtMoneyFromCents = (cents: number | null | undefined, opts: { compact?: boolean } = {}): string => {
+    if (cents == null || !Number.isFinite(Number(cents))) return '—'
+    const usdDollars = Number(cents) / 100
+    const targetCcy = displayCcy ?? 'USD'
+    if (targetCcy === 'USD') {
+      return opts.compact
+        ? `$${usdDollars >= 1000 ? Math.round(usdDollars).toLocaleString('en-US') : usdDollars.toFixed(0)}`
+        : `$${usdDollars.toFixed(usdDollars >= 1000 ? 0 : 2)}`
+    }
+    // EUR path: look up USD→EUR
+    const rate = fx?.rates.USD_EUR
+    if (rate == null || !Number.isFinite(rate)) {
+      // No rate — fall back to USD rendering so we don't fabricate
+      return `$${usdDollars.toFixed(usdDollars >= 1000 ? 0 : 2)}*`
+    }
+    const eurValue = usdDollars * rate
+    return opts.compact
+      ? `€${eurValue >= 1000 ? Math.round(eurValue).toLocaleString('en-US') : eurValue.toFixed(0)}`
+      : `€${eurValue.toFixed(eurValue >= 1000 ? 0 : 2)}`
+  }
 
   const trendPeriods = hasAnyTrend ? [
     { label: '7d',   val: trend.raw_pct_7d   },
@@ -993,17 +1032,17 @@ export default function CardPageClient({
           )}
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10, marginBottom: 18 }}>
-            <StatTile label="Raw Price"           value={`$${(card.raw_usd / 100).toFixed(0)}`} />
-            <StatTile label="PSA 10 Value"        value={`$${(card.psa10_usd / 100).toFixed(0)}`} />
+            <StatTile label="Raw Price"           value={fmtMoneyFromCents(card.raw_usd, { compact: true })} />
+            <StatTile label="PSA 10 Value"        value={fmtMoneyFromCents(card.psa10_usd, { compact: true })} />
             <StatTile
               label="Gross Premium (PSA 10)"
-              value={gradingGrossSpreadCents != null ? `${gradingGrossSpreadCents > 0 ? '+' : ''}$${(gradingGrossSpreadCents / 100).toFixed(0)}` : '—'}
+              value={gradingGrossSpreadCents != null ? `${gradingGrossSpreadCents > 0 ? '+' : ''}${fmtMoneyFromCents(gradingGrossSpreadCents, { compact: true }).replace(/^-/, '')}` : '—'}
               sub="before PSA fees"
             />
             {expectedValueCents != null && (
               <StatTile
                 label="Expected Gross Return"
-                value={`${expectedValueCents > 0 ? '+' : ''}$${(expectedValueCents / 100).toFixed(0)}`}
+                value={`${expectedValueCents > 0 ? '+' : ''}${fmtMoneyFromCents(expectedValueCents, { compact: true }).replace(/^-/, '')}`}
                 sub={gemRate != null ? `probability-weighted · at ${gemRate.toFixed(1)}% gem` : 'probability-weighted'}
                 highlight={expectedValueCents > 0}
               />
@@ -1018,7 +1057,7 @@ export default function CardPageClient({
                   <div key={g.label}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
                       <span style={{ fontSize: 13, fontFamily: "'Figtree', sans-serif", color: 'var(--text)', fontWeight: 600 }}>
-                        {g.label}<span style={{ fontWeight: 400, color: 'var(--text-muted)', marginLeft: 6 }}>${(g.value / 100).toFixed(0)}</span>
+                        {g.label}<span style={{ fontWeight: 400, color: 'var(--text-muted)', marginLeft: 6 }}>{fmtMoneyFromCents(g.value, { compact: true })}</span>
                       </span>
                       <span style={{ fontSize: 13, fontWeight: 700, fontFamily: "'Figtree', sans-serif", color: 'var(--text-muted)' }}>{g.multiple?.toFixed(1)}x raw</span>
                     </div>
