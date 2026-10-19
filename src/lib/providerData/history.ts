@@ -38,9 +38,19 @@ export async function getProviderHistorySeries(
   sb: SupabaseClient,
   tcg_card_id: string,
   tcg_printing_key: string,
-  opts: { ignoreFlag?: boolean } = {},
+  opts: {
+    /** Admin preview: bypass BOTH the env flag and the pilot allowlist. */
+    ignoreFlag?: boolean;
+    /** PP-TCG-CUTOVER-PREP-01 §3 — pilot allowlist gate for history.
+     *  Pass true only when the current card's pilot row has
+     *  history_enabled=true. Defaults to false (fail-closed). */
+    pilotHistoryEnabled?: boolean;
+  } = {},
 ): Promise<ProviderHistorySeries[]> {
-  if (!opts.ignoreFlag && !isProviderFlagEnabled('tcggraph_history')) return [];
+  if (!opts.ignoreFlag) {
+    if (!isProviderFlagEnabled('tcggraph_history')) return [];
+    if (!opts.pilotHistoryEnabled) return [];
+  }
   const { data, error } = await sb
     .from('pokemon_tcg_prices_history')
     .select('series_kind, source, finish, grader, grade, currency, day, market, low')

@@ -33,11 +33,19 @@ function makeStubWithEffectiveView(
   mapping: { pricing_eligibility: string; [k: string]: unknown },
   rest: Record<string, { data: unknown; error: unknown }> = {},
   effectiveOverride?: { data: unknown; error: unknown },
+  pilotOverride?: { data: unknown; error: unknown },
 ) {
   return makeStub({
     'pokemon_tcg_mappings:single': { data: mapping, error: null },
     'v_pokemon_tcg_effective_eligibility:single': effectiveOverride ?? {
       data: { effective_eligibility: mapping.pricing_eligibility },
+      error: null,
+    },
+    // Default pilot: all three features ENABLED for the stub so existing
+    // behaviour-oriented tests still exercise their intended branches.
+    // Tests for the pilot gate itself pass `pilotOverride` explicitly.
+    'v_pokemon_tcg_pilot_active:single': pilotOverride ?? {
+      data: { prices_enabled: true, images_enabled: true, history_enabled: true },
       error: null,
     },
     ...rest,
@@ -290,5 +298,85 @@ describe('getProviderSnapshot — fail-closed on missing QA / view errors', () =
     expect(r?.market_prices).toEqual([]);
     expect(r?.graded_prices).toEqual([]);
     expect(r?.image_normal).toBeNull();
+  });
+});
+
+// PP-TCG-CUTOVER-PREP-01 §3 — pilot allowlist gate
+describe('getProviderSnapshot — pilot cohort allowlist', () => {
+  beforeEach(() => {
+    delete process.env.PP_USE_TCGGRAPH_PRICES;
+    delete process.env.PP_USE_TCGGRAPH_IMAGES;
+  });
+
+  it('public mode without pilot row blocks prices + images even when env flags are ON', async () => {
+    process.env.PP_USE_TCGGRAPH_PRICES = '1';
+    process.env.PP_USE_TCGGRAPH_IMAGES = '1';
+    const sb = makeStubWithEffectiveView(
+      APPROVED_BULK_SAFE_MAPPING,
+      {
+        'pokemon_tcg_provider_cards:single': { data: { image_normal: 'x.jpg' }, error: null },
+        'pokemon_tcg_prices_market:list': { data: [{ source: 'tcgplayer', market: 10 }], error: null },
+        'pokemon_tcg_prices_graded:list': { data: [{ grader: 'psa', grade: '10', price: 100 }], error: null },
+      },
+      undefined,
+      { data: null, error: null },         // no pilot row → all features off
+    );
+    const r = await getProviderSnapshot(sb, 'test-slug');
+    expect(r?.market_prices).toEqual([]);
+    expect(r?.graded_prices).toEqual([]);
+    expect(r?.image_normal).toBeNull();
+  });
+
+  it('pilot prices_enabled=true + images_enabled=false serves prices only', async () => {
+    process.env.PP_USE_TCGGRAPH_PRICES = '1';
+    process.env.PP_USE_TCGGRAPH_IMAGES = '1';
+    const sb = makeStubWithEffectiveView(
+      APPROVED_BULK_SAFE_MAPPING,
+      {
+        'pokemon_tcg_provider_cards:single': { data: { image_normal: 'x.jpg' }, error: null },
+        'pokemon_tcg_prices_market:list': { data: [{ source: 'tcgplayer', market: 10 }], error: null },
+        'pokemon_tcg_prices_graded:list': { data: [{ grader: 'psa', grade: '10', price: 100 }], error: null },
+      },
+      undefined,
+      { data: { prices_enabled: true, images_enabled: false, history_enabled: false }, error: null },
+    );
+    const r = await getProviderSnapshot(sb, 'test-slug');
+    expect(r?.market_prices).toHaveLength(1);
+    expect(r?.graded_prices).toHaveLength(1);
+    expect(r?.image_normal).toBeNull();      // images gated by pilot
+  });
+
+  it('pilot error → fail closed (DB error treated as not in pilot)', async () => {
+    process.env.PP_USE_TCGGRAPH_PRICES = '1';
+    process.env.PP_USE_TCGGRAPH_IMAGES = '1';
+    const sb = makeStubWithEffectiveView(
+      APPROVED_BULK_SAFE_MAPPING,
+      {
+        'pokemon_tcg_provider_cards:single': { data: { image_normal: 'x.jpg' }, error: null },
+        'pokemon_tcg_prices_market:list': { data: [{ source: 'tcgplayer', market: 10 }], error: null },
+        'pokemon_tcg_prices_graded:list': { data: [{ grader: 'psa', grade: '10', price: 100 }], error: null },
+      },
+      undefined,
+      { data: null, error: { message: 'pilot view read error' } },
+    );
+    const r = await getProviderSnapshot(sb, 'test-slug');
+    expect(r?.market_prices).toEqual([]);
+    expect(r?.image_normal).toBeNull();
+  });
+
+  it('preview mode bypasses the pilot gate (ignorePilotCohort defaults true)', async () => {
+    const sb = makeStubWithEffectiveView(
+      APPROVED_BULK_SAFE_MAPPING,
+      {
+        'pokemon_tcg_provider_cards:single': { data: { image_normal: 'x.jpg' }, error: null },
+        'pokemon_tcg_prices_market:list': { data: [{ source: 'tcgplayer', market: 10 }], error: null },
+        'pokemon_tcg_prices_graded:list': { data: [{ grader: 'psa', grade: '10', price: 100 }], error: null },
+      },
+      undefined,
+      { data: null, error: null },         // not in pilot — but preview ignores it
+    );
+    const r = await getProviderSnapshot(sb, 'test-slug', { previewMode: true });
+    expect(r?.market_prices).toHaveLength(1);
+    expect(r?.image_normal).toBe('x.jpg');
   });
 });

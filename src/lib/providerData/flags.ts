@@ -13,14 +13,16 @@ import 'server-only';
 // deploy preview, or at build time.
 
 type FlagKey =
-  | 'tcggraph_prices'      // use provider market/graded prices on card pages
-  | 'tcggraph_images'      // use provider images on card pages
-  | 'tcggraph_history';    // use provider history for chart
+  | 'tcggraph_prices'       // use provider market/graded prices on card pages
+  | 'tcggraph_images'       // use provider images on card pages
+  | 'tcggraph_history'      // use provider history for chart
+  | 'currency_selector';    // render the USD/EUR header selector on public pages
 
 const ENV_KEYS: Record<FlagKey, string> = {
-  tcggraph_prices:  'PP_USE_TCGGRAPH_PRICES',
-  tcggraph_images:  'PP_USE_TCGGRAPH_IMAGES',
-  tcggraph_history: 'PP_USE_TCGGRAPH_HISTORY',
+  tcggraph_prices:   'PP_USE_TCGGRAPH_PRICES',
+  tcggraph_images:   'PP_USE_TCGGRAPH_IMAGES',
+  tcggraph_history:  'PP_USE_TCGGRAPH_HISTORY',
+  currency_selector: 'PP_USE_CURRENCY_SELECTOR',
 };
 
 export function isProviderFlagEnabled(key: FlagKey): boolean {
@@ -31,8 +33,9 @@ export function isProviderFlagEnabled(key: FlagKey): boolean {
 
 export function listProviderFlags(): Record<FlagKey, boolean> {
   return {
-    tcggraph_prices:  isProviderFlagEnabled('tcggraph_prices'),
-    tcggraph_images:  isProviderFlagEnabled('tcggraph_images'),
-    tcggraph_history: isProviderFlagEnabled('tcggraph_history'),
+    tcggraph_prices:   isProviderFlagEnabled('tcggraph_prices'),
+    tcggraph_images:   isProviderFlagEnabled('tcggraph_images'),
+    tcggraph_history:  isProviderFlagEnabled('tcggraph_history'),
+    currency_selector: isProviderFlagEnabled('currency_selector'),
   };
 }

@@ -30,6 +30,21 @@ function setRpc(h: RpcHandler) { rpcHandler = h }
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
     rpc: async (_name: string, args: RpcArgs) => rpcHandler(args),
+    // PP-TCG-CUTOVER-PREP-01 §3 — the public card page also calls
+    // getProviderSnapshot + getPilotFeatures via `.from(...).select(...).eq(...).maybeSingle()`.
+    // Stub a chainable builder that always resolves to no-op data; this
+    // keeps the provider path a strict no-op during metadata tests.
+    from: () => {
+      const q: any = {
+        select: () => q,
+        eq: () => q,
+        or: () => q,
+        order: () => q,
+        range: () => Promise.resolve({ data: [], error: null }),
+        maybeSingle: () => Promise.resolve({ data: null, error: null }),
+      }
+      return q
+    },
   }),
 }))
 // React's `cache` primitive is only defined inside an RSC render.

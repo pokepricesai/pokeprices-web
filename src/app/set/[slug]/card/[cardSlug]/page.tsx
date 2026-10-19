@@ -9,6 +9,19 @@ import { loadRecentSalesGroupedForCardIfEnabled } from '@/lib/recentSales/cardQu
 import { isCardIndexable } from '@/lib/seo-indexability/cardIndexability'
 import { getCardSeoOverride } from '@/lib/seo/cardSeoOverrides'
 import { displaySetName, resolveLanguage } from '@/lib/cardLanguage'
+// PP-TCG-CUTOVER-PREP-01 §3 — production provider-read path. All env
+// flags default OFF; the pilot allowlist is the second gate. Even if
+// an operator flips an env flag on, only slugs in
+// pokemon_tcg_pilot_cohort with the matching feature enabled will
+// start serving TCGGraph data. For every other request this path is
+// a no-op and the legacy card_trends data continues to serve.
+import { getProviderSnapshot } from '@/lib/providerData/snapshot'
+import { getProviderHistorySeries } from '@/lib/providerData/history'
+import { adaptSnapshotToLegacyCardRow, adaptProviderHistoryForChart } from '@/lib/providerData/toCardRow'
+import { getPilotFeatures } from '@/lib/providerData/pilotCohort'
+import { isProviderFlagEnabled } from '@/lib/providerData/flags'
+import { cookies } from 'next/headers'
+import { loadLatestFxTable, parseDisplayCcy, DISPLAY_CCY_COOKIE } from '@/lib/providerData/currency'
 // Block 5A-W-46B (with W46B-FIX1) — server-emit BreadcrumbSchema only.
 //   * BreadcrumbSchema moved up from CardPageClient (which fetched
 //     `card` via useEffect and therefore shipped an empty initial HTML
@@ -347,6 +360,78 @@ export default async function CardPage({ params }: { params: Promise<{ slug: str
     isSealed:   !!card.is_sealed,
   } : null
 
+  // PP-TCG-CUTOVER-PREP-01 §3 — provider snapshot path.
+  //
+  // Reads TCGGraph data ONLY when ALL of the following hold:
+  //   1. We have a card row (not on error branch)
+  //   2. The mapping is approved (snapshot gate)
+  //   3. effective_eligibility ≥ market_only for prices, identity_only for images
+  //   4. The matching PP_USE_TCGGRAPH_* env flag is ON
+  //   5. The card's pp_card_slug is in pokemon_tcg_pilot_cohort with the
+  //      matching feature enabled
+  //
+  // When any condition fails: snapshot returns empty arrays / null image
+  // and this code uses the legacy `card` row untouched. The behaviour on
+  // the live site with all env flags off is a pure no-op (one extra
+  // Supabase read per card page).
+  const providerSupabase = supabaseServer
+  const providerSlug = card ? String(card.card_slug ?? '') : null
+  const [providerSnapshot, pilotFeatures] = providerSlug
+    ? await Promise.all([
+        getProviderSnapshot(providerSupabase, providerSlug),
+        getPilotFeatures(providerSupabase, providerSlug),
+      ])
+    : [null, { prices: false, images: false, history: false } as const]
+
+  const providerHasPrices =
+    (providerSnapshot?.market_prices?.length ?? 0) > 0 ||
+    (providerSnapshot?.graded_prices?.length ?? 0) > 0
+  const providerHasImage = Boolean(providerSnapshot?.image_normal)
+  const useProvider = providerHasPrices || providerHasImage
+
+  let providerHistoryChart: ReadonlyArray<Record<string, unknown>> | undefined
+  if (useProvider && providerSnapshot?.tcg_card_id && providerSnapshot?.tcg_printing_key) {
+    const historySeries = await getProviderHistorySeries(
+      providerSupabase,
+      providerSnapshot.tcg_card_id,
+      providerSnapshot.tcg_printing_key,
+      { pilotHistoryEnabled: pilotFeatures.history },
+    )
+    if (historySeries.length > 0) {
+      providerHistoryChart = adaptProviderHistoryForChart(historySeries) as unknown as ReadonlyArray<Record<string, unknown>>
+    }
+  }
+
+  // PP-TCG-CUTOVER-PREP-01 §7 — public USD/EUR selector (behind
+  // PP_USE_CURRENCY_SELECTOR). Flag off → no cookie read, no FX
+  // fetch, no displayCcy passed to the client. Flag on → compute
+  // display currency from cookie + load the cached FX table.
+  const currencySelectorOn = isProviderFlagEnabled('currency_selector')
+  let displayCcy: 'USD' | 'EUR' = 'USD'
+  let fxTable: Awaited<ReturnType<typeof loadLatestFxTable>> | null = null
+  if (currencySelectorOn) {
+    const cookieStore = await cookies()
+    displayCcy = parseDisplayCcy(cookieStore.get(DISPLAY_CCY_COOKIE)?.value)
+    fxTable = await loadLatestFxTable(providerSupabase)
+  }
+
+  // When provider mode is active, adapt the snapshot into the CardRow
+  // shape the client already expects. Otherwise keep the legacy card.
+  const cardForClient = useProvider && card
+    ? adaptSnapshotToLegacyCardRow({
+        card_slug: card.card_slug,
+        card_url_slug: (card.card_url_slug as string | null) ?? null,
+        card_name: card.card_name,
+        set_name: card.set_name,
+        card_number: card.card_number ?? null,
+        card_number_display: card.card_number_display ?? null,
+        set_printed_total: card.set_printed_total ?? null,
+        image_url: card.image_url ?? null,
+        language: (card.language as string | null) ?? 'en',
+        is_sealed: card.is_sealed ?? false,
+      }, providerSnapshot)?.card ?? card
+    : card
+
   // Block 5A-W-58H — server-rendered SEO intro paragraph for the ten
   // hand-picked cards. Only fires when the same override the metadata
   // reads returned an `intro` string. Rendered by CardPageClient in
@@ -405,17 +490,33 @@ export default async function CardPage({ params }: { params: Promise<{ slug: str
       <CardPageClient
         setName={setName}
         cardUrlSlug={cardSlug}
-        initialCardData={card ?? undefined}
-        initialTrendData={initialTrendData}
-        quickFactsSlot={card && indexable ? (
-          <CardPriceQuickFacts
-            card={card}
-            trend={trendForPanel}
-            setHref={setHref}
-            pokemonHref={null}
-            pokemonName={null}
-          />
-        ) : null}
+        initialCardData={cardForClient ?? undefined}
+        initialTrendData={useProvider ? null : initialTrendData}
+        // When provider mode is active, ALWAYS supply initialPriceHistory
+        // (even as an empty array) so the client's extras-fetch early-exit
+        // triggers. Prevents the browser from calling /api/card/{slug}/extras
+        // and get_card_trends_detail — both legacy PriceCharting-derived.
+        initialPriceHistory={useProvider
+          ? ((providerHistoryChart as unknown as Array<Record<string, unknown>>) ?? [])
+          : undefined}
+        providerMode={useProvider || undefined}
+        displayCcy={currencySelectorOn ? displayCcy : undefined}
+        fx={currencySelectorOn ? fxTable : undefined}
+        quickFactsSlot={
+          // Suppress the legacy PriceCharting-derived Quick Facts panel
+          // when provider mode is active — the hero already renders the
+          // adapted TCGGraph values and we don't want a parallel panel
+          // to leak legacy raw_usd/psa10_usd signals onto a pilot card.
+          card && indexable && !useProvider ? (
+            <CardPriceQuickFacts
+              card={card}
+              trend={trendForPanel}
+              setHref={setHref}
+              pokemonHref={null}
+              pokemonName={null}
+            />
+          ) : null
+        }
         seoIntroSlot={seoIntroSlot}
       />
       {recentSalesCard && (

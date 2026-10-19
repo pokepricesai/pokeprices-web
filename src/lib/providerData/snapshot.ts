@@ -1,5 +1,6 @@
 import 'server-only';
 import { isProviderFlagEnabled } from './flags';
+import { getPilotFeatures } from './pilotCohort';
 
 // Server-side resolver for a single PP card's TCGGraph provider
 // snapshot. Returns null unless the matching feature flag is ON.
@@ -71,6 +72,10 @@ export interface GetSnapshotOptions {
    *  is explicitly looking at this). Defaults to true when previewMode
    *  is true, false otherwise. */
   ignoreFlags?: boolean;
+  /** In preview mode, bypass the pilot allowlist. Defaults to true
+   *  when previewMode is true, false otherwise. Public callers MUST
+   *  not pass this. */
+  ignorePilotCohort?: boolean;
 }
 
 export async function getProviderSnapshot(
@@ -80,6 +85,7 @@ export async function getProviderSnapshot(
 ): Promise<ProviderSnapshot | null> {
   const previewMode = !!opts.previewMode;
   const ignoreFlags = opts.ignoreFlags ?? previewMode;
+  const ignorePilot = opts.ignorePilotCohort ?? previewMode;
 
   const { data: mapping, error: mErr } = await sb
     .from('pokemon_tcg_mappings')
@@ -134,14 +140,25 @@ export async function getProviderSnapshot(
   // Price-eligibility gate — never leak aggregate graded onto a
   // variant printing, never leak anything from identity_only /
   // not_eligible / uncertain rows. Applies in BOTH preview and
-  // public modes; only the mapping-approved gate differs.
+  // public modes; only the mapping-approved + pilot gates differ.
   const priceFlagOn = ignoreFlags ? true : isProviderFlagEnabled('tcggraph_prices');
   const imageFlagOn = ignoreFlags ? true : isProviderFlagEnabled('tcggraph_images');
-  const canReturnMarket = priceFlagOn &&
+
+  // PP-TCG-CUTOVER-PREP-01 §3 — pilot allowlist, per-feature.
+  // Any slug NOT in the allowlist defaults to all-features-off, which
+  // means the public adapter returns an "identity-only or null" snapshot
+  // — i.e. legacy card_trends keeps serving. This is the gate that
+  // prevents a flipped env flag from accidentally activating all
+  // 37,224 approved mappings.
+  const pilot = ignorePilot
+    ? { prices: true, images: true, history: true }
+    : await getPilotFeatures(sb, pp_card_slug);
+
+  const canReturnMarket = priceFlagOn && pilot.prices &&
     (eligibility === 'bulk_safe' || eligibility === 'market_only');
-  const canReturnGraded = priceFlagOn &&
+  const canReturnGraded = priceFlagOn && pilot.prices &&
     eligibility === 'bulk_safe';
-  const canReturnImages = imageFlagOn &&
+  const canReturnImages = imageFlagOn && pilot.images &&
     (eligibility === 'bulk_safe' || eligibility === 'market_only' || eligibility === 'identity_only');
 
   return {
