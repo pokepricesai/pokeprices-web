@@ -117,12 +117,19 @@ export async function getProviderSnapshot(
   if (!effective.effective_eligibility) return null;  // null effective → fail closed
   const effectiveEligibility = effective.effective_eligibility as ProviderPricingEligibility;
 
+  // PP-TCG-PRINTING-RECLASS-FIX §3 — exclude superseded provider_cards
+  // rows from public reads. A row flagged provider_status='superseded'
+  // represents a printing_key the TCGGraph provider has since
+  // reclassified — serving its stale image/price would be wrong. The
+  // underlying row + historical prices remain in the database for
+  // audit; this filter keeps them out of the public read path.
   const [cardRes, marketRes, gradedRes] = await Promise.all([
     sb.from('pokemon_tcg_provider_cards')
       .select('image_small, image_normal, image_large, image_source')
       .eq('provider', 'tcggraph')
       .eq('tcg_card_id', mapping.tcg_card_id)
       .eq('tcg_printing_key', mapping.tcg_printing_key)
+      .eq('provider_status', 'active')
       .maybeSingle(),
     sb.from('pokemon_tcg_prices_market')
       .select('source, finish, list_type, currency, market, low, trend, source_updated_at')
