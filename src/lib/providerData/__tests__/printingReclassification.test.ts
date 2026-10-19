@@ -113,6 +113,25 @@ describe('PP-TCG-PRINTING-RECLASS-FIX — adapter read-path invariants', () => {
     expect(r?.image_normal).toBe('https://cards.tcggraph.io/sp5/7.jpg')
   })
 
+  it('(CLOSEOUT §4) superseded provider_card → market + graded suppressed too (incompatible with current provider truth)', async () => {
+    // 2 affected 1st-edition mappings scenario — the stale printing's
+    // price rows exist in prices_market but the provider_card row for
+    // the same (card_id, old_key) is superseded. Public must NOT serve
+    // those orphan prices.
+    const sb = stubWithEffectiveView(
+      APPROVED_MAPPING_SP5_7,
+      { image_normal: 'https://cards.tcggraph.io/sp5/7.jpg', provider_status: 'superseded' },
+      {
+        market: [{ source: 'tcgplayer', finish: 'normal', currency: 'USD', market: 1.00 }],
+        graded: [],
+      },
+    )
+    const r = await getProviderSnapshot(sb, '12345')
+    // Image AND market both suppressed because provider_card is not active.
+    expect(r?.image_normal).toBeNull()
+    expect(r?.market_prices).toEqual([])
+  })
+
   it('(a) superseded + no active replacement → whole adapter returns the gated snapshot', async () => {
     // Market/graded rows are still keyed on (card_id, printing_key), so if the
     // adapter asked for the same printing_key those rows WOULD be present —

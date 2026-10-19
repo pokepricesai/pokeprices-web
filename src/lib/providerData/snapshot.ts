@@ -161,11 +161,25 @@ export async function getProviderSnapshot(
     ? { prices: true, images: true, history: true }
     : await getPilotFeatures(sb, pp_card_slug);
 
-  const canReturnMarket = priceFlagOn && pilot.prices &&
+  // PP-TCG-PRINTING-RECLASS-CLOSEOUT §4 — if the provider_cards lookup
+  // returned no row (the (card_id, printing_key) is NOT active — either
+  // superseded or absent), the printing is reclassified or missing.
+  // Suppress market + graded on this printing too, not just the image.
+  // The prices_market/prices_graded rows for the OLD printing_key are
+  // "incompatible" with the current provider truth and must not surface.
+  const providerCardActive = !!cardRes.data;
+
+  const canReturnMarket = providerCardActive && priceFlagOn && pilot.prices &&
     (eligibility === 'bulk_safe' || eligibility === 'market_only');
-  const canReturnGraded = priceFlagOn && pilot.prices &&
+  // Graded is pooled per card_id — not per printing. We still gate on
+  // providerCardActive so a card with every printing superseded (no
+  // active row at all) stops serving graded. If the SAME card_id has
+  // an active row for a DIFFERENT printing_key, the current mapping's
+  // provider_card is still null and graded is suppressed — that's the
+  // safe choice until the mapping is remapped to the active printing.
+  const canReturnGraded = providerCardActive && priceFlagOn && pilot.prices &&
     eligibility === 'bulk_safe';
-  const canReturnImages = imageFlagOn && pilot.images &&
+  const canReturnImages = providerCardActive && imageFlagOn && pilot.images &&
     (eligibility === 'bulk_safe' || eligibility === 'market_only' || eligibility === 'identity_only');
 
   return {
