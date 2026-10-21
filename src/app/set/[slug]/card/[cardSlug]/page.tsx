@@ -509,6 +509,7 @@ export default async function CardPage({ params }: { params: Promise<{ slug: str
           ? ((providerHistoryChart as unknown as Array<Record<string, unknown>>) ?? [])
           : undefined}
         providerMode={useProvider || undefined}
+        providerMarketPrices={useProvider ? providerSnapshot?.market_prices : undefined}
         displayCcy={currencySelectorOn ? displayCcy : undefined}
         fx={currencySelectorOn ? fxTable : undefined}
         quickFactsSlot={

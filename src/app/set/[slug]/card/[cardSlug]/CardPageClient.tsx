@@ -250,6 +250,74 @@ function SectionLabel({ children, style = {} }: { children: React.ReactNode; sty
   )
 }
 
+// PP-TCG-PUBLIC-PILOT-02 §1 — TCGGraph marketplace snapshots.
+// Renders ONLY when provider mode is active for this card and the
+// provider shipped at least one non-null market or low value. Each
+// source is labelled distinctly so a visitor can tell "realised-sale
+// mid" (TCGplayer market) from "listings trend" (Cardmarket). We do
+// NOT convert currencies, do NOT synthesise history, do NOT fall back
+// to PriceCharting if a source is missing — missing values render as
+// an em-dash on the row they belong to.
+function ProviderMarketplaceSnapshots({
+  providerMode,
+  rows,
+}: {
+  providerMode: boolean
+  rows: CardPageClientProps['providerMarketPrices']
+}) {
+  if (!providerMode) return null
+  const retail = (rows ?? []).filter(r => r.list_type === 'retail' && (r.market != null || r.low != null))
+  if (retail.length === 0) return null
+  function fmt(n: number | null | undefined, currency: string): string {
+    if (n == null) return '—'
+    const sym = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : `${currency} `
+    const v = Number(n)
+    if (!Number.isFinite(v)) return '—'
+    return `${sym}${v.toFixed(2)}`
+  }
+  function sourceCopy(source: string): { label: string; marketCopy: string; lowCopy: string } {
+    switch (source) {
+      case 'tcgplayer':
+        return { label: 'TCGplayer (US)', marketCopy: 'Market valuation', lowCopy: 'Lowest listing' }
+      case 'cardmarket':
+        return { label: 'Cardmarket (EU)', marketCopy: 'Listing trend', lowCopy: 'Lowest listing' }
+      case 'cardkingdom':
+        return { label: 'Card Kingdom (US)', marketCopy: 'Retail quote', lowCopy: 'Lowest listing' }
+      case 'manapool':
+        return { label: 'ManaPool', marketCopy: 'Retail quote', lowCopy: 'Lowest listing' }
+      default:
+        return { label: source, marketCopy: 'Market', lowCopy: 'Low' }
+    }
+  }
+  return (
+    <div style={{ background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)', padding: '14px 16px', marginBottom: 14 }}>
+      <SectionLabel>Marketplace Snapshots</SectionLabel>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {retail.map((r, idx) => {
+          const c = sourceCopy(r.source)
+          return (
+            <div key={`${r.source}-${r.currency}-${r.finish ?? idx}`} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', fontFamily: "'Figtree', sans-serif" }}>{c.label}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+                <span>{c.marketCopy}</span>
+                <span style={{ color: r.market == null ? 'var(--border)' : 'var(--text)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmt(r.market, r.currency)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif" }}>
+                <span>{c.lowCopy}</span>
+                <span style={{ color: r.low == null ? 'var(--border)' : 'var(--text)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmt(r.low, r.currency)}</span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 12, lineHeight: 1.55, fontFamily: "'Figtree', sans-serif" }}>
+        Source: TCGGraph aggregation. TCGplayer tracks recent-sale market mid; Cardmarket tracks listing trends (asking side).
+        Values shown in each marketplace&rsquo;s native currency — no FX conversion applied.
+      </div>
+    </div>
+  )
+}
+
 function Panel({ children, style = {} }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
     <div style={{ background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)', padding: '18px 20px', marginTop: 20, ...style }}>
@@ -379,11 +447,26 @@ export type CardPageClientProps = {
     as_of: string
     rates: Partial<Record<`${'USD' | 'EUR'}_${'USD' | 'EUR'}`, number>>
   } | null
+  /** PP-TCG-PUBLIC-PILOT-02 §1 — TCGGraph per-source market prices
+   *  for the exact provider printing. Rendered in a new "Marketplace
+   *  Snapshots" panel ONLY when providerMode is active. Legacy card
+   *  pages leave this undefined and nothing changes. */
+  providerMarketPrices?: Array<{
+    source:   'tcgplayer' | 'cardmarket' | 'cardkingdom' | 'manapool'
+    finish:   string | null
+    list_type: 'retail' | 'buylist'
+    currency: string
+    market:   number | null
+    low:      number | null
+    trend:    number | null
+    source_updated_at: string | null
+  }>
 }
 
 export default function CardPageClient({
   setName, cardUrlSlug, initialCardData, initialTrendData, quickFactsSlot, seoIntroSlot,
   initialPriceHistory, initialProviderExtras, providerMode, displayCcy, fx,
+  providerMarketPrices,
 }: CardPageClientProps) {
   // W46D — treat any value !== undefined as "server supplied data".
   // A legitimate null from the server means "no card row exists" but
@@ -935,6 +1018,8 @@ export default function CardPageClient({
             />
           </div>
           )}
+
+          <ProviderMarketplaceSnapshots providerMode={!!providerMode} rows={providerMarketPrices} />
 
           {trendPeriods.length > 0 && (
             <div style={{ background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)', padding: '14px 16px' }}>

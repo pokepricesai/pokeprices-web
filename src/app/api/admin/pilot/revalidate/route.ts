@@ -33,10 +33,44 @@ const MAX_SLUGS = 50       // bounded — single pilot activations expected
 
 type Body = { pp_card_slugs?: unknown }
 
+// PP-TCG-PUBLIC-PILOT-02 §2 — authenticated non-interactive path.
+//
+// The original `requireAdmin` path is a Supabase user JWT whose email
+// is in ADMIN_ALLOWED_EMAILS. That works for a human operator with a
+// live admin session, but not for a non-interactive caller (CI,
+// pilot automation) that doesn't own a user identity.
+//
+// Shared-secret fallback: if the request carries
+// `Authorization: Bearer <PILOT_REVALIDATE_SECRET>` AND that env var
+// is set AND the bearer matches exactly (constant-time compare), we
+// accept the call. This reuses the same authorisation surface — the
+// secret is admin-owned, lives in the project env, is never
+// client-side, and only unlocks this one single-purpose endpoint.
+// Human JWT auth continues to work unchanged alongside it.
+//
+// The secret path still enforces: POST-only, bounded body size, slug
+// resolution via the real `cards` table, and single-path
+// revalidation. No sitewide purge is possible from this endpoint.
+function constantTimeEq(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
 export async function POST(req: Request) {
-  const auth = await requireAdmin(req)
-  if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status })
+  const header = req.headers.get('authorization') ?? ''
+  const bearer = header.startsWith('Bearer ')
+    ? header.slice('Bearer '.length).trim()
+    : ''
+  const envSecret = process.env.PILOT_REVALIDATE_SECRET ?? ''
+  const secretAuthed = Boolean(bearer) && Boolean(envSecret) && constantTimeEq(bearer, envSecret)
+
+  if (!secretAuthed) {
+    const auth = await requireAdmin(req)
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status })
+    }
   }
 
   let body: Body
