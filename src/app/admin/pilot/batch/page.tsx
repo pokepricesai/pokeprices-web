@@ -273,14 +273,18 @@ export default async function PilotBatchPage() {
   const sb = getSupabaseServiceClient()
 
   // Current state table (18 rows)
-  const { data: cohort } = await sb.from('pokemon_tcg_pilot_cohort')
+  type CohortRow = { pp_card_slug: string; prices_enabled: boolean; images_enabled: boolean; history_enabled: boolean; activated_at: string | null; deactivated_at: string | null; updated_at: string | null }
+  type CardMetaRow = { card_slug: string; card_name: string | null; set_name: string | null; card_url_slug: string | null }
+  const { data: cohortRaw } = await sb.from('pokemon_tcg_pilot_cohort')
     .select('pp_card_slug,prices_enabled,images_enabled,history_enabled,activated_at,deactivated_at,updated_at')
     .order('pp_card_slug')
-  const slugs = (cohort ?? []).map(r => r.pp_card_slug)
-  const cards = slugs.length > 0
+  const cohort: CohortRow[] = (cohortRaw ?? []) as unknown as CohortRow[]
+  const slugs: string[] = cohort.map(r => r.pp_card_slug)
+  const cardsRaw = slugs.length > 0
     ? (await sb.from('cards').select('card_slug,card_name,set_name,card_url_slug').in('card_slug', slugs)).data ?? []
     : []
-  const byslug = new Map(cards.map(c => [c.card_slug, c]))
+  const cards: CardMetaRow[] = cardsRaw as unknown as CardMetaRow[]
+  const byslug = new Map<string, CardMetaRow>(cards.map(c => [c.card_slug, c]))
 
   return (
     <main style={{ maxWidth: 1100, margin: '32px auto', padding: '0 20px', fontFamily: "'Figtree', sans-serif", color: 'var(--text)' }}>
@@ -305,7 +309,7 @@ export default async function PilotBatchPage() {
           </tr>
         </thead>
         <tbody>
-          {(cohort ?? []).map(r => {
+          {cohort.map(r => {
             const c = byslug.get(r.pp_card_slug)
             const group = THIN_DATA.has(r.pp_card_slug) ? 'thin (B)'
               : PRESET_REPS.includes(r.pp_card_slug) ? 'rep'
@@ -350,7 +354,7 @@ export default async function PilotBatchPage() {
           <li>Allowlist is the <code>pokemon_tcg_pilot_cohort</code> table — DB-mutable only.</li>
           <li>Uses your signed-in admin JWT (same cookie session as <code>/admin/*</code>); no new secrets.</li>
           <li>Content-based polling (up to {POLL_MAX_ATTEMPTS} × {POLL_INTERVAL_MS / 1000}s) per slug — passes only when the public HTML actually flips.</li>
-          <li>Thin-data slugs ({[...THIN_DATA].join(', ')}) are visible in the state table but excluded from the preset activation batches.</li>
+          <li>Thin-data slugs ({Array.from(THIN_DATA).join(', ')}) are visible in the state table but excluded from the preset activation batches.</li>
           <li>No sitewide purge; each slug revalidates one specific card URL via <code>/api/admin/pilot/revalidate</code>.</li>
         </ul>
       </div>
@@ -383,7 +387,7 @@ function SlugFormButton({ action, slugs, label }: { action: 'activate' | 'deacti
 function PerSlugForm({ action, slugs, labels }: {
   action: 'activate' | 'deactivate' | 'rollback'
   slugs: string[]
-  labels: Map<string, { card_name: string | null; set_name: string | null } | undefined>
+  labels: Map<string, { card_name: string | null; set_name: string | null; card_slug: string; card_url_slug: string | null }>
 }) {
   return (
     <form action={async (fd: FormData) => {
