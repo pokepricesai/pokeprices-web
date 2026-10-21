@@ -83,11 +83,29 @@ type SlugResult = {
   detail: string
 }
 
+type RollbackResult = {
+  slug: string
+  pre_prices_enabled: boolean | null
+  target_prices_enabled: boolean | null
+  cohort_restore_ok: boolean
+  revalidate_responses: Array<{ status: number; body: string }>
+  polls: ProbeAttempt[]
+  verified: boolean
+  detail: string
+}
+
 type BatchOutcome = {
   started_at: string
   action: 'activate' | 'deactivate' | 'rollback'
   slugs_requested: string[]
   per_slug: SlugResult[]
+  // Non-null ONLY when a failure occurred. Contains one entry per
+  // card the batch mutated (even the one that triggered the failure),
+  // restored to its pre-batch prices_enabled value with public HTML
+  // re-verified. verified=false here means a card did not come back
+  // to its original rendering within the poll budget — flagged
+  // explicitly so the operator can intervene.
+  rollback_on_failure: RollbackResult[] | null
   verdict: 'PASS' | 'FAIL'
 }
 
@@ -177,6 +195,7 @@ async function runBatch(action: 'activate' | 'deactivate' | 'rollback', slugs: s
         pre_cohort: null, post_cohort: null, revalidate_responses: [], polls: [],
         content_as_expected: false, ok: false, detail: 'slug not in pilot cohort allowlist',
       })),
+      rollback_on_failure: null,
       verdict: 'FAIL',
     }
   }
@@ -188,11 +207,18 @@ async function runBatch(action: 'activate' | 'deactivate' | 'rollback', slugs: s
     return {
       started_at: new Date().toISOString(),
       action, slugs_requested: slugs, per_slug: [],
-      verdict: 'FAIL',
+      rollback_on_failure: null, verdict: 'FAIL',
     }
   }
 
+  // Track every slug whose cohort row this batch has mutated so a
+  // failure anywhere can restore ALL of them to pre-batch state —
+  // including the one that triggered the failure. We only push to
+  // `mutated` AFTER a flip has actually been attempted.
+  const mutated: Array<{ slug: string; pre_prices_enabled: boolean | null; url: string }> = []
   const per_slug: SlugResult[] = []
+  let anyFailure = false
+
   for (const slug of slugs) {
     const url = await urlForSlug(sb, slug)
     if (!url) {
@@ -200,30 +226,36 @@ async function runBatch(action: 'activate' | 'deactivate' | 'rollback', slugs: s
         slug, url: '', action, pre_cohort: null, post_cohort: null,
         revalidate_responses: [], polls: [],
         content_as_expected: false, ok: false,
-        detail: 'url resolution failed (cards table lookup)',
+        detail: 'url resolution failed (cards table lookup) — no cohort mutation attempted',
       })
-      continue
+      anyFailure = true
+      break
     }
 
     const { data: pre } = await sb.from('pokemon_tcg_pilot_cohort')
       .select('prices_enabled,images_enabled,history_enabled,activated_at,deactivated_at')
       .eq('pp_card_slug', slug).maybeSingle()
+    const prePrices: boolean | null = (pre as { prices_enabled?: boolean | null } | null)?.prices_enabled ?? null
 
     const rvResponses: Array<{ status: number; body: string }> = []
     const polls: ProbeAttempt[] = []
+    let flipAttempted = false
 
     try {
       if (action === 'activate') {
-        await flipCohort(sb, slug, true)
+        await flipCohort(sb, slug, true); flipAttempted = true
+        mutated.push({ slug, pre_prices_enabled: prePrices, url })
         rvResponses.push(await callRevalidate(adminJwt, slug))
         polls.push(...(await pollUntil(url, true)))
       } else if (action === 'deactivate') {
-        await flipCohort(sb, slug, false)
+        await flipCohort(sb, slug, false); flipAttempted = true
+        mutated.push({ slug, pre_prices_enabled: prePrices, url })
         rvResponses.push(await callRevalidate(adminJwt, slug))
         polls.push(...(await pollUntil(url, false)))
       } else {
-        // rollback cycle
-        await flipCohort(sb, slug, false)
+        // rollback cycle (OFF → verify legacy → ON → verify active)
+        await flipCohort(sb, slug, false); flipAttempted = true
+        mutated.push({ slug, pre_prices_enabled: prePrices, url })
         rvResponses.push(await callRevalidate(adminJwt, slug))
         polls.push(...(await pollUntil(url, false)))
         await flipCohort(sb, slug, true)
@@ -231,17 +263,17 @@ async function runBatch(action: 'activate' | 'deactivate' | 'rollback', slugs: s
         polls.push(...(await pollUntil(url, true)))
       }
     } catch (e) {
-      // Try to restore on error for activate/rollback (which end in "on")
-      try {
-        if (action !== 'deactivate') await flipCohort(sb, slug, true)
-      } catch { /* best effort */ }
+      // No post-hoc force-flip here — the batch-level restore pass
+      // below handles reverting any touched cohort rows to their
+      // ORIGINAL prices_enabled values.
       per_slug.push({
         slug, url, action, pre_cohort: pre, post_cohort: null,
         revalidate_responses: rvResponses, polls,
         content_as_expected: false, ok: false,
-        detail: `error: ${(e as Error).message}`,
+        detail: `error after flipAttempted=${flipAttempted}: ${(e as Error).message}`,
       })
-      continue
+      anyFailure = true
+      break
     }
 
     const { data: post } = await sb.from('pokemon_tcg_pilot_cohort')
@@ -257,6 +289,58 @@ async function runBatch(action: 'activate' | 'deactivate' | 'rollback', slugs: s
       content_as_expected, ok: content_as_expected,
       detail: content_as_expected ? 'public HTML matches expected post-action state' : 'public HTML did not transition within poll budget',
     })
+    if (!content_as_expected) {
+      anyFailure = true
+      break
+    }
+  }
+
+  // Batch-level restore pass — ONLY runs if a failure occurred. For
+  // every card this batch mutated (including the one that failed),
+  // flip prices_enabled back to its pre-batch value, revalidate, and
+  // poll the public URL until it matches the pre-batch rendering.
+  // Each card's restore is reported individually; verified=false
+  // means the public HTML did not come back within the poll budget
+  // and the operator needs to intervene.
+  let rollback_on_failure: RollbackResult[] | null = null
+  if (anyFailure && mutated.length > 0) {
+    rollback_on_failure = []
+    for (const m of mutated) {
+      const target = m.pre_prices_enabled
+      const rvs: Array<{ status: number; body: string }> = []
+      const rps: ProbeAttempt[] = []
+      let cohort_restore_ok = false
+      let detail = ''
+      try {
+        if (target === true || target === false) {
+          await flipCohort(sb, m.slug, target)
+          cohort_restore_ok = true
+        } else {
+          detail = 'pre-batch prices_enabled was null (no cohort row read) — cohort row NOT re-written'
+        }
+        rvs.push(await callRevalidate(adminJwt, m.slug))
+        rps.push(...(await pollUntil(m.url, target === true)))
+      } catch (e) {
+        detail = `restore error: ${(e as Error).message}`
+      }
+      const last = rps[rps.length - 1]
+      const verified = cohort_restore_ok && !!last && last.provider_active === (target === true)
+      if (!detail) {
+        detail = verified
+          ? 'original public rendering restored'
+          : 'cohort row flipped back but public HTML did NOT restore within poll budget — operator intervention needed'
+      }
+      rollback_on_failure.push({
+        slug: m.slug,
+        pre_prices_enabled: target,
+        target_prices_enabled: target,
+        cohort_restore_ok,
+        revalidate_responses: rvs,
+        polls: rps,
+        verified,
+        detail,
+      })
+    }
   }
 
   return {
@@ -264,7 +348,8 @@ async function runBatch(action: 'activate' | 'deactivate' | 'rollback', slugs: s
     action,
     slugs_requested: slugs,
     per_slug,
-    verdict: per_slug.every(r => r.ok) ? 'PASS' : 'FAIL',
+    rollback_on_failure,
+    verdict: anyFailure ? 'FAIL' : 'PASS',
   }
 }
 
@@ -452,6 +537,39 @@ async function ResultBlock() {
           </div>
         )
       })}
+
+      {parsed.rollback_on_failure && (
+        <div style={{ marginTop: 20, padding: 12, background: '#fef3c7', borderRadius: 8, border: '2px solid #a16207' }}>
+          <div style={{ fontWeight: 800, color: '#a16207', fontSize: 14 }}>Batch-level restore pass (triggered by failure above)</div>
+          <div style={{ fontSize: 11, color: '#7c5f0a', marginTop: 4 }}>
+            Each mutated card was flipped back to its pre-batch prices_enabled value, revalidated via the admin endpoint, and polled until the public HTML matched the original rendering.
+            Subsequent batches should NOT be run until every entry below reports <code>verified=true</code>.
+          </div>
+          {parsed.rollback_on_failure.map((rb, i) => {
+            const last = rb.polls[rb.polls.length - 1]
+            return (
+              <div key={i} style={{ marginTop: 10, padding: 10, background: 'var(--card)', borderRadius: 6, border: `1px solid ${rb.verified ? '#15803d44' : '#b91c1c88'}` }}>
+                <div style={{ fontWeight: 700, color: rb.verified ? '#15803d' : '#b91c1c' }}>
+                  {rb.slug} — restore {rb.verified ? '✓ verified' : '✗ NOT VERIFIED'} · target prices_enabled={String(rb.target_prices_enabled)} · cohort_restore_ok={String(rb.cohort_restore_ok)}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{rb.detail}</div>
+                {last && (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                    last probe: cache={last.cache} age={last.age} status={last.status}{' '}
+                    provider_active={String(last.provider_active)} attempts={rb.polls.length}
+                  </div>
+                )}
+                <details style={{ marginTop: 4 }}>
+                  <summary style={{ fontSize: 11, cursor: 'pointer', color: 'var(--text-muted)' }}>Restore evidence</summary>
+                  <pre style={{ fontSize: 10, overflowX: 'auto', background: 'var(--bg-light)', padding: 6, marginTop: 4, borderRadius: 4 }}>
+                    {JSON.stringify({ revalidate: rb.revalidate_responses, polls: rb.polls }, null, 2)}
+                  </pre>
+                </details>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
