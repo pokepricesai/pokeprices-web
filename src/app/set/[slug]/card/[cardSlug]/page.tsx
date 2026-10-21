@@ -20,6 +20,7 @@ import { getProviderHistorySeries } from '@/lib/providerData/history'
 import { adaptSnapshotToLegacyCardRow, adaptProviderHistoryForChart } from '@/lib/providerData/toCardRow'
 import { getPilotFeatures } from '@/lib/providerData/pilotCohort'
 import { isProviderFlagEnabled } from '@/lib/providerData/flags'
+import { getSupabaseServiceClient } from '@/lib/supabaseService'
 import { cookies } from 'next/headers'
 import { loadLatestFxTable, parseDisplayCcy, DISPLAY_CCY_COOKIE } from '@/lib/providerData/currency'
 // Block 5A-W-46B (with W46B-FIX1) — server-emit BreadcrumbSchema only.
@@ -374,7 +375,15 @@ export default async function CardPage({ params }: { params: Promise<{ slug: str
   // and this code uses the legacy `card` row untouched. The behaviour on
   // the live site with all env flags off is a pure no-op (one extra
   // Supabase read per card page).
-  const providerSupabase = supabaseServer
+  //
+  // PP-TCG-PUBLIC-PILOT-01 — service-role client is required here.
+  // pokemon_tcg_mappings, pokemon_tcg_provider_cards, pokemon_tcg_prices_*
+  // all have RLS `FOR ALL USING (public.network_is_admin())`, which the
+  // anon client fails. The snapshot's own gates (approved + eligibility
+  // + pilot cohort + env flag + active printing) are what control public
+  // exposure — not RLS. supabaseService is `import 'server-only'`, so the
+  // service-role key never reaches the client bundle.
+  const providerSupabase = getSupabaseServiceClient()
   const providerSlug = card ? String(card.card_slug ?? '') : null
   const [providerSnapshot, pilotFeatures] = providerSlug
     ? await Promise.all([
