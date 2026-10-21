@@ -1242,6 +1242,7 @@ export default function CardPageClient({
         card,
         gemRate,
         psa10Multiple: psa10Multiple ?? undefined,
+        providerMode: !!providerMode,
       })} />
     </div>
   )

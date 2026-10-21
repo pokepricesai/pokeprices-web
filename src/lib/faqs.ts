@@ -25,6 +25,7 @@ export function getCardFaqItems({
   card,
   gemRate,
   psa10Multiple,
+  providerMode,
 }: {
   card: {
     card_name: string
@@ -36,6 +37,18 @@ export function getCardFaqItems({
   }
   gemRate?: number | null
   psa10Multiple?: number | null
+  /**
+   * PP-TCG-PUBLIC-PILOT-02 close-out §2 — when the public card page
+   * is rendering TCGGraph provider data (useProvider=true), the
+   * default "sold-sales only, never asking prices" phrasing is no
+   * longer accurate: the Marketplace Snapshots panel on provider
+   * cards surfaces listing-side quotes (Cardmarket, TCGplayer lowest
+   * listings). We swap in a methodology description that correctly
+   * distinguishes realised-sale sources from listing-side sources
+   * on provider-mode cards. Legacy (non-provider) cards keep their
+   * existing wording verbatim.
+   */
+  providerMode?: boolean
   /**
    * @deprecated PP-GOOGLE-02 removed the hardcoded $25 grading-fee
    * assumption; the "Is it worth grading?" FAQ no longer quotes a
@@ -55,9 +68,12 @@ export function getCardFaqItems({
     const parts = [`Raw: ${fmtUsd(card.raw_usd)}`]
     if (card.psa9_usd)  parts.push(`PSA 9: ${fmtUsd(card.psa9_usd)}`)
     if (card.psa10_usd) parts.push(`PSA 10: ${fmtUsd(card.psa10_usd)}`)
+    const sourceSentence = providerMode
+      ? `These raw and graded figures come from TCGGraph's realised-sale aggregation across the major Pokémon TCG marketplaces.`
+      : `The guide is rebuilt nightly from sold-sales data across the major Pokémon TCG marketplaces, never asking prices.`
     items.push({
       question: `How much is ${fullName} from ${setName} worth?`,
-      answer: `${fullName} from ${setName} currently reads ${parts.join(', ')} in our aggregated recent-sales price guide. The guide is rebuilt nightly from sold-sales data across the major Pokémon TCG marketplaces, never asking prices.`,
+      answer: `${fullName} from ${setName} currently reads ${parts.join(', ')} in our aggregated recent-sales price guide. ${sourceSentence}`,
     })
   }
 
@@ -92,9 +108,12 @@ export function getCardFaqItems({
   }
 
   // Q4: Where do prices come from?
+  const q4Answer = providerMode
+    ? `Raw and per-grader PSA / BGS / CGC / SGC figures come from TCGGraph's realised-sale aggregation across the major Pokémon TCG marketplaces, refreshed nightly. The Marketplace Snapshots panel on this page additionally surfaces TCGplayer market valuations (recent-sale mid) and Cardmarket listing trends (asking-side) in each marketplace's native currency — these are shown separately so the methodology is explicit. PSA population data continues to come from PSA's public population reports.`
+    : `Raw, PSA 9 and PSA 10 figures come from our aggregated recent-sales price guide, rebuilt nightly from sold-sales data across the major Pokémon TCG marketplaces. The displayed values are guide numbers, not individual listings. PSA population data is sourced directly from PSA's public population reports. Asking prices are never used; only confirmed sales activity feeds the guide.`
   items.push({
     question: `Where do PokePrices ${fullName} prices come from?`,
-    answer: `Raw, PSA 9 and PSA 10 figures come from our aggregated recent-sales price guide, rebuilt nightly from sold-sales data across the major Pokémon TCG marketplaces. The displayed values are guide numbers, not individual listings. PSA population data is sourced directly from PSA's public population reports. Asking prices are never used; only confirmed sales activity feeds the guide.`,
+    answer: q4Answer,
   })
 
   return items
