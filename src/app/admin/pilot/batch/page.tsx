@@ -718,16 +718,77 @@ export default async function PilotBatchPage() {
       </p>
       <form action={async () => {
         'use server'
-        await requireAdminPage(ADMIN_PAGE_PATH)
-        const sb = getSupabaseServiceClient()
-        const sel = await selectNextExpansionBatch(sb, EXPANSION_BATCH_SIZE)
-        const outcome = sel.slugs.length > 0
-          ? await runBatch('activate', sel.slugs)
-          : { started_at: new Date().toISOString(), action: 'activate' as const, slugs_requested: [], per_slug: [], rollback_on_failure: null, verdict: 'FAIL' as const }
-        const augmented = { ...outcome, _expansion: sel }
-        const jar = await cookies()
-        jar.set('pilot_batch_result', JSON.stringify(augmented), { httpOnly: true, sameSite: 'lax', path: ADMIN_PAGE_PATH, maxAge: 600 })
-        redirect(ADMIN_PAGE_PATH)
+        // PP-TCG-500-PHASE-1 diag — stage breadcrumbs with a distinctive
+        // prefix so Vercel's runtime logs can be filtered for this exact
+        // Server Action invocation. NEVER logs JWTs, cookies, or
+        // credentials — only stage names, boolean flags, numeric counts,
+        // slug lists, and exception messages. The breadcrumbs run before
+        // and after each await so a silent abort leaves a clear last
+        // stage in the logs.
+        const DIAG = '[PP-DIAG-ACTIVATE-NEXT-5]'
+        const actionId = `activate-next-5-${Date.now()}`
+        console.log(`${DIAG} stage=form_action_entered action_id=${actionId}`)
+        try {
+          try {
+            await requireAdminPage(ADMIN_PAGE_PATH)
+          } catch (e) {
+            console.log(`${DIAG} stage=require_admin_FAIL action_id=${actionId} error=${(e as Error).message}`)
+            throw e
+          }
+          console.log(`${DIAG} stage=require_admin_ok action_id=${actionId}`)
+
+          const sb = getSupabaseServiceClient()
+          console.log(`${DIAG} stage=service_client_created action_id=${actionId}`)
+
+          let sel: Awaited<ReturnType<typeof selectNextExpansionBatch>>
+          try {
+            sel = await selectNextExpansionBatch(sb, EXPANSION_BATCH_SIZE)
+          } catch (e) {
+            console.log(`${DIAG} stage=selector_FAIL action_id=${actionId} error=${(e as Error).message}`)
+            throw e
+          }
+          console.log(`${DIAG} stage=selector_ok action_id=${actionId} staged_total=${sel.staged_total} picked=${sel.slugs.length} rejected=${sel.rejected.length} errors=${sel.errors.length} slugs=${sel.slugs.join(',')}`)
+          if (sel.errors.length > 0) console.log(`${DIAG}   selector_errors: ${sel.errors.join(' | ')}`)
+          if (sel.rejected.length > 0) console.log(`${DIAG}   selector_rejected: ${sel.rejected.slice(0,5).map(r => r.slug+':'+r.reason).join(' | ')}`)
+
+          let outcome: BatchOutcome
+          if (sel.slugs.length === 0) {
+            console.log(`${DIAG} stage=skip_runBatch_no_slugs action_id=${actionId}`)
+            outcome = { started_at: new Date().toISOString(), action: 'activate', slugs_requested: [], per_slug: [], rollback_on_failure: null, verdict: 'FAIL' }
+          } else {
+            console.log(`${DIAG} stage=runBatch_about_to_call action_id=${actionId} slug_count=${sel.slugs.length}`)
+            try {
+              outcome = await runBatch('activate', sel.slugs)
+            } catch (e) {
+              console.log(`${DIAG} stage=runBatch_FAIL action_id=${actionId} error=${(e as Error).message}`)
+              throw e
+            }
+            console.log(`${DIAG} stage=runBatch_returned action_id=${actionId} verdict=${outcome.verdict} per_slug_count=${outcome.per_slug.length} rollback_fired=${outcome.rollback_on_failure !== null}`)
+            for (const r of outcome.per_slug) console.log(`${DIAG}   slug=${r.slug} ok=${r.ok} detail=${r.detail.slice(0, 160)}`)
+          }
+
+          const augmented = { ...outcome, _expansion: sel }
+          const jsonSize = JSON.stringify(augmented).length
+          console.log(`${DIAG} stage=about_to_set_cookie action_id=${actionId} payload_size_bytes=${jsonSize}`)
+
+          const jar = await cookies()
+          try {
+            jar.set('pilot_batch_result', JSON.stringify(augmented), { httpOnly: true, sameSite: 'lax', path: ADMIN_PAGE_PATH, maxAge: 600 })
+          } catch (e) {
+            console.log(`${DIAG} stage=cookie_set_FAIL action_id=${actionId} error=${(e as Error).message} size=${jsonSize}`)
+            throw e
+          }
+          console.log(`${DIAG} stage=cookie_set_ok action_id=${actionId} about_to_redirect`)
+          redirect(ADMIN_PAGE_PATH)
+        } catch (e) {
+          // next/navigation's redirect() throws a special NEXT_REDIRECT
+          // error that Next.js uses to drive the client navigation.
+          // Re-throw it unchanged. Only log genuine errors.
+          const msg = (e as Error).message
+          if (msg === 'NEXT_REDIRECT') throw e
+          console.log(`${DIAG} stage=FATAL action_id=${actionId} error=${msg}`)
+          throw e
+        }
       }}>
         <button type="submit" style={{ background: '#166534', color: 'white', border: 'none', borderRadius: 8, padding: '10px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
           Activate next {EXPANSION_BATCH_SIZE} by GSC rank (global sort, strict re-check)
