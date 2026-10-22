@@ -21,6 +21,8 @@ import { adaptSnapshotToLegacyCardRow, adaptProviderHistoryForChart } from '@/li
 import { getPilotFeatures } from '@/lib/providerData/pilotCohort'
 import { isProviderFlagEnabled } from '@/lib/providerData/flags'
 import { getSupabaseServiceClient } from '@/lib/supabaseService'
+import { resolveProviderMode } from '@/lib/providerData/resolveProviderMode'
+import { pickCardTitleDescription } from './pickCardTitleDescription'
 import { cookies } from 'next/headers'
 import { loadLatestFxTable, parseDisplayCcy, DISPLAY_CCY_COOKIE } from '@/lib/providerData/currency'
 // Block 5A-W-46B (with W46B-FIX1) — server-emit BreadcrumbSchema only.
@@ -201,42 +203,25 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     num = ` #${card.card_number}`
   }
 
-  // PP-TCG-PUBLIC-PILOT-03 — SEO metadata parity with the page body.
+  // PP-TCG-500-PREP correction §B — SEO metadata parity with the page body
+  // via the shared resolveProviderMode helper. The helper applies the
+  // exact same cohort + snapshot gates the page body uses, so the two
+  // can never diverge.
   //
-  // generateMetadata used to read card.raw_usd / card.psa10_usd /
-  // card.psa9_usd directly from the legacy card_trends RPC. On
-  // provider-active cards this meant <title> / <meta description> /
-  // openGraph / twitter could silently show the legacy PriceCharting
-  // numbers while the page body showed TCGGraph. We now consult the
-  // same adapter the body uses — getProviderSnapshot + the pricing-
-  // eligibility gates built into it — and ONLY the three price
-  // fields (raw / psa9 / psa10 in cents) are overridden. Everything
-  // else about the title/description/robots/canonical/OG remains
-  // identical to the legacy branch.
-  //
-  // Non-provider cards: snapshot is null OR has empty arrays. Both
-  // yield useProvider=false here, so legacy card values pass through
-  // untouched — zero behaviour change on the public catalogue.
-  //
-  // PSA 9: the adapter explicitly sets psa9_usd=null in provider
-  // mode because TCGGraph only publishes a pooled `any:9` for most
-  // cards. The description template skips the PSA 9 clause when
-  // psa9UsdCents is falsy, so the claim is simply omitted.
+  // Fail-closed rule: unless we POSITIVELY certify this card is legacy
+  // (snapshot read ok AND pilot read ok AND both say "not provider"),
+  // we null the three price-cents variables. The title/description
+  // templates then fall through to the generic variant that omits all
+  // numerical claims. The description's PSA 9 clause is skipped
+  // whenever psa9UsdCents is falsy, which handles provider-mode's
+  // deliberate psa9=null and the fail-closed null together.
   let rawUsdCents:   number | null = card.raw_usd   ?? null
   let psa9UsdCents:  number | null = card.psa9_usd  ?? null
   let psa10UsdCents: number | null = card.psa10_usd ?? null
-  try {
+  if (card.card_slug) {
     const providerSupabase = getSupabaseServiceClient()
-    const providerSlug = card.card_slug ? String(card.card_slug) : null
-    const providerSnapshot = providerSlug
-      ? await getProviderSnapshot(providerSupabase, providerSlug)
-      : null
-    const providerHasPrices =
-      (providerSnapshot?.market_prices?.length ?? 0) > 0 ||
-      (providerSnapshot?.graded_prices?.length ?? 0) > 0
-    const providerHasImage = Boolean(providerSnapshot?.image_normal)
-    const useProvider = providerHasPrices || providerHasImage
-    if (useProvider && providerSnapshot) {
+    const mode = await resolveProviderMode(providerSupabase, String(card.card_slug))
+    if (mode.useProvider && mode.snapshot) {
       const adapted = adaptSnapshotToLegacyCardRow({
         card_slug:            String(card.card_slug ?? ''),
         card_url_slug:        (card.card_url_slug as string | null) ?? null,
@@ -248,27 +233,27 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
         image_url:            card.image_url ?? null,
         language:             ((card as { language?: string | null }).language ?? 'en'),
         is_sealed:            card.is_sealed ?? false,
-      }, providerSnapshot)
+      }, mode.snapshot)
       if (adapted?.card) {
         rawUsdCents   = adapted.card.raw_usd   ?? null
         psa9UsdCents  = adapted.card.psa9_usd  ?? null
         psa10UsdCents = adapted.card.psa10_usd ?? null
       }
+    } else if (mode.mustFailClosed) {
+      rawUsdCents = null
+      psa9UsdCents = null
+      psa10UsdCents = null
     }
-  } catch {
-    // Fail-closed: on any snapshot error, keep the legacy card values
-    // (metadata should still render; nothing worse than before).
+    // else: certified legacy — leave the three legacy values untouched.
   }
 
   const rawUsd   = rawUsdCents   ? rawUsdCents   / 100 : null
-  const psa9Usd  = psa9UsdCents  ? psa9UsdCents  / 100 : null
   const psa10Usd = psa10UsdCents ? psa10UsdCents / 100 : null
   const multiple = rawUsd && psa10Usd ? psa10Usd / rawUsd : null
   const canonical = `https://www.pokeprices.io/set/${slug}/card/${cardSlug}`
   const year = new Date().getFullYear()
 
   // Grading variant: PSA 10 is 3x+ raw — grading angle beats raw price angle
-  const useGradingVariant = multiple != null && multiple >= 3
 
   // Block 5A-W-48C — visible set label strips the leading "Japanese "
   // for Japanese sets so the title reads "Battle Partners" rather
@@ -283,25 +268,12 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const jpMarker = cardLang === 'jp' ? ' Japanese' : ''
   const descSetPhrase = cardLang === 'jp' ? `${setLabel} (Japanese)` : setLabel
 
-  let title: string
-  let description: string
-
-  if (useGradingVariant && rawUsd && psa10Usd) {
-    title = `${name}${num}${jpMarker} Price: ${fmt(psa10UsdCents!)} PSA 10 vs ${fmt(rawUsdCents!)} Raw. Worth Grading? (${year})`
-    description = `Is ${name}${num} worth grading? PSA 10 ${fmt(psa10UsdCents!)} is ${multiple!.toFixed(1)}× the raw price of ${fmt(rawUsdCents!)}. ${descSetPhrase} price guide: gem rate, grading spread, PSA population and verified recent sales.`
-  } else if (rawUsd && psa10Usd) {
-    title = `${name}${num}${jpMarker} Price & Value: ${fmt(rawUsdCents!)} Raw, ${fmt(psa10UsdCents!)} PSA 10 (${year}) | ${setLabel}`
-    description = `How much is ${name}${num} worth? ${descSetPhrase} price guide: ${fmt(rawUsdCents!)} raw${psa9Usd ? `, ${fmt(psa9UsdCents!)} PSA 9` : ''}, ${fmt(psa10UsdCents!)} PSA 10. Price trend, grading spread, PSA population and verified recent sales.`
-  } else if (psa10Usd) {
-    title = `${name}${num}${jpMarker} PSA 10 Price & Value: ${fmt(psa10UsdCents!)} (${year}) | ${setLabel}`
-    description = `${name}${num} PSA 10 value: ${fmt(psa10UsdCents!)}. ${descSetPhrase} price guide: price trend, PSA population, gem rate and verified recent sales. Updated nightly.`
-  } else if (rawUsd) {
-    title = `${name}${num}${jpMarker} Price: ${fmt(rawUsdCents!)} Raw (${year}) | ${setLabel}`
-    description = `How much is ${name}${num} worth? ${descSetPhrase} price guide: currently ${fmt(rawUsdCents!)} raw. Price trend, grading data, PSA population and verified recent sales. Updated nightly.`
-  } else {
-    title = `${name}${num}${jpMarker} Pokémon Card Price Guide (${year}) | ${setLabel}`
-    description = `Track ${name}${num} from ${descSetPhrase}: raw, PSA 9 and PSA 10 prices, grading spreads, PSA population and verified recent sales. Price guide updated nightly.`
-  }
+  const picked = pickCardTitleDescription({
+    name, num, jpMarker, year, setLabel, descSetPhrase,
+    rawUsdCents, psa9UsdCents, psa10UsdCents,
+  })
+  let title       = picked.title
+  let description = picked.description
 
   // Block 5A-W-58H — controlled SEO overrides on a small set of
   // hand-picked cards, informed by real Search Console query data.
@@ -442,20 +414,24 @@ export default async function CardPage({ params }: { params: Promise<{ slug: str
   // + pilot cohort + env flag + active printing) are what control public
   // exposure — not RLS. supabaseService is `import 'server-only'`, so the
   // service-role key never reaches the client bundle.
+  // PP-TCG-500-PREP correction §B — route through the shared
+  // resolveProviderMode helper so page body + generateMetadata share
+  // the same source-selection decision. We still need pilotFeatures
+  // separately for history gating (image/history flags are read from
+  // the cohort row directly).
   const providerSupabase = getSupabaseServiceClient()
   const providerSlug = card ? String(card.card_slug ?? '') : null
-  const [providerSnapshot, pilotFeatures] = providerSlug
+  const [providerMode, pilotFeatures] = providerSlug
     ? await Promise.all([
-        getProviderSnapshot(providerSupabase, providerSlug),
+        resolveProviderMode(providerSupabase, providerSlug),
         getPilotFeatures(providerSupabase, providerSlug),
       ])
-    : [null, { prices: false, images: false, history: false } as const]
-
-  const providerHasPrices =
-    (providerSnapshot?.market_prices?.length ?? 0) > 0 ||
-    (providerSnapshot?.graded_prices?.length ?? 0) > 0
-  const providerHasImage = Boolean(providerSnapshot?.image_normal)
-  const useProvider = providerHasPrices || providerHasImage
+    : [
+        { snapshot: null, pilotPricesOn: false, snapshotLookupFailed: false, pilotLookupFailed: false, useProvider: false, mustFailClosed: false } as const,
+        { prices: false, images: false, history: false } as const,
+      ]
+  const providerSnapshot = providerMode.snapshot
+  const useProvider = providerMode.useProvider
 
   let providerHistoryChart: ReadonlyArray<Record<string, unknown>> | undefined
   if (useProvider && providerSnapshot?.tcg_card_id && providerSnapshot?.tcg_printing_key) {

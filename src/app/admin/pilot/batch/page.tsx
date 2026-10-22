@@ -40,6 +40,10 @@ import { redirect } from 'next/navigation'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
+// PP-TCG-500-PREP correction §A — explicit function duration; defends
+// against any plan-level default change. 10-card activation batch × up
+// to 10 polls × 2 s/poll ≈ 220 s worst case, which fits within 300 s.
+export const maxDuration = 300
 export const metadata = {
   title: 'Pilot batch control',
   robots: { index: false, follow: false, nocache: true, noarchive: true },
@@ -56,6 +60,18 @@ const PRESET_BATCH2 = ['12368493', '13025625', '11830160', '13025579', '11197498
 const PRESET_BATCH3 = ['5732710', '6770012', '849472', '7445267', '5952701']
 // Explicitly excluded thin-data cards (Group B — not activated in this ticket).
 const THIN_DATA = new Set(['2677929', '3468740', '6903541', '6903528'])
+
+// PP-TCG-500-PREP correction §A — staged-marker scope.
+// Rows inserted by scripts/_pp03/stage-348-insert.mjs carry this prefix
+// in `notes`. Every PP-TCG-500-PREP action restricts itself to rows
+// matching this prefix. The 14 live cards + 4 thin cards use a different
+// notes string ('pilot cohort proposal · ...') and are invisible to
+// expansion-only operations as a data-level invariant.
+const EXPANSION_NOTES_PREFIX = 'PP-TCG-500-PREP · GSC-ranked'
+const EXPANSION_BATCH_SIZE = 10
+// Hard block: these slugs can never flow through expansion operations
+// even if a future row somehow carried the expansion marker.
+const EXPANSION_HARD_BLOCK = THIN_DATA
 
 type ProbeAttempt = {
   attempt: number
@@ -353,6 +369,263 @@ async function runBatch(action: 'activate' | 'deactivate' | 'rollback', slugs: s
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// PP-TCG-500-PREP correction §A — expansion selector + emergency ops
+// ─────────────────────────────────────────────────────────────────────
+
+type ExpansionCandidate = {
+  pp_card_slug: string
+  gsc_rank: number | null
+  outcome: string
+  risk_class: string
+  confidence: string
+  review_status: string
+  printing_active_status: string
+  has_image: boolean
+  has_market_prices: boolean
+  has_graded_prices: boolean
+  effective_eligibility: string
+}
+
+type ExpansionSelection = {
+  slugs: string[]
+  rejected: Array<{ slug: string; reason: string }>
+  errors: string[]
+  staged_total: number
+  staged_still_available: number
+}
+
+/** PP-TCG-500-PREP §A: pick the next N expansion candidates.
+ *
+ * Rules:
+ *   - Only rows with notes starting with EXPANSION_NOTES_PREFIX AND
+ *     prices_enabled=false AND NOT in EXPANSION_HARD_BLOCK.
+ *   - Re-check each candidate against the strict provider-safe filter
+ *     at the moment of click (the live DB may have changed since
+ *     staging).
+ *   - After all re-checks, sort GLOBALLY by gsc_rank ascending, then
+ *     take the first N. This is the fix for the earlier chunk-local
+ *     sort bug.
+ *   - DB errors are surfaced explicitly in `errors[]` so the operator
+ *     sees them rather than silently fewer candidates.
+ */
+async function selectNextExpansionBatch(
+  sb: ReturnType<typeof getSupabaseServiceClient>,
+  size: number,
+): Promise<ExpansionSelection> {
+  const errors: string[] = []
+  // (1) Pull every staged row for this expansion ticket.
+  const { data: stagedRaw, error: stagedErr } = await sb
+    .from('pokemon_tcg_pilot_cohort')
+    .select('pp_card_slug,notes,prices_enabled')
+    .eq('prices_enabled', false)
+    .like('notes', `${EXPANSION_NOTES_PREFIX}%`)
+  if (stagedErr) {
+    errors.push(`staged read: ${stagedErr.message}`)
+    return { slugs: [], rejected: [], errors, staged_total: 0, staged_still_available: 0 }
+  }
+  const stagedSlugs = (stagedRaw ?? [])
+    .map(r => r.pp_card_slug as string)
+    .filter(s => !EXPANSION_HARD_BLOCK.has(s))
+  const staged_total = stagedSlugs.length
+  if (staged_total === 0) return { slugs: [], rejected: [], errors, staged_total, staged_still_available: 0 }
+
+  // (2) Re-check against strict filter — fetch in chunks because of
+  //     PostgREST's URL-length cap on IN clauses.
+  const rechecked: ExpansionCandidate[] = []
+  for (let i = 0; i < stagedSlugs.length; i += 100) {
+    const chunk = stagedSlugs.slice(i, i + 100)
+    const { data, error } = await sb
+      .from('v_pp_tcg_card_reconciliation')
+      .select('pp_card_slug,outcome,risk_class,confidence,review_status,printing_active_status,has_image,has_market_prices,has_graded_prices,effective_eligibility,gsc_rank')
+      .in('pp_card_slug', chunk)
+    if (error) {
+      errors.push(`reconciliation chunk ${i}: ${error.message}`)
+      // Don't silently drop candidates — surface the error and skip this chunk.
+      continue
+    }
+    if (data) rechecked.push(...(data as ExpansionCandidate[]))
+  }
+
+  // (3) GLOBAL sort by gsc_rank ASC. Rows missing gsc_rank sink to the
+  //     end (shouldn't happen since staging requires gsc_rank, but
+  //     defensive). This is the correction over the earlier draft that
+  //     sorted within each chunk.
+  rechecked.sort((a, b) => (a.gsc_rank ?? Number.MAX_SAFE_INTEGER) - (b.gsc_rank ?? Number.MAX_SAFE_INTEGER))
+
+  // (4) Apply strict filter, in global rank order, until we have N.
+  const slugs: string[] = []
+  const rejected: Array<{ slug: string; reason: string }> = []
+  for (const r of rechecked) {
+    if (slugs.length >= size) break
+    if (r.outcome !== 'approved_active')             { rejected.push({ slug: r.pp_card_slug, reason: `outcome=${r.outcome}` });              continue }
+    if (r.risk_class !== 'catalogue_corroborated')   { rejected.push({ slug: r.pp_card_slug, reason: `risk=${r.risk_class}` });                continue }
+    if (r.confidence !== 'verified')                 { rejected.push({ slug: r.pp_card_slug, reason: `conf=${r.confidence}` });                continue }
+    if (r.review_status !== 'approved')              { rejected.push({ slug: r.pp_card_slug, reason: `review=${r.review_status}` });           continue }
+    if (r.printing_active_status !== 'active')       { rejected.push({ slug: r.pp_card_slug, reason: `printing=${r.printing_active_status}` }); continue }
+    if (!r.has_image || !r.has_market_prices || !r.has_graded_prices) { rejected.push({ slug: r.pp_card_slug, reason: 'missing_asset' });     continue }
+    if (!['bulk_safe','market_only'].includes(r.effective_eligibility)) { rejected.push({ slug: r.pp_card_slug, reason: `elig=${r.effective_eligibility}` }); continue }
+    slugs.push(r.pp_card_slug)
+  }
+  const staged_still_available = rechecked.length - rejected.length
+  return { slugs, rejected, errors, staged_total, staged_still_available }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Emergency rollback — DEDICATED. Does NOT share runBatch's restore-on-
+// failure semantics (which would be inappropriate for a kill switch).
+//
+// Split into two separate server actions so operator can run each
+// independently and resume:
+//   1. emergencyDisableExpansion — one bulk UPDATE on cohort rows
+//      matching the expansion marker AND prices_enabled=true. Atomic.
+//      Never re-enables anything. 14 live cards are protected by data
+//      because their notes don't start with EXPANSION_NOTES_PREFIX.
+//   2. revalidateExpansionPending — iterates up to N slugs whose
+//      updated_at == deactivated_at (never revalidated after disable)
+//      and submits each to the admin revalidate endpoint. On success
+//      bumps updated_at above deactivated_at. On failure LEAVES the
+//      row in the pending state so a re-click retries it. Does NOT
+//      auto-re-enable prices.
+// ─────────────────────────────────────────────────────────────────────
+
+type EmergencyDisableReport = {
+  started_at: string
+  rows_matched: number
+  rows_affected: number
+  slugs: string[]
+  error: string | null
+}
+
+type RevalidatePendingReport = {
+  started_at: string
+  pending_before: number
+  attempted: number
+  succeeded: Array<{ slug: string; revalidated_at: string }>
+  failed: Array<{ slug: string; reason: string }>
+  pending_after: number
+}
+
+const REVAL_BATCH_SIZE = 10
+
+async function emergencyDisableExpansion(): Promise<EmergencyDisableReport> {
+  'use server'
+  await requireAdminPage(ADMIN_PAGE_PATH)
+  const sb = getSupabaseServiceClient()
+  const started_at = new Date().toISOString()
+  // Pre-select to count + report the affected slug set
+  const { data: before, error: beforeErr } = await sb
+    .from('pokemon_tcg_pilot_cohort')
+    .select('pp_card_slug')
+    .eq('prices_enabled', true)
+    .like('notes', `${EXPANSION_NOTES_PREFIX}%`)
+  if (beforeErr) {
+    return { started_at, rows_matched: 0, rows_affected: 0, slugs: [], error: `select: ${beforeErr.message}` }
+  }
+  const matchedSlugs = (before ?? []).map(r => r.pp_card_slug as string).filter(s => !EXPANSION_HARD_BLOCK.has(s))
+  const rows_matched = matchedSlugs.length
+  if (rows_matched === 0) {
+    return { started_at, rows_matched: 0, rows_affected: 0, slugs: [], error: null }
+  }
+  // Bulk UPDATE: set prices_enabled=false, deactivated_at=now(),
+  // updated_at=now(). The equality of deactivated_at and updated_at
+  // after this is the "pending revalidation" marker used by step 2.
+  // Scope: expansion-marker rows ONLY. The 14 live cards have
+  // different notes and are not matched.
+  const now = new Date().toISOString()
+  const { data: affected, error: upErr } = await sb
+    .from('pokemon_tcg_pilot_cohort')
+    .update({ prices_enabled: false, deactivated_at: now, updated_at: now })
+    .eq('prices_enabled', true)
+    .like('notes', `${EXPANSION_NOTES_PREFIX}%`)
+    .select('pp_card_slug')
+  if (upErr) {
+    return { started_at, rows_matched, rows_affected: 0, slugs: [], error: `update: ${upErr.message}` }
+  }
+  const affectedSlugs = (affected ?? []).map(r => r.pp_card_slug as string)
+  return { started_at, rows_matched, rows_affected: affectedSlugs.length, slugs: affectedSlugs, error: null }
+}
+
+async function revalidateExpansionPending(): Promise<RevalidatePendingReport> {
+  'use server'
+  await requireAdminPage(ADMIN_PAGE_PATH)
+  const sb = getSupabaseServiceClient()
+  const supa = await getSupabaseServerClient()
+  const { data: sessData } = await supa.auth.getSession()
+  const adminJwt = sessData?.session?.access_token
+  const started_at = new Date().toISOString()
+  // Pending list: deactivated_at IS NOT NULL AND updated_at <= deactivated_at
+  // (the bulk disable set them equal; successful revalidation bumps
+  // updated_at above deactivated_at so the row drops out of pending).
+  //
+  // PostgREST filter: `.eq('updated_at', 'deactivated_at')` isn't supported
+  // directly; we fetch pending candidates (prices_enabled=false, marker,
+  // deactivated_at not null) and filter client-side on the timestamps.
+  const { data: candidates, error: candErr } = await sb
+    .from('pokemon_tcg_pilot_cohort')
+    .select('pp_card_slug,deactivated_at,updated_at,notes')
+    .eq('prices_enabled', false)
+    .not('deactivated_at', 'is', null)
+    .like('notes', `${EXPANSION_NOTES_PREFIX}%`)
+  if (candErr) {
+    return { started_at, pending_before: 0, attempted: 0, succeeded: [], failed: [{ slug: '*', reason: `select: ${candErr.message}` }], pending_after: 0 }
+  }
+  const pending = (candidates ?? [])
+    .filter(r => r.deactivated_at && r.updated_at && new Date(r.updated_at as string).getTime() <= new Date(r.deactivated_at as string).getTime())
+    .filter(r => !EXPANSION_HARD_BLOCK.has(r.pp_card_slug as string))
+  const pending_before = pending.length
+  if (pending_before === 0) {
+    return { started_at, pending_before: 0, attempted: 0, succeeded: [], failed: [], pending_after: 0 }
+  }
+  if (!adminJwt) {
+    return { started_at, pending_before, attempted: 0, succeeded: [], failed: [{ slug: '*', reason: 'no admin session JWT' }], pending_after: pending_before }
+  }
+
+  const batch = pending.slice(0, REVAL_BATCH_SIZE)
+  const succeeded: Array<{ slug: string; revalidated_at: string }> = []
+  const failed: Array<{ slug: string; reason: string }> = []
+  for (const row of batch) {
+    const slug = row.pp_card_slug as string
+    let rvOk = false
+    try {
+      const res = await fetch(REVALIDATE_ENDPOINT, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminJwt}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pp_card_slugs: [slug] }),
+      })
+      rvOk = res.ok
+      if (!rvOk) failed.push({ slug, reason: `revalidate status=${res.status}` })
+    } catch (e) {
+      failed.push({ slug, reason: `revalidate threw: ${(e as Error).message}` })
+    }
+    if (rvOk) {
+      // Mark revalidated by bumping updated_at above deactivated_at.
+      const now = new Date().toISOString()
+      const { error: markErr } = await sb
+        .from('pokemon_tcg_pilot_cohort')
+        .update({ updated_at: now })
+        .eq('pp_card_slug', slug)
+      if (markErr) {
+        failed.push({ slug, reason: `mark error: ${markErr.message}` })
+      } else {
+        succeeded.push({ slug, revalidated_at: now })
+      }
+    }
+  }
+  // Count remaining pending for the operator-visible status.
+  const { data: afterCandidates } = await sb
+    .from('pokemon_tcg_pilot_cohort')
+    .select('pp_card_slug,deactivated_at,updated_at')
+    .eq('prices_enabled', false)
+    .not('deactivated_at', 'is', null)
+    .like('notes', `${EXPANSION_NOTES_PREFIX}%`)
+  const pending_after = (afterCandidates ?? [])
+    .filter(r => r.deactivated_at && r.updated_at && new Date(r.updated_at as string).getTime() <= new Date(r.deactivated_at as string).getTime())
+    .filter(r => !EXPANSION_HARD_BLOCK.has(r.pp_card_slug as string))
+    .length
+  return { started_at, pending_before, attempted: batch.length, succeeded, failed, pending_after }
+}
+
 export default async function PilotBatchPage() {
   await requireAdminPage(ADMIN_PAGE_PATH)
   const sb = getSupabaseServiceClient()
@@ -431,7 +704,73 @@ export default async function PilotBatchPage() {
       <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Flips off → revalidate → verify legacy → flips on → revalidate → verify active. Ends with prices_enabled=true.</p>
       <PerSlugForm action="rollback" slugs={slugs} labels={byslug} />
 
+      {/* ─── PP-TCG-500-PREP correction §A — expansion controls (348 staged, zero activated) ─── */}
+      <h2 style={{ fontSize: 16, marginTop: 40 }}>Expansion — next {EXPANSION_BATCH_SIZE} by GSC rank</h2>
+      <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+        Picks the globally top-{EXPANSION_BATCH_SIZE} staged candidates (<code>notes</code> starts with <code>{EXPANSION_NOTES_PREFIX}</code>, <code>prices_enabled=false</code>, strict provider-safe at click time, excluding thin-data slugs). The 14 live cards and 4 thin cards use different <code>notes</code> and are invisible to this selector by data-level invariant. Server-side re-check runs immediately before each activation.
+      </p>
+      <form action={async () => {
+        'use server'
+        await requireAdminPage(ADMIN_PAGE_PATH)
+        const sb = getSupabaseServiceClient()
+        const sel = await selectNextExpansionBatch(sb, EXPANSION_BATCH_SIZE)
+        const outcome = sel.slugs.length > 0
+          ? await runBatch('activate', sel.slugs)
+          : { started_at: new Date().toISOString(), action: 'activate' as const, slugs_requested: [], per_slug: [], rollback_on_failure: null, verdict: 'FAIL' as const }
+        const augmented = { ...outcome, _expansion: sel }
+        const jar = await cookies()
+        jar.set('pilot_batch_result', JSON.stringify(augmented), { httpOnly: true, sameSite: 'lax', path: ADMIN_PAGE_PATH, maxAge: 600 })
+        redirect(ADMIN_PAGE_PATH)
+      }}>
+        <button type="submit" style={{ background: '#166534', color: 'white', border: 'none', borderRadius: 8, padding: '10px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+          Activate next {EXPANSION_BATCH_SIZE} by GSC rank (global sort, strict re-check)
+        </button>
+      </form>
+
+      <h2 style={{ fontSize: 16, marginTop: 32, color: '#991b1b' }}>Emergency — disable ALL expansion-cohort pricing</h2>
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.55 }}>
+        Dedicated kill switch for expansion rows only. One bulk <code>UPDATE</code> sets <code>prices_enabled=false</code> on every row matching the <code>{EXPANSION_NOTES_PREFIX}</code> marker that is currently enabled. Does NOT auto re-enable on failure. 14 live cards + 4 thin cards are protected by data (different <code>notes</code> values). Public HTML continues serving cached content until <strong>Revalidate pending expansion URLs</strong> below is run.
+        Requires typing <code>disable expansion</code> to confirm.
+      </p>
+      <form action={async (fd: FormData) => {
+        'use server'
+        await requireAdminPage(ADMIN_PAGE_PATH)
+        if ((fd.get('confirm') ?? '').toString().trim() !== 'disable expansion') {
+          const jar = await cookies()
+          jar.set('pilot_emergency_result', JSON.stringify({ started_at: new Date().toISOString(), error: 'confirmation phrase did not match', rows_matched: 0, rows_affected: 0, slugs: [] } satisfies EmergencyDisableReport), { httpOnly: true, sameSite: 'lax', path: ADMIN_PAGE_PATH, maxAge: 600 })
+          redirect(ADMIN_PAGE_PATH)
+        }
+        const report = await emergencyDisableExpansion()
+        const jar = await cookies()
+        jar.set('pilot_emergency_result', JSON.stringify(report), { httpOnly: true, sameSite: 'lax', path: ADMIN_PAGE_PATH, maxAge: 600 })
+        redirect(ADMIN_PAGE_PATH)
+      }}>
+        <input name="confirm" placeholder='type "disable expansion"' style={{ padding: 8, fontSize: 13, marginRight: 8, border: '1px solid #991b1b', borderRadius: 6 }} />
+        <button type="submit" style={{ background: '#991b1b', color: 'white', border: 'none', borderRadius: 8, padding: '10px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+          EMERGENCY: Bulk-disable expansion cohort
+        </button>
+      </form>
+
+      <h2 style={{ fontSize: 16, marginTop: 32 }}>Revalidate pending expansion URLs</h2>
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.55 }}>
+        Resumable, bounded ({REVAL_BATCH_SIZE} slugs per invocation). Processes rows where <code>updated_at ≤ deactivated_at</code> (the pending marker set by emergency disable). On success bumps <code>updated_at</code> above <code>deactivated_at</code> so the row drops out of pending. On failure LEAVES the row pending for a safe retry. Does NOT re-enable pricing under any outcome.
+      </p>
+      <form action={async () => {
+        'use server'
+        await requireAdminPage(ADMIN_PAGE_PATH)
+        const report = await revalidateExpansionPending()
+        const jar = await cookies()
+        jar.set('pilot_reval_result', JSON.stringify(report), { httpOnly: true, sameSite: 'lax', path: ADMIN_PAGE_PATH, maxAge: 600 })
+        redirect(ADMIN_PAGE_PATH)
+      }}>
+        <button type="submit" style={{ background: '#a16207', color: 'white', border: 'none', borderRadius: 8, padding: '10px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+          Revalidate next {REVAL_BATCH_SIZE} pending expansion URLs
+        </button>
+      </form>
+
       <ResultBlock />
+      <EmergencyResultBlock />
+      <RevalResultBlock />
 
       <div style={{ marginTop: 32, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
         <strong>Scope &amp; safety</strong>
@@ -568,6 +907,72 @@ async function ResultBlock() {
               </div>
             )
           })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+async function EmergencyResultBlock() {
+  const jar = await cookies()
+  const raw = jar.get('pilot_emergency_result')?.value
+  if (!raw) return null
+  let parsed: EmergencyDisableReport
+  try { parsed = JSON.parse(raw) as EmergencyDisableReport } catch { return null }
+  const ok = !parsed.error
+  return (
+    <div style={{ marginTop: 20, padding: 12, background: ok ? '#fef3c7' : '#fee2e2', borderRadius: 8, border: `2px solid ${ok ? '#a16207' : '#991b1b'}` }}>
+      <div style={{ fontWeight: 800, fontSize: 14, color: ok ? '#a16207' : '#991b1b' }}>
+        Emergency bulk-disable report
+      </div>
+      <div style={{ fontSize: 11, color: '#5c3b00', marginTop: 4 }}>Started: {parsed.started_at}</div>
+      {parsed.error && <div style={{ fontSize: 12, color: '#991b1b', marginTop: 6, fontWeight: 700 }}>Error: {parsed.error}</div>}
+      <div style={{ fontSize: 12, marginTop: 6 }}>Rows matching marker: <strong>{parsed.rows_matched}</strong></div>
+      <div style={{ fontSize: 12, marginTop: 2 }}>Rows affected: <strong>{parsed.rows_affected}</strong></div>
+      {parsed.slugs.length > 0 && (
+        <details style={{ marginTop: 6 }}>
+          <summary style={{ fontSize: 11, cursor: 'pointer' }}>Affected slugs ({parsed.slugs.length})</summary>
+          <pre style={{ fontSize: 10, overflowX: 'auto', background: 'var(--card)', padding: 6, marginTop: 4, borderRadius: 4 }}>{parsed.slugs.join('\n')}</pre>
+        </details>
+      )}
+      {parsed.rows_affected > 0 && (
+        <div style={{ fontSize: 11, color: '#5c3b00', marginTop: 8 }}>
+          Public pages continue serving cached TCGGraph content until <strong>Revalidate pending expansion URLs</strong> is run (resumable, {REVAL_BATCH_SIZE} per click).
+        </div>
+      )}
+    </div>
+  )
+}
+
+async function RevalResultBlock() {
+  const jar = await cookies()
+  const raw = jar.get('pilot_reval_result')?.value
+  if (!raw) return null
+  let parsed: RevalidatePendingReport
+  try { parsed = JSON.parse(raw) as RevalidatePendingReport } catch { return null }
+  const done = parsed.pending_after === 0
+  return (
+    <div style={{ marginTop: 20, padding: 12, background: done ? '#dcfce7' : '#fef3c7', borderRadius: 8, border: `2px solid ${done ? '#15803d' : '#a16207'}` }}>
+      <div style={{ fontWeight: 800, fontSize: 14, color: done ? '#15803d' : '#a16207' }}>
+        Revalidate pending — {done ? 'ALL CLEAR' : `${parsed.pending_after} still pending`}
+      </div>
+      <div style={{ fontSize: 11, marginTop: 4 }}>Started: {parsed.started_at}</div>
+      <div style={{ fontSize: 12, marginTop: 6 }}>Pending before this run: <strong>{parsed.pending_before}</strong> · attempted: <strong>{parsed.attempted}</strong> · succeeded: <strong>{parsed.succeeded.length}</strong> · failed: <strong>{parsed.failed.length}</strong> · pending after: <strong>{parsed.pending_after}</strong></div>
+      {parsed.failed.length > 0 && (
+        <details open style={{ marginTop: 6 }}>
+          <summary style={{ fontSize: 11, cursor: 'pointer', color: '#991b1b' }}>Failures ({parsed.failed.length}) — these rows remain pending; re-click to retry</summary>
+          <pre style={{ fontSize: 10, overflowX: 'auto', background: 'var(--card)', padding: 6, marginTop: 4, borderRadius: 4 }}>{parsed.failed.map(f => `${f.slug}: ${f.reason}`).join('\n')}</pre>
+        </details>
+      )}
+      {parsed.succeeded.length > 0 && (
+        <details style={{ marginTop: 6 }}>
+          <summary style={{ fontSize: 11, cursor: 'pointer' }}>Succeeded ({parsed.succeeded.length})</summary>
+          <pre style={{ fontSize: 10, overflowX: 'auto', background: 'var(--card)', padding: 6, marginTop: 4, borderRadius: 4 }}>{parsed.succeeded.map(s => `${s.slug} @ ${s.revalidated_at}`).join('\n')}</pre>
+        </details>
+      )}
+      {!done && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+          Click <strong>Revalidate next {REVAL_BATCH_SIZE} pending expansion URLs</strong> again to continue. Safe to re-click — only still-pending rows are processed.
         </div>
       )}
     </div>
