@@ -12,7 +12,7 @@
 //     AND (c) not in any run_item — the enrollment never selects them.
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { listStrictCandidates, type ReconciliationRow } from './strict'
+import { listStrictCandidates, listStrictCandidatesEfficient, strictRecheckOne, type ReconciliationRow } from './strict'
 import type { MigrationRunConfig } from './types'
 
 export interface EnrollmentReport {
@@ -37,8 +37,21 @@ export async function enrollRun(
   cfg: MigrationRunConfig,
 ): Promise<EnrollmentReport> {
   const errors: string[] = []
-  // (1) Scan the reconciliation view for all strict-corrected candidates.
-  const candidates = await listStrictCandidates(sb, { language: cfg.language ?? 'any' })
+  // (1) Scan the reconciliation view for strict-corrected candidates.
+  //     - When enrollment_limit is set (canary / small-batch path), use
+  //       the single-query DB-side selector that applies LIMIT in SQL
+  //       and never scans the full view.
+  //     - When no limit is set (full-catalogue path), fall back to the
+  //       paginated scanner. That path is prone to statement_timeout
+  //       and is currently gated out of the UI.
+  const useEfficient = cfg.enrollment_limit != null && cfg.enrollment_limit > 0
+  const candidates = useEfficient
+    ? await listStrictCandidatesEfficient(sb, {
+        language: cfg.language ?? 'any',
+        limit:    cfg.enrollment_limit!,
+        headroom: 100,
+      })
+    : await listStrictCandidates(sb, { language: cfg.language ?? 'any' })
   const strict_candidates_scanned = candidates.length
 
   // (2) Pre-fetch exclusions in bulk:
@@ -78,12 +91,30 @@ export async function enrollRun(
     toEnrollAll.push({ ...row, priority_tier: tier, priority_rank: rank })
   })
 
-  const toEnroll = cfg.enrollment_limit != null && cfg.enrollment_limit >= 0
+  const toEnrollCapped = cfg.enrollment_limit != null && cfg.enrollment_limit >= 0
     ? toEnrollAll.slice(0, cfg.enrollment_limit)
     : toEnrollAll
 
+  // (3b) Per-candidate strict re-check (belt-and-braces for the canary
+  //      path). The view-level scan already filtered; re-checking right
+  //      before insert guards against the (unlikely) race where a row's
+  //      eligibility flips between scan and insert. Fast — one row
+  //      lookup per candidate.
+  const toEnroll: typeof toEnrollCapped = []
+  let skipped_recheck_failed = 0
+  for (const r of toEnrollCapped) {
+    const re = await strictRecheckOne(sb, r.pp_card_slug)
+    if (re.ok === false) {
+      skipped_recheck_failed++
+      errors.push(`recheck ${r.pp_card_slug}: ${re.reason}`)
+      continue
+    }
+    toEnroll.push(r)
+  }
+
   // (4) Insert cohort rows (ON CONFLICT DO NOTHING on unique pp_card_slug)
-  //     for slugs we don't already have a row for.
+  //     for slugs we don't already have a row for. New cohort rows ship
+  //     with prices_enabled/images_enabled/history_enabled all false.
   const needsCohortInsert = toEnroll.filter(r => !existingCohortSet.has(r.pp_card_slug))
   const existing_cohort_rows_reused = toEnroll.length - needsCohortInsert.length
   let new_cohort_rows_inserted = 0

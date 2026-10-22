@@ -61,8 +61,50 @@ export async function strictRecheckOne(
   return { ok: true, row: r }
 }
 
+/** Bounded, single-query DB-side candidate selection. All strict
+ *  filters including the asymmetric graded gate are pushed into the
+ *  Postgres query; LIMIT is enforced server-side so the view is NEVER
+ *  fully scanned. Fetches `limit + headroom` rows to leave room for the
+ *  active + already-enrolled JS-side exclusion filter.
+ *
+ *  This is the canary and small-batch path. The paginated
+ *  listStrictCandidates below is the full-catalogue path, which can
+ *  statement-timeout on heavy views — avoid it until a resumable RPC
+ *  is in place. */
+export async function listStrictCandidatesEfficient(
+  sb: SupabaseClient,
+  opts: { language?: 'en' | 'jp' | 'any'; limit: number; headroom?: number },
+): Promise<ReconciliationRow[]> {
+  const lang     = opts.language ?? 'any'
+  const headroom = opts.headroom ?? 100
+  const fetchN   = Math.max(1, opts.limit + headroom)
+  let q = sb.from('v_pp_tcg_card_reconciliation')
+    .select('pp_card_slug,pp_card_name,pp_set_name,pp_language,outcome,risk_class,confidence,review_status,printing_active_status,has_image,has_market_prices,has_graded_prices,effective_eligibility,gsc_rank')
+    .eq('outcome', 'approved_active')
+    .eq('risk_class', 'catalogue_corroborated')
+    .eq('confidence', 'verified')
+    .eq('review_status', 'approved')
+    .eq('printing_active_status', 'active')
+    .eq('has_image', true)
+    .eq('has_market_prices', true)
+    .in('effective_eligibility', ['bulk_safe', 'market_only'])
+    // Asymmetric graded gate pushed into SQL:
+    //   market_only passes freely; bulk_safe additionally requires has_graded_prices=true.
+    .or('effective_eligibility.eq.market_only,has_graded_prices.eq.true')
+    .order('gsc_rank', { ascending: true, nullsFirst: false })
+    .order('pp_card_slug', { ascending: true })
+    .limit(fetchN)
+  if (lang !== 'any') q = q.eq('pp_language', lang)
+  const { data, error } = await q
+  if (error) throw new Error(`strict scan efficient: ${error.message}`)
+  return (data ?? []) as ReconciliationRow[]
+}
+
 /** Scan the entire reconciliation view for strict-corrected candidates.
- *  Used by enrollment. Returns rows ordered by gsc_rank asc nulls last. */
+ *  Used by enrollment. Returns rows ordered by gsc_rank asc nulls last.
+ *  DEPRECATED — timeout-prone on heavy views. The canary path uses
+ *  listStrictCandidatesEfficient above; the full-catalogue UI is
+ *  disabled pending a resumable DB-side enrolment RPC. */
 export async function listStrictCandidates(
   sb: SupabaseClient,
   opts: { language?: 'en' | 'jp' | 'any'; limit?: number } = {},
