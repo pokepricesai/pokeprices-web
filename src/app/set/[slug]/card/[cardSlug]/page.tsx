@@ -201,9 +201,68 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     num = ` #${card.card_number}`
   }
 
-  const rawUsd   = card.raw_usd   ? card.raw_usd   / 100 : null
-  const psa9Usd  = card.psa9_usd  ? card.psa9_usd  / 100 : null
-  const psa10Usd = card.psa10_usd ? card.psa10_usd / 100 : null
+  // PP-TCG-PUBLIC-PILOT-03 — SEO metadata parity with the page body.
+  //
+  // generateMetadata used to read card.raw_usd / card.psa10_usd /
+  // card.psa9_usd directly from the legacy card_trends RPC. On
+  // provider-active cards this meant <title> / <meta description> /
+  // openGraph / twitter could silently show the legacy PriceCharting
+  // numbers while the page body showed TCGGraph. We now consult the
+  // same adapter the body uses — getProviderSnapshot + the pricing-
+  // eligibility gates built into it — and ONLY the three price
+  // fields (raw / psa9 / psa10 in cents) are overridden. Everything
+  // else about the title/description/robots/canonical/OG remains
+  // identical to the legacy branch.
+  //
+  // Non-provider cards: snapshot is null OR has empty arrays. Both
+  // yield useProvider=false here, so legacy card values pass through
+  // untouched — zero behaviour change on the public catalogue.
+  //
+  // PSA 9: the adapter explicitly sets psa9_usd=null in provider
+  // mode because TCGGraph only publishes a pooled `any:9` for most
+  // cards. The description template skips the PSA 9 clause when
+  // psa9UsdCents is falsy, so the claim is simply omitted.
+  let rawUsdCents:   number | null = card.raw_usd   ?? null
+  let psa9UsdCents:  number | null = card.psa9_usd  ?? null
+  let psa10UsdCents: number | null = card.psa10_usd ?? null
+  try {
+    const providerSupabase = getSupabaseServiceClient()
+    const providerSlug = card.card_slug ? String(card.card_slug) : null
+    const providerSnapshot = providerSlug
+      ? await getProviderSnapshot(providerSupabase, providerSlug)
+      : null
+    const providerHasPrices =
+      (providerSnapshot?.market_prices?.length ?? 0) > 0 ||
+      (providerSnapshot?.graded_prices?.length ?? 0) > 0
+    const providerHasImage = Boolean(providerSnapshot?.image_normal)
+    const useProvider = providerHasPrices || providerHasImage
+    if (useProvider && providerSnapshot) {
+      const adapted = adaptSnapshotToLegacyCardRow({
+        card_slug:            String(card.card_slug ?? ''),
+        card_url_slug:        (card.card_url_slug as string | null) ?? null,
+        card_name:            card.card_name,
+        set_name:             card.set_name,
+        card_number:          card.card_number ?? null,
+        card_number_display:  card.card_number_display ?? null,
+        set_printed_total:    card.set_printed_total ?? null,
+        image_url:            card.image_url ?? null,
+        language:             ((card as { language?: string | null }).language ?? 'en'),
+        is_sealed:            card.is_sealed ?? false,
+      }, providerSnapshot)
+      if (adapted?.card) {
+        rawUsdCents   = adapted.card.raw_usd   ?? null
+        psa9UsdCents  = adapted.card.psa9_usd  ?? null
+        psa10UsdCents = adapted.card.psa10_usd ?? null
+      }
+    }
+  } catch {
+    // Fail-closed: on any snapshot error, keep the legacy card values
+    // (metadata should still render; nothing worse than before).
+  }
+
+  const rawUsd   = rawUsdCents   ? rawUsdCents   / 100 : null
+  const psa9Usd  = psa9UsdCents  ? psa9UsdCents  / 100 : null
+  const psa10Usd = psa10UsdCents ? psa10UsdCents / 100 : null
   const multiple = rawUsd && psa10Usd ? psa10Usd / rawUsd : null
   const canonical = `https://www.pokeprices.io/set/${slug}/card/${cardSlug}`
   const year = new Date().getFullYear()
@@ -228,17 +287,17 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   let description: string
 
   if (useGradingVariant && rawUsd && psa10Usd) {
-    title = `${name}${num}${jpMarker} Price: ${fmt(card.psa10_usd!)} PSA 10 vs ${fmt(card.raw_usd!)} Raw. Worth Grading? (${year})`
-    description = `Is ${name}${num} worth grading? PSA 10 ${fmt(card.psa10_usd!)} is ${multiple!.toFixed(1)}× the raw price of ${fmt(card.raw_usd!)}. ${descSetPhrase} price guide: gem rate, grading spread, PSA population and verified recent sales.`
+    title = `${name}${num}${jpMarker} Price: ${fmt(psa10UsdCents!)} PSA 10 vs ${fmt(rawUsdCents!)} Raw. Worth Grading? (${year})`
+    description = `Is ${name}${num} worth grading? PSA 10 ${fmt(psa10UsdCents!)} is ${multiple!.toFixed(1)}× the raw price of ${fmt(rawUsdCents!)}. ${descSetPhrase} price guide: gem rate, grading spread, PSA population and verified recent sales.`
   } else if (rawUsd && psa10Usd) {
-    title = `${name}${num}${jpMarker} Price & Value: ${fmt(card.raw_usd!)} Raw, ${fmt(card.psa10_usd!)} PSA 10 (${year}) | ${setLabel}`
-    description = `How much is ${name}${num} worth? ${descSetPhrase} price guide: ${fmt(card.raw_usd!)} raw${psa9Usd ? `, ${fmt(card.psa9_usd!)} PSA 9` : ''}, ${fmt(card.psa10_usd!)} PSA 10. Price trend, grading spread, PSA population and verified recent sales.`
+    title = `${name}${num}${jpMarker} Price & Value: ${fmt(rawUsdCents!)} Raw, ${fmt(psa10UsdCents!)} PSA 10 (${year}) | ${setLabel}`
+    description = `How much is ${name}${num} worth? ${descSetPhrase} price guide: ${fmt(rawUsdCents!)} raw${psa9Usd ? `, ${fmt(psa9UsdCents!)} PSA 9` : ''}, ${fmt(psa10UsdCents!)} PSA 10. Price trend, grading spread, PSA population and verified recent sales.`
   } else if (psa10Usd) {
-    title = `${name}${num}${jpMarker} PSA 10 Price & Value: ${fmt(card.psa10_usd!)} (${year}) | ${setLabel}`
-    description = `${name}${num} PSA 10 value: ${fmt(card.psa10_usd!)}. ${descSetPhrase} price guide: price trend, PSA population, gem rate and verified recent sales. Updated nightly.`
+    title = `${name}${num}${jpMarker} PSA 10 Price & Value: ${fmt(psa10UsdCents!)} (${year}) | ${setLabel}`
+    description = `${name}${num} PSA 10 value: ${fmt(psa10UsdCents!)}. ${descSetPhrase} price guide: price trend, PSA population, gem rate and verified recent sales. Updated nightly.`
   } else if (rawUsd) {
-    title = `${name}${num}${jpMarker} Price: ${fmt(card.raw_usd!)} Raw (${year}) | ${setLabel}`
-    description = `How much is ${name}${num} worth? ${descSetPhrase} price guide: currently ${fmt(card.raw_usd!)} raw. Price trend, grading data, PSA population and verified recent sales. Updated nightly.`
+    title = `${name}${num}${jpMarker} Price: ${fmt(rawUsdCents!)} Raw (${year}) | ${setLabel}`
+    description = `How much is ${name}${num} worth? ${descSetPhrase} price guide: currently ${fmt(rawUsdCents!)} raw. Price trend, grading data, PSA population and verified recent sales. Updated nightly.`
   } else {
     title = `${name}${num}${jpMarker} Pokémon Card Price Guide (${year}) | ${setLabel}`
     description = `Track ${name}${num} from ${descSetPhrase}: raw, PSA 9 and PSA 10 prices, grading spreads, PSA population and verified recent sales. Price guide updated nightly.`
