@@ -5,7 +5,7 @@
 import { requireAdminPage } from '@/lib/adminAuth'
 import { getSupabaseServiceClient } from '@/lib/supabaseService'
 import { runMetrics } from '@/lib/providerData/migration/metrics'
-import { enrollRunItems, transitionRun, emergencyRollback, revalidateRolledBack } from '../actions'
+import { enrollRunItems, enrollCanary, transitionRun, emergencyRollback, revalidateRolledBack } from '../actions'
 import { redirect, notFound } from 'next/navigation'
 import type { MigrationRun, MigrationRunConfig, MigrationStatus } from '@/lib/providerData/migration/types'
 import { cookies } from 'next/headers'
@@ -87,12 +87,30 @@ export default async function Page({ params }: PageProps) {
         <h2 style={{ fontSize: 16, marginTop: 0 }}>Controls</h2>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {run.status === 'draft' && (
-            <ActionForm label="Enrol items from strict reconciliation" bg="#1a5fad" action={async () => {
-              'use server'
-              const r = await enrollRunItems(runId)
-              await writeFeedback(runId, 'enrol', r)
-              redirect(PATH)
-            }} />
+            <>
+              {/* Canary enrol — capped ≤25, forces gsc_rank, keeps run in draft. */}
+              <form action={async (fd: FormData) => {
+                'use server'
+                const n = Number(fd.get('canary_n') ?? 5) || 5
+                const r = await enrollCanary(runId, n)
+                await writeFeedback(runId, 'enrol_canary', r)
+                redirect(PATH)
+              }} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input name="canary_n" type="number" min={1} max={25} defaultValue={5}
+                  style={{ padding: 6, fontSize: 12, width: 70, border: '1px solid #15803d', borderRadius: 4 }} />
+                <button type="submit"
+                  style={{ background: '#15803d', color: 'white', border: 'none', borderRadius: 8, padding: '8px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                  Enrol next N by GSC rank (canary — stays in draft)
+                </button>
+              </form>
+              {/* Full-catalogue enrol — moves draft → ready on success. */}
+              <ActionForm label="Enrol items from strict reconciliation (full — moves draft → ready)" bg="#1a5fad" action={async () => {
+                'use server'
+                const r = await enrollRunItems(runId)
+                await writeFeedback(runId, 'enrol', r)
+                redirect(PATH)
+              }} />
+            </>
           )}
           {run.status === 'ready' && (
             <>

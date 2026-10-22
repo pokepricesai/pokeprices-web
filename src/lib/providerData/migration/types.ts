@@ -23,6 +23,11 @@ export interface MigrationRunConfig {
   selection_strategy?:       'gsc_rank' | 'set_proximity_then_rank' | 'all_strict'
   /** Language scope for enrollment. 'en', 'jp', 'any' (default). */
   language?:                 'en' | 'jp' | 'any'
+  /** Hard cap on how many run_items an enrollment pass will insert.
+   *  Applied AFTER the active/enrolled exclusion filter so the cap
+   *  always yields exactly N inserted (if enough strict candidates
+   *  exist). Omit for the full catalogue. */
+  enrollment_limit?:         number
 }
 
 export interface MigrationRun {
@@ -73,7 +78,7 @@ export interface VerificationEvidence {
   final_url:                   string
 }
 
-export const DEFAULT_CONFIG: Required<MigrationRunConfig> = {
+export const DEFAULT_CONFIG: Required<Omit<MigrationRunConfig, 'enrollment_limit'>> & { enrollment_limit?: number } = {
   daily_cap:                5,
   batch_size:               5,
   lease_duration_sec:       240,

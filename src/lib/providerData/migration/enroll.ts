@@ -20,9 +20,11 @@ export interface EnrollmentReport {
   strict_candidates_scanned:   number
   skipped_already_active:      number
   skipped_already_enrolled:    number
+  cap_applied:                 number | null
   new_cohort_rows_inserted:    number
   existing_cohort_rows_reused: number
   run_items_inserted:          number
+  selected_slugs:              Array<{ slug: string; gsc_rank: number | null; tier: string }>
   errors:                      string[]
 }
 
@@ -61,8 +63,10 @@ export async function enrollRun(
   const { data: cohortRowsAll } = await sb.from('pokemon_tcg_pilot_cohort').select('pp_card_slug')
   const existingCohortSet = new Set((cohortRowsAll ?? []).map(r => r.pp_card_slug as string))
 
-  // (3) Classify + compute priority ranking.
-  const toEnroll: Array<ReconciliationRow & { priority_tier: string; priority_rank: number }> = []
+  // (3) Classify + compute priority ranking. The enrollment_limit cap is
+  //     applied AFTER the active/enrolled exclusion filter so N is honoured
+  //     exactly (not reduced by overlapping-with-active/enrolled rows).
+  const toEnrollAll: Array<ReconciliationRow & { priority_tier: string; priority_rank: number }> = []
   let skipped_already_active   = 0
   let skipped_already_enrolled = 0
   const prioritisedCandidates = prioritise(candidates, cfg.selection_strategy ?? 'gsc_rank')
@@ -71,8 +75,12 @@ export async function enrollRun(
     if (activeSet.has(row.pp_card_slug))   { skipped_already_active++;   return }
     if (enrolledSet.has(row.pp_card_slug)) { skipped_already_enrolled++; return }
     const { tier, rank } = assignPriority(row, idx)
-    toEnroll.push({ ...row, priority_tier: tier, priority_rank: rank })
+    toEnrollAll.push({ ...row, priority_tier: tier, priority_rank: rank })
   })
+
+  const toEnroll = cfg.enrollment_limit != null && cfg.enrollment_limit >= 0
+    ? toEnrollAll.slice(0, cfg.enrollment_limit)
+    : toEnrollAll
 
   // (4) Insert cohort rows (ON CONFLICT DO NOTHING on unique pp_card_slug)
   //     for slugs we don't already have a row for.
@@ -120,8 +128,11 @@ export async function enrollRun(
   return {
     run_id, strict_candidates_scanned,
     skipped_already_active, skipped_already_enrolled,
+    cap_applied: cfg.enrollment_limit ?? null,
     new_cohort_rows_inserted, existing_cohort_rows_reused,
-    run_items_inserted, errors,
+    run_items_inserted,
+    selected_slugs: toEnroll.map(r => ({ slug: r.pp_card_slug, gsc_rank: r.gsc_rank, tier: r.priority_tier })),
+    errors,
   }
 }
 

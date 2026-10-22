@@ -5,7 +5,8 @@
 //
 // Exposes:
 //   - createRun(name, config)         → inserts a draft run
-//   - enrollRunItems(runId)           → populates run_items from strict scan
+//   - enrollRunItems(runId)           → full strict-scan enrol; moves draft → ready
+//   - enrollCanary(runId, limit)      → capped canary enrol (≤25); keeps run in draft
 //   - transitionRun(runId, newStatus) → draft→ready→running→paused→running→stopped
 //   - emergencyRollback(runId)        → bulk-disable verified items in a run
 //   - revalidateRolledBack(runId)     → resumable revalidation of rolled-back URLs
@@ -50,6 +51,35 @@ export async function enrollRunItems(runId: string): Promise<{ report: unknown }
     return { report }
   } catch (e) {
     return { error: `enroll: ${(e as Error).message}` }
+  }
+}
+
+/** Canary enrolment. Caps `enrollment_limit` to a small N (default 5,
+ *  hard cap 25), forces `selection_strategy='gsc_rank'`, and critically
+ *  does NOT transition the run out of draft. The operator must still
+ *  move the run through draft → ready → running by hand after reviewing
+ *  the selected items. Draft-only — refuses to run on ready/running/etc. */
+export async function enrollCanary(runId: string, limit: number): Promise<{ report: unknown } | { error: string }> {
+  await requireAdminPage(ADMIN_INDEX)
+  const sb = getSupabaseServiceClient()
+  const n = Math.max(1, Math.min(25, Math.floor(Number(limit) || 0)))
+  const { data: run } = await sb.from('pp_tcg_migration_run').select('status,config').eq('id', runId).maybeSingle()
+  if (!run) return { error: 'run not found' }
+  if (run.status !== 'draft') {
+    return { error: `canary enrolment requires status=draft (current=${run.status})` }
+  }
+  try {
+    const cfg: MigrationRunConfig = {
+      ...((run.config as MigrationRunConfig) ?? {}),
+      selection_strategy: 'gsc_rank',
+      enrollment_limit:   n,
+    }
+    const report = await enrollRun(sb, runId, cfg)
+    // No status transition. canTransition('draft','running')===false so
+    // the run cannot start accidentally after enrolment.
+    return { report }
+  } catch (e) {
+    return { error: `canary enroll: ${(e as Error).message}` }
   }
 }
 
