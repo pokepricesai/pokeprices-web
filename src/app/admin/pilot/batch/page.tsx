@@ -41,8 +41,10 @@ import { redirect } from 'next/navigation'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 // PP-TCG-500-PREP correction §A — explicit function duration; defends
-// against any plan-level default change. 10-card activation batch × up
-// to 10 polls × 2 s/poll ≈ 220 s worst case, which fits within 300 s.
+// against any plan-level default change. Batch size is 5 so a single
+// Server Action can accommodate BOTH activation (up to 5 × 22 s ≈
+// 110 s) AND worst-case batch-level restoration (another 5 × 22 s ≈
+// 110 s) within the 300 s function limit, with ~80 s headroom.
 export const maxDuration = 300
 export const metadata = {
   title: 'Pilot batch control',
@@ -68,7 +70,12 @@ const THIN_DATA = new Set(['2677929', '3468740', '6903541', '6903528'])
 // notes string ('pilot cohort proposal · ...') and are invisible to
 // expansion-only operations as a data-level invariant.
 const EXPANSION_NOTES_PREFIX = 'PP-TCG-500-PREP · GSC-ranked'
-const EXPANSION_BATCH_SIZE = 10
+// PP-TCG-500-PREP final correction — reduced from 10 to 5 so a single
+// Server Action can hold BOTH worst-case activation (up to 5 × 22 s)
+// AND worst-case restore-on-failure (another 5 × 22 s) inside the
+// 300 s function limit. At 10 cards the activate+restore worst case
+// would be ~440 s, risking a timeout mid-restore.
+const EXPANSION_BATCH_SIZE = 5
 // Hard block: these slugs can never flow through expansion operations
 // even if a future row somehow carried the expansion marker.
 const EXPANSION_HARD_BLOCK = THIN_DATA
