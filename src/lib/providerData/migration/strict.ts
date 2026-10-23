@@ -46,7 +46,23 @@ export async function strictRecheckOne(
   if (!data)  return { ok: false, reason: 'strict_recheck_no_row' }
   const r = data as ReconciliationRow
   if (r.outcome !== 'approved_active')           return { ok: false, reason: `outcome=${r.outcome}` }
-  if (r.risk_class !== 'catalogue_corroborated') return { ok: false, reason: `risk=${r.risk_class}` }
+  // Risk class gate.
+  //   catalogue_corroborated — single-printing, externally corroborated. Safe for both tiers.
+  //   pricing_restriction    — identity verified but multi-printing on the TCG card.
+  //                            Safe to migrate ONLY when effective_eligibility=market_only,
+  //                            because the TCGGraph graded_prices feed has no printing
+  //                            dimension and market_only suppresses graded surface at the
+  //                            adapter + metadata layer. The pokemon_tcg_effective_eligibility
+  //                            view auto-downgrades under pricing_restriction; this check
+  //                            is belt-and-braces.
+  //   anything else           — reject.
+  if (r.risk_class === 'pricing_restriction') {
+    if (r.effective_eligibility !== 'market_only') {
+      return { ok: false, reason: 'pricing_restriction_without_market_only' }
+    }
+  } else if (r.risk_class !== 'catalogue_corroborated') {
+    return { ok: false, reason: `risk=${r.risk_class}` }
+  }
   if (r.confidence !== 'verified')               return { ok: false, reason: `conf=${r.confidence}` }
   if (r.review_status !== 'approved')            return { ok: false, reason: `review=${r.review_status}` }
   if (r.printing_active_status !== 'active')     return { ok: false, reason: `printing=${r.printing_active_status}` }
@@ -81,7 +97,13 @@ export async function listStrictCandidatesEfficient(
   let q = sb.from('v_pp_tcg_card_reconciliation')
     .select('pp_card_slug,pp_card_name,pp_set_name,pp_language,outcome,risk_class,confidence,review_status,printing_active_status,has_image,has_market_prices,has_graded_prices,effective_eligibility,gsc_rank')
     .eq('outcome', 'approved_active')
-    .eq('risk_class', 'catalogue_corroborated')
+    // Risk-class gate:
+    //   catalogue_corroborated — accepted for both bulk_safe and market_only.
+    //   pricing_restriction    — accepted ONLY when effective_eligibility=market_only
+    //                            (enforced by the asymmetric graded-gate .or() below,
+    //                             because pricing_restriction forces market_only in the
+    //                             effective-eligibility view).
+    .in('risk_class', ['catalogue_corroborated', 'pricing_restriction'])
     .eq('confidence', 'verified')
     .eq('review_status', 'approved')
     .eq('printing_active_status', 'active')
@@ -90,6 +112,7 @@ export async function listStrictCandidatesEfficient(
     .in('effective_eligibility', ['bulk_safe', 'market_only'])
     // Asymmetric graded gate pushed into SQL:
     //   market_only passes freely; bulk_safe additionally requires has_graded_prices=true.
+    //   pricing_restriction cards are market_only in the effective view, so pass here.
     .or('effective_eligibility.eq.market_only,has_graded_prices.eq.true')
     .order('gsc_rank', { ascending: true, nullsFirst: false })
     .order('pp_card_slug', { ascending: true })

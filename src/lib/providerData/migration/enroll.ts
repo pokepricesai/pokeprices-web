@@ -37,41 +37,52 @@ export async function enrollRun(
   cfg: MigrationRunConfig,
 ): Promise<EnrollmentReport> {
   const errors: string[] = []
-  // (1) Scan the reconciliation view for strict-corrected candidates.
-  //     - When enrollment_limit is set (canary / small-batch path), use
-  //       the single-query DB-side selector that applies LIMIT in SQL
-  //       and never scans the full view.
-  //     - When no limit is set (full-catalogue path), fall back to the
-  //       paginated scanner. That path is prone to statement_timeout
-  //       and is currently gated out of the UI.
-  const useEfficient = cfg.enrollment_limit != null && cfg.enrollment_limit > 0
-  const candidates = useEfficient
-    ? await listStrictCandidatesEfficient(sb, {
-        language: cfg.language ?? 'any',
-        limit:    cfg.enrollment_limit!,
-        headroom: 100,
-      })
+
+  // (1) Candidate selection.
+  //
+  //     Primary path — DB-side RPC `pp_tcg_strict_candidates`. Pushes
+  //     every strict filter, risk-class rule, active/enrolled exclusions,
+  //     GSC ordering and LIMIT into Postgres. No application-side
+  //     fetch-and-filter, no fixed headroom, no stalling as the active
+  //     count grows. Returns exactly N candidates ready to enrol.
+  //
+  //     Fallback (full-catalogue path, UI-disabled) — paginated scanner
+  //     retained for emergency use via the enrollRunItems server action.
+  //     Prone to statement_timeout at full-catalogue scale.
+  const useRpc = cfg.enrollment_limit != null && cfg.enrollment_limit > 0
+  const candidates = useRpc
+    ? await (async () => {
+        const { data, error } = await sb.rpc('pp_tcg_strict_candidates', {
+          p_limit:    cfg.enrollment_limit!,
+          p_language: (cfg.language === 'any' ? null : cfg.language) ?? null,
+        })
+        if (error) throw new Error(`strict RPC: ${error.message}`)
+        return (data ?? []) as ReconciliationRow[]
+      })()
     : await listStrictCandidates(sb, { language: cfg.language ?? 'any' })
   const strict_candidates_scanned = candidates.length
 
-  // (2) Pre-fetch exclusions in bulk:
-  //    (a) Slugs currently prices_enabled=true in cohort (already active).
-  //    (b) Slugs already in any run_item (owned by another run).
-  const { data: activeRows } = await sb.from('pokemon_tcg_pilot_cohort')
-    .select('pp_card_slug').eq('prices_enabled', true)
-  const activeSet = new Set((activeRows ?? []).map(r => r.pp_card_slug as string))
-
-  const existingItemsAll: string[] = []
-  let from = 0
-  while (true) {
-    const { data } = await sb.from('pp_tcg_migration_run_item')
-      .select('pp_card_slug').order('pp_card_slug').range(from, from + 999)
-    if (!data || !data.length) break
-    existingItemsAll.push(...data.map(r => r.pp_card_slug as string))
-    if (data.length < 1000) break
-    from += 1000
+  // (2) Active + enrolled exclusion.
+  //     With the RPC these are already filtered DB-side; we skip the
+  //     cost of fetching the exclusion sets. The fallback paginated
+  //     scanner needs them, so compute lazily.
+  const needsAppSideExclusion = !useRpc
+  const activeSet   = new Set<string>()
+  const enrolledSet = new Set<string>()
+  if (needsAppSideExclusion) {
+    const { data: activeRows } = await sb.from('pokemon_tcg_pilot_cohort')
+      .select('pp_card_slug').eq('prices_enabled', true)
+    for (const r of activeRows ?? []) activeSet.add(r.pp_card_slug as string)
+    let from = 0
+    while (true) {
+      const { data } = await sb.from('pp_tcg_migration_run_item')
+        .select('pp_card_slug').order('pp_card_slug').range(from, from + 999)
+      if (!data || !data.length) break
+      for (const r of data) enrolledSet.add(r.pp_card_slug as string)
+      if (data.length < 1000) break
+      from += 1000
+    }
   }
-  const enrolledSet = new Set(existingItemsAll)
 
   const { data: cohortRowsAll } = await sb.from('pokemon_tcg_pilot_cohort').select('pp_card_slug')
   const existingCohortSet = new Set((cohortRowsAll ?? []).map(r => r.pp_card_slug as string))
@@ -85,8 +96,10 @@ export async function enrollRun(
   const prioritisedCandidates = prioritise(candidates, cfg.selection_strategy ?? 'gsc_rank')
 
   prioritisedCandidates.forEach((row, idx) => {
-    if (activeSet.has(row.pp_card_slug))   { skipped_already_active++;   return }
-    if (enrolledSet.has(row.pp_card_slug)) { skipped_already_enrolled++; return }
+    if (needsAppSideExclusion) {
+      if (activeSet.has(row.pp_card_slug))   { skipped_already_active++;   return }
+      if (enrolledSet.has(row.pp_card_slug)) { skipped_already_enrolled++; return }
+    }
     const { tier, rank } = assignPriority(row, idx)
     toEnrollAll.push({ ...row, priority_tier: tier, priority_rank: rank })
   })

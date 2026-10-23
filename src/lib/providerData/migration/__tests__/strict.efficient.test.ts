@@ -40,18 +40,19 @@ describe('listStrictCandidatesEfficient', () => {
     expect(sb._calls().find(c => c.op === 'from')?.args).toEqual(['v_pp_tcg_card_reconciliation'])
   })
 
-  it('applies every strict filter — outcome, risk, confidence, review, printing, image, market, eligibility set', async () => {
+  it('applies every strict filter — outcome, confidence, review, printing, image, market; and the new .in() risk_class rule', async () => {
     const sb = makeStubSupabase()
     await listStrictCandidatesEfficient(sb as unknown as never, { limit: 5 })
     const eqs = sb._calls().filter(c => c.op === 'eq').map(c => c.args)
     expect(eqs).toContainEqual(['outcome', 'approved_active'])
-    expect(eqs).toContainEqual(['risk_class', 'catalogue_corroborated'])
     expect(eqs).toContainEqual(['confidence', 'verified'])
     expect(eqs).toContainEqual(['review_status', 'approved'])
     expect(eqs).toContainEqual(['printing_active_status', 'active'])
     expect(eqs).toContainEqual(['has_image', true])
     expect(eqs).toContainEqual(['has_market_prices', true])
     const ins = sb._calls().filter(c => c.op === 'in').map(c => c.args)
+    // Risk class is now an .in() with both accepted values.
+    expect(ins).toContainEqual(['risk_class', ['catalogue_corroborated', 'pricing_restriction']])
     expect(ins).toContainEqual(['effective_eligibility', ['bulk_safe', 'market_only']])
   })
 
