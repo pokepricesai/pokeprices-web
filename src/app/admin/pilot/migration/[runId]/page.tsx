@@ -103,11 +103,21 @@ export default async function Page({ params }: PageProps) {
                   Enrol next N by GSC rank (canary — stays in draft)
                 </button>
               </form>
+              {/* Mark Ready — gated on at least one pending item. Transitions
+                  draft → ready. The next click (on the ready-state controls)
+                  then moves ready → running. Two separate clicks = two
+                  separate approval gates. */}
+              {metrics.totals.pending > 0 && (
+                <ActionForm label={`Mark Ready (draft → ready, ${metrics.totals.pending} pending)`} bg="#1a5fad" action={async () => {
+                  'use server'
+                  const r = await transitionRun(runId, 'ready')
+                  await writeFeedback(runId, 'mark_ready', r)
+                  redirect(PATH)
+                }} />
+              )}
               {/* Full-catalogue enrol — DISABLED pending resumable DB-side
                   selection. The old paginated scan statement-timeouts on
-                  the full view. Use canary enrol above for now. The
-                  enrollRunItems server action is still callable from
-                  server-side code; the UI button is deliberately absent. */}
+                  the full view. Use canary enrol above for now. */}
               <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', padding: '8px 12px', background: 'var(--bg-light)', borderRadius: 8 }}>
                 Full-catalogue enrol disabled — pending resumable selector (see enrollRunItems).
               </div>
@@ -115,18 +125,10 @@ export default async function Page({ params }: PageProps) {
           )}
           {run.status === 'ready' && (
             <>
-              <ActionForm label="Start run (status=running)" bg="#15803d" action={async () => {
+              <ActionForm label={`Start Migration (ready → running, cron activates up to daily_cap=${cfg.daily_cap ?? 5}/day)`} bg="#15803d" action={async () => {
                 'use server'
                 const r = await transitionRun(runId, 'running')
                 await writeFeedback(runId, 'start', r)
-                redirect(PATH)
-              }} />
-              <ActionForm label="Enrol more items" bg="#1a5fad" action={async () => {
-                'use server'
-                // Transition back to draft temporarily, enrol, then back to ready.
-                await transitionRun(runId, 'ready')
-                const r = await enrollRunItems(runId)
-                await writeFeedback(runId, 'enrol', r)
                 redirect(PATH)
               }} />
             </>
