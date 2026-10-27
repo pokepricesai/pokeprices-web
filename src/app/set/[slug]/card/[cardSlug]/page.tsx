@@ -545,9 +545,15 @@ export default async function CardPage({ params }: { params: Promise<{ slug: str
           : undefined}
         providerMode={useProvider || undefined}
         providerMarketPrices={useProvider ? providerSnapshot?.market_prices : undefined}
-        /* CN-05 Sprint 8 — exact TCGplayer product ID when the
-           provider snapshot resolved one. Null falls back to search. */
-        tcgplayerProductId={useProvider ? (providerSnapshot?.tcgplayer_product_id ?? null) : null}
+        /* CN-05 Sprint 8 — exact TCGplayer product ID whenever the
+           snapshot resolved one. Independent of the useProvider
+           pricing-display gate because `providerSnapshot` is only
+           populated for approved mappings with an active
+           provider_cards row (see snapshot.ts §PP-TCG-PRINTING-
+           RECLASS-FIX); showing an exact-product deep link does
+           not depend on legacy card_trends having been retired.
+           Null → search fallback preserved. */
+        tcgplayerProductId={providerSnapshot?.tcgplayer_product_id ?? null}
         displayCcy={currencySelectorOn ? displayCcy : undefined}
         fx={currencySelectorOn ? fxTable : undefined}
         quickFactsSlot={
