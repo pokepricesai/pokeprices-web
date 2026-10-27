@@ -14,6 +14,7 @@ import GradeLadder, { type GradePrices } from '@/components/GradeLadder'
 import CardQuickActions from '@/components/CardQuickActions'
 import EbayCardPriceActions from '@/components/affiliate/EbayCardPriceActions'
 import EbayCardPrimaryAction from '@/components/affiliate/EbayCardPrimaryAction'
+import TcgplayerCardAction from '@/components/affiliate/TcgplayerCardAction'
 import JapaneseBadge from '@/components/JapaneseBadge'
 import { resolveLanguage, displaySetName } from '@/lib/cardLanguage'
 import FAQ from '@/components/FAQ'
@@ -1004,6 +1005,16 @@ export default function CardPageClient({
               setSlug={card.set_name}
               isSealed={!!card.is_sealed}
               language={resolveLanguage(card.language as any, card.set_name)}
+            />
+            {/* CN-05 Sprint 4 — TCGplayer buying CTA alongside eBay.
+                Search-URL fallback (no stored TCGplayer product IDs on
+                this repo's `cards` table yet); label makes the search
+                nature explicit. */}
+            <TcgplayerCardAction
+              cardName={card.card_name}
+              cardSlug={(card.card_url_slug || card.card_slug || '').toString().replace(/^pc-/, '') || null}
+              setSlug={card.set_name}
+              isSealed={!!card.is_sealed}
             />
             <EbayCardPriceActions
               cardName={card.card_name}
