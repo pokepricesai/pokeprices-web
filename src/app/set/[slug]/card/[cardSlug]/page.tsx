@@ -545,6 +545,9 @@ export default async function CardPage({ params }: { params: Promise<{ slug: str
           : undefined}
         providerMode={useProvider || undefined}
         providerMarketPrices={useProvider ? providerSnapshot?.market_prices : undefined}
+        /* CN-05 Sprint 8 — exact TCGplayer product ID when the
+           provider snapshot resolved one. Null falls back to search. */
+        tcgplayerProductId={useProvider ? (providerSnapshot?.tcgplayer_product_id ?? null) : null}
         displayCcy={currencySelectorOn ? displayCcy : undefined}
         fx={currencySelectorOn ? fxTable : undefined}
         quickFactsSlot={

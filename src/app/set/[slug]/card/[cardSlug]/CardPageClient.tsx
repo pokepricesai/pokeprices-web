@@ -462,12 +462,17 @@ export type CardPageClientProps = {
     trend:    number | null
     source_updated_at: string | null
   }>
+  /** CN-05 Sprint 8 — exact TCGplayer product ID extracted at
+   *  read-time from pokemon_tcg_provider_cards.raw_payload. Only
+   *  populated when providerMode is active AND the mapping resolves.
+   *  Null falls back to the honest search-URL label. */
+  tcgplayerProductId?: number | null
 }
 
 export default function CardPageClient({
   setName, cardUrlSlug, initialCardData, initialTrendData, quickFactsSlot, seoIntroSlot,
   initialPriceHistory, initialProviderExtras, providerMode, displayCcy, fx,
-  providerMarketPrices,
+  providerMarketPrices, tcgplayerProductId,
 }: CardPageClientProps) {
   // W46D — treat any value !== undefined as "server supplied data".
   // A legitimate null from the server means "no card row exists" but
@@ -1006,15 +1011,18 @@ export default function CardPageClient({
               isSealed={!!card.is_sealed}
               language={resolveLanguage(card.language as any, card.set_name)}
             />
-            {/* CN-05 Sprint 4 — TCGplayer buying CTA alongside eBay.
-                Search-URL fallback (no stored TCGplayer product IDs on
-                this repo's `cards` table yet); label makes the search
-                nature explicit. */}
+            {/* CN-05 Sprint 4+8 — TCGplayer CTA. Sprint 8 upgrade:
+                provider snapshot now surfaces an exact tcgplayer
+                product ID from the already-ingested TCGGraph
+                raw_payload (read-time jsonb extraction, no schema
+                change). When present → exact-product deep link;
+                otherwise → honest search-URL fallback. */}
             <TcgplayerCardAction
               cardName={card.card_name}
               cardNumber={card.card_number_display ?? card.card_number ?? null}
               cardSlug={(card.card_url_slug || card.card_slug || '').toString().replace(/^pc-/, '') || null}
               setSlug={card.set_name}
+              productId={tcgplayerProductId ?? null}
               isSealed={!!card.is_sealed}
             />
             <EbayCardPriceActions

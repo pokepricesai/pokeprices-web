@@ -60,6 +60,15 @@ export interface ProviderSnapshot {
   image_source: string | null;
   market_prices: ProviderMarketPrice[];
   graded_prices: ProviderGradedPrice[];
+  /** CN-05 Sprint 8 — exact-product TCGplayer identifier extracted
+   *  at read-time via PostgREST jsonb path from the existing
+   *  `pokemon_tcg_provider_cards.raw_payload.external_ids.tcgplayerId`.
+   *  Zero schema change, zero backfill, no ingest drift risk — the
+   *  TCGGraph provider already populates this field in every active
+   *  pokemon_tcg_provider_cards row. Null = no TCGplayer entry for
+   *  this printing; the TcgplayerCardAction search-URL fallback
+   *  continues to apply unchanged. */
+  tcgplayer_product_id: number | null;
 }
 
 export interface GetSnapshotOptions {
@@ -124,8 +133,11 @@ export async function getProviderSnapshot(
   // underlying row + historical prices remain in the database for
   // audit; this filter keeps them out of the public read path.
   const [cardRes, marketRes, gradedRes] = await Promise.all([
+    // CN-05 Sprint 8 — extend the existing SELECT with a PostgREST
+    // jsonb path to pull the TCGplayer product ID from the already-
+    // ingested raw_payload. No new round trip; same index path.
     sb.from('pokemon_tcg_provider_cards')
-      .select('image_small, image_normal, image_large, image_source')
+      .select('image_small, image_normal, image_large, image_source, tcgplayer_product_id:raw_payload->external_ids->>tcgplayerId')
       .eq('provider', 'tcggraph')
       .eq('tcg_card_id', mapping.tcg_card_id)
       .eq('tcg_printing_key', mapping.tcg_printing_key)
@@ -182,6 +194,18 @@ export async function getProviderSnapshot(
   const canReturnImages = providerCardActive && imageFlagOn && pilot.images &&
     (eligibility === 'bulk_safe' || eligibility === 'market_only' || eligibility === 'identity_only');
 
+  // CN-05 Sprint 8 — parse the extracted jsonb path value. PostgREST
+  // returns it as a string (jsonb ->> returns text). Only accept a
+  // positive numeric; anything else resolves to null and the
+  // TcgplayerCardAction falls back to its honest search label. Gating
+  // on `providerCardActive` matches the image / price gates — a
+  // superseded or missing provider_cards row never surfaces an ID.
+  const rawTcgplayerId: unknown = (cardRes.data as { tcgplayer_product_id?: unknown } | null)?.tcgplayer_product_id;
+  const tcgplayerIdNum =
+    providerCardActive && typeof rawTcgplayerId === 'string' && /^\d+$/.test(rawTcgplayerId)
+      ? Number(rawTcgplayerId)
+      : null;
+
   return {
     pp_card_slug,
     tcg_card_id: mapping.tcg_card_id,
@@ -195,5 +219,6 @@ export async function getProviderSnapshot(
     image_source: canReturnImages ? (cardRes.data?.image_source ?? null) : null,
     market_prices: canReturnMarket ? ((marketRes.data as ProviderMarketPrice[]) || []) : [],
     graded_prices: canReturnGraded ? ((gradedRes.data as ProviderGradedPrice[]) || []) : [],
+    tcgplayer_product_id: tcgplayerIdNum,
   };
 }

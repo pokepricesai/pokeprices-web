@@ -27,6 +27,7 @@ function snapshot(opts: Partial<ProviderSnapshot> = {}): ProviderSnapshot {
     image_source: 'own',
     market_prices: [],
     graded_prices: [],
+    tcgplayer_product_id: null,
     ...opts,
   }
 }

@@ -34,6 +34,11 @@ export type TcgplayerCardActionProps = {
   cardSlug?:  string | null
   setSlug?:   string | null
   isSealed?:  boolean
+  /** CN-05 Sprint 8 — verified TCGplayer product ID from the
+   *  TCGGraph provider snapshot. When numeric, the resolver emits
+   *  an exact-product deep link; otherwise falls back to the
+   *  per-game search URL with "Find on TCGplayer" label. */
+  productId?: number | null
 }
 
 // PokePrices stores modifiers inside card_name like "Blastoise #E9",
@@ -71,6 +76,10 @@ export default function TcgplayerCardAction(props: TcgplayerCardActionProps) {
     ? buildTcgplayerLink({
         cardName: query,
         game: 'pokemon',
+        // CN-05 Sprint 8 — when the server passed a verified
+        // numeric product ID from the TCGGraph provider snapshot,
+        // use it. Otherwise fall through to search.
+        productId: props.productId ?? null,
         subid: `pp:card_primary:${(props.cardSlug ?? 'unknown').toString().slice(0, 50)}`,
       })
     : null
