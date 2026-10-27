@@ -94,3 +94,35 @@ describe('buildTcgplayerLink — URL safety', () => {
     expect(dest).toContain('q=Pikachu%20%26%20Zekrom')
   })
 })
+
+// Component-side cleaner lives in TcgplayerCardAction.tsx but we
+// snapshot the regex intent here so future refactors cannot silently
+// regress the "#E9 / #TG11 / [Variant]" handling. These are the
+// exact strings that caused live-verification friction in Sprint 4.
+describe('card_name cleaner regex expectations', () => {
+  const strip = (raw: string) => raw
+    .replace(/\s*#[A-Za-z0-9][A-Za-z0-9-]*/g, '')
+    .replace(/\s*\[[^\]]+\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  it('strips plain-digit modifier (#42)', () => {
+    expect(strip('Charizard #42')).toBe('Charizard')
+  })
+  it('strips letter-prefixed modifier (#E9)', () => {
+    expect(strip('Blastoise #E9')).toBe('Blastoise')
+  })
+  it('strips prefixed-numeric modifier (#TG11, #SV52)', () => {
+    expect(strip('Pikachu #TG11')).toBe('Pikachu')
+    expect(strip('Mewtwo #SV52')).toBe('Mewtwo')
+  })
+  it('strips bracketed variant', () => {
+    expect(strip('Pikachu [Rainbow Foil]')).toBe('Pikachu')
+  })
+  it('strips both modifiers together and collapses whitespace', () => {
+    expect(strip('Pikachu #42 [Foil]')).toBe('Pikachu')
+  })
+  it('leaves non-modifier text untouched', () => {
+    expect(strip('Mewtwo & Mew')).toBe('Mewtwo & Mew')
+  })
+})

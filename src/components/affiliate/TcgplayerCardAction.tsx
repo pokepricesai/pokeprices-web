@@ -36,13 +36,18 @@ export type TcgplayerCardActionProps = {
   isSealed?:  boolean
 }
 
-// PokePrices stores modifiers inside card_name like "Blastoise #E9" or
-// "Pikachu [Rainbow Foil]". These confuse TCGplayer's search. Strip
-// them to a clean species/product name; pass the number separately
-// if we have it. Memory: feedback_pokeprices_cardname_modifiers.
+// PokePrices stores modifiers inside card_name like "Blastoise #E9",
+// "Pikachu #TG11" or "Pikachu [Rainbow Foil]". These confuse
+// TCGplayer's search. Strip them to a clean species/product name;
+// pass the number separately if we have it.
+// Memory: feedback_pokeprices_cardname_modifiers.
+//
+// The "#…" segment allows letters + digits + hyphens so prefixed
+// numbers like "#E9", "#SV52" and "#TG11" are all removed. The
+// strip stops at the next whitespace / end of string.
 function cleanCardName(raw: string): string {
   return raw
-    .replace(/\s*#\d+[A-Za-z]*\b/g, '')
+    .replace(/\s*#[A-Za-z0-9][A-Za-z0-9-]*/g, '')
     .replace(/\s*\[[^\]]+\]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
