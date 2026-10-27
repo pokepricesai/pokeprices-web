@@ -125,6 +125,7 @@ export default function TcgplayerCardAction(props: TcgplayerCardActionProps) {
         rel="sponsored nofollow noopener noreferrer"
         onClick={onClick}
         data-affiliate="1"
+        data-merchant="tcgplayer"
         data-placement="card_primary_tcgplayer"
         data-component="TcgplayerCardAction"
         data-page-type="card"
