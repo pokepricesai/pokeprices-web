@@ -1012,6 +1012,7 @@ export default function CardPageClient({
                 nature explicit. */}
             <TcgplayerCardAction
               cardName={card.card_name}
+              cardNumber={card.card_number_display ?? card.card_number ?? null}
               cardSlug={(card.card_url_slug || card.card_slug || '').toString().replace(/^pc-/, '') || null}
               setSlug={card.set_name}
               isSealed={!!card.is_sealed}

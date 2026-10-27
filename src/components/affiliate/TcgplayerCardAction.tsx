@@ -29,10 +29,23 @@ import { trackEvent } from '@/lib/analytics'
 import { buildTcgplayerLink } from '@/lib/tcgplayerAffiliate'
 
 export type TcgplayerCardActionProps = {
-  cardName:  string
-  cardSlug?: string | null
-  setSlug?:  string | null
-  isSealed?: boolean
+  cardName:   string
+  cardNumber?: string | null
+  cardSlug?:  string | null
+  setSlug?:   string | null
+  isSealed?:  boolean
+}
+
+// PokePrices stores modifiers inside card_name like "Blastoise #E9" or
+// "Pikachu [Rainbow Foil]". These confuse TCGplayer's search. Strip
+// them to a clean species/product name; pass the number separately
+// if we have it. Memory: feedback_pokeprices_cardname_modifiers.
+function cleanCardName(raw: string): string {
+  return raw
+    .replace(/\s*#\d+[A-Za-z]*\b/g, '')
+    .replace(/\s*\[[^\]]+\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 export default function TcgplayerCardAction(props: TcgplayerCardActionProps) {
@@ -42,9 +55,16 @@ export default function TcgplayerCardAction(props: TcgplayerCardActionProps) {
   const trimmedName = (props.cardName ?? '').trim()
   const shouldRender = !props.isSealed && trimmedName.length > 0
 
+  const cleanName = cleanCardName(trimmedName)
+  const number = (props.cardNumber ?? '').toString().trim()
+  // Keep the card_number as a separate query token when present so the
+  // TCGplayer search can narrow by printing without the "#" prefix
+  // confusing their tokenizer.
+  const query = number ? `${cleanName} ${number}` : cleanName
+
   const link = shouldRender
     ? buildTcgplayerLink({
-        cardName: trimmedName,
+        cardName: query,
         game: 'pokemon',
         subid: `pp:card_primary:${(props.cardSlug ?? 'unknown').toString().slice(0, 50)}`,
       })
