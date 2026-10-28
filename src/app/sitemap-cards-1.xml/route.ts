@@ -9,6 +9,13 @@ import { fetchIndexableCardBatch, renderCardSitemapXml } from '@/lib/seo-indexab
 
 const BASE_URL = 'https://www.pokeprices.io'
 
+// Action 562dc04b — 24h ISR. Uncached, this route ran a cold Supabase
+// query over 10k card rows per request (~17-42s render), which Google
+// handled but the OS sitemap-check probe (7s timeout) could not. ISR
+// serves a cached response <1s thereafter; revalidation happens once
+// per day in the background. XML contract unchanged.
+export const revalidate = 86400
+
 export async function GET() {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

@@ -20,6 +20,9 @@ import { fetchIndexableCardBatch, renderCardSitemapXml } from '@/lib/seo-indexab
 
 const BASE_URL = 'https://www.pokeprices.io'
 
+// Action 562dc04b — 24h ISR. See sitemap-cards-1.xml/route.ts for rationale.
+export const revalidate = 86400
+
 export async function GET() {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
