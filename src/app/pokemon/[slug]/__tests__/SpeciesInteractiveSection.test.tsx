@@ -74,8 +74,22 @@ describe('SpeciesInteractiveSection — logged-out CTA', () => {
     expect(SECTION).toMatch(/Create a free account to track your English and Japanese \{displayName\} collection progress\./)
   })
 
-  it('CTA link points at the existing sign-up flow with a returnTo back to this Pokémon page', () => {
-    expect(SECTION).toMatch(/\/dashboard\/login\?returnTo=\$\{encodeURIComponent\(`\/pokemon\/\$\{pokemonSlug \?\? ''\}`\)\}/)
+  it('CTA link uses a static /dashboard/login href and builds returnTo in the onClick handler', () => {
+    // PP-SEO-LOGIN-URL-FIX (2026-11-02) — the href must stay static
+    // so Googlebot (and other JS-rendering crawlers) do not discover
+    // a unique /dashboard/login?returnTo=/pokemon/<species> URL per
+    // species page. The real returnTo is built at interaction time
+    // and dispatched via router.push, so the user flow is unchanged.
+    expect(SECTION).toMatch(/href="\/dashboard\/login"/)
+    expect(SECTION).toMatch(/router\.push\(`\/dashboard\/login\?returnTo=\$\{encodeURIComponent\(`\/pokemon\/\$\{pokemonSlug \?\? ''\}`\)\}`\)/)
+  })
+
+  it('does NOT emit a per-species /dashboard/login?returnTo href at render time', () => {
+    // Anti-regression — a `<Link href="/dashboard/login?returnTo=…">`
+    // or `<a href="/dashboard/login?returnTo=…">` at render time
+    // leaks a unique anchor per species page into Googlebot's render.
+    expect(SECTION).not.toMatch(/href=\{[^}]*`?\/dashboard\/login\?returnTo=\$\{encodeURIComponent/)
+    expect(SECTION).not.toMatch(/href="\/dashboard\/login\?returnTo=/)
   })
 
   it('is guarded so signed-out users still see the card list (no hidden content)', () => {

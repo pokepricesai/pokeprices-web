@@ -379,21 +379,44 @@ export default function CardQuickActions({ card }: { card: Card }) {
   }
 
   if (!user) {
-    // Build a returnTo for portfolio-add that drops the user back here.
-    // (Portfolio add is not auto-replayed in Block 2A — keep the UX
-    // identical to today: log in, land back on the card, click again.)
-    const portfolioReturnTo = typeof window === 'undefined'
-      ? '/'
-      : window.location.pathname + window.location.search
+    // Portfolio-add from the logged-out card hero mirrors the Watch
+    // click handler just above: a static /dashboard/login href in the
+    // DOM, with the actual returnTo built inside the onClick so the
+    // URL is only materialised on a real user interaction.
+    //
+    // Why the href is static:
+    //   Googlebot (and other JS-rendering crawlers) will see the
+    //   anchor markup in the hydrated DOM. If we interpolated
+    //   `window.location.pathname + search` into the href at render
+    //   time, the crawler discovers a unique /dashboard/login?returnTo
+    //   per card page. GSC Coverage grew from 5.7k to 35k such URLs
+    //   between August and late October 2026; every one is blocked by
+    //   robots.txt (Disallow: /dashboard) but still wastes crawl
+    //   budget and clutters the Coverage report. Keeping the DOM href
+    //   static ("/dashboard/login") removes the explosion entirely —
+    //   normal clicks still receive the full returnTo via router.push.
+    //
+    // Minor UX trade-off: middle-click / Cmd-click opens the plain
+    // login page in a new tab, so the user lands on /dashboard after
+    // auth instead of the originating card. That matches the Watch
+    // button's existing behaviour and is acceptable.
+    const handleLoggedOutPortfolioClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+      // Allow modified clicks (new tab / new window) to fall through
+      // to the default navigation to /dashboard/login.
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return
+      e.preventDefault()
+      const returnTo = window.location.pathname + window.location.search
+      router.push(`/dashboard/login?returnTo=${encodeURIComponent(returnTo)}`)
+    }
     return (
       <>
         <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <a href="/dashboard/login" onClick={handleLoggedOutWatchClick} style={baseBtn}>
             <span>👁</span> Watch
           </a>
-          <Link href={`/dashboard/login?returnTo=${encodeURIComponent(portfolioReturnTo)}`} style={baseBtn}>
+          <a href="/dashboard/login" onClick={handleLoggedOutPortfolioClick} style={baseBtn}>
             <span>📊</span> Add to portfolio
-          </Link>
+          </a>
           <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", alignSelf: 'center' }}>
             Free. No card required to register.
           </span>

@@ -8,6 +8,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import {
   loadPokemonCompletion,
@@ -53,6 +54,7 @@ export default function SpeciesInteractiveSection({
   enTotal?: number
   jpTotal?: number
 }) {
+  const router = useRouter()
   const [sort, setSort] = useState<'price_desc' | 'price_asc' | 'set' | 'name'>('price_desc')
   const [language, setLanguage] = useState<LanguageFilter>('all')
   const [user, setUser] = useState<{ id: string } | null>(null)
@@ -173,8 +175,22 @@ export default function SpeciesInteractiveSection({
             <div style={{ fontSize: 13, color: 'var(--text)', fontFamily: "'Figtree', sans-serif", lineHeight: 1.5 }}>
               Create a free account to track your English and Japanese {displayName} collection progress.
             </div>
-            <Link
-              href={`/dashboard/login?returnTo=${encodeURIComponent(`/pokemon/${pokemonSlug ?? ''}`)}`}
+            {/* Login CTA (block spec 5A-W-53A — logged-out).
+                PP-SEO-LOGIN-URL-FIX (2026-11-02): the href is now
+                static ("/dashboard/login"). Previously it carried
+                `?returnTo=/pokemon/${pokemonSlug}` as a hydrated
+                anchor, which Googlebot discovered on every species
+                page (43 of the 1,000 example blocked-URLs in the
+                Nov 1 Coverage export came from this component).
+                The onClick builds the real returnTo at interaction
+                time so the UX is unchanged for normal clicks. */}
+            <a
+              href="/dashboard/login"
+              onClick={(e) => {
+                if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return
+                e.preventDefault()
+                router.push(`/dashboard/login?returnTo=${encodeURIComponent(`/pokemon/${pokemonSlug ?? ''}`)}`)
+              }}
               style={{
                 padding: '8px 16px', borderRadius: 10,
                 background: 'var(--primary)', color: '#fff',
@@ -183,7 +199,7 @@ export default function SpeciesInteractiveSection({
               }}
             >
               Sign up free
-            </Link>
+            </a>
           </div>
         )
       )}
