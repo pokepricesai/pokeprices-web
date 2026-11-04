@@ -10,7 +10,36 @@
 // This route does NOT submit to IndexNow — that is the worker's job.
 //
 // Auth:  Bearer $CRON_SECRET.
-// Runtime: nodejs. maxDuration=60.
+// Runtime: nodejs. maxDuration=300.
+//
+// CN-06.02 (2026-11-04): raised from 60 → 300 after Vercel runtime
+// logs showed roughly half of the 5-min-schedule invocations hitting
+// the 60s cap (`Vercel Runtime Timeout Error: Task timed out after
+// 60 seconds`) on the pokeprices-web production deployment. The
+// default `eventsPerRun=2000` + per-event source-table joins plus
+// per-card `enqueueUrl` round-trips simply does not fit in 60s under
+// realistic queue depth. 300s matches Vercel Pro's new default
+// function timeout and still leaves a wide margin before the next
+// 5-min cron fire. Vercel bills by active CPU time, not wall-clock,
+// so this does not 5× the function cost; it only removes a false
+// timeout ceiling.
+//
+// Secondary safeguard: EVENTS_PER_RUN_CEILING caps the effective
+// batch size at 1000 regardless of the settings row. Operators can
+// still tune LOWER via settings.harvester_events_per_run (useful on
+// a backlog-light day); the ceiling only prevents a misconfigured
+// settings row from blowing past the 300s budget. The harvester is
+// already idempotent (hash-dedup on enqueueUrl + bulk mark-processed
+// at the end), so a partial run — if ever still hits the ceiling —
+// simply leaves unprocessed events for the next 5-min fire; no
+// duplication, no data loss.
+//
+// Why not a per-stage AbortController timer? The underlying
+// supabase-js v2 queries do not reliably honour AbortSignal across
+// PostgREST chunk boundaries, so a timer would not actually cancel
+// an in-flight query. Capping the input batch size is the only
+// reliable work bound at the route layer without rewriting the
+// harvester's queue architecture.
 // ============================================================================
 
 import 'server-only'
@@ -21,7 +50,13 @@ import { loadSettings } from '@/lib/indexnow/queue'
 
 export const runtime      = 'nodejs'
 export const dynamic      = 'force-dynamic'
-export const maxDuration  = 60
+export const maxDuration  = 300
+
+/** Hard upper bound on events pulled per run. Independent of
+ *  settings.harvester_events_per_run — the ceiling only prevents
+ *  a settings misconfiguration from bursting past the 300s budget.
+ *  Operator can tune LOWER via settings. */
+export const EVENTS_PER_RUN_CEILING = 1000
 
 async function handle(req: Request) {
   const auth = isCronAuthOk(req)
@@ -41,12 +76,29 @@ async function handle(req: Request) {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const eventsPerRun = Number((settings as any).harvester_events_per_run ?? 2000)
+  const requested = Number((settings as any).harvester_events_per_run ?? 2000)
+  const eventsPerRun = Math.max(1, Math.min(requested, EVENTS_PER_RUN_CEILING))
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const enqueueAggregates = ((settings as any).harvester_enqueue_aggregates ?? true) as boolean
 
   const trigger = req.method === 'GET' ? 'cron' : 'admin_manual'
+  const t0 = Date.now()
   const result = await runIndexnowHarvester({ trigger, eventsPerRun, enqueueAggregates })
+  const elapsedMs = Date.now() - t0
+  // Observability: single structured log per invocation. Operators
+  // can grep Vercel runtime logs to see the per-run distribution.
+  console.log('[indexnow-harvest]', JSON.stringify({
+    trigger,
+    status: result.status,
+    reason: result.reason,
+    events_read: result.events_read,
+    events_marked_processed: result.events_marked_processed,
+    requested_events_per_run: requested,
+    effective_events_per_run: eventsPerRun,
+    capped_by_ceiling: requested > EVENTS_PER_RUN_CEILING,
+    elapsed_ms: elapsedMs,
+    errors_count: (result as { errors?: unknown[] }).errors?.length ?? 0,
+  }))
   const httpStatus = result.status === 'error' ? 500 : 200
   return NextResponse.json(result, { status: httpStatus })
 }
