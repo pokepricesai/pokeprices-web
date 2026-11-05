@@ -165,7 +165,7 @@ export async function GET(
   const setNameClean = canonSetName.replace(/^Pokemon /, '')
   let popQuery = supabase
     .from('psa_population')
-    .select('card_name, variant, set_name, card_number, psa_7, psa_8, psa_9, psa_10, total_graded, gem_rate')
+    .select('card_name, variant, set_name, card_number, psa_7, psa_8, psa_9, psa_10, total_graded, gem_rate, scraped_date')
     .ilike('card_name', `%${canonCardName}%`)
     .ilike('set_name', `%${setNameClean}%`)
     .gt('total_graded', 0)
