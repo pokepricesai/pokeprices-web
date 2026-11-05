@@ -126,6 +126,30 @@ function pctQuality(pct: number | null, period = '30d'): PctQuality {
   return 'clean'
 }
 
+// ─── PSA population as-of label ───────────────────────────────────────────────
+//
+// The PSA pop dataset is refreshed out-of-band, so every rendered figure
+// needs an explicit observation date so users don't mistake a stale
+// snapshot for a live reading. Returns the full label string the UI
+// renders. Returns 'PSA population date unavailable' when the stored
+// scraped_date is missing or unparsable — never invents a date.
+function formatPsaPopDateLabel(scrapedDate: unknown): string {
+  const UNAVAILABLE = 'PSA population date unavailable'
+  if (typeof scrapedDate !== 'string' || scrapedDate.trim() === '') return UNAVAILABLE
+  // Expect YYYY-MM-DD. Parse as UTC midnight to avoid tz drift.
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(scrapedDate.trim())
+  if (!m) return UNAVAILABLE
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])))
+  if (Number.isNaN(d.getTime())) return UNAVAILABLE
+  let formatted: string
+  try {
+    formatted = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+  } catch {
+    formatted = `${m[1]}-${m[2]}-${m[3]}`
+  }
+  return `PSA population as of ${formatted}`
+}
+
 // ─── Fallback insight ─────────────────────────────────────────────────────────
 
 function generateFallbackInsight(card: any, trend: any, metrics: any, psaPop: any): string | null {
@@ -1186,6 +1210,9 @@ export default function CardPageClient({
       {psaPop && (
         <Panel>
           <SectionLabel>PSA Population{psaPop.variant && psaPop.variant !== 'Standard' ? `: ${psaPop.variant}` : ''}</SectionLabel>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Figtree', sans-serif", marginTop: -6, marginBottom: 12, letterSpacing: 0.2 }}>
+            {formatPsaPopDateLabel(psaPop.scraped_date)}
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 16 }}>
             {[
               { label: 'PSA 7',  value: psaPop.psa_7         },

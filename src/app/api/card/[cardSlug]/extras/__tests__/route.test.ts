@@ -142,7 +142,7 @@ function seedAllOk() {
   })
   insightMock.mockResolvedValueOnce({ data: 'Clean 30d rise.', error: null })
   cardVolumeMock.mockResolvedValueOnce({ data: { volume_label: 'Sells weekly', sales_30d: 7 }, error: null })
-  psaPopMock.mockResolvedValueOnce({ data: [{ total_graded: 1234, psa_10: 456, gem_rate: '37.0' }], error: null })
+  psaPopMock.mockResolvedValueOnce({ data: [{ total_graded: 1234, psa_10: 456, gem_rate: '37.0', scraped_date: '2026-05-13' }], error: null })
 }
 
 // ─── 1. full successful payload ─────────────────────────────────────
@@ -167,6 +167,28 @@ describe('/api/card/[cardSlug]/extras — fully successful', () => {
     expect(body.volume.data.volume_label).toBe('Sells weekly')
     expect(body.psaPop.status).toBe('ok')
     expect(body.psaPop.data.total_graded).toBe(1234)
+    // scraped_date must reach the client so the card page can label
+    // the snapshot with an explicit "as of <date>".
+    expect(body.psaPop.data.scraped_date).toBe('2026-05-13')
+  })
+
+  it('psaPop with scraped_date missing/null is passed through so the UI renders a neutral label', async () => {
+    metricsMock.mockResolvedValueOnce({ data: [{ drawdown_pct: '-5' }], error: null })
+    priceHistoryMock.mockResolvedValueOnce({ data: [], error: null })
+    insightMock.mockResolvedValueOnce({ data: null, error: null })
+    cardVolumeMock.mockResolvedValueOnce({ data: null, error: null })
+    psaPopMock.mockResolvedValueOnce({
+      data: [{ total_graded: 42, psa_10: 1, gem_rate: '2.4', scraped_date: null }],
+      error: null,
+    })
+
+    const GET = await loadGET()
+    const r = await GET(req(path()), ctx())
+    expect(r.status).toBe(200)
+    const body = await r.json()
+    expect(body.psaPop.status).toBe('ok')
+    expect(body.psaPop.data.total_graded).toBe(42)
+    expect(body.psaPop.data.scraped_date).toBeNull()
   })
 })
 
