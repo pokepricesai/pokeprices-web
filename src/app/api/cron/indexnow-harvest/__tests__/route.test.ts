@@ -94,23 +94,46 @@ describe('indexnow-harvest route — auth', () => {
 })
 
 describe('indexnow-harvest route — CN-06.02 events-per-run ceiling', () => {
-  it('invokes harvester with 2000 → capped to EVENTS_PER_RUN_CEILING=1000', async () => {
+  // Ceiling lowered 1000 → 500 on 2026-11-04 after production
+  // telemetry showed 1000 events landing at 294s (first post-deploy
+  // fire) and the subsequent fire timing out at 300s. Target: fit
+  // comfortably in 300s with ~50% headroom.
+
+  it('EVENTS_PER_RUN_CEILING is 500 (lowered from 1000)', () => {
+    expect(EVENTS_PER_RUN_CEILING).toBe(500)
+  })
+
+  it('invokes harvester with 2000 → capped to EVENTS_PER_RUN_CEILING=500', async () => {
     settingsMock = { harvester_enabled: true, harvester_events_per_run: 2000 }
     const res = await GET(req())
     expect(res.status).toBe(200)
     expect(harvesterCalls).toHaveLength(1)
     expect(harvesterCalls[0].eventsPerRun).toBe(EVENTS_PER_RUN_CEILING)
-    expect(harvesterCalls[0].eventsPerRun).toBe(1000)
+    expect(harvesterCalls[0].eventsPerRun).toBe(500)
   })
 
-  it('invokes harvester with settings override 5000 → still capped at 1000', async () => {
+  it('invokes harvester with settings override 5000 → still capped at 500', async () => {
     settingsMock = { harvester_enabled: true, harvester_events_per_run: 5000 }
     const res = await GET(req())
     expect(res.status).toBe(200)
-    expect(harvesterCalls[0].eventsPerRun).toBe(1000)
+    expect(harvesterCalls[0].eventsPerRun).toBe(500)
   })
 
-  it('invokes harvester with settings override 500 → passed through (operator can tune LOWER)', async () => {
+  it('invokes harvester with settings override 1000 → still capped at 500 (operator cannot raise above ceiling)', async () => {
+    settingsMock = { harvester_enabled: true, harvester_events_per_run: 1000 }
+    const res = await GET(req())
+    expect(res.status).toBe(200)
+    expect(harvesterCalls[0].eventsPerRun).toBe(500)
+  })
+
+  it('invokes harvester with settings override 250 → passed through (operator can tune LOWER)', async () => {
+    settingsMock = { harvester_enabled: true, harvester_events_per_run: 250 }
+    const res = await GET(req())
+    expect(res.status).toBe(200)
+    expect(harvesterCalls[0].eventsPerRun).toBe(250)
+  })
+
+  it('invokes harvester with settings override 500 → passed through (matches ceiling exactly)', async () => {
     settingsMock = { harvester_enabled: true, harvester_events_per_run: 500 }
     const res = await GET(req())
     expect(res.status).toBe(200)
@@ -124,11 +147,11 @@ describe('indexnow-harvest route — CN-06.02 events-per-run ceiling', () => {
     expect(harvesterCalls[0].eventsPerRun).toBe(1)
   })
 
-  it('invokes harvester with default (no settings override) → default 2000 capped to 1000', async () => {
+  it('invokes harvester with default (no settings override) → default 2000 capped to 500', async () => {
     settingsMock = { harvester_enabled: true }
     const res = await GET(req())
     expect(res.status).toBe(200)
-    expect(harvesterCalls[0].eventsPerRun).toBe(1000)
+    expect(harvesterCalls[0].eventsPerRun).toBe(500)
   })
 })
 
@@ -167,7 +190,7 @@ describe('indexnow-harvest route — structured log + status pass-through', () =
     spy.mockRestore()
     expect(logs.some(line => line.join(' ').includes('[indexnow-harvest]'))).toBe(true)
     const line = logs.find(l => l.join(' ').includes('[indexnow-harvest]'))!.join(' ')
-    expect(line).toContain('"effective_events_per_run":1000')
+    expect(line).toContain('"effective_events_per_run":500')
     expect(line).toContain('"requested_events_per_run":5000')
     expect(line).toContain('"capped_by_ceiling":true')
     expect(line).toContain('"status":"ok"')

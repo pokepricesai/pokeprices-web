@@ -25,14 +25,26 @@
 // timeout ceiling.
 //
 // Secondary safeguard: EVENTS_PER_RUN_CEILING caps the effective
-// batch size at 1000 regardless of the settings row. Operators can
-// still tune LOWER via settings.harvester_events_per_run (useful on
-// a backlog-light day); the ceiling only prevents a misconfigured
-// settings row from blowing past the 300s budget. The harvester is
-// already idempotent (hash-dedup on enqueueUrl + bulk mark-processed
-// at the end), so a partial run — if ever still hits the ceiling —
-// simply leaves unprocessed events for the next 5-min fire; no
-// duplication, no data loss.
+// batch size regardless of the settings row. Operators can still
+// tune LOWER via settings.harvester_events_per_run (useful on a
+// backlog-light day); the ceiling only prevents a misconfigured
+// settings row from blowing past the 300s budget.
+//
+// CN-06.02 follow-up (2026-11-04): ceiling lowered from 1000 → 500.
+// The first post-deploy run with ceiling=1000 completed 1,000 events
+// in 294s — essentially at the 300s wall-time cap. The subsequent
+// run timed out at 300s before reaching the mark-processed step,
+// yielding ~50% success rate. Per-event cost under the current
+// backlog is ~300ms (source-table joins + enqueueUrl round-trip);
+// 500 events × 300ms ≈ 150s, leaving ~50% headroom under the 300s
+// cap. Projected throughput at full success: 500 × 288 runs/day =
+// 144,000 events/day — ~13 days to drain the 1.86M-event backlog
+// assuming no new arrivals and adequate downstream capacity.
+//
+// The harvester is already idempotent (hash-dedup on enqueueUrl +
+// bulk mark-processed at the end), so a partial run — if ever still
+// hits the ceiling — simply leaves unprocessed events for the next
+// 5-min fire; no duplication, no data loss.
 //
 // Why not a per-stage AbortController timer? The underlying
 // supabase-js v2 queries do not reliably honour AbortSignal across
@@ -55,8 +67,12 @@ export const maxDuration  = 300
 /** Hard upper bound on events pulled per run. Independent of
  *  settings.harvester_events_per_run — the ceiling only prevents
  *  a settings misconfiguration from bursting past the 300s budget.
- *  Operator can tune LOWER via settings. */
-export const EVENTS_PER_RUN_CEILING = 1000
+ *  Operator can tune LOWER via settings.
+ *
+ *  Lowered 1000 → 500 on 2026-11-04 after production telemetry
+ *  showed 1000 events landing at 294s (first fire) and a 300s
+ *  timeout (second fire). See file header for details. */
+export const EVENTS_PER_RUN_CEILING = 500
 
 async function handle(req: Request) {
   const auth = isCronAuthOk(req)
