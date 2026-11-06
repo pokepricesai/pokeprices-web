@@ -46,6 +46,7 @@ export const DASHBOARD_NAV: readonly NavGroup[] = [
   {
     label: 'Account',
     items: [
+      { href: '/dashboard/account',      label: 'Connections' },
       { href: '/dashboard/settings',     label: 'Settings' },
     ],
   },
