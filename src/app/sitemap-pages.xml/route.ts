@@ -13,6 +13,7 @@ export async function GET() {
     { url: `${BASE_URL}/cards/search`,        priority: '0.9', changefreq: 'daily'   },
     { url: `${BASE_URL}/pokemon`,             priority: '0.9', changefreq: 'weekly'  },
     { url: `${BASE_URL}/insights`,            priority: '0.8', changefreq: 'weekly'  },
+    { url: `${BASE_URL}/releases`,            priority: '0.75', changefreq: 'weekly' },
 
     // Tool hubs + featured tools
     { url: `${BASE_URL}/tools`,               priority: '0.9', changefreq: 'weekly'  },
