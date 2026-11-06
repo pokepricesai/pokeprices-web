@@ -30,6 +30,7 @@ const REAL_PAGES: readonly { href: string; file: string }[] = [
   { href: '/dashboard/grading',        file: '../grading/page.tsx' },
   { href: '/dashboard/quick-price',    file: '../quick-price/page.tsx' },
   { href: '/dashboard/card-shows',     file: '../card-shows/page.tsx' },
+  { href: '/dashboard/account',        file: '../account/page.tsx' },
   { href: '/dashboard/settings',       file: '../settings/page.tsx' },
 ]
 
@@ -67,12 +68,13 @@ describe('DashboardSidebar — route inventory', () => {
     }
   })
 
-  it('does not invent Settings, Billing or Account routes beyond the real /dashboard/settings', () => {
+  it('does not invent Billing or other unimplemented account routes', () => {
     const flat = DASHBOARD_NAV.flatMap(g => g.items.map(i => i.href))
     expect(flat).not.toContain('/dashboard/billing')
-    expect(flat).not.toContain('/dashboard/account')
-    // /dashboard/settings IS a real route (see REAL_PAGES above).
+    // /dashboard/settings and /dashboard/account are both real routes
+    // (see REAL_PAGES above). /dashboard/account shipped in CN-IDENTITY-02.
     expect(flat).toContain('/dashboard/settings')
+    expect(flat).toContain('/dashboard/account')
   })
 
   it('the Overview item is /dashboard exactly (not a partial match target)', () => {
