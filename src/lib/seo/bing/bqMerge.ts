@@ -34,6 +34,14 @@ export type UpsertResult = {
   rows_inserted?: number
   rows_updated?: number
   bytes_billed?: number
+  /** CN-06.04-P04: rows that reached upsertRows but had null/empty key
+   *  fields and were dropped pre-MERGE. Reported so the ingest audit
+   *  can surface the count; never silently 0. */
+  rows_dropped_null_keys?: number
+  /** CN-06.04-P04: when the MERGE fails, we include the first row's
+   *  keys so the operator can tell WHICH source shape triggered the
+   *  error without redacting the API response. Null-safe. */
+  diagnostic_first_row_keys?: string[]
   error?: string
 }
 
@@ -48,6 +56,30 @@ export type UpsertResult = {
  *    ingestRunId   String written to ingest_run_id for every row
  *
  *  Never throws. Returns { ok:false, error } on any BQ failure. */
+/** CN-06.04-P04: drop rows where any key-field value is null/undefined/
+ *  empty-string. The BigQuery MERGE target columns for key fields are
+ *  declared NOT NULL; silently letting such rows through produced the
+ *  "Required field X cannot be null" error on the 2026-11-06 fire
+ *  (first run after the IAM unblock). Dropping defensively here is
+ *  safer than fabricating a sentinel date, which the brief forbids. */
+export function dropRowsWithNullKeys(
+  rows: Array<Record<string, unknown>>,
+  keyFields: FieldSpec[],
+): { kept: Array<Record<string, unknown>>; dropped: number } {
+  const kept: Array<Record<string, unknown>> = []
+  let dropped = 0
+  for (const r of rows) {
+    let ok = true
+    for (const kf of keyFields) {
+      const v = r[kf.name]
+      if (v == null) { ok = false; break }
+      if (typeof v === 'string' && v.trim() === '') { ok = false; break }
+    }
+    if (ok) kept.push(r); else dropped++
+  }
+  return { kept, dropped }
+}
+
 export async function upsertRows(
   ctx: BqContext,
   tableFqn: string,
@@ -57,7 +89,20 @@ export async function upsertRows(
   ingestRunId: string,
 ): Promise<UpsertResult> {
   if (rows.length === 0) {
-    return { ok: true, rows_seen: 0, rows_inserted: 0, rows_updated: 0, bytes_billed: 0 }
+    return { ok: true, rows_seen: 0, rows_inserted: 0, rows_updated: 0, bytes_billed: 0, rows_dropped_null_keys: 0 }
+  }
+
+  // Defensive pre-filter: drop rows where any NOT NULL key field is
+  // null/empty before the MERGE. The count is reported in the result
+  // so the ingest audit surfaces the drop (never silent).
+  const { kept: safeRows, dropped: droppedNullKeys } = dropRowsWithNullKeys(rows, keyFields)
+  if (safeRows.length === 0) {
+    return {
+      ok: true,
+      rows_seen: rows.length,
+      rows_inserted: 0, rows_updated: 0, bytes_billed: 0,
+      rows_dropped_null_keys: droppedNullKeys,
+    }
   }
 
   const allFields = [...keyFields, ...valueFields]
@@ -102,7 +147,7 @@ export async function upsertRows(
       query: sql,
       location: ctx.location,
       useLegacySql: false,
-      params: { rows, ingest_run_id: ingestRunId },
+      params: { rows: safeRows, ingest_run_id: ingestRunId },
       types:  { rows: [structSchema], ingest_run_id: 'STRING' },
     })
     await job.getQueryResults()
@@ -115,9 +160,20 @@ export async function upsertRows(
       rows_inserted: Number(dml.insertedRowCount ?? 0),
       rows_updated:  Number(dml.updatedRowCount  ?? 0),
       bytes_billed:  bytes,
+      rows_dropped_null_keys: droppedNullKeys,
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'unknown bq merge error'
-    return { ok: false, error: msg.slice(0, 400), rows_seen: rows.length }
+    // Include the first row's keys in the error so the operator can
+    // identify which source's shape triggered the BQ rejection. The
+    // actual values are NOT included (they may carry PII / query terms).
+    const firstRowKeys = safeRows[0] ? Object.keys(safeRows[0]) : []
+    return {
+      ok: false,
+      error: msg.slice(0, 350) + (firstRowKeys.length ? ` | first_row_keys=[${firstRowKeys.join(',')}]` : ''),
+      rows_seen: rows.length,
+      rows_dropped_null_keys: droppedNullKeys,
+      diagnostic_first_row_keys: firstRowKeys,
+    }
   }
 }
