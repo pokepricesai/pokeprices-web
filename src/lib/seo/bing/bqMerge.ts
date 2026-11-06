@@ -80,6 +80,47 @@ export function dropRowsWithNullKeys(
   return { kept, dropped }
 }
 
+/** CN-06.04-P04 (root cause) — wrap DATE / TIMESTAMP values with the
+ *  BigQuery helper constructors so the ARRAY<STRUCT> parameter binding
+ *  serialises them as DATE / TIMESTAMP rather than STRING.
+ *
+ *  Why: the shorthand `types: { rows: [{ snapshot_date: 'DATE', ... }] }`
+ *  declares the STRUCT field as DATE, but the JS value `'2026-11-06'` is
+ *  a plain string. When @google-cloud/bigquery serialises the nested
+ *  STRUCT for the query parameter, it passes the string through without
+ *  coercion. BigQuery's MERGE `VALUES (S.snapshot_date, ...)` then sees
+ *  a STRING-typed STRUCT field and attempts an implicit coercion to the
+ *  target NOT NULL DATE column. On some rows the coercion produces NULL
+ *  and INSERT fails with "Required field X cannot be null".
+ *
+ *  The fix: for every DATE / TIMESTAMP / DATETIME field in the struct
+ *  schema, wrap the string value in `bq.date()` / `bq.timestamp()` /
+ *  `bq.datetime()` so the parameter is sent with the correct wire type.
+ *  Null values stay null (type-preserving). The BQ library static/instance
+ *  helpers accept either an ISO string or a Date; we pass ISO strings as
+ *  produced by parseWcfDate + .slice(0,10).
+ *
+ *  Supported: @google-cloud/bigquery exposes these as instance methods
+ *  on the BigQuery class. We accept `bq` as the already-constructed
+ *  client (BqContext.bq); callers that construct a client with a different
+ *  class must expose compatible .date()/.timestamp()/.datetime() helpers. */
+export function wrapTypedValues(
+  row: Record<string, unknown>,
+  structSchema: Record<string, BqType>,
+  bq: { date(v: unknown): unknown; timestamp(v: unknown): unknown },
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const k of Object.keys(row)) {
+    const v = row[k]
+    if (v == null) { out[k] = null; continue }
+    const type = structSchema[k]
+    if (type === 'DATE' && typeof v === 'string')      out[k] = bq.date(v)
+    else if (type === 'TIMESTAMP' && typeof v === 'string') out[k] = bq.timestamp(v)
+    else                                                    out[k] = v
+  }
+  return out
+}
+
 export async function upsertRows(
   ctx: BqContext,
   tableFqn: string,
@@ -142,12 +183,19 @@ export async function upsertRows(
       VALUES (${insertValues})
   `
 
+  // Serialise DATE / TIMESTAMP string values via the BQ client helpers
+  // so the ARRAY<STRUCT> parameter is sent with the correct wire type.
+  // Without this, BigQuery receives the STRUCT fields as STRING and
+  // implicit coercion into NOT NULL DATE columns produced the Nov 6
+  // "Required field X cannot be null" error for 4 of 5 Bing sources.
+  const typedRows = safeRows.map(r => wrapTypedValues(r, structSchema, ctx.bq))
+
   try {
     const [job] = await ctx.bq.createQueryJob({
       query: sql,
       location: ctx.location,
       useLegacySql: false,
-      params: { rows: safeRows, ingest_run_id: ingestRunId },
+      params: { rows: typedRows, ingest_run_id: ingestRunId },
       types:  { rows: [structSchema], ingest_run_id: 'STRING' },
     })
     await job.getQueryResults()

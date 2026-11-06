@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { dropRowsWithNullKeys } from '../bqMerge'
+import { dropRowsWithNullKeys, wrapTypedValues } from '../bqMerge'
+
+/** Fake BigQuery client exposing just the `.date` + `.timestamp` helpers. */
+function fakeBq() {
+  return {
+    date:      (v: unknown) => ({ _kind: 'BqDate',      value: v }),
+    timestamp: (v: unknown) => ({ _kind: 'BqTimestamp', value: v }),
+  }
+}
 
 const KEY = [
   { name: 'date',     type: 'DATE'   as const },
@@ -88,5 +96,79 @@ describe('dropRowsWithNullKeys — defensive pre-filter before BQ MERGE', () => 
     const { kept, dropped } = dropRowsWithNullKeys([], KEY)
     expect(dropped).toBe(0)
     expect(kept).toHaveLength(0)
+  })
+})
+
+describe('wrapTypedValues — serialise DATE/TIMESTAMP via BQ helpers', () => {
+  it('wraps a string DATE value with bq.date() so the wire type is DATE, not STRING', () => {
+    const bq = fakeBq()
+    const row = { snapshot_date: '2026-11-06', feed_url: 'https://x/a', clicks: 5 }
+    const schema = { snapshot_date: 'DATE' as const, feed_url: 'STRING' as const, clicks: 'INT64' as const }
+    const out = wrapTypedValues(row, schema, bq)
+    expect(out.snapshot_date).toEqual({ _kind: 'BqDate', value: '2026-11-06' })
+    expect(out.feed_url).toBe('https://x/a')
+    expect(out.clicks).toBe(5)
+  })
+
+  it('wraps a string TIMESTAMP value with bq.timestamp()', () => {
+    const bq = fakeBq()
+    const row = { last_crawled: '2026-11-06T07:00:00Z', url_count: 42 }
+    const schema = { last_crawled: 'TIMESTAMP' as const, url_count: 'INT64' as const }
+    const out = wrapTypedValues(row, schema, bq)
+    expect(out.last_crawled).toEqual({ _kind: 'BqTimestamp', value: '2026-11-06T07:00:00Z' })
+    expect(out.url_count).toBe(42)
+  })
+
+  it('preserves nulls without wrapping (BQ handles null DATE / TIMESTAMP natively)', () => {
+    const bq = fakeBq()
+    const row = {
+      snapshot_date: '2026-11-06',
+      last_crawled: null,
+      source_updated_at: null,
+      clicks: null,
+    }
+    const schema = {
+      snapshot_date: 'DATE' as const,
+      last_crawled: 'TIMESTAMP' as const,
+      source_updated_at: 'TIMESTAMP' as const,
+      clicks: 'INT64' as const,
+    }
+    const out = wrapTypedValues(row, schema, bq)
+    expect(out.snapshot_date).toEqual({ _kind: 'BqDate', value: '2026-11-06' })
+    expect(out.last_crawled).toBeNull()
+    expect(out.source_updated_at).toBeNull()
+    expect(out.clicks).toBeNull()
+  })
+
+  it('does NOT wrap INT64 / STRING / FLOAT64 / BOOL — those serialise natively', () => {
+    const bq = fakeBq()
+    const row = {
+      psa_10: 72,
+      card_name: 'Blastoise',
+      gem_rate: 6.58,
+      compressed: true,
+    }
+    const schema = {
+      psa_10: 'INT64' as const,
+      card_name: 'STRING' as const,
+      gem_rate: 'FLOAT64' as const,
+      compressed: 'BOOL' as const,
+    }
+    const out = wrapTypedValues(row, schema, bq)
+    expect(out.psa_10).toBe(72)
+    expect(out.card_name).toBe('Blastoise')
+    expect(out.gem_rate).toBe(6.58)
+    expect(out.compressed).toBe(true)
+  })
+
+  it('does not double-wrap a non-string DATE value (idempotent on object inputs)', () => {
+    // If a caller has already wrapped the value, wrapTypedValues leaves it.
+    const bq = fakeBq()
+    const already = { _kind: 'BqDate', value: '2026-11-06' }
+    const row = { snapshot_date: already }
+    const schema = { snapshot_date: 'DATE' as const }
+    const out = wrapTypedValues(row, schema, bq)
+    // Non-string → not wrapped again. Passed through verbatim.
+    expect(out.snapshot_date).toBe(already)
   })
 })
